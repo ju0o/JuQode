@@ -29,25 +29,37 @@ Question  →  Quest  →  Queue  →  Quick  →  Qode
 
 ---
 
-## Status
+## 이 저장소의 역할
 
-**Pre-alpha. 사용 가능한 릴리스가 아직 없다.**
+**이 저장소는 JuQode의 Code 저장소다.**
 
-이 저장소는 JuQode의 **공개 가능한 기술 명세**를 담기 위한 자리다.
-현재는 Product 정의 단계이며, 공개할 기술 명세가 성숙하면 여기에 추가된다.
+| Repository | 현재 상태 | 담는 것 |
+|---|---|---|
+| **JuQode** (이 repo) | 현재 Private | **Code / 구현**, 코드와 함께 사는 기술 명세 · Format Spec |
+| JuQode-Private | Private | **Markdown / 기획** — Strategy · PRD · UX · Roadmap |
 
-→ [docs/README.md](docs/README.md)
+분리 기준은 공개/비공개가 아니라 **Code vs 기획**이다.
+Product 정의 · UX 설계 · 사업 관련 문서는 이 저장소에 두지 않는다.
+
+향후 Open Source로 전환될 수 있으나, 그 시점의 점검 항목은
+`JuQode-Private/docs/00_PROJECT_CHARTER.md` §2에 정의되어 있다.
 
 ---
 
-## Repository
+## Status
 
-| Repository | 성격 | 담는 것 |
+**Phase 0 — Product 정의 단계. 구현 코드가 아직 없다.**
+
+현재 진행 상황:
+
+| Phase | 내용 | 상태 |
 |---|---|---|
-| **JuQode** (이 repo) | PUBLIC | 공개 가능한 기술 명세 |
-| JuQode-Private | PRIVATE | Product Strategy · PRD · UX · Roadmap |
+| 0 | Product SSOT (28개 문서) | ✅ 완료 — PM 검토 대기 |
+| 1 | Visual Prototype | 대기 |
+| 2 | Architecture Decision | 대기 |
+| 3 | MVP 구현 ← **코드가 여기서 시작된다** | 대기 |
 
-Product 정의, UX 설계, 사업 관련 문서는 이 저장소에 두지 않는다.
+→ [docs/README.md](docs/README.md)
 
 ---
 
