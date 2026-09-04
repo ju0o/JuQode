@@ -1,0 +1,192 @@
+/* JuQode v0.1 — Functional Prototype
+ * 모든 값의 출처: JuQode-Private/docs/design/DESIGN.md (v0.1 Visual Tone · FROZEN)
+ * 이 파일에서 토큰을 새로 만들지 않는다. */
+
+:root{
+  --paper:#F7F5F2; --surface:#FFFFFF; --sunk:#EDEAE5;
+  --ink:#0D0C0B; --ink2:#4A4641; --ink3:#857F77; --ink4:#B5AEA5;
+  --hair:#D8D3CC; --attn:#9A5B12; --fail:#8C2B20; --past:#5B6B84;
+  --sans:"Archivo","Noto Sans KR","Helvetica Neue",Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --dur:520ms;            /* 의미 전이. 장식이 아니다 */
+  --ctxw:340px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;overflow:hidden;min-width:1280px}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+
+.app{height:100vh;min-height:760px;display:flex;flex-direction:column}
+
+/* 검수용: 전이를 즉시 끝낸다 (?still=1). 제품 동작에는 영향 없음
+   delay 도 0으로 — duration 만 0으로 하면 delay 가 남아 값이 도달하지 않는다 */
+.still *,.still *::before,.still *::after{transition-duration:0ms!important;
+  transition-delay:0ms!important;animation-duration:0ms!important;animation-delay:0ms!important}
+
+/* ── Product Chrome — 44px. IDE 툴바가 아니다 ─────────── */
+.chrome{height:44px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;
+  border-bottom:1px solid var(--hair);background:var(--surface)}
+.chrome .wm{font-size:15px;font-weight:700;letter-spacing:-.03em}
+.chrome .back{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink3);
+  border:1px solid var(--hair);padding:5px 10px;opacity:0;pointer-events:none;transition:opacity 200ms}
+.chrome .back.on{opacity:1;pointer-events:auto}
+.chrome .back:hover{color:var(--ink);border-color:var(--ink3)}
+.chrome .sp{flex:1}
+.chrome .agent{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink2);
+  display:flex;align-items:center;gap:7px}
+.chrome .agent i{width:7px;height:7px;background:var(--ink);display:block;transition:background 200ms}
+.chrome .agent.busy i{background:var(--attn)}
+.chrome .path{font-family:var(--mono);font-size:10.5px;color:var(--ink4)}
+
+.body{flex:1;display:flex;min-height:0}
+.stagewrap{flex:1;min-width:0;position:relative;overflow:hidden}
+
+/* ── Containment Frame — 지나온 단계가 테두리로 남는다 (C 문법) ── */
+.frame{position:absolute;border:2px solid var(--ink);pointer-events:none;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
+             right var(--dur) var(--ease),bottom var(--dur) var(--ease),
+             opacity 300ms var(--ease)}
+.notch{position:absolute;top:-9px;left:20px;background:var(--paper);padding:0 10px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink2);white-space:nowrap}
+.nstat{position:absolute;top:-9px;right:20px;background:var(--paper);padding:0 10px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--ink3);white-space:nowrap}
+.memo{position:absolute;bottom:-8px;left:20px;background:var(--paper);padding:0 10px;
+  font-size:11.5px;color:var(--ink4);white-space:nowrap}
+
+/* ── Software Object — 카드가 아니다 ────────────────── */
+.sw{position:absolute;background:var(--surface);border:2px solid var(--ink);
+  display:flex;flex-direction:column;padding:16px 18px 14px;overflow:hidden;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
+             width var(--dur) var(--ease),height var(--dur) var(--ease),
+             opacity 380ms var(--ease),transform var(--dur) var(--ease),
+             border-width 200ms;cursor:pointer}
+.sw.current{border-width:3px}
+.sw:hover{background:#FDFCFB}
+.sw.receded{opacity:.05;pointer-events:none}
+.sw.entered{cursor:default;z-index:4;overflow:visible}
+.sw.entered:hover{background:var(--surface)}
+.sw .swName{font-size:30px;font-weight:700;letter-spacing:-.035em;line-height:1;
+  transition:font-size var(--dur) var(--ease)}
+.sw.current .swName{font-size:40px}
+.sw.entered .swName{font-size:0;opacity:0}
+.sw .swMeta{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--ink3);
+  margin-top:6px;transition:opacity 240ms}
+.sw.entered .swMeta{opacity:0;height:0;margin:0}
+.sw .swFig{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+  transition:opacity 260ms}
+.sw.entered .swFig{opacity:0;height:0;flex:none;overflow:hidden}
+.sw .swHint{font-size:12px;color:var(--ink3);border-top:1px solid var(--hair);
+  padding-top:9px;margin-top:9px;line-height:1.6;transition:opacity 240ms}
+.sw.entered .swHint{opacity:0;height:0;padding:0;margin:0;overflow:hidden}
+
+/* 진입한 소프트웨어의 내부 — Feature 층 */
+.inner{position:absolute;left:0;right:0;top:30px;bottom:0;overflow:hidden;opacity:0;pointer-events:none;
+  transition:opacity 300ms var(--ease) 180ms}
+.inner.on{opacity:1;pointer-events:auto}
+
+/* ── Feature Object — 폴더·메뉴·카드가 아니다 ───────── */
+.ft{position:absolute;background:var(--surface);border:2px solid var(--ink);
+  padding:13px 15px 12px;display:flex;flex-direction:column;overflow:hidden;z-index:2;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
+             width var(--dur) var(--ease),height var(--dur) var(--ease),
+             opacity 380ms var(--ease),background 160ms,border-color 160ms;cursor:pointer}
+.ft:hover{background:#FDFCFB}
+.ft.selected{background:var(--ink);border-width:3px}
+.ft.selected .ftName,.ft.selected .ftMeta,.ft.selected .ftList{color:#fff}
+.ft.selected .ftList{color:#C6C1BA}
+.ft.selected:hover{background:var(--ink)}
+.ft.attention{border-color:var(--attn)}
+.ft.absent{border-style:dashed;border-color:var(--ink4)}
+.ft.absent .ftName{color:var(--ink3)}
+.ft.receded{opacity:0;pointer-events:none}
+.ft.entered{cursor:default;background:var(--surface);border-width:3px;z-index:5;overflow:visible}
+.ft.entered .ftName,.ft.entered .ftMeta,.ft.entered .ftList{color:var(--ink)}
+.ft .ftName{font-size:23px;font-weight:700;letter-spacing:-.03em;line-height:1.1;
+  display:flex;align-items:center;gap:8px;transition:opacity 240ms}
+.ft.entered .ftName{opacity:0;height:0;overflow:hidden}
+.ft .ftMeta{font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;color:var(--ink3);
+  margin-top:6px;transition:opacity 240ms}
+.ft.entered .ftMeta{opacity:0;height:0;margin:0;overflow:hidden}
+.ft .ftList{font-size:12px;color:var(--ink3);line-height:1.72;margin-top:auto;
+  transition:opacity 240ms}
+.ft.entered .ftList{opacity:0;height:0;margin:0;overflow:hidden}
+.mk{width:9px;height:9px;flex:none;background:var(--ink);display:inline-block}
+.mk.a{background:var(--attn)}
+
+/* ── Behavior Node ─────────────────────────────────── */
+.bh{position:absolute;background:var(--surface);border:2px solid var(--ink);
+  padding:12px 14px 11px;display:flex;flex-direction:column;z-index:2;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
+             opacity 420ms var(--ease),transform 420ms var(--ease)}
+.bh .bIdx{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--ink4)}
+.bh .bName{font-size:21px;font-weight:700;letter-spacing:-.03em;margin-top:6px;line-height:1.15}
+.bh .bNote{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--ink3);margin-top:auto}
+.bh.fail{border-color:var(--fail);border-style:dashed}
+.bh.fail .bName,.bh.fail .bIdx,.bh.fail .bNote{color:var(--fail)}
+.bh.made{border-color:var(--attn);border-width:3px}
+.bh.made .bName{color:var(--attn)}
+.bh.appearing{opacity:0;transform:scale(.94)}
+.bTag{position:absolute;top:-10px;right:-2px;background:var(--attn);color:#fff;
+  font-family:var(--mono);font-size:9px;letter-spacing:.12em;padding:3px 8px}
+
+/* 관계선 — 직교. bezier 금지 */
+.edges{position:absolute;inset:0;pointer-events:none;z-index:1;overflow:visible}
+.eLabel{position:absolute;background:var(--paper);font-family:var(--mono);font-size:9px;
+  letter-spacing:.12em;color:var(--ink3);padding:1px 6px;z-index:2;white-space:nowrap;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),opacity 300ms}
+.eLabel.f{color:var(--fail)}
+
+/* ── Contextual Work Surface — 상시 아님 ──────────── */
+.ctx{width:0;flex:none;border-left:2px solid var(--ink);background:var(--surface);
+  overflow:hidden;transition:width var(--dur) var(--ease);border-left-width:0}
+.ctx.on{width:var(--ctxw);border-left-width:2px}
+.ctxIn{width:var(--ctxw);padding:20px 20px 0;height:100%;display:flex;flex-direction:column;
+  opacity:0;transition:opacity 260ms var(--ease) 140ms}
+.ctx.on .ctxIn{opacity:1}
+.ctxKind{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink3)}
+.ctxH1{font-size:32px;font-weight:700;letter-spacing:-.035em;line-height:1.05;margin:9px 0 18px}
+.ctxH2{font-size:20px;font-weight:700;letter-spacing:-.025em;line-height:1.35;margin:9px 0 18px}
+.blk{border-top:1px solid var(--hair);padding:12px 0}
+.blk:last-of-type{border-bottom:1px solid var(--hair)}
+.blkLabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3);margin-bottom:6px}
+.blkVal{font-size:15px;font-weight:500;letter-spacing:-.01em}
+.blkVal.a{color:var(--attn)}
+.list{display:flex;flex-direction:column}
+.list span{font-size:13.5px;padding:4px 0 4px 11px;border-left:2px solid var(--hair);margin-left:1px}
+.list span.f{color:var(--fail);border-left-color:var(--fail)}
+.list span.a{color:var(--attn);border-left-color:var(--attn)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{font-size:12.5px;border:1px solid var(--hair);padding:3px 8px}
+.chips span.strong{border-color:var(--ink);font-weight:600}
+.events{display:flex;flex-direction:column;gap:5px}
+.events span{font-size:13px;display:flex;gap:9px;align-items:baseline}
+.events span b{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--ink3);
+  width:26px;flex:none;font-weight:500}
+.events span.now,.events span.now b{color:var(--attn)}
+.nums{display:flex;gap:22px;align-items:baseline}
+.nums div{display:flex;flex-direction:column;gap:3px}
+.nums .n{font-family:var(--mono);font-size:26px;font-weight:500;line-height:1}
+.nums .n.a{color:var(--attn)}
+.nums .l{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink3)}
+.ctxNote{font-size:11.5px;color:var(--ink4);line-height:1.75;padding:12px 0}
+.rawEntry{margin-top:auto;border-top:2px solid var(--ink);padding:12px 0;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--ink3);
+  display:flex;justify-content:space-between}
+
+/* ── Qode Composer — Chat이 아니다 ────────────────── */
+.qode{flex:none;border-top:2px solid var(--ink);background:var(--surface);padding:0 20px}
+.prep{height:26px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--hair);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3)}
+.prep b{color:var(--ink);font-weight:500}
+.prep .a{color:var(--attn)}
+.prep .hint{margin-left:auto;color:var(--ink4);letter-spacing:.06em}
+.qrow{height:74px;display:flex;align-items:center;gap:20px}
+.qrow input{flex:1;border:0;outline:0;background:none;font-family:var(--sans);
+  font-size:22px;letter-spacing:-.025em;color:var(--ink);min-width:0}
+.qrow input::placeholder{color:var(--ink4)}
+.qrow .go{font-family:var(--mono);font-size:12px;letter-spacing:.12em;font-weight:500;
+  border:2px solid var(--ink);padding:11px 20px;white-space:nowrap;transition:background 160ms,color 160ms}
+.qrow .go.armed{background:var(--ink);color:#fff}
+.qrow .go[disabled]{opacity:.35;cursor:default}

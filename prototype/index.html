@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>JuQode — Software Workspace</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+
+  <div class="chrome">
+    <span class="wm">JuQode</span>
+    <button class="back" id="back">← 밖으로</button>
+    <span class="sp"></span>
+    <span class="agent" id="agent"><i></i><span id="agentText">Claude Code · 연결됨</span></span>
+    <span class="path">C:\Desktop\MyService</span>
+  </div>
+
+  <div class="body">
+    <div class="stagewrap" id="stage"></div>
+    <aside class="ctx" id="ctx"><div class="ctxIn" id="ctxIn"></div></aside>
+  </div>
+
+  <div class="qode">
+    <div class="prep" id="prep"></div>
+    <div class="qrow">
+      <input id="ask" placeholder="원하는 걸 말해보세요." autocomplete="off" spellcheck="false">
+      <button class="go" id="go">Qode 실행</button>
+    </div>
+  </div>
+
+</div>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

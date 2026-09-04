@@ -48,7 +48,7 @@ Product 정의 · UX 설계 · 사업 관련 문서는 이 저장소에 두지 �
 
 ## Status
 
-**현재: Phase 2 — Claude Canvas Wireflow. 구현 코드가 아직 없다.**
+**현재: Phase 3 — Lovable Functional Prototype. 첫 인터랙티브 코드가 있다.**
 
 Product Planning은 **동결(Planning Freeze)** 되었다.
 
@@ -57,9 +57,9 @@ Product Planning은 **동결(Planning Freeze)** 되었다.
 | 0 | Product SSOT | ✅ 완료 |
 | 1 | Visual Product Planning | ✅ 완료 |
 | 1.5 | **Planning Freeze** | ✅ 완료 |
-| **2** | **Claude Canvas Wireflow** | **제작 완료 · 검토 대기** |
-| 2.5 | Lovable Handoff | 대기 |
-| 3 | Lovable Functional Prototype | 대기 |
+| 2 | Primary Interface Design | ✅ 완료 |
+| 2.5 | Lovable Handoff | ✅ 완료 |
+| **3** | **Lovable Functional Prototype** | **진행 중 → [`prototype/`](prototype/)** |
 | 4 | MVP Architecture Freeze | 대기 ← **기술 명세가 여기서 나온다** |
 | 5 | Supabase / Data Layer | 대기 |
 | 6 | First Qode Real Integration | 대기 ← **코드가 여기서 실제로 동작한다** |
@@ -72,7 +72,10 @@ v0.1 이후의 V1 / V2 / Later는 별도 Roadmap으로 계속된다.
 → Data Layer → 실제 Agent 통합 → QA → Release.
 Backend / Data Architecture가 UX를 끌고 가기 전에 실제 제품 인터랙션을 검증한다.
 
-→ [docs/README.md](docs/README.md)
+→ [prototype/README.md](prototype/README.md) · [docs/README.md](docs/README.md)
+
+**`prototype/`** — 인터랙션 검증용 프론트엔드 프로토타입. 빌드 없이 `index.html`을 열면 된다.
+Backend · DB · Git · 실제 Coding Agent 없음. Working / Result는 시뮬레이션이다.
 
 ---
 
