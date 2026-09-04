@@ -127,7 +127,8 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
 .bh.fail .bName,.bh.fail .bIdx,.bh.fail .bNote{color:var(--fail)}
 .bh.made{border-color:var(--attn);border-width:3px}
 .bh.made .bName{color:var(--attn)}
-.bh.appearing{opacity:0;transform:scale(.94)}
+@keyframes bhAppear{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+.bh.made{animation:bhAppear 300ms var(--ease) both}
 .bTag{position:absolute;top:-10px;right:-2px;background:var(--attn);color:#fff;
   font-family:var(--mono);font-size:9px;letter-spacing:.12em;padding:3px 8px}
 

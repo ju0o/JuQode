@@ -122,7 +122,7 @@ function build() {
   el.bh = {};
   for (const b of [...LOGIN_BEHAVIORS, NEW_BEHAVIOR]) {
     const d = document.createElement('div');
-    d.className = 'bh' + (b.fail ? ' fail' : '') + (b.made ? ' made appearing' : '');
+    d.className = 'bh' + (b.fail ? ' fail' : '') + (b.made ? ' made' : '');
     d.dataset.id = b.id;
     d.innerHTML = `<div class="bIdx">${b.idx}</div><div class="bName">${b.name}</div>
       <div class="bNote">${b.note}</div>${b.made ? '<span class="bTag">새로 생김</span>' : ''}`;
@@ -456,10 +456,8 @@ function runQode() {
     S.changed = true;                    // 결과는 Software 구조에 반영된다
     S.events.forEach((x) => { x.pending = false; });
     render();
-    // 새 동작이 자기 자리에서 나타난다
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      el.bh.wait.classList.remove('appearing');
-    }));
+    // 새 동작은 display 가 켜지는 순간 CSS animation 으로 한 번 나타난다.
+    // (rAF 로 클래스를 벗기는 방식은 프레임이 안 돌면 영구히 숨겨진다 — 실제로 그랬다)
   }, QODE.completeAt));
 }
 
@@ -481,6 +479,10 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape') goBack(); })
 build();
 render();
 setTimeout(layout, 60);
+
+/* 부팅 확인 블록 제거 — 여기까지 왔으면 스크립트가 정상 실행됐다 */
+const boot = document.getElementById('bootmsg');
+if (boot) boot.remove();
 
 /* ── 검수용 자동 클릭 (?drive=…) — 실제 click 이벤트를 쏜다 ── */
 const params = new URLSearchParams(location.search);

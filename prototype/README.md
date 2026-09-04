@@ -2,9 +2,31 @@
 
 **인터랙션 검증용 프론트엔드 프로토타입.** 제품 전체가 아니다.
 
+## 열기
+
 ```
-열기:  브라우저로 index.html 을 그대로 연다. 빌드 · 설치 · 서버 없음.
+index.html 을 더블클릭한다.  끝.
 ```
+
+**`index.html` 하나로 완결되어 있다.** 외부 요청 **0건** —
+CSS · JS · 데이터가 모두 그 파일 안에 들어 있다.
+그래서 `file://` 로 열어도, 다른 폴더로 옮겨도, 그 파일만 전달해도 동작한다.
+
+| 필요 없는 것 | |
+|---|---|
+| npm install · 빌드 | 없음 |
+| localhost · Python 서버 | 없음 |
+| 확장 프로그램 · 브라우저 보안 플래그 | 없음 |
+| 인터넷 | 없음 (웹폰트도 불러오지 않는다 — 시스템 폰트로 대체) |
+
+> **이전에 깨진 이유:** `index.html` 이 `app.css` · `data.js` · `app.js` 세 형제 파일을
+> 상대 경로로 불러왔다. 그 파일들이 함께 오지 않는 전달 경로(브라우저에서 파일만 저장,
+> 파일 하나만 복사, 프로토타입이 없는 branch)에서는 `file://` 로 열 때
+> **ERR_FILE_NOT_FOUND** 가 나고 화면이 기본 HTML 스타일로만 보였다.
+> 지금은 그 실패가 구조적으로 불가능하다.
+
+> **화면이 안 뜨면** — `이 화면이 아직 뜨지 않았습니다` 라는 문장이 보인다.
+> 조용히 빈 화면이 되지 않게 부팅 확인 블록을 넣어 두었다.
 
 ## 무엇을 증명하는가
 
@@ -30,10 +52,16 @@ Software World → My Service → 로그인 → Qode → Working → Result
 
 | | |
 |---|---|
-| `index.html` | 4영역 골격 (Chrome / Primary / Contextual / Qode) |
-| `app.css` | DESIGN.md 토큰 + 상태 스타일 |
-| `data.js` | Mock 데이터 (소프트웨어 · 기능 · 동작 · 관계) |
-| `app.js` | 레이아웃 엔진 + 상태 기계 + Semantic Zoom |
+| **`index.html`** | **산출물. 자기완결.** 이것만 열면 된다 (생성된 파일) |
+| `build.mjs` | `src/` 를 `index.html` 하나로 합친다 |
+| `src/index.template.html` | 4영역 골격 (Chrome / Primary / Contextual / Qode) |
+| `src/app.css` | DESIGN.md 토큰 + 상태 스타일 |
+| `src/data.js` | Mock 데이터 (소프트웨어 · 기능 · 동작 · 관계) |
+| `src/app.js` | 레이아웃 엔진 + 상태 기계 + Semantic Zoom |
+
+**고칠 때는 `src/` 를 고치고 `node build.mjs` 를 돌린다.**
+`index.html` 을 직접 고치면 다음 빌드에서 덮어써진다.
+빌드는 외부 참조가 0건인지 검사하고, 하나라도 남으면 실패한다.
 
 ## Semantic Zoom 구현 방식
 
@@ -83,3 +111,15 @@ Backend · Database · 인증 · Repository 파싱 · Git · 실제 Coding Agent
 
 Context 검사/정정 · Skill · Change Story · Evidence · UNKNOWN/FAIL ·
 Software Time · 비교 · 안전한 되돌리기 — **구현하지 않았고, 막지도 않았다.**
+
+## 어느 branch에 있는가
+
+이 프로토타입은 **`docs/public-foundation`** branch에 있다.
+`main` 은 아직 비어 있다 (PR #1 미merge).
+
+```
+git clone -b docs/public-foundation https://github.com/ju0o/JuQode.git
+```
+
+또는 GitHub에서 `prototype/index.html` → **Raw** → 저장.
+**단일 파일이므로 그것만으로 충분하다.**

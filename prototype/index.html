@@ -1,11 +1,218 @@
 <!doctype html>
+<!-- 생성된 파일이다. 고치려면 src/ 를 고치고 `node build.mjs` -->
 <html lang="ko">
 <head>
 <meta charset="utf-8">
 <title>JuQode — Software Workspace</title>
-<link rel="stylesheet" href="app.css">
+<style>
+/* JuQode v0.1 — Functional Prototype
+ * 모든 값의 출처: JuQode-Private/docs/design/DESIGN.md (v0.1 Visual Tone · FROZEN)
+ * 이 파일에서 토큰을 새로 만들지 않는다. */
+
+:root{
+  --paper:#F7F5F2; --surface:#FFFFFF; --sunk:#EDEAE5;
+  --ink:#0D0C0B; --ink2:#4A4641; --ink3:#857F77; --ink4:#B5AEA5;
+  --hair:#D8D3CC; --attn:#9A5B12; --fail:#8C2B20; --past:#5B6B84;
+  --sans:"Archivo","Noto Sans KR","Helvetica Neue",Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --dur:520ms;            /* 의미 전이. 장식이 아니다 */
+  --ctxw:340px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;overflow:hidden;min-width:1280px}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+
+.app{height:100vh;min-height:760px;display:flex;flex-direction:column}
+
+/* 검수용: 전이를 즉시 끝낸다 (?still=1). 제품 동작에는 영향 없음
+   delay 도 0으로 — duration 만 0으로 하면 delay 가 남아 값이 도달하지 않는다 */
+.still *,.still *::before,.still *::after{transition-duration:0ms!important;
+  transition-delay:0ms!important;animation-duration:0ms!important;animation-delay:0ms!important}
+
+/* ── Product Chrome — 44px. IDE 툴바가 아니다 ─────────── */
+.chrome{height:44px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;
+  border-bottom:1px solid var(--hair);background:var(--surface)}
+.chrome .wm{font-size:15px;font-weight:700;letter-spacing:-.03em}
+.chrome .back{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink3);
+  border:1px solid var(--hair);padding:5px 10px;opacity:0;pointer-events:none;transition:opacity 200ms}
+.chrome .back.on{opacity:1;pointer-events:auto}
+.chrome .back:hover{color:var(--ink);border-color:var(--ink3)}
+.chrome .sp{flex:1}
+.chrome .agent{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink2);
+  display:flex;align-items:center;gap:7px}
+.chrome .agent i{width:7px;height:7px;background:var(--ink);display:block;transition:background 200ms}
+.chrome .agent.busy i{background:var(--attn)}
+.chrome .path{font-family:var(--mono);font-size:10.5px;color:var(--ink4)}
+
+.body{flex:1;display:flex;min-height:0}
+.stagewrap{flex:1;min-width:0;position:relative;overflow:hidden}
+
+/* ── Containment Frame — 지나온 단계가 테두리로 남는다 (C 문법) ── */
+.frame{position:absolute;border:2px solid var(--ink);pointer-events:none;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
+             right var(--dur) var(--ease),bottom var(--dur) var(--ease),
+             opacity 300ms var(--ease)}
+.notch{position:absolute;top:-9px;left:20px;background:var(--paper);padding:0 10px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink2);white-space:nowrap}
+.nstat{position:absolute;top:-9px;right:20px;background:var(--paper);padding:0 10px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--ink3);white-space:nowrap}
+.memo{position:absolute;bottom:-8px;left:20px;background:var(--paper);padding:0 10px;
+  font-size:11.5px;color:var(--ink4);white-space:nowrap}
+
+/* ── Software Object — 카드가 아니다 ────────────────── */
+.sw{position:absolute;background:var(--surface);border:2px solid var(--ink);
+  display:flex;flex-direction:column;padding:16px 18px 14px;overflow:hidden;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
+             width var(--dur) var(--ease),height var(--dur) var(--ease),
+             opacity 380ms var(--ease),transform var(--dur) var(--ease),
+             border-width 200ms;cursor:pointer}
+.sw.current{border-width:3px}
+.sw:hover{background:#FDFCFB}
+.sw.receded{opacity:.05;pointer-events:none}
+.sw.entered{cursor:default;z-index:4;overflow:visible}
+.sw.entered:hover{background:var(--surface)}
+.sw .swName{font-size:30px;font-weight:700;letter-spacing:-.035em;line-height:1;
+  transition:font-size var(--dur) var(--ease)}
+.sw.current .swName{font-size:40px}
+.sw.entered .swName{font-size:0;opacity:0}
+.sw .swMeta{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--ink3);
+  margin-top:6px;transition:opacity 240ms}
+.sw.entered .swMeta{opacity:0;height:0;margin:0}
+.sw .swFig{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+  transition:opacity 260ms}
+.sw.entered .swFig{opacity:0;height:0;flex:none;overflow:hidden}
+.sw .swHint{font-size:12px;color:var(--ink3);border-top:1px solid var(--hair);
+  padding-top:9px;margin-top:9px;line-height:1.6;transition:opacity 240ms}
+.sw.entered .swHint{opacity:0;height:0;padding:0;margin:0;overflow:hidden}
+
+/* 진입한 소프트웨어의 내부 — Feature 층 */
+.inner{position:absolute;left:0;right:0;top:30px;bottom:0;overflow:hidden;opacity:0;pointer-events:none;
+  transition:opacity 300ms var(--ease) 180ms}
+.inner.on{opacity:1;pointer-events:auto}
+
+/* ── Feature Object — 폴더·메뉴·카드가 아니다 ───────── */
+.ft{position:absolute;background:var(--surface);border:2px solid var(--ink);
+  padding:13px 15px 12px;display:flex;flex-direction:column;overflow:hidden;z-index:2;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
+             width var(--dur) var(--ease),height var(--dur) var(--ease),
+             opacity 380ms var(--ease),background 160ms,border-color 160ms;cursor:pointer}
+.ft:hover{background:#FDFCFB}
+.ft.selected{background:var(--ink);border-width:3px}
+.ft.selected .ftName,.ft.selected .ftMeta,.ft.selected .ftList{color:#fff}
+.ft.selected .ftList{color:#C6C1BA}
+.ft.selected:hover{background:var(--ink)}
+.ft.attention{border-color:var(--attn)}
+.ft.absent{border-style:dashed;border-color:var(--ink4)}
+.ft.absent .ftName{color:var(--ink3)}
+.ft.receded{opacity:0;pointer-events:none}
+.ft.entered{cursor:default;background:var(--surface);border-width:3px;z-index:5;overflow:visible}
+.ft.entered .ftName,.ft.entered .ftMeta,.ft.entered .ftList{color:var(--ink)}
+.ft .ftName{font-size:23px;font-weight:700;letter-spacing:-.03em;line-height:1.1;
+  display:flex;align-items:center;gap:8px;transition:opacity 240ms}
+.ft.entered .ftName{opacity:0;height:0;overflow:hidden}
+.ft .ftMeta{font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;color:var(--ink3);
+  margin-top:6px;transition:opacity 240ms}
+.ft.entered .ftMeta{opacity:0;height:0;margin:0;overflow:hidden}
+.ft .ftList{font-size:12px;color:var(--ink3);line-height:1.72;margin-top:auto;
+  transition:opacity 240ms}
+.ft.entered .ftList{opacity:0;height:0;margin:0;overflow:hidden}
+.mk{width:9px;height:9px;flex:none;background:var(--ink);display:inline-block}
+.mk.a{background:var(--attn)}
+
+/* ── Behavior Node ─────────────────────────────────── */
+.bh{position:absolute;background:var(--surface);border:2px solid var(--ink);
+  padding:12px 14px 11px;display:flex;flex-direction:column;z-index:2;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
+             opacity 420ms var(--ease),transform 420ms var(--ease)}
+.bh .bIdx{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--ink4)}
+.bh .bName{font-size:21px;font-weight:700;letter-spacing:-.03em;margin-top:6px;line-height:1.15}
+.bh .bNote{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--ink3);margin-top:auto}
+.bh.fail{border-color:var(--fail);border-style:dashed}
+.bh.fail .bName,.bh.fail .bIdx,.bh.fail .bNote{color:var(--fail)}
+.bh.made{border-color:var(--attn);border-width:3px}
+.bh.made .bName{color:var(--attn)}
+@keyframes bhAppear{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+.bh.made{animation:bhAppear 300ms var(--ease) both}
+.bTag{position:absolute;top:-10px;right:-2px;background:var(--attn);color:#fff;
+  font-family:var(--mono);font-size:9px;letter-spacing:.12em;padding:3px 8px}
+
+/* 관계선 — 직교. bezier 금지 */
+.edges{position:absolute;inset:0;pointer-events:none;z-index:1;overflow:visible}
+.eLabel{position:absolute;background:var(--paper);font-family:var(--mono);font-size:9px;
+  letter-spacing:.12em;color:var(--ink3);padding:1px 6px;z-index:2;white-space:nowrap;
+  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),opacity 300ms}
+.eLabel.f{color:var(--fail)}
+
+/* ── Contextual Work Surface — 상시 아님 ──────────── */
+.ctx{width:0;flex:none;border-left:2px solid var(--ink);background:var(--surface);
+  overflow:hidden;transition:width var(--dur) var(--ease);border-left-width:0}
+.ctx.on{width:var(--ctxw);border-left-width:2px}
+.ctxIn{width:var(--ctxw);padding:20px 20px 0;height:100%;display:flex;flex-direction:column;
+  opacity:0;transition:opacity 260ms var(--ease) 140ms}
+.ctx.on .ctxIn{opacity:1}
+.ctxKind{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink3)}
+.ctxH1{font-size:32px;font-weight:700;letter-spacing:-.035em;line-height:1.05;margin:9px 0 18px}
+.ctxH2{font-size:20px;font-weight:700;letter-spacing:-.025em;line-height:1.35;margin:9px 0 18px}
+.blk{border-top:1px solid var(--hair);padding:12px 0}
+.blk:last-of-type{border-bottom:1px solid var(--hair)}
+.blkLabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3);margin-bottom:6px}
+.blkVal{font-size:15px;font-weight:500;letter-spacing:-.01em}
+.blkVal.a{color:var(--attn)}
+.list{display:flex;flex-direction:column}
+.list span{font-size:13.5px;padding:4px 0 4px 11px;border-left:2px solid var(--hair);margin-left:1px}
+.list span.f{color:var(--fail);border-left-color:var(--fail)}
+.list span.a{color:var(--attn);border-left-color:var(--attn)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{font-size:12.5px;border:1px solid var(--hair);padding:3px 8px}
+.chips span.strong{border-color:var(--ink);font-weight:600}
+.events{display:flex;flex-direction:column;gap:5px}
+.events span{font-size:13px;display:flex;gap:9px;align-items:baseline}
+.events span b{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--ink3);
+  width:26px;flex:none;font-weight:500}
+.events span.now,.events span.now b{color:var(--attn)}
+.nums{display:flex;gap:22px;align-items:baseline}
+.nums div{display:flex;flex-direction:column;gap:3px}
+.nums .n{font-family:var(--mono);font-size:26px;font-weight:500;line-height:1}
+.nums .n.a{color:var(--attn)}
+.nums .l{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink3)}
+.ctxNote{font-size:11.5px;color:var(--ink4);line-height:1.75;padding:12px 0}
+.rawEntry{margin-top:auto;border-top:2px solid var(--ink);padding:12px 0;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--ink3);
+  display:flex;justify-content:space-between}
+
+/* ── Qode Composer — Chat이 아니다 ────────────────── */
+.qode{flex:none;border-top:2px solid var(--ink);background:var(--surface);padding:0 20px}
+.prep{height:26px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--hair);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3)}
+.prep b{color:var(--ink);font-weight:500}
+.prep .a{color:var(--attn)}
+.prep .hint{margin-left:auto;color:var(--ink4);letter-spacing:.06em}
+.qrow{height:74px;display:flex;align-items:center;gap:20px}
+.qrow input{flex:1;border:0;outline:0;background:none;font-family:var(--sans);
+  font-size:22px;letter-spacing:-.025em;color:var(--ink);min-width:0}
+.qrow input::placeholder{color:var(--ink4)}
+.qrow .go{font-family:var(--mono);font-size:12px;letter-spacing:.12em;font-weight:500;
+  border:2px solid var(--ink);padding:11px 20px;white-space:nowrap;transition:background 160ms,color 160ms}
+.qrow .go.armed{background:var(--ink);color:#fff}
+.qrow .go[disabled]{opacity:.35;cursor:default}
+
+</style>
 </head>
 <body>
+<!-- 부팅 확인. JS 가 뜨면 app.js 가 이 블록을 지운다.
+     이 문장이 보인다는 것은 스크립트가 실행되지 않았다는 뜻이다 (조용히 깨지지 않게). -->
+<div id="bootmsg" style="position:fixed;inset:0;z-index:999;background:#F7F5F2;
+  font:15px/1.7 -apple-system,'Malgun Gothic',sans-serif;color:#0D0C0B;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px;text-align:center">
+  <div style="font-weight:700;font-size:19px">화면이 아직 뜨지 않았습니다</div>
+  <div style="color:#4A4641">이 파일은 하나로 완결되어 있어 인터넷도 서버도 필요하지 않습니다.<br>
+    브라우저에서 JavaScript 가 꺼져 있으면 이 문장이 남습니다.</div>
+  <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#857F77;letter-spacing:.06em">
+    JuQode prototype · self-contained</div>
+</div>
 <div class="app">
 
   <div class="chrome">
@@ -30,7 +237,624 @@
   </div>
 
 </div>
-<script src="data.js"></script>
-<script src="app.js"></script>
+<script>
+/* ── src/data.js ─────────────────────────────────── */
+/* JuQode v0.1 — Functional Prototype · static data
+ * 출처: JuQode-Private/docs/handoffs/LOVABLE_HANDOFF_V01.md §7
+ * 이 파일은 Mock이다. Repository 파싱 · Backend · Git 없음. */
+
+const WORLD = [
+  {
+    id: 'blog', name: 'Blog', featureCount: 2, note: '아직 없는 것 1',
+    // 관계 구조 — 이것이 그 소프트웨어의 형태다 (A 문법)
+    layers: [1, 1], edges: [[0, 1]], absent: [1], attention: [],
+  },
+  {
+    id: 'store', name: 'Store', featureCount: 3, note: '확인 필요 1',
+    layers: [1, 1, 1], edges: [[0, 1], [1, 2]], absent: [], attention: [2],
+  },
+  {
+    id: 'juguard', name: 'JuGuard', featureCount: 5, note: '정상',
+    layers: [1, 2, 2], edges: [[0, 1], [0, 2], [1, 3], [2, 4]], absent: [], attention: [],
+  },
+  {
+    id: 'myservice', name: 'My Service', featureCount: 8,
+    note: '확인 필요 2 · 아직 없는 것 1', current: true,
+    layers: [2, 2, 3, 1],
+    edges: [[0, 2], [1, 3], [1, 6], [2, 4], [3, 5], [5, 7]],
+    absent: [6], attention: [3, 7],
+  },
+];
+
+/* My Service — Feature. layer = 관계 깊이. 크기는 동작 수에서 나온다 (임의 아님) */
+const FEATURES = [
+  { id: 'signup',  name: '회원가입', layer: 0,
+    behaviors: ['정보 입력', '중복 확인', '계정 만들기', '환영 메일'] },
+  { id: 'search',  name: '검색',     layer: 0,
+    behaviors: ['검색어 입력', '결과 찾기', '조건 좁히기', '정렬', '최근 검색 저장'] },
+  { id: 'login',   name: '로그인',   layer: 1, state: '정상 작동',
+    related: ['프로필', '세션'], lastChange: '로그인 실패 메시지 수정',
+    behaviors: ['사용자 입력', '사용자 확인', '인증', '세션 생성', '홈 이동', '로그인 실패'] },
+  { id: 'payment', name: '결제',     layer: 1, attention: true,
+    behaviors: ['결제수단 확인', '금액 계산', '쿠폰 적용', '결제 요청', '결제 성공', '결제 실패', '주문 생성'] },
+  { id: 'profile', name: '프로필',   layer: 2,
+    behaviors: ['정보 보기', '정보 고치기', '사진 바꾸기', '비밀번호 바꾸기'] },
+  { id: 'order',   name: '주문',     layer: 2,
+    behaviors: ['주문 확인', '배송지 입력', '주문 접수', '상태 바꾸기', '주문 취소'] },
+  { id: 'reco',    name: 'AI 추천',  layer: 2, absent: true,
+    behaviors: ['사용자 관심 파악', '추천 보여주기'] },
+  { id: 'notify',  name: '알림',     layer: 3, attention: true,
+    behaviors: ['알림 만들기', '보내기', '읽음 처리'] },
+];
+
+const FEATURE_EDGES = [
+  ['signup', 'login'], ['login', 'profile'], ['search', 'payment'],
+  ['payment', 'order'], ['order', 'notify'], ['search', 'reco'],
+];
+
+/* 로그인 Behavior 구조 — 성공/실패 분기 */
+const LOGIN_BEHAVIORS = [
+  { id: 'input',   idx: '01', name: '사용자 입력', note: '로그인 화면',      layer: 0, row: 0 },
+  { id: 'check',   idx: '02', name: '사용자 확인', note: '입력이 맞는지',    layer: 1, row: 0 },
+  { id: 'auth',    idx: '03', name: '인증',        note: '비밀번호 확인',    layer: 2, row: 0 },
+  { id: 'session', idx: '04', name: '세션 생성',   note: '로그인 상태 유지', layer: 3, row: -1 },
+  { id: 'home',    idx: '05', name: '홈 이동',     note: '첫 화면으로',      layer: 4, row: -1 },
+  { id: 'fail',    idx: '실패', name: '로그인 실패', note: '다시 시도해야 한다', layer: 3, row: 1, fail: true },
+];
+
+/* Qode 완료 시 구조에 삽입되는 동작 — 결과는 Software에 반영된다 */
+const NEW_BEHAVIOR = {
+  id: 'wait', idx: '새 동작', name: '30초 기다리기', note: '세 번 실패한 뒤',
+  layer: 4, row: 1, made: true,
+};
+
+const LOGIN_EDGES_BEFORE = [
+  ['input', 'check'], ['check', 'auth'],
+  ['auth', 'session', '성공'], ['auth', 'fail', '실패'],
+  ['session', 'home'],
+];
+const RETURN_EDGE_BEFORE = { from: 'fail', to: 'input', label: '다시 입력으로' };
+
+const LOGIN_EDGES_AFTER = [
+  ...LOGIN_EDGES_BEFORE, ['fail', 'wait'],
+];
+const RETURN_EDGE_AFTER = { from: 'wait', to: 'input', label: '다시 입력으로' };
+
+/* Qode — 자동 준비된 것. 사용자가 고르지 않는다 */
+const QODE = {
+  ask: '로그인에 세 번 실패하면 30초 뒤에 다시 시도할 수 있게 해줘.',
+  agent: 'Claude Code',
+  contextCount: 4,
+  skillCount: 1,
+  context: ['로그인 규칙', '세션 정책', '실패 처리 기준', '한국어'],
+  skill: '동작 추가',
+  working: '로그인 실패 후 30초 대기 기능을 만드는 중',
+  // 실제로 일어난 일. 진행률이 아니다 — 사건이다
+  events: [
+    { at: 400,  text: '요청 이해' },
+    { at: 1500, text: '관련 로그인 동작 확인' },
+    { at: 2900, text: '실패 흐름 수정' },
+    { at: 4200, text: '동작 확인 중', pending: true },
+  ],
+  completeAt: 5600,
+  result: {
+    outcome: '로그인 실패 후 30초 뒤 다시 시도할 수 있게 됐습니다.',
+    impact: '로그인',
+    verified: 3,
+    attention: 1,
+    attentionText: '실제 사용자가 30초를 기다릴지',
+    structural: '동작 1개 · 30초 기다리기',
+  },
+};
+
+/* ── src/app.js ──────────────────────────────────── */
+/* JuQode v0.1 — Functional Prototype
+ *
+ * 핵심 원칙 (LOVABLE_HANDOFF_V01.md §6):
+ *   들어가는 것은 라우팅이 아니다. 하나의 DOM 트리에서 컨테이너가 커진다.
+ *   지나온 단계는 언마운트되지 않고 테두리로 남는다.
+ *
+ * 그래서 이 파일에는 router가 없다. depth가 바뀌면 좌표만 다시 계산한다. */
+
+/* data.js 가 먼저 로드되어 전역에 있다 (index.html 의 script 순서) */
+
+window.addEventListener('error', (e) => {
+  document.title = 'JQ_ERR ' + e.message + ' @ ' + (e.lineno || '?');
+});
+const $ = (s) => document.querySelector(s);
+const stage = $('#stage');
+const ctx = $('#ctx');
+const ctxIn = $('#ctxIn');
+const ask = $('#ask');
+const go = $('#go');
+const prep = $('#prep');
+const back = $('#back');
+const agent = $('#agent');
+const agentText = $('#agentText');
+
+/* ── state ───────────────────────────────────────────── */
+const S = {
+  depth: 'world',          // world | service | feature
+  selected: null,          // feature id
+  qode: 'idle',            // idle | working | done
+  events: [],
+  changed: false,          // 30초 기다리기가 구조에 들어갔는가
+};
+let timers = [];
+const clearTimers = () => { timers.forEach(clearTimeout); timers = []; };
+
+/* ── world-level 관계 도형 (A 문법) ──────────────────── */
+function figureSVG(sw, w, h) {
+  const { layers, edges, absent, attention } = sw;
+  const cols = layers.length, cw = w / cols;
+  const pos = []; let i = 0;
+  layers.forEach((count, c) => {
+    const step = h / (count + 1);
+    for (let r = 0; r < count; r++) pos[i++] = { x: cw * c + cw / 2, y: step * (r + 1) };
+  });
+  const lines = edges.map(([a, b]) => {
+    const p = pos[a], q = pos[b]; if (!p || !q) return '';
+    const mx = (p.x + q.x) / 2;
+    return `<path d="M ${p.x} ${p.y} L ${mx} ${p.y} L ${mx} ${q.y} L ${q.x} ${q.y}" fill="none" stroke="#4A4641" stroke-width="1"/>`;
+  }).join('');
+  const sz = 12;
+  const nodes = pos.map((p, n) => {
+    const off = absent.includes(n), at = attention.includes(n);
+    const fill = off ? '#F7F5F2' : at ? '#9A5B12' : '#0D0C0B';
+    const extra = off ? ' stroke="#B5AEA5" stroke-width="1" stroke-dasharray="2 2"' : '';
+    return `<rect x="${(p.x - sz / 2).toFixed(1)}" y="${(p.y - sz / 2).toFixed(1)}" width="${sz}" height="${sz}" fill="${fill}"${extra}/>`;
+  }).join('');
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${lines}${nodes}</svg>`;
+}
+
+/* ── DOM 최초 구성. 이후 다시 만들지 않는다 ──────────── */
+const el = {};
+
+function build() {
+  stage.innerHTML = `
+    <div class="frame" id="worldFrame">
+      <span class="notch" id="worldNotch">이 컴퓨터</span>
+      <span class="nstat" id="worldStat">소프트웨어 4 · 기능 18</span>
+      <span class="memo" id="worldMemo">각 도형은 그 소프트웨어의 기능과 관계다 — 자라면 구조가 자란다</span>
+    </div>`;
+  el.worldFrame = $('#worldFrame');
+  el.worldNotch = $('#worldNotch');
+  el.worldStat = $('#worldStat');
+  el.worldMemo = $('#worldMemo');
+
+  el.sw = {};
+  for (const sw of WORLD) {
+    const d = document.createElement('div');
+    d.className = 'sw' + (sw.current ? ' current' : '');
+    d.dataset.id = sw.id;
+    d.innerHTML = `
+      <div class="swName">${sw.name}</div>
+      <div class="swMeta">기능 ${sw.featureCount} · ${sw.note}${sw.current ? ' · 지금 여기' : ''}</div>
+      <div class="swFig"></div>
+      ${sw.current ? '<div class="swHint">이 도형이 My Service의 구조다 — 채운 칸은 되어 있는 것, 주황은 확인 필요, 점선은 아직 없는 것</div>' : ''}
+      ${sw.current ? `<span class="notch" style="opacity:0" data-role="svcNotch">MY SERVICE</span>
+        <span class="nstat" style="opacity:0" data-role="svcStat">기능 8 · 확인 필요 2 · 아직 없는 것 1</span>
+        <div class="inner" data-role="svcInner"><svg class="edges" data-role="ftEdges"></svg></div>` : ''}`;
+    d.addEventListener('click', () => onSoftwareClick(sw.id));
+    stage.appendChild(d);
+    el.sw[sw.id] = d;
+  }
+
+  const ms = el.sw.myservice;
+  el.svcNotch = ms.querySelector('[data-role=svcNotch]');
+  el.svcStat = ms.querySelector('[data-role=svcStat]');
+  el.svcInner = ms.querySelector('[data-role=svcInner]');
+  el.ftEdges = ms.querySelector('[data-role=ftEdges]');
+
+  el.ft = {};
+  for (const f of FEATURES) {
+    const d = document.createElement('div');
+    d.className = 'ft' + (f.attention ? ' attention' : '') + (f.absent ? ' absent' : '');
+    d.dataset.id = f.id;
+    d.innerHTML = `
+      <div class="ftName">${f.name}${f.attention ? '<span class="mk a"></span>' : ''}</div>
+      <div class="ftMeta">동작 ${f.behaviors.length}${f.absent ? ' · 아직 없음' : f.attention ? ' · 확인 필요' : ''}</div>
+      <div class="ftList">${f.behaviors.join('<br>')}</div>
+      ${f.id === 'login' ? `<span class="notch" style="opacity:0" data-role="lgNotch">로그인</span>
+        <span class="nstat" style="opacity:0" data-role="lgStat">동작 6 · 정상 작동</span>
+        <div class="inner" data-role="lgInner"><svg class="edges" data-role="bhEdges"></svg></div>` : ''}`;
+    d.addEventListener('click', (e) => { e.stopPropagation(); onFeatureClick(f.id); });
+    el.svcInner.appendChild(d);
+    el.ft[f.id] = d;
+  }
+
+  const lg = el.ft.login;
+  el.lgNotch = lg.querySelector('[data-role=lgNotch]');
+  el.lgStat = lg.querySelector('[data-role=lgStat]');
+  el.lgInner = lg.querySelector('[data-role=lgInner]');
+  el.bhEdges = lg.querySelector('[data-role=bhEdges]');
+
+  el.bh = {};
+  for (const b of [...LOGIN_BEHAVIORS, NEW_BEHAVIOR]) {
+    const d = document.createElement('div');
+    d.className = 'bh' + (b.fail ? ' fail' : '') + (b.made ? ' made' : '');
+    d.dataset.id = b.id;
+    d.innerHTML = `<div class="bIdx">${b.idx}</div><div class="bName">${b.name}</div>
+      <div class="bNote">${b.note}</div>${b.made ? '<span class="bTag">새로 생김</span>' : ''}`;
+    if (b.made) d.style.display = 'none';
+    el.lgInner.appendChild(d);
+    el.bh[b.id] = d;
+  }
+}
+
+/* ── 직교 관계선 ─────────────────────────────────────── */
+const MARKERS = `<defs>
+  <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#0D0C0B"/></marker>
+  <marker id="af" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#8C2B20"/></marker>
+</defs>`;
+
+function orthPath(a, b, stub) {
+  if (Math.abs(a.y - b.y) < 1) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+  const mx = a.x + stub;
+  return `M ${a.x} ${a.y} L ${mx} ${a.y} L ${mx} ${b.y} L ${b.x} ${b.y}`;
+}
+
+function drawEdges(svg, host, pairs, boxes, opts = {}) {
+  const paths = pairs.map(([from, to]) => {
+    const A = boxes[from], B = boxes[to];
+    if (!A || !B) return '';
+    const a = { x: A.x + A.w, y: A.y + A.h / 2 };
+    const b = { x: B.x, y: B.y + B.h / 2 };
+    return `<path d="${orthPath(a, b, opts.stub || 24)}" fill="none" stroke="#0D0C0B" stroke-width="1" marker-end="url(#ah)"/>`;
+  }).join('');
+  let extra = '';
+  if (opts.ret) {
+    const A = boxes[opts.ret.from], B = boxes[opts.ret.to];
+    if (A && B) {
+      const y = Math.min(A.y + A.h + (opts.retLane || 58), (opts.bottom || 1e9) - 14);
+      extra = `<path d="M ${A.x + A.w / 2} ${A.y + A.h} L ${A.x + A.w / 2} ${y} L ${B.x + B.w / 2} ${y} L ${B.x + B.w / 2} ${B.y + B.h}" fill="none" stroke="#8C2B20" stroke-width="1" stroke-dasharray="6 4" marker-end="url(#af)"/>`;
+    }
+  }
+  svg.innerHTML = MARKERS + paths + extra;
+  // 분기 라벨은 DOM으로 (배경으로 선을 덮어야 읽힌다)
+  host.querySelectorAll('.eLabel').forEach((n) => n.remove());
+  (opts.labels || []).forEach(({ from, to, text, fail }) => {
+    const A = boxes[from], B = boxes[to]; if (!A || !B) return;
+    const s = document.createElement('span');
+    s.className = 'eLabel' + (fail ? ' f' : '');
+    s.textContent = text;
+    s.style.left = `${A.x + A.w + (opts.stub || 24) + 6}px`;
+    s.style.top = `${(A.y + A.h / 2 + B.y + B.h / 2) / 2 - 8}px`;
+    host.appendChild(s);
+  });
+}
+
+/* ── 레이아웃 ────────────────────────────────────────── */
+const WORLD_POS = {
+  myservice: [0.04, 0.30, 0.47, 0.62],
+  juguard:   [0.55, 0.07, 0.33, 0.35],
+  store:     [0.60, 0.53, 0.29, 0.31],
+  blog:      [0.11, 0.07, 0.23, 0.18],
+};
+
+/* 레이아웃은 애니메이션 중인 실측값이 아니라 목표 좌표에서 계산한다.
+ * (실측을 쓰면 전이 도중에 계산되어 음수 좌표가 나온다 — 실제로 겪은 버그) */
+function ctxVisible() {
+  return S.qode === 'working' || S.qode === 'done' || !!S.selected;
+}
+function stageBox() {
+  const b = document.querySelector('.body');
+  const W = b.clientWidth - (ctxVisible() ? 342 : 0);
+  return { W, H: b.clientHeight };
+}
+
+function layout() {
+  const { W, H } = stageBox();
+  if (!W || !H) return;
+  const inService = S.depth === 'service' || S.depth === 'feature';
+  const inFeature = S.depth === 'feature';
+
+  /* 세계 테두리 — 사라지지 않는다. 얇아진다 */
+  const wi = S.depth === 'world' ? 14 : inFeature ? 8 : 12;
+  Object.assign(el.worldFrame.style, { left: `${wi}px`, top: `${wi}px`, right: `${wi}px`, bottom: `${wi}px` });
+  el.worldNotch.textContent = S.depth === 'world' ? '이 컴퓨터' : '이 컴퓨터 ›';
+  el.worldStat.style.opacity = S.depth === 'world' ? '1' : '0';
+  el.worldMemo.style.opacity = S.depth === 'world' ? '1' : '0';
+
+  /* 소프트웨어 */
+  for (const sw of WORLD) {
+    const d = el.sw[sw.id];
+    if (sw.id === 'myservice' && inService) {
+      const inset = inFeature ? 24 : 34;
+      Object.assign(d.style, { left: `${inset}px`, top: `${inset}px`,
+        width: `${W - inset * 2}px`, height: `${H - inset * 2}px`, transform: 'none' });
+      d.classList.add('entered'); d.classList.remove('receded');
+    } else if (inService) {
+      const [x, y, w, h] = WORLD_POS[sw.id];
+      // 바깥으로 물러난다 — 사라지는 게 아니라 밀려난다
+      const dx = (x + w / 2 - 0.5) * 760, dy = (y + h / 2 - 0.5) * 560;
+      Object.assign(d.style, { left: `${x * W}px`, top: `${y * H}px`,
+        width: `${w * W}px`, height: `${h * H}px`,
+        transform: `translate(${dx}px,${dy}px) scale(.9)` });
+      d.classList.add('receded'); d.classList.remove('entered');
+    } else {
+      const [x, y, w, h] = WORLD_POS[sw.id];
+      Object.assign(d.style, { left: `${x * W}px`, top: `${y * H}px`,
+        width: `${w * W}px`, height: `${h * H}px`, transform: 'none' });
+      d.classList.remove('receded', 'entered');
+      const fig = d.querySelector('.swFig');
+      const fw = Math.round(w * W) - 40, fh = Math.max(46, Math.round(h * H) - 118);
+      const key = `${fw}x${fh}`;
+      if (fig.dataset.key !== key) { fig.dataset.key = key; fig.innerHTML = figureSVG(sw, fw, fh); }
+    }
+  }
+
+  el.svcInner.classList.toggle('on', inService);
+  el.svcNotch.style.opacity = inService ? '1' : '0';
+  el.svcNotch.textContent = inFeature ? 'MY SERVICE ›' : 'MY SERVICE';
+  el.svcStat.style.opacity = inService && !inFeature ? '1' : '0';
+  if (!inService) return;
+
+  /* Feature 층 배치 — 격자가 아니라 관계 방향. 목표 좌표로 계산한다 */
+  const svcInset = inFeature ? 24 : 34;
+  const aw = (W - svcInset * 2) - 4;
+  const ah = (H - svcInset * 2) - 4 - 30;
+  const LAYERS = 4;
+  let GAP = 40;
+  const colW = Math.round((aw - GAP * (LAYERS - 1)) / LAYERS);
+  const raw = (f) => 74 + f.behaviors.length * 24;             // DESIGN.md §E — 면적이 곧 내용
+  const byLayer = [0, 1, 2, 3].map((L) => FEATURES.filter((f) => f.layer === L));
+  // 가장 빡빡한 층이 넘치면 비례를 유지한 채 함께 줄인다
+  let scale = 1;
+  for (const list of byLayer) {
+    if (!list.length) continue;
+    const need = list.reduce((a, f) => a + raw(f), 0) + GAP * (list.length - 1);
+    if (need > ah) scale = Math.min(scale, (ah - GAP * (list.length - 1)) / (need - GAP * (list.length - 1)));
+  }
+  scale = Math.max(0.62, scale);
+  const hOf = (f) => Math.round(raw(f) * scale);
+  const boxes = {};
+  byLayer.forEach((list, L) => {
+    const total = list.reduce((a, f) => a + hOf(f), 0) + GAP * (list.length - 1);
+    let y = Math.max(0, Math.round((ah - total) / 2));
+    for (const f of list) {
+      boxes[f.id] = { x: L * (colW + GAP), y, w: colW, h: hOf(f) };
+      y += hOf(f) + GAP;
+    }
+  });
+
+  for (const f of FEATURES) {
+    const d = el.ft[f.id], b = boxes[f.id];
+    if (f.id === 'login' && inFeature) {
+      Object.assign(d.style, { left: '26px', top: '26px', width: `${aw - 52}px`, height: `${ah - 52}px` });
+      d.classList.add('entered'); d.classList.remove('receded', 'selected');
+    } else if (inFeature) {
+      Object.assign(d.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` });
+      d.classList.add('receded'); d.classList.remove('entered', 'selected');
+    } else {
+      Object.assign(d.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` });
+      d.classList.remove('receded', 'entered');
+      d.classList.toggle('selected', S.selected === f.id);
+    }
+  }
+  drawEdges(el.ftEdges, el.svcInner, FEATURE_EDGES, boxes, { stub: 26 });
+  el.ftEdges.style.opacity = inFeature ? '0' : '1';
+  el.svcInner.querySelectorAll('.eLabel').forEach((n) => { n.style.opacity = inFeature ? '0' : '1'; });
+
+  el.lgInner.classList.toggle('on', inFeature);
+  el.lgNotch.style.opacity = inFeature ? '1' : '0';
+  el.lgStat.style.opacity = inFeature ? '1' : '0';
+  el.lgStat.textContent = S.changed ? '동작 7 · 방금 1개 늘었다' : '동작 6 · 정상 작동';
+  if (!inFeature) return;
+
+  /* Behavior 배치 — 성공/실패 분기. 목표 좌표로 계산한다 */
+  const bw = aw - 52 - 4;
+  const bh = ah - 52 - 4 - 30;
+  const NG = 34;
+  const NW = Math.min(212, Math.round((bw - 4 * NG) / 5));
+  const NH = Math.max(104, Math.min(132, Math.round((bh - 150) / 3)));
+  // 세 줄(성공 / 본류 / 실패) + 되돌아가는 점선이 지나갈 차선까지 계산해 가운데 둔다
+  const upGap = Math.round(NH * 1.2), loGap = Math.round(NH * 1.35), RET_LANE = 62;
+  const span = upGap + NH + loGap + RET_LANE;
+  const top0 = Math.max(0, Math.round((bh - span) / 2));
+  const midY = top0 + upGap;
+  const rowY = { '-1': top0, 0: midY, 1: midY + loGap };
+  const list = S.changed ? [...LOGIN_BEHAVIORS, NEW_BEHAVIOR] : LOGIN_BEHAVIORS;
+  const bboxes = {};
+  for (const b of list) {
+    bboxes[b.id] = { x: b.layer * (NW + NG), y: rowY[String(b.row)], w: NW, h: NH };
+    const d = el.bh[b.id];
+    d.style.display = '';
+    Object.assign(d.style, { left: `${bboxes[b.id].x}px`, top: `${bboxes[b.id].y}px`,
+      width: `${NW}px`, height: `${NH}px` });
+  }
+  if (!S.changed) el.bh.wait.style.display = 'none';
+
+  const pairs = (S.changed ? LOGIN_EDGES_AFTER : LOGIN_EDGES_BEFORE).map(([a, b]) => [a, b]);
+  const ret = S.changed ? RETURN_EDGE_AFTER : RETURN_EDGE_BEFORE;
+  drawEdges(el.bhEdges, el.lgInner, pairs, bboxes, {
+    stub: 17, ret, retLane: 34, bottom: bh,
+    labels: [
+      { from: 'auth', to: 'session', text: '성공' },
+      { from: 'auth', to: 'fail', text: '실패', fail: true },
+    ],
+  });
+}
+
+/* ── Contextual Work Surface ────────────────────────── */
+function renderCtx() {
+  let html = '';
+  if (S.qode === 'working') {
+    html = `
+      <div class="ctxKind">이번 QODE</div>
+      <div class="ctxH2">${QODE.working}</div>
+      <div class="blk"><div class="blkLabel">AGENT</div><div class="blkVal">${QODE.agent}</div></div>
+      <div class="blk"><div class="blkLabel">자동 준비됨</div>
+        <div class="list">${QODE.context.map((c) => `<span>${c}</span>`).join('')}
+          <span class="a">SKILL · ${QODE.skill}</span></div></div>
+      <div class="blk"><div class="blkLabel">실제로 일어난 일</div>
+        <div class="events">${S.events.map((e) => `<span class="${e.pending ? 'now' : ''}"><b>${e.pending ? '지금' : '됨'}</b>${e.text}</span>`).join('')}</div></div>
+      <div class="ctxNote">진행률은 없습니다.<br>실제로 일어난 것만 적습니다.</div>`;
+  } else if (S.qode === 'done') {
+    const r = QODE.result;
+    html = `
+      <div class="ctxKind">변경 결과</div>
+      <div class="ctxH2">${r.outcome}</div>
+      <div class="blk"><div class="blkLabel">영향</div>
+        <div class="chips"><span class="strong">${r.impact}</span></div></div>
+      <div class="blk"><div class="blkLabel">검증</div>
+        <div class="nums">
+          <div><span class="n">${r.verified}</span><span class="l">확인됨</span></div>
+          <div><span class="n a">${r.attention}</span><span class="l">확인 필요</span></div>
+        </div></div>
+      <div class="blk"><div class="blkLabel">확인 필요</div>
+        <div class="list"><span class="a">${r.attentionText}</span></div></div>
+      <div class="blk"><div class="blkLabel">구조에 생긴 것</div><div class="blkVal">${r.structural}</div></div>
+      <div class="ctxNote">화면이 보고서로 바뀌지 않았습니다.<br>결과는 Software 안에 들어 있습니다.</div>
+      <div class="rawEntry"><span>원본 그대로</span><span>LEVEL 5</span></div>`;
+  } else if (S.selected) {
+    const f = FEATURES.find((x) => x.id === S.selected);
+    html = `
+      <div class="ctxKind">기능</div>
+      <div class="ctxH1">${f.name}</div>
+      <div class="blk"><div class="blkLabel">현재 상태</div>
+        <div class="blkVal${f.attention ? ' a' : ''}">${f.absent ? '아직 없음' : f.attention ? '확인 필요' : f.state || '정상 작동'}</div></div>
+      <div class="blk"><div class="blkLabel">동작 ${f.behaviors.length}가지</div>
+        <div class="list">${f.behaviors.map((b) => `<span class="${b.includes('실패') ? 'f' : ''}">${b}</span>`).join('')}</div></div>
+      ${f.related ? `<div class="blk"><div class="blkLabel">연관</div>
+        <div class="chips">${f.related.map((r) => `<span>${r}</span>`).join('')}</div></div>` : ''}
+      ${f.lastChange ? `<div class="blk"><div class="blkLabel">최근 변경</div>
+        <div class="blkVal">${f.lastChange}</div></div>` : ''}
+      ${f.id === 'login' ? '<div class="blk" style="border-bottom:0"><button class="go" id="enterBtn" style="border:2px solid var(--ink);padding:10px 16px;font-family:var(--mono);font-size:11px;letter-spacing:.12em">안으로 들어가기 →</button></div>' : ''}
+      <div class="ctxNote">이 면은 고정되어 있지 않습니다.<br>선택을 풀면 사라집니다.</div>`;
+  }
+  ctxIn.innerHTML = html;
+  ctx.classList.toggle('on', !!html);
+  const b = $('#enterBtn');
+  if (b) b.addEventListener('click', (e) => { e.stopPropagation(); enterFeature('login'); });
+  requestAnimationFrame(() => requestAnimationFrame(layout));   // ctx 폭 변화 후 재배치
+}
+
+/* ── Qode Composer 보조 표시 ────────────────────────── */
+function renderPrep() {
+  if (S.qode === 'working') {
+    prep.innerHTML = `자동 준비됨 · <b>CONTEXT ${QODE.contextCount}</b> · <b>SKILL ${QODE.skillCount}</b> · <span class="a">${QODE.agent.toUpperCase()} 작업 중</span>`;
+  } else if (S.depth === 'world') {
+    prep.innerHTML = '<span class="hint" style="margin:0">소프트웨어를 골라 안으로 들어가세요</span>';
+  } else {
+    prep.innerHTML = `자동 준비됨 · <b>CONTEXT ${QODE.contextCount}</b> · <b>SKILL ${QODE.skillCount}</b> · ${QODE.agent} — 직접 준비하지 않았습니다`;
+  }
+  const armed = S.depth === 'feature' && S.qode === 'idle' && ask.value.trim().length > 0;
+  go.classList.toggle('armed', armed);
+  go.disabled = S.depth !== 'feature' || S.qode !== 'idle';
+  ask.disabled = S.depth !== 'feature' || S.qode !== 'idle';
+  ask.placeholder = S.depth === 'feature' ? '원하는 걸 말해보세요.'
+    : S.depth === 'service' ? '기능을 고르고 안으로 들어가면 말할 수 있습니다.'
+    : '원하는 걸 말해보세요.';
+}
+
+function render() {
+  back.classList.toggle('on', S.depth !== 'world');
+  agent.classList.toggle('busy', S.qode === 'working');
+  agentText.textContent = S.qode === 'working' ? `${QODE.agent} · 작업 중` : `${QODE.agent} · 연결됨`;
+  renderCtx();
+  renderPrep();
+  layout();
+}
+
+/* ── 전이 ───────────────────────────────────────────── */
+function onSoftwareClick(id) {
+  if (S.depth !== 'world') return;
+  if (id !== 'myservice') return;          // 이 프로토타입은 My Service 하나만 들어간다
+  S.depth = 'service'; S.selected = null;
+  render();
+}
+function onFeatureClick(id) {
+  if (S.depth === 'feature') return;
+  if (S.depth !== 'service') return;
+  if (S.selected === id && id === 'login') return enterFeature('login');
+  S.selected = S.selected === id ? null : id;
+  render();
+}
+function enterFeature(id) {
+  if (id !== 'login') return;
+  S.depth = 'feature'; S.selected = 'login';
+  ask.value = QODE.ask;
+  render();
+  setTimeout(() => ask.focus(), 560);
+}
+function goBack() {
+  clearTimers();
+  if (S.depth === 'feature') {
+    S.depth = 'service'; S.selected = 'login'; S.qode = 'idle'; S.events = [];
+    ask.value = '';
+  } else if (S.depth === 'service') {
+    S.depth = 'world'; S.selected = null;
+  }
+  render();
+}
+
+/* ── Qode 실행 (시뮬레이션) ─────────────────────────── */
+function runQode() {
+  if (S.depth !== 'feature' || S.qode !== 'idle' || !ask.value.trim()) return;
+  S.qode = 'working'; S.events = [];
+  render();
+  for (const e of QODE.events) {
+    timers.push(setTimeout(() => {
+      S.events.forEach((x) => { x.pending = false; });
+      S.events.push({ ...e });
+      renderCtx();
+    }, e.at));
+  }
+  timers.push(setTimeout(() => {
+    S.qode = 'done';
+    S.changed = true;                    // 결과는 Software 구조에 반영된다
+    S.events.forEach((x) => { x.pending = false; });
+    render();
+    // 새 동작은 display 가 켜지는 순간 CSS animation 으로 한 번 나타난다.
+    // (rAF 로 클래스를 벗기는 방식은 프레임이 안 돌면 영구히 숨겨진다 — 실제로 그랬다)
+  }, QODE.completeAt));
+}
+
+/* ── 이벤트 ─────────────────────────────────────────── */
+back.addEventListener('click', goBack);
+go.addEventListener('click', runQode);
+ask.addEventListener('input', renderPrep);
+ask.addEventListener('keydown', (e) => { if (e.key === 'Enter') runQode(); });
+stage.addEventListener('click', (e) => {
+  if (e.target === stage && S.depth === 'service' && S.selected) { S.selected = null; render(); }
+});
+window.addEventListener('resize', layout);
+stage.addEventListener('transitionend', (e) => {
+  if (e.propertyName === 'width' || e.propertyName === 'height') layout();
+});
+ctx.addEventListener('transitionend', (e) => { if (e.propertyName === 'width') layout(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') goBack(); });
+
+build();
+render();
+setTimeout(layout, 60);
+
+/* 부팅 확인 블록 제거 — 여기까지 왔으면 스크립트가 정상 실행됐다 */
+const boot = document.getElementById('bootmsg');
+if (boot) boot.remove();
+
+/* ── 검수용 자동 클릭 (?drive=…) — 실제 click 이벤트를 쏜다 ── */
+const params = new URLSearchParams(location.search);
+if (params.get('still')) document.documentElement.classList.add('still');
+const drive = params.get('drive');
+if (drive) {
+  const click = (n) => n && n.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  const seq = [];
+  if (['service', 'feature', 'selected', 'working', 'done'].includes(drive)) {
+    seq.push([100, () => click(el.sw.myservice)]);
+  }
+  if (['selected'].includes(drive)) seq.push([700, () => click(el.ft.login)]);
+  if (['feature', 'working', 'done'].includes(drive)) {
+    seq.push([700, () => click(el.ft.login)]);
+    seq.push([1300, () => click($('#enterBtn'))]);
+  }
+  if (['working', 'done'].includes(drive)) seq.push([2100, () => click(go)]);
+  if (drive === 'working') seq.push([5000, () => {}]);
+  if (drive === 'done') seq.push([8200, () => {}]);
+  for (const [at, fn] of seq) setTimeout(fn, at);
+}
+
+</script>
 </body>
 </html>
