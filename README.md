@@ -48,16 +48,29 @@ Product 정의 · UX 설계 · 사업 관련 문서는 이 저장소에 두지 �
 
 ## Status
 
-**Phase 0 — Product 정의 단계. 구현 코드가 아직 없다.**
+**현재: Phase 2 — Figma Product Design. 구현 코드가 아직 없다.**
 
-현재 진행 상황:
+Product Planning은 **동결(Planning Freeze)** 되었다.
 
 | Phase | 내용 | 상태 |
 |---|---|---|
-| 0 | Product SSOT (28개 문서) | ✅ 완료 — PM 검토 대기 |
-| 1 | Visual Prototype | 대기 |
-| 2 | Architecture Decision | 대기 |
-| 3 | MVP 구현 ← **코드가 여기서 시작된다** | 대기 |
+| 0 | Product SSOT | ✅ 완료 |
+| 1 | Visual Product Planning | ✅ 완료 |
+| 1.5 | **Planning Freeze** | ✅ 완료 |
+| **2** | **Figma Product Design** | **진행 예정** |
+| 2.5 | Design Handoff | 대기 |
+| 3 | Lovable Functional Prototype | 대기 |
+| 4 | MVP Architecture Freeze | 대기 ← **기술 명세가 여기서 나온다** |
+| 5 | Supabase / Data Layer | 대기 |
+| 6 | First Qode Real Integration | 대기 ← **코드가 여기서 실제로 동작한다** |
+| 7 | QA / Dogfood | 대기 |
+| **v0.1** | **First Qode MVP Release** | — |
+
+v0.1 이후의 V1 / V2 / Later는 별도 Roadmap으로 계속된다.
+
+**순서가 고정된 이유:** Design → 기능적 인터랙션 Prototype → Architecture Freeze
+→ Data Layer → 실제 Agent 통합 → QA → Release.
+Backend / Data Architecture가 UX를 끌고 가기 전에 실제 제품 인터랙션을 검증한다.
 
 → [docs/README.md](docs/README.md)
 
