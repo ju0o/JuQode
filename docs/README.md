@@ -6,7 +6,7 @@
 
 ## 왜 비어 있는가
 
-JuQode는 현재 **Phase 2 (Figma Product Design)** 단계이며, 구현 코드가 아직 없다.
+JuQode는 현재 **Phase 2 (Claude Canvas Wireflow)** 단계이며, 구현 코드가 아직 없다.
 따라서 코드와 함께 사는 문서도 아직 없다.
 
 기획 문서(Strategy · PRD · UX · Roadmap)는 **JuQode-Private**에 있다.
@@ -23,7 +23,7 @@ JuQode는 현재 **Phase 2 (Figma Product Design)** 단계이며, 구현 코드�
 | Evidence Schema | Test / Build / Screenshot / Git 검증 결과의 표현 | Phase 4 |
 | Architecture Notes | Agent 실행 / Evidence 파이프라인 / Context 저장 구조 | Phase 4 |
 
-**Phase 4 = MVP Architecture Freeze.** 그 앞에 Figma(2) · Design Handoff(2.5) ·
+**Phase 4 = MVP Architecture Freeze.** 그 앞에 Canvas Wireflow(2) · Lovable Handoff(2.5) ·
 Lovable Functional Prototype(3)이 있고, 구현은 Phase 5~6이다.
 
 **Context Block Format을 사람이 읽을 수 있는 형식으로 유지하는 것**은

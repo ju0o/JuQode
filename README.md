@@ -48,7 +48,7 @@ Product 정의 · UX 설계 · 사업 관련 문서는 이 저장소에 두지 �
 
 ## Status
 
-**현재: Phase 2 — Figma Product Design. 구현 코드가 아직 없다.**
+**현재: Phase 2 — Claude Canvas Wireflow. 구현 코드가 아직 없다.**
 
 Product Planning은 **동결(Planning Freeze)** 되었다.
 
@@ -57,8 +57,8 @@ Product Planning은 **동결(Planning Freeze)** 되었다.
 | 0 | Product SSOT | ✅ 완료 |
 | 1 | Visual Product Planning | ✅ 완료 |
 | 1.5 | **Planning Freeze** | ✅ 완료 |
-| **2** | **Figma Product Design** | **진행 예정** |
-| 2.5 | Design Handoff | 대기 |
+| **2** | **Claude Canvas Wireflow** | **제작 완료 · 검토 대기** |
+| 2.5 | Lovable Handoff | 대기 |
 | 3 | Lovable Functional Prototype | 대기 |
 | 4 | MVP Architecture Freeze | 대기 ← **기술 명세가 여기서 나온다** |
 | 5 | Supabase / Data Layer | 대기 |
