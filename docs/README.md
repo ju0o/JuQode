@@ -1,10 +1,22 @@
 # JuQode — Code-side Documentation
 
-> **이 디렉터리는 아직 비어 있다. 의도된 것이다.**
+> **여기에는 설계 명세만 있다. 기술 명세는 아직 없다. 의도된 것이다.**
 
 ---
 
-## 왜 비어 있는가
+## 지금 있는 것
+
+| | |
+|---|---|
+| [`design/PRIMARY_WORKSPACE_V02.md`](design/PRIMARY_WORKSPACE_V02.md) | **Primary Workspace 최종 설계 명세** (Phase 3R.1). Lovable Build Contract 포함 |
+| [`design/primary-workspace-v02.html`](design/primary-workspace-v02.html) | 위 명세의 **비주얼 보드**. 브라우저로 열면 된다. 의존성 0 |
+
+`primary-workspace-v02.html`은 보드이면서 동시에 **MASS LAYOUT 엔진의 참조 구현**이다.
+여섯 개의 소프트웨어 유형이 특별 케이스 코드 없이 **질량 값만 다른 같은 렌더러**로 그려진다.
+
+---
+
+## 왜 기술 명세가 없는가
 
 JuQode는 현재 **Phase 3 (Functional Prototype)** 단계다.
 첫 인터랙티브 코드는 [`prototype/`](../prototype/)에 있고, 그 문서는 그 안의 README다.
