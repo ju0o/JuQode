@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1180">
+<title>JuQode — Software Physics Canon · Law Reference</title>
+<style>
+:root{
+  --paper:#F7F5F2; --surface:#FFFFFF; --sunk:#EDEAE5;
+  --ink:#0D0C0B; --ink2:#4A4641; --ink3:#857F77; --ink4:#B5AEA5;
+  --hair:#D8D3CC; --attn:#9A5B12; --fail:#8C2B20; --past:#5B6B84;
+  --sans:"Archivo","Noto Sans KR","Helvetica Neue","Malgun Gothic",Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;min-width:1180px}
+.wrap{max-width:1200px;margin:0 auto;padding:52px 44px 110px}
+.head{border-bottom:2px solid var(--ink);padding-bottom:22px;margin-bottom:14px}
+.kick{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ink3)}
+h1{font-size:42px;font-weight:700;letter-spacing:-.04em;line-height:1;margin:14px 0 0}
+.sub{font-size:16px;color:var(--ink2);letter-spacing:-.015em;margin-top:13px;line-height:1.65;max-width:900px}
+.sub b{font-weight:700;color:var(--ink)}
+.meta{display:flex;gap:24px;margin-top:18px;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.13em;color:var(--ink3);flex-wrap:wrap}
+.warn{border:2px solid var(--ink);background:var(--surface);padding:14px 18px;margin:26px 0 0;
+  font-size:13px;color:var(--ink2);line-height:1.7}
+.warn b{color:var(--ink)}
+section{margin-top:58px}
+h2{font-size:11.5px;font-family:var(--mono);letter-spacing:.2em;color:var(--ink3);font-weight:500;
+  border-top:1px solid var(--hair);padding-top:12px;margin:0 0 6px}
+h3{font-size:25px;font-weight:700;letter-spacing:-.03em;margin:0 0 8px}
+.lede{font-size:14px;color:var(--ink2);line-height:1.7;max-width:880px;margin:0 0 26px}
+.lede b{color:var(--ink)}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:22px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.card{background:var(--surface);border:1px solid var(--hair)}
+.card svg{display:block;width:100%;height:auto}
+.cap{border-top:1px solid var(--hair);padding:12px 15px 14px}
+.cap .n{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--ink3)}
+.cap .t{font-size:15px;font-weight:700;letter-spacing:-.02em;margin-top:5px}
+.cap .c{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--attn);margin-top:6px}
+.cap .d{font-size:12.5px;color:var(--ink2);line-height:1.65;margin-top:8px}
+.cap .x{font-size:11.5px;color:var(--ink4);line-height:1.6;margin-top:7px}
+.stack{background:var(--surface);border:2px solid var(--ink);padding:0}
+.row{display:grid;grid-template-columns:150px 1fr;border-bottom:1px solid var(--hair)}
+.row:last-child{border-bottom:0}
+.row .k{padding:18px 20px;border-right:1px solid var(--hair);background:var(--sunk)}
+.row .k b{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink3)}
+.row .k i{display:block;font-style:normal;font-size:17px;font-weight:700;letter-spacing:-.03em;margin-top:6px}
+.row .v{padding:18px 20px;display:flex;flex-direction:column;gap:10px}
+.row .v div{display:flex;gap:14px;align-items:baseline;font-size:13.5px}
+.row .v div em{font-style:normal;font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  color:var(--ink3);width:34px;flex:none}
+.row .v div b{font-weight:700;letter-spacing:-.015em;width:170px;flex:none}
+.row .v div span{color:var(--ink2);font-size:12.5px}
+table{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}
+th{font-family:var(--mono);font-size:9px;letter-spacing:.13em;color:var(--ink3);font-weight:500;
+  text-align:left;padding:9px 14px 9px 0;border-bottom:1px solid var(--ink)}
+td{padding:9px 14px 9px 0;border-bottom:1px solid var(--hair);color:var(--ink2);vertical-align:top}
+td:first-child{color:var(--ink);font-weight:600;white-space:nowrap}
+td.no{color:var(--fail)}
+.open{border:2px solid var(--attn);background:var(--surface);padding:16px 20px;margin-top:22px}
+.open .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--attn)}
+.open .t{font-size:17px;font-weight:700;letter-spacing:-.025em;margin-top:8px;line-height:1.5}
+.open .d{font-size:13px;color:var(--ink2);margin-top:9px;line-height:1.7}
+.foot{border-top:2px solid var(--ink);padding-top:18px;margin-top:66px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;color:var(--ink3);
+  display:flex;justify-content:space-between}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="head">
+  <div class="kick">JUQODE · PHASE 3R.2 · LAW REFERENCE</div>
+  <h1>Software Physics Canon</h1>
+  <div class="sub"><b>이것은 제품 화면이 아니다.</b> 법칙의 참조 카드다.
+  아래 그림들은 UI 시안이 아니라 <b>각 법칙이 소유한 시각 채널</b>을 하나씩 분리해 보여준다.
+  전체 명세는 <span style="font-family:var(--mono);font-size:13px">SOFTWARE_PHYSICS_CANON.md</span>에 있다.</div>
+  <div class="meta"><span>D-054 VISUAL TONE · FROZEN</span><span>NOT A UI MOCKUP</span>
+  <span>NO JAVASCRIPT</span><span>ZERO DEPENDENCY</span><span>LOVABLE CREDITS SPENT · 0</span></div>
+</div>
+
+<div class="warn"><b>왜 법칙이 필요한가.</b> 표상을 세 번 교체했지만 세 번 다 도표로 읽혔다.
+도표와 소프트웨어의 차이는 선의 모양이 아니다 — <b>도표는 아무 법칙도 따르지 않는다.</b>
+법칙은 장식이 아니라 제약이다: 어떤 채널이 무엇을 의미할 수 있고 무엇을 의미할 수 <b>없는지</b>를 정한다.</div>
+
+<!-- ════ 1. 세 층 ════ -->
+<section>
+  <h2>01 · THREE LAYERS</h2>
+  <h3>믿음 · 행동 · 통제</h3>
+  <p class="lede">층을 섞지 않는다. <b>믿음</b>은 JuQode가 소프트웨어에 대해 무엇을 믿는가,
+  <b>행동</b>은 소프트웨어가 인터페이스 안에서 어떻게 움직이는가, <b>통제</b>는 결과가 큰 행동을 어떻게 다루는가다.
+  Becoming은 믿음이라서 물리 법칙에서 강등했고, Responsibility는 윤리라서 물리에서 빼냈다.</p>
+  <div class="stack">
+    <div class="row">
+      <div class="k"><b>A · 믿음</b><i>Philosophy</i></div>
+      <div class="v">
+        <div><em>P1</em><b>BECOMING</b><span>소프트웨어는 완성되지 않는다 — 완성도 지표가 존재하지 않는다</span></div>
+        <div><em>P2</em><b>ABSORPTION</b><span>복잡함은 JuQode의 것이다 — 파일·브랜치·환경변수는 Primary UI에 없다</span></div>
+        <div><em>P3</em><b>HONESTY</b><span>모르는 것은 모르는 채로 남는다 — UNKNOWN은 1급 상태다</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="k"><b>B · 행동</b><i>Physics</i></div>
+      <div class="v">
+        <div><em>L1</em><b>MASS</b><span>의미가 자리와 크기를 만든다 · 파일 수가 아니다</span></div>
+        <div><em>L2</em><b>CAUSALITY</b><span>모든 것은 어디선가 와서 어딘가로 간다 · 전파는 깊이와 경계에서 멈춘다</span></div>
+        <div><em>L3</em><b>EQUILIBRIUM</b><span>Qode는 작업이 아니라 평형 사이의 이동이다</span></div>
+        <div><em>L4</em><b>UNCERTAINTY</b><span>앎은 부분적이다 · 원래 이름 ENTROPY는 기각했다</span></div>
+        <div><em>L5</em><b>OBSERVATION</b><span>주의가 해상도를 정한다 · 양자역학이 아니라 지도학이다</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="k"><b>C · 통제</b><i>Ethics</i></div>
+      <div class="v">
+        <div><em>E1</em><b>REVERSIBILITY</b><span>경계 밖으로 나간 것은 되돌릴 수 없다 · 결과가 저항을 정한다</span></div>
+        <div><em>E2</em><b>EVIDENCE</b><span>주장은 사실이 아니다 · 증거만이 평형을 회복시킨다</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════ 2. 채널 배타성 ════ -->
+<section>
+  <h2>02 · CHANNEL EXCLUSIVITY</h2>
+  <h3>하나의 법칙은 하나의 채널만 소유한다</h3>
+  <p class="lede">이 규칙 하나가 인포그래픽이 되는 것을 구조적으로 막는다.
+  아래 여섯 그림은 각 법칙이 소유한 채널을 <b>그 채널만으로</b> 그린 것이다.
+  가장 중요한 결과: <b>범주는 위치와 면적을 얻고, 색은 얻지 못한다.</b> 색은 오직 결과와 상태만 의미한다.</p>
+  <div class="grid3">
+
+    <div class="card"><svg viewBox="0 0 180 122">
+      <rect width="180" height="122" fill="#FFFFFF"/>
+      <rect x="18" y="14" width="144" height="84" fill="none" stroke="#0D0C0B" stroke-width="2"/>
+      <line x1="18" y1="62" x2="162" y2="62" stroke="#D8D3CC"/>
+      <line x1="18" y1="84" x2="162" y2="84" stroke="#D8D3CC"/>
+      <g fill="#857F77">
+        <rect x="34" y="26" width="6" height="6"/><rect x="58" y="24" width="6" height="6"/>
+        <rect x="82" y="30" width="6" height="6"/><rect x="106" y="25" width="6" height="6"/>
+        <rect x="130" y="31" width="6" height="6"/><rect x="46" y="44" width="6" height="6"/>
+        <rect x="70" y="46" width="6" height="6"/><rect x="94" y="43" width="6" height="6"/>
+        <rect x="118" y="47" width="6" height="6"/><rect x="38" y="70" width="5" height="5"/>
+        <rect x="66" y="71" width="5" height="5"/><rect x="96" y="69" width="5" height="5"/>
+        <rect x="126" y="72" width="5" height="5"/><rect x="52" y="89" width="4" height="4"/>
+        <rect x="92" y="90" width="4" height="4"/></g>
+      <text x="90" y="114" font-family="IBM Plex Mono,monospace" font-size="9" fill="#857F77"
+        text-anchor="middle" letter-spacing="1.2">AREA · POSITION</text>
+    </svg><div class="cap"><div class="n">L1</div><div class="t">MASS</div>
+    <div class="c">면적 · 위치</div>
+    <div class="d">층의 두께가 곧 의미의 무게다. 색도 아이콘도 쓰지 않는다.</div>
+    <div class="x">금지 — 중요도를 색으로 칠하는 것. 질량을 파일 수로 계산하는 것.</div></div></div>
+
+    <div class="card"><svg viewBox="0 0 180 122">
+      <rect width="180" height="122" fill="#FFFFFF"/>
+      <rect x="18" y="14" width="144" height="84" fill="none" stroke="#0D0C0B" stroke-width="2"/>
+      <line x1="46" y1="8" x2="46" y2="14" stroke="#4A4641" stroke-width="1.5"/>
+      <line x1="36" y1="14" x2="56" y2="14" stroke="#0D0C0B" stroke-width="4.5"/>
+      <path d="M46 14 L46 46 L108 46 L108 74 L46 74" fill="none" stroke="#4A4641" stroke-width="1.5"/>
+      <polygon points="80,46 74,43 74,49" fill="#4A4641"/>
+      <polygon points="108,62 105,56 111,56" fill="#4A4641"/>
+      <path d="M108 46 L162 46" fill="none" stroke="#4A4641" stroke-width="1.5"/>
+      <line x1="162" y1="36" x2="162" y2="56" stroke="#0D0C0B" stroke-width="4.5"/>
+      <line x1="162" y1="46" x2="172" y2="46" stroke="#4A4641" stroke-width="1.5"/>
+      <text x="90" y="114" font-family="IBM Plex Mono,monospace" font-size="9" fill="#857F77"
+        text-anchor="middle" letter-spacing="1.2">LINE · DIRECTION · CROSSING</text>
+    </svg><div class="cap"><div class="n">L2</div><div class="t">CAUSALITY</div>
+    <div class="c">선 · 방향 · 경계 통과</div>
+    <div class="d">들어오고 · 변하고 · 되돌아오고 · 나간다. 경계를 통과하는 선이 곧 Port다.</div>
+    <div class="x">금지 — 함수 호출 단위로 그리는 것. 전파 깊이 무제한. 화살촉 남발.</div></div></div>
+
+    <div class="card"><svg viewBox="0 0 180 122">
+      <rect width="180" height="122" fill="#FFFFFF"/>
+      <rect x="12" y="14" width="74" height="84" fill="none" stroke="#0D0C0B" stroke-width="2"/>
+      <line x1="12" y1="56" x2="86" y2="56" stroke="#D8D3CC"/>
+      <g fill="#857F77"><rect x="26" y="30" width="6" height="6"/><rect x="50" y="32" width="6" height="6"/>
+      <rect x="68" y="29" width="6" height="6"/><rect x="34" y="72" width="6" height="6"/>
+      <rect x="60" y="74" width="6" height="6"/></g>
+      <rect x="94" y="14" width="74" height="84" fill="none" stroke="#0D0C0B" stroke-width="2"/>
+      <line x1="94" y1="56" x2="168" y2="56" stroke="#D8D3CC"/>
+      <rect x="96" y="16" width="70" height="38" fill="none" stroke="#9A5B12" stroke-width="1.5" stroke-dasharray="3 3"/>
+      <g fill="#9A5B12"><rect x="108" y="30" width="6" height="6"/><rect x="132" y="32" width="6" height="6"/>
+      <rect x="150" y="29" width="6" height="6"/></g>
+      <g fill="#857F77"><rect x="116" y="72" width="6" height="6"/><rect x="142" y="74" width="6" height="6"/></g>
+      <text x="49" y="114" font-family="IBM Plex Mono,monospace" font-size="9" fill="#857F77"
+        text-anchor="middle" letter-spacing="1">SETTLED</text>
+      <text x="131" y="114" font-family="IBM Plex Mono,monospace" font-size="9" fill="#9A5B12"
+        text-anchor="middle" letter-spacing="1">DISTURBED</text>
+    </svg><div class="cap"><div class="n">L3</div><div class="t">EQUILIBRIUM</div>
+    <div class="c">렌더링 자체의 안정성</div>
+    <div class="d">교란된 <b>영역만</b> 안정성을 잃는다. 나머지 화면은 그대로 고요하다.</div>
+    <div class="x">금지 — 전역 스피너 · 진행률 바 · 로딩 셔머. 화면 전체가 흔들리는 것.</div></div></div>
+
+    <div class="card"><svg viewBox="0 0 180 122">
+      <rect width="180" height="122" fill="#FFFFFF"/>
+      <rect x="14" y="20" width="44" height="60" fill="none" stroke="#0D0C0B" stroke-width="1.5"/>
+      <g fill="#857F77"><rect x="24" y="34" width="6" height="6"/><rect x="42" y="36" width="6" height="6"/>
+      <rect x="30" y="54" width="6" height="6"/><rect x="46" y="56" width="6" height="6"/></g>
+      <rect x="68" y="20" width="44" height="60" fill="none" stroke="#0D0C0B" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <g fill="#857F77"><rect x="78" y="34" width="6" height="6"/><rect x="96" y="36" width="6" height="6"/>
+      <rect x="84" y="54" width="6" height="6"/><rect x="100" y="56" width="6" height="6"/></g>
+      <rect x="122" y="20" width="44" height="60" fill="none" stroke="#B5AEA5" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <text x="36" y="94" font-family="Archivo,sans-serif" font-size="9.5" fill="#857F77" text-anchor="middle">확인됨</text>
+      <text x="90" y="94" font-family="Archivo,sans-serif" font-size="9.5" fill="#857F77" text-anchor="middle">미확인</text>
+      <text x="144" y="94" font-family="Archivo,sans-serif" font-size="9.5" fill="#857F77" text-anchor="middle">모름</text>
+      <text x="90" y="114" font-family="IBM Plex Mono,monospace" font-size="9" fill="#857F77"
+        text-anchor="middle" letter-spacing="1.2">EDGE · INTERIOR FILL</text>
+    </svg><div class="cap"><div class="n">L4</div><div class="t">UNCERTAINTY</div>
+    <div class="c">모서리 품질 · 내부 채움</div>
+    <div class="d"><b>모름은 윤곽만 있고 내부가 없다</b> — "무언가 있지만 안을 모른다"가 라벨 없이 읽힌다.</div>
+    <div class="x">금지 — 경고 뱃지 · 노란 삼각형 · 4단계 이상의 확신 등급. 상시 노출.</div></div></div>
+
+    <div class="card"><svg viewBox="0 0 180 122">
+      <rect width="180" height="122" fill="#FFFFFF"/>
+      <rect x="14" y="20" width="44" height="60" fill="none" stroke="#0D0C0B" stroke-width="1.5"/>
+      <g fill="#857F77" opacity=".9"><rect x="22" y="30" width="4" height="4"/><rect x="32" y="32" width="4" height="4"/>
+      <rect x="42" y="30" width="4" height="4"/><rect x="27" y="42" width="4" height="4"/><rect x="37" y="43" width="4" height="4"/>
+      <rect x="47" y="41" width="4" height="4"/><rect x="22" y="54" width="4" height="4"/><rect x="34" y="55" width="4" height="4"/>
+      <rect x="45" y="56" width="4" height="4"/><rect x="29" y="66" width="4" height="4"/><rect x="41" y="67" width="4" height="4"/></g>
+      <rect x="68" y="20" width="44" height="60" fill="none" stroke="#0D0C0B" stroke-width="1.5"/>
+      <g fill="#857F77"><rect x="78" y="30" width="6" height="6"/><rect x="96" y="31" width="6" height="6"/>
+      <rect x="80" y="48" width="6" height="6"/><rect x="98" y="49" width="6" height="6"/>
+      <rect x="88" y="64" width="6" height="6"/></g>
+      <rect x="122" y="20" width="44" height="60" fill="none" stroke="#0D0C0B" stroke-width="1.5"/>
+      <path d="M132 32 L156 32 L156 52 L132 52" fill="none" stroke="#4A4641" stroke-width="1.5"/>
+      <rect x="129" y="29" width="7" height="7" fill="#0D0C0B"/>
+      <rect x="129" y="49" width="7" height="7" fill="#0D0C0B"/>
+      <text x="90" y="94" font-family="Archivo,sans-serif" font-size="9.5" fill="#857F77" text-anchor="middle">잉크 총량은 같다</text>
+      <text x="90" y="114" font-family="IBM Plex Mono,monospace" font-size="9" fill="#857F77"
+        text-anchor="middle" letter-spacing="1.2">FAR → MID → NEAR</text>
+    </svg><div class="cap"><div class="n">L5</div><div class="t">OBSERVATION</div>
+    <div class="c">해상도</div>
+    <div class="d">톤이 표식으로, 표식 하나가 경로로 <b>해상</b>된다. 잉크가 누적되지 않는다.</div>
+    <div class="x">금지 — 확대가 라벨 추가가 되는 것. 관측하지 않은 것을 발명하는 것.</div></div></div>
+
+    <div class="card"><svg viewBox="0 0 180 122">
+      <rect width="180" height="122" fill="#FFFFFF"/>
+      <rect x="18" y="14" width="118" height="84" fill="none" stroke="#0D0C0B" stroke-width="2"/>
+      <path d="M36 28 L86 28 L86 52 L36 52 L36 28" fill="none" stroke="#4A4641" stroke-width="1.5"/>
+      <polygon points="64,28 58,25 58,31" fill="#4A4641"/>
+      <path d="M86 52 L86 84" fill="none" stroke="#9A5B12" stroke-width="2.2"/>
+      <path d="M86 84 L136 84" fill="none" stroke="#9A5B12" stroke-width="2.2"/>
+      <line x1="136" y1="74" x2="136" y2="94" stroke="#9A5B12" stroke-width="4.5"/>
+      <path d="M136 84 L162 84" fill="none" stroke="#9A5B12" stroke-width="2.2"/>
+      <rect x="158" y="80" width="8" height="8" fill="#9A5B12"/>
+      <rect x="26" y="58" width="74" height="13" fill="#FFFFFF"/>
+      <text x="61" y="68" font-family="Archivo,sans-serif" font-size="9.5" fill="#857F77" text-anchor="middle">되돌릴 수 있다</text>
+      <text x="90" y="114" font-family="IBM Plex Mono,monospace" font-size="9" fill="#9A5B12"
+        text-anchor="middle" letter-spacing="1.2">CROSSING = IRREVERSIBLE</text>
+    </svg><div class="cap"><div class="n">E1</div><div class="t">REVERSIBILITY</div>
+    <div class="c">경계 기준 위치 + 색</div>
+    <div class="d"><b>경계선은 되돌릴 수 있음의 경계선이다.</b> Port는 연동이 아니라 비가역이 발생하는 지점이다.</div>
+    <div class="x">금지 — 모든 것에 확인 모달. 색을 범주 구분에 쓰는 것.</div></div></div>
+
+  </div>
+</section>
+
+<!-- ════ 3. 상태 기계 ════ -->
+<section>
+  <h2>03 · QODE STATE MODEL</h2>
+  <h3>다른 도구가 초록 체크를 주는 지점에서, JuQode는 멈춰 선다</h3>
+  <p class="lede"><b>SETTLING이 이 모델의 전부다.</b> 코드가 써졌다는 것은 완료가 아니다.
+  증거가 도착해야 평형이 회복되고, 그때에만 Software Time에 점이 찍힌다.
+  그래서 <b>되돌아갈 수 있는 곳은 언제나 확인된 상태</b>다 — "돌아갔더니 거기도 깨져 있더라"가 구조적으로 불가능해진다.</p>
+  <div class="card"><svg viewBox="0 0 880 236">
+    <rect width="880" height="236" fill="#FFFFFF"/>
+    <!-- row A -->
+    <rect x="60" y="60" width="12" height="12" fill="#0D0C0B"/>
+    <text x="80" y="70" font-family="IBM Plex Mono,monospace" font-size="11" fill="#0D0C0B" letter-spacing="1.4">SETTLED</text>
+    <rect x="250" y="60" width="12" height="12" fill="#0D0C0B"/>
+    <text x="270" y="70" font-family="IBM Plex Mono,monospace" font-size="11" fill="#0D0C0B" letter-spacing="1.4">DISTURBED</text>
+    <rect x="470" y="60" width="12" height="12" fill="#9A5B12"/>
+    <text x="490" y="70" font-family="IBM Plex Mono,monospace" font-size="11" fill="#9A5B12" letter-spacing="1.4">SETTLING</text>
+    <rect x="690" y="60" width="12" height="12" fill="#0D0C0B"/>
+    <text x="710" y="70" font-family="IBM Plex Mono,monospace" font-size="11" fill="#0D0C0B" letter-spacing="1.4">SETTLED′</text>
+    <!-- row B -->
+    <rect x="250" y="150" width="12" height="12" fill="#8C2B20"/>
+    <text x="270" y="160" font-family="IBM Plex Mono,monospace" font-size="11" fill="#8C2B20" letter-spacing="1.4">UNSETTLED</text>
+    <rect x="690" y="150" width="12" height="12" fill="#B5AEA5"/>
+    <text x="710" y="160" font-family="IBM Plex Mono,monospace" font-size="11" fill="#857F77" letter-spacing="1.4">UNKNOWN</text>
+    <!-- connectors row A -->
+    <path d="M162 66 L250 66" fill="none" stroke="#4A4641" stroke-width="1.5"/>
+    <polygon points="212,66 206,63 206,69" fill="#4A4641"/>
+    <text x="206" y="55" font-family="Archivo,sans-serif" font-size="10" fill="#857F77" text-anchor="middle">Qode 시작</text>
+    <path d="M366 66 L470 66" fill="none" stroke="#4A4641" stroke-width="1.5"/>
+    <polygon points="424,66 418,63 418,69" fill="#4A4641"/>
+    <text x="418" y="55" font-family="Archivo,sans-serif" font-size="10" fill="#857F77" text-anchor="middle">실행 완료</text>
+    <path d="M572 66 L690 66" fill="none" stroke="#4A4641" stroke-width="1.5"/>
+    <polygon points="636,66 630,63 630,69" fill="#4A4641"/>
+    <text x="630" y="55" font-family="Archivo,sans-serif" font-size="10" fill="#9A5B12" text-anchor="middle">증거 도착</text>
+    <!-- disturbed -> unsettled -->
+    <path d="M256 78 L256 150" fill="none" stroke="#4A4641" stroke-width="1.5"/>
+    <polygon points="256,120 253,114 259,114" fill="#4A4641"/>
+    <text x="266" y="118" font-family="Archivo,sans-serif" font-size="10" fill="#857F77">실행 실패</text>
+    <!-- settling -> unknown -->
+    <path d="M476 78 L476 122 L690 122 L690 150" fill="none" stroke="#4A4641" stroke-width="1.5"/>
+    <polygon points="690,140 687,134 693,134" fill="#4A4641"/>
+    <rect x="500" y="112" width="120" height="14" fill="#FFFFFF"/>
+    <text x="506" y="123" font-family="Archivo,sans-serif" font-size="10" fill="#857F77">확인할 수 없음</text>
+    <!-- return rail -->
+    <path d="M696 78 L696 100 L820 100 L820 208 L66 208 L66 78" fill="none" stroke="#4A4641" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <polygon points="66,120 63,126 69,126" fill="#4A4641"/>
+    <path d="M256 162 L256 208" fill="none" stroke="#4A4641" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <path d="M696 162 L696 208" fill="none" stroke="#4A4641" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <rect x="360" y="200" width="180" height="15" fill="#FFFFFF"/>
+    <text x="368" y="212" font-family="Archivo,sans-serif" font-size="10.5" fill="#4A4641">이전 평형으로 돌아가기</text>
+    <text x="712" y="90" font-family="IBM Plex Mono,monospace" font-size="8.5" fill="#857F77" letter-spacing=".8">SOFTWARE TIME · 점이 찍힌다</text>
+  </svg></div>
+  <table>
+    <tr><th>상태</th><th>뜻</th><th>몸에서</th><th>일반 에이전트 도구는</th></tr>
+    <tr><td>SETTLED</td><td>안정. 지금 형태가 곧 사실이다</td><td>고요함. 실선</td><td>같음</td></tr>
+    <tr><td>DISTURBED</td><td>대상 영역의 안정성이 유예됐다</td><td>영향 영역만 파선</td><td class="no">전역 스피너</td></tr>
+    <tr><td>SETTLING</td><td>변경됐으나 <b>아직 확인되지 않았다</b></td><td>새 구조 + attention</td><td class="no">완료 처리</td></tr>
+    <tr><td>SETTLED′</td><td>확인됐다. 새 평형</td><td>고요함 회복 · 시간축에 점</td><td class="no">커밋 하나</td></tr>
+    <tr><td>UNSETTLED</td><td>확인 실패. <b>이전 평형은 유효</b></td><td>failure + 이전 참조 유지</td><td class="no">에러 로그</td></tr>
+    <tr><td>UNKNOWN</td><td>확인할 수 없었다</td><td>윤곽만</td><td class="no">조용히 완료</td></tr>
+  </table>
+</section>
+
+<!-- ════ 4. Empty vs 모름 ════ -->
+<section>
+  <h2>04 · THE HARD PROBLEM</h2>
+  <h3>Empty와 모름은 반드시 달라 보여야 한다</h3>
+  <p class="lede">이 Canon이 만든 가장 어려운 시각 문제다. 둘 다 "내부에 아무것도 그리지 않는" 상태인데,
+  의미는 정반대다. <b>Empty는 완전히 아는 상태이고, 모름은 전혀 모르는 상태다.</b>
+  이 둘이 같아 보이면 P3(정직)이 무너진다.</p>
+  <div class="grid2">
+    <div class="card"><svg viewBox="0 0 400 200">
+      <rect width="400" height="200" fill="#FFFFFF"/>
+      <rect x="60" y="26" width="280" height="148" fill="none" stroke="#B5AEA5" stroke-width="1" stroke-dasharray="4 4"/>
+      <line x1="60" y1="75" x2="340" y2="75" stroke="#B5AEA5" stroke-width="1" opacity=".28"/>
+      <line x1="60" y1="124" x2="340" y2="124" stroke="#B5AEA5" stroke-width="1" opacity=".28"/>
+      <rect x="195" y="95" width="10" height="10" fill="#0D0C0B"/>
+    </svg><div class="cap"><div class="n">질량 0 · 불확실성 0</div><div class="t">EMPTY</div>
+    <div class="d">경계는 파선 — <b>아직 하중을 받지 않았다.</b> 가운데 원점은 첫 번째 약속이다.
+    희미한 두 선이 깊이 축을 예고한다.</div>
+    <div class="x">Empty는 결핍이 아니라 <b>완전히 알려진 유일한 평형</b>이다. 그래서 조용해야 한다 —
+    온보딩 체크리스트는 "당신은 아직 부족하다"는 잘못된 메시지다.</div></div></div>
+
+    <div class="card"><svg viewBox="0 0 400 200">
+      <rect width="400" height="200" fill="#FFFFFF"/>
+      <rect x="60" y="26" width="280" height="148" fill="none" stroke="#0D0C0B" stroke-width="2"/>
+      <line x1="60" y1="70" x2="340" y2="70" stroke="#D8D3CC"/>
+      <line x1="60" y1="132" x2="340" y2="132" stroke="#D8D3CC"/>
+      <rect x="74" y="34" width="118" height="28" fill="none" stroke="#B5AEA5" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <rect x="206" y="34" width="120" height="28" fill="none" stroke="#B5AEA5" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <rect x="74" y="80" width="170" height="42" fill="none" stroke="#B5AEA5" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <rect x="258" y="80" width="68" height="42" fill="none" stroke="#B5AEA5" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <rect x="74" y="142" width="252" height="22" fill="none" stroke="#B5AEA5" stroke-width="1.5" stroke-dasharray="4 3"/>
+    </svg><div class="cap"><div class="n">질량 있음 · 불확실성 최대</div><div class="t">모름 (UNKNOWN)</div>
+    <div class="d">경계는 <b>실선</b> — 파일이 있으니 무언가는 확실히 존재한다.
+    영역의 윤곽은 그리되 <b>내부를 그리지 않는다.</b></div>
+    <div class="x">화면이 라벨 없이 말한다 — <b>"여기 무언가 있다. 나는 아직 그 안을 모른다."</b>
+    IDE는 이 화면을 줄 수 없다. 파일 트리는 항상 뭔가를 아는 척한다.</div></div></div>
+  </div>
+  <div class="open">
+    <div class="k">OPEN · 3R.3에서 검증</div>
+    <div class="t">위 두 그림은 <b>제안이지 확정이 아니다.</b></div>
+    <div class="d">구분의 축은 <b>경계선의 성질</b>(파선 ink4 / 실선 ink)과 <b>내부 윤곽의 유무</b>다.
+    작은 크기에서, 그리고 두 상태가 한 화면에 섞여 있을 때도 구분되는지는 아직 검증되지 않았다.
+    <b>3R.3 Visual Grammar의 첫 과제로 지정한다.</b></div>
+  </div>
+</section>
+
+<!-- ════ 5. 기각 ════ -->
+<section>
+  <h2>05 · REJECTED</h2>
+  <h3>법칙이 되지 못한 것</h3>
+  <p class="lede">기각 목록이 이 문서에서 가장 중요한 부분이다.
+  은유가 예측력을 갖지 못하거나 과학적으로 오해를 부르면 <b>이름을 버렸다.</b>
+  명료함이 영리한 용어보다 중요하다.</p>
+  <table>
+    <tr><th>개념</th><th>판정</th><th>이유</th></tr>
+    <tr><td>ENTROPY</td><td>개명 → UNCERTAINTY</td><td>열역학 엔트로피는 <b>무질서</b>이지 <b>무지</b>가 아니다. 정보 엔트로피는 확률분포의 성질이지 "확인 안 됨"이 아니다. 유용한 아이디어는 살리고 <b>틀린 이름을 버렸다</b></td></tr>
+    <tr><td>GRAVITY (인력)</td><td>축소 → MASS</td><td>상호 인력 시뮬레이션은 물리 엔진을 요구하고, 배치가 매번 달라져 공간 기억이 무너진다. 질량은 <b>정렬하고 크기를 정할 뿐 끌어당기지 않는다</b></td></tr>
+    <tr><td>PENDULUM</td><td>기각 (개념만 잔존)</td><td>흔들리는 애니메이션은 가짜 움직임이다. 진자에서 가져온 것은 운동이 아니라 <b>"멈추는 지점이 있다"</b>는 개념뿐이고, 그것이 L3다</td></tr>
+    <tr><td>QUANTUM OBSERVATION</td><td>프레이밍 기각</td><td>JuQode에서 관측은 소프트웨어를 바꾸지 않는다. 렌더링만 바꾼다. 정직한 참조는 <b>지도학의 일반화</b>이고, 그쪽이 실제로 빌려 쓸 기법을 준다</td></tr>
+    <tr><td>THERMODYNAMICS 일반</td><td>기각</td><td>소프트웨어는 닫힌계가 아니다. 에너지 보존도 제2법칙도 성립하지 않는다. 은유가 예측력을 갖지 못한다</td></tr>
+    <tr><td>BECOMING (물리로)</td><td>강등 → P1</td><td>그 자체로는 행동을 규정하지 않는다. 믿음이다. 행동은 L1·L3가 담당한다</td></tr>
+    <tr><td>KAFKA</td><td>법칙 아님 → 진단 렌즈</td><td>시각 법칙으로 만들면 장식이 된다. <b>"창조자가 자기 창조물에 소외된다"</b>는 진단으로 쓸 때 가장 강하고, 그것이 P2가 됐다</td></tr>
+    <tr><td>철학자 인용 · 초상</td><td>전면 기각</td><td>철학으로 제품을 장식하지 않는다</td></tr>
+    <tr><td>Software Time = Git 커밋</td><td>기각 → 평형의 나열</td><td>커밋은 기술 사실이고 평형은 사람의 사실이다. 점의 개수가 수백 개에서 셀 수 있는 개수로 줄고, <b>돌아갈 수 있는 곳은 전부 확인된 상태</b>가 된다</td></tr>
+  </table>
+</section>
+
+<!-- ════ 6. MVP ════ -->
+<section>
+  <h2>06 · MVP CANON CUT</h2>
+  <h3>v0.1은 물리 엔진을 만들지 않는다. 법칙을 지킬 뿐이다</h3>
+  <p class="lede">법칙을 <b>지키는 것</b>과 법칙을 <b>시뮬레이션하는 것</b>은 다르다.
+  v0.1에서 새로 보이게 되는 법칙은 셋뿐이다.</p>
+  <table>
+    <tr><th>법칙</th><th>v0.1 범위</th><th>근거</th></tr>
+    <tr><td>L1 MASS</td><td>전체</td><td>3R.1에서 이미 구현됨. 배치 엔진 자체다</td></tr>
+    <tr><td>L2 CAUSALITY</td><td>경로 + 방향 + <b>전파 깊이 1</b></td><td>이것 없이는 Backend / Agent가 성립하지 않는다</td></tr>
+    <tr><td>L3 EQUILIBRIUM</td><td>6-상태 기계 전체</td><td><b>JuQode를 IDE와 가르는 지점.</b> 양보 불가</td></tr>
+    <tr><td>L4 UNCERTAINTY</td><td>축소 — <b>모름 이진 상태 하나만</b></td><td>확신 등급 · 시간 감쇠 없음. 뱃지 수프 위험 회피</td></tr>
+    <tr><td>L5 OBSERVATION</td><td>추가 작업 0</td><td>3R.1 §10이 이미 확정. Canon은 이유만 제공</td></tr>
+    <tr><td>E1 REVERSIBILITY</td><td>모델 필드만. UI 없음</td><td>v0.1엔 비가역 행동이 거의 없다. 그러나 <b>구조는 미루지 않는다</b></td></tr>
+    <tr><td>E2 EVIDENCE</td><td>SETTLING / SETTLED 구분으로 절반 구현</td><td>Evidence Schema는 Phase 4</td></tr>
+  </table>
+</section>
+
+<div class="foot">
+  <span>JUQODE · SOFTWARE PHYSICS CANON · LAW REFERENCE</span>
+  <span>docs/design/SOFTWARE_PHYSICS_CANON.md</span>
+  <span>LOVABLE CREDITS SPENT · 0</span>
+</div>
+
+</div>
+</body>
+</html>

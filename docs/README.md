@@ -8,8 +8,13 @@
 
 | | |
 |---|---|
-| [`design/PRIMARY_WORKSPACE_V02.md`](design/PRIMARY_WORKSPACE_V02.md) | **Primary Workspace 최종 설계 명세** (Phase 3R.1). Lovable Build Contract 포함 |
+| [`design/SOFTWARE_PHYSICS_CANON.md`](design/SOFTWARE_PHYSICS_CANON.md) | **법칙**(Phase 3R.2). 믿음 3 · 행동 5 · 통제 2. **상위 문서** |
+| [`design/software-physics-canon.html`](design/software-physics-canon.html) | 위 법칙의 **참조 카드**. 제품 화면이 아니다 |
+| [`design/PRIMARY_WORKSPACE_V02.md`](design/PRIMARY_WORKSPACE_V02.md) | **Primary Workspace 설계 명세** (Phase 3R.1). Lovable Build Contract 포함 |
 | [`design/primary-workspace-v02.html`](design/primary-workspace-v02.html) | 위 명세의 **비주얼 보드**. 브라우저로 열면 된다. 의존성 0 |
+
+**읽는 순서: Canon → Workspace.** Canon이 *왜 그렇게 그리는가*를, Workspace가 *무엇을 그리는가*를 정한다.
+둘이 충돌하면 **Canon이 상위**다. (3R.1에 소급 적용될 개정 목록은 Canon §17.2에 있다.)
 
 `primary-workspace-v02.html`은 보드이면서 동시에 **MASS LAYOUT 엔진의 참조 구현**이다.
 여섯 개의 소프트웨어 유형이 특별 케이스 코드 없이 **질량 값만 다른 같은 렌더러**로 그려진다.
