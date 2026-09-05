@@ -8,6 +8,8 @@
 
 | | |
 |---|---|
+| [`design/KINETIC_SOFTWARE_REPRESENTATION.md`](design/KINETIC_SOFTWARE_REPRESENTATION.md) | **운동 표상 연구**(3R.4). 재료 = 장(場)과 결. **Founder 판단 대기** |
+| [`design/kinetic-software-study.html`](design/kinetic-software-study.html) | 위 연구의 **인터랙티브 모션 스터디** 5장면 + 정지 프레임. 의존성 0 |
 | [`design/SOFTWARE_PHYSICS_CANON.md`](design/SOFTWARE_PHYSICS_CANON.md) | **법칙**(3R.2). 믿음 3 · 행동 5 · 통제 2. **상위 SSOT** |
 | [`design/software-physics-canon.html`](design/software-physics-canon.html) | 위 법칙의 **참조 카드**. 제품 화면이 아니다 |
 | [`design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`](design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md) | **시각 문법**(3R.3). 채널 소유표 + **Lovable 1차 Build Contract** |
@@ -15,11 +17,13 @@
 | [`design/PRIMARY_WORKSPACE_V02.md`](design/PRIMARY_WORKSPACE_V02.md) | 화면 명세(3R.1). **§3.3 폐기 · 6건 소급 정정됨** |
 | [`design/primary-workspace-v02.html`](design/primary-workspace-v02.html) | 위 명세의 보드. **점밭 표현은 폐기됨**(역사적 기록) |
 
-**읽는 순서: Canon → Visual Grammar → Workspace.**
-Canon이 *왜*, Visual Grammar가 *어떻게 보이는가*, Workspace가 *화면 골격*을 정한다.
-충돌하면 **위에 있는 문서가 이긴다.**
+**읽는 순서: Canon → Kinetic Representation → Workspace.**
+Canon이 *왜*, Kinetic Representation이 *어떤 재료 위에서 일어나는가*, Workspace가 *화면 골격*을 정한다.
+충돌하면 **Canon이 이긴다.**
 
-**다음 Lovable 호출은 `SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`의 LOVABLE BUILD CONTRACT 하나만 본다.**
+**3R.3 Visual Grammar의 시각형(점밭·구획)은 Founder가 기각했다.**
+문서는 추론 이력으로 남기되 **그 안의 LOVABLE BUILD CONTRACT는 보류**한다.
+3R.4가 그것을 대체하려는 연구이며, **Founder 승인 전까지 Lovable을 호출하지 않는다.**
 목표 5–8 크레딧. 표현 단계 총 상한 15. MVP 보호선 40.
 
 두 보드는 **엔진의 참조 구현**이기도 하다 — 모든 소프트웨어 유형이 특별 케이스 코드 없이
