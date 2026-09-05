@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1240">
+<title>JuQode — Semantic Place Study</title>
+<style>
+:root{
+  --paper:#F7F5F2; --surface:#FFFFFF; --sunk:#EDEAE5;
+  --ink:#0D0C0B; --ink2:#4A4641; --ink3:#857F77; --ink4:#B5AEA5;
+  --hair:#D8D3CC; --attn:#9A5B12; --fail:#8C2B20; --past:#5B6B84;
+  --sans:"Archivo","Noto Sans KR","Helvetica Neue","Malgun Gothic",Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;min-width:1240px}
+.wrap{max-width:1280px;margin:0 auto;padding:52px 44px 120px}
+.head{border-bottom:2px solid var(--ink);padding-bottom:22px}
+.kick{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ink3)}
+h1{font-size:46px;font-weight:700;letter-spacing:-.042em;line-height:1.02;margin:14px 0 0}
+.sub{font-size:16.5px;color:var(--ink2);letter-spacing:-.015em;margin-top:14px;line-height:1.65;max-width:940px}
+.sub b{font-weight:700;color:var(--ink)}
+.meta{display:flex;gap:24px;margin-top:18px;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.13em;color:var(--ink3);flex-wrap:wrap}
+.kill{border:2px solid var(--ink);background:var(--surface);padding:18px 22px;margin-top:26px;
+  display:grid;grid-template-columns:210px 1fr;gap:24px;align-items:center}
+.kill .l{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--fail)}
+.kill .l b{display:block;font-family:var(--sans);font-size:19px;font-weight:700;
+  letter-spacing:-.03em;color:var(--ink);margin-top:8px}
+.kill .r{font-size:13.5px;color:var(--ink2);line-height:1.75}
+.kill .r b{color:var(--ink)}
+section{margin-top:66px}
+h2{font-size:11.5px;font-family:var(--mono);letter-spacing:.2em;color:var(--ink3);font-weight:500;
+  border-top:1px solid var(--hair);padding-top:12px;margin:0 0 6px}
+h3{font-size:27px;font-weight:700;letter-spacing:-.032em;margin:0 0 8px}
+.lede{font-size:14.5px;color:var(--ink2);line-height:1.72;max-width:940px;margin:0 0 26px}
+.lede b{color:var(--ink);font-weight:600}
+.lede + .lede{margin-top:-14px}
+.law{border-left:2px solid var(--ink);padding:2px 0 2px 18px;margin:26px 0 30px;max-width:860px}
+.law b{display:block;font-size:20px;letter-spacing:-.028em;line-height:1.5}
+.law span{display:block;font-size:12.5px;color:var(--ink3);margin-top:7px;line-height:1.65}
+.reads{display:grid;grid-template-columns:repeat(3,1fr);gap:0 30px;border-top:1px solid var(--ink);margin-top:8px}
+.reads div{border-bottom:1px solid var(--hair);padding:12px 0 13px}
+.reads .k{font-size:13.5px;font-weight:600;letter-spacing:-.02em}
+.reads .v{font-size:12px;color:var(--ink2);line-height:1.6;margin-top:5px}
+.sc{display:grid;grid-template-columns:auto 1fr;gap:26px;align-items:start;margin-top:22px}
+.stat{display:flex;justify-content:space-between;align-items:baseline;padding-bottom:9px}
+.stat .lab{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--ink4)}
+.stat b{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--ink3);font-weight:500}
+.cvw{border:1px solid var(--hair);background:var(--surface);line-height:0}
+.cvw.hero{border:2px solid var(--ink)}
+canvas{display:block;width:864px;height:470px}
+.scR{padding-top:26px}
+.bt{padding:9px 0 10px 13px;border-left:2px solid transparent;border-bottom:1px solid var(--hair)}
+.bt .n{font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;color:var(--ink4)}
+.bt .t{font-size:13.5px;font-weight:600;letter-spacing:-.022em;color:var(--ink4);margin-top:3px}
+.bt .w{font-size:11.5px;line-height:1.64;color:var(--ink4);margin-top:5px}
+.bt.done .t{color:var(--ink3)}
+.bt.read{border-left-color:var(--hair)}
+.bt.read .t{color:var(--ink)}
+.bt.read .w{color:var(--ink2)}
+.bt.now{border-left-color:var(--ink)}
+.bt.now .t{color:var(--ink)}
+.bt.now .w{color:var(--ink2)}
+.readout{margin-top:16px;border:1px solid var(--hair);background:var(--surface);padding:13px 14px;min-height:78px}
+.readout .h{font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;color:var(--ink4)}
+.readout .m{font-size:15px;font-weight:600;letter-spacing:-.025em;margin-top:7px;color:var(--ink4)}
+.readout .m.on{color:var(--ink)}
+.readout .s{font-size:11.5px;color:var(--ink3);line-height:1.6;margin-top:6px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{font-size:12.5px;letter-spacing:-.02em;border:1px solid var(--hair);background:var(--surface);
+  padding:7px 11px;cursor:pointer;color:var(--ink2)}
+.chip:hover{border-color:var(--ink);color:var(--ink)}
+.chip.on{border-color:var(--ink);color:var(--ink);font-weight:600}
+.ctl{display:flex;gap:16px;margin-top:16px;border-top:1px solid var(--hair);padding-top:12px}
+.ctl button{font-family:var(--mono);font-size:9px;letter-spacing:.13em;color:var(--ink3);
+  background:none;border:0;padding:0;cursor:pointer}
+.ctl button:hover{color:var(--ink)}
+.hint{font-family:var(--mono);font-size:8.5px;letter-spacing:.11em;color:var(--ink4);margin-top:14px;line-height:1.8}
+.strip{display:grid;grid-template-columns:repeat(2,1fr);gap:22px;margin-top:10px}
+.strip .c{border:1px solid var(--hair);background:var(--surface)}
+.strip canvas{width:100%;height:auto}
+.strip .cap{border-top:1px solid var(--hair);padding:11px 13px 13px}
+.strip .cap .t{font-size:14px;font-weight:700;letter-spacing:-.025em}
+.strip .cap .d{font-size:11.5px;color:var(--ink2);line-height:1.6;margin-top:5px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:34px;margin-top:8px}
+.two h4{font-size:13.5px;margin:0 0 10px;letter-spacing:-.02em}
+.two ul{margin:0;padding-left:16px}
+.two li{font-size:12.5px;color:var(--ink2);line-height:1.75;margin-bottom:7px}
+.two li b{color:var(--ink)}
+.foot{border-top:2px solid var(--ink);padding-top:18px;margin-top:74px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;color:var(--ink3);
+  display:flex;justify-content:space-between}
+#boot{position:fixed;inset:0;background:var(--paper);display:flex;align-items:center;
+  justify-content:center;flex-direction:column;gap:10px;text-align:center;padding:40px;z-index:99}
+</style>
+</head>
+<body>
+<div id="boot">
+  <div style="font-weight:700;font-size:19px">연구가 아직 시작되지 않았습니다</div>
+  <div style="color:#4A4641;font-size:14px;line-height:1.7">이 파일은 하나로 완결되어 있어 인터넷도 서버도 빌드도 필요하지 않습니다.</div>
+  <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#857F77">semantic-place-study · self-contained</div>
+</div>
+
+<div class="wrap">
+
+<div class="head">
+  <div class="kick">JUQODE · PHASE 3R.5 · SEMANTIC PLACE STUDY</div>
+  <h1>의미는 자리를 만든다.<br>물건이 되지 않고.</h1>
+  <div class="sub">이전 연구는 하나의 몸을 얻었지만 <b>집을 수 없는 몸</b>이었다.
+    무거운 쪽은 가리킬 수 있어도 <b>“로그인 쪽”</b>은 가리킬 수 없었다.
+    이 연구는 그 하나를 푼다 — 카드로도, 노드로도, 구획으로도 돌아가지 않고.</div>
+  <div class="meta">
+    <span>SELF-CONTAINED · NO DEPENDENCIES</span>
+    <span>LOVABLE CREDITS SPENT · 0</span>
+    <span>ONE NEW CONCEPT ONLY</span>
+    <span>D-054 TOKENS</span>
+  </div>
+  <div class="kill">
+    <div class="l">THE TENSION<b>경계 없이, 그러나 집히게</b></div>
+    <div class="r">경계를 그리면 <b>카드·노드·구획</b>으로 돌아간다.
+      경계를 안 그리면 <b>집을 수가 없다</b>. 지금까지 이 둘 사이에 답이 없었다.
+      답은 경계에 있지 않았다. <b>결의 방향</b>에 있었다.</div>
+  </div>
+</div>
+
+<section>
+  <h2>00 · LAW</h2>
+  <h3>의미는 결의 방향을 정한다</h3>
+  <div class="lede">이전 연구에서 결은 <b>몸 전체가 하나의 방향</b>으로 흘렀다.
+    그 방향은 고정 상수였고, 아무 의미도 나르지 않았다.
+    이 연구는 그 채널을 의미에 준다.</div>
+
+  <div class="law">
+    <b>하나의 뜻이 지배하는 곳에서 결은 같은 쪽을 향한다.<br>자리의 가장자리는 선이 아니라 결이 도는 지점이다.</b>
+    <span>자리는 <b>테두리를 갖지 않는다.</b> 방향의 합의를 가질 뿐이다.
+      그래서 자리는 물건이 되지 않는다 — 떼어낼 수도, 셀 수도, 옮길 수도 없다.
+      그런데도 눈은 그것을 하나의 장소로 읽는다.</span>
+  </div>
+
+  <div class="lede">여기서 세 가지가 따라 나온다. 전부 새 개념이 아니라 이 한 법칙의 결과다.</div>
+
+  <div class="reads">
+    <div><div class="k">방향의 차이 = 의미의 거리</div><div class="v">결이 비슷하게 누우면 뜻이 가깝다는 말이다. 로그인과 세션은 비슷하게 눕고, 사용자 저장은 가로지른다.</div></div>
+    <div><div class="k">겹침 = 방향의 혼합</div><div class="v">두 뜻이 걸친 곳에서 결은 두 방향 사이를 돈다. 그 자리는 두 이름을 다 갖는다. 나눌 필요가 없다.</div></div>
+    <div><div class="k">주의 = 합의의 강화</div><div class="v">보고 있는 자리는 결이 더 또렷하게 한 쪽을 향하고, 나머지는 주변 결로 풀린다. 확대가 아니다.</div></div>
+    <div><div class="k">질량은 그대로 압축</div><div class="v">무거운 곳은 여전히 결이 조여든다. 방향과 밀도는 서로 다른 채널이라 섞이지 않는다.</div></div>
+    <div><div class="k">이름은 자리를 만들지 않는다</div><div class="v">자리가 먼저 있고, 이름은 그것을 확인한다. 기본 화면에는 이름이 하나도 없다.</div></div>
+    <div><div class="k">봉우리는 여전히 금지</div><div class="v">방향이 바뀌어도 닫힌 고리는 생기지 않는다. 등고선 지도로 돌아가지 않는다.</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>01 · STUDY — EMPTY → FIRST SEMANTIC PLACE</h2>
+  <h3>첫 자리가 생기는 순간</h3>
+  <div class="lede">빈 소프트웨어에는 <b>자리가 없다.</b> 결은 한 방향으로만 흐른다 — 가짜 자리를 미리 만들어 두지 않는다.
+    <b>"로그인부터 만들어줘."</b> 이후, 그 자리의 결이 <b>몸의 나머지와 다른 쪽으로 돌아눕는다.</b>
+    로그인 카드가 뜨는 것이 아니라, 재료의 한 구역이 다른 성질을 갖게 된다.</div>
+  <div class="sc" id="s1"></div>
+</section>
+
+<section>
+  <h2>02 · STUDY — POINT → MEANING</h2>
+  <h3>집으면 무엇인지 말한다</h3>
+  <div class="lede">몸 위를 지나가 보라. 툴팁이 먼저 뜨지 않는다 — <b>몸이 먼저 응답한다.</b>
+    보고 있는 자리의 결이 한 쪽으로 또렷해지고 나머지는 풀린다. 그 다음에야 이름이 확인처럼 나타난다.
+    JuQode는 그 자리가 무엇인지 <b>확신의 세기와 함께</b> 말한다.</div>
+  <div class="sc" id="s2"></div>
+</section>
+
+<section>
+  <h2>03 · STUDY — MEANING → PLACE</h2>
+  <h3>말하면 그 자리가 나선다</h3>
+  <div class="lede">반대 방향이 더 중요하다. 비개발자는 좌표를 모른다. 말을 안다.
+    <b>"세션 쪽 보여줘."</b> — 몸이 스스로 <b>그쪽으로 빗질된다.</b>
+    조명도, 조준원도, 화살표도 없다. 그 자리의 결이 또렷해지고 나머지가 풀리는 것이 전부다.</div>
+  <div class="sc" id="s3"></div>
+</section>
+
+<section>
+  <h2>04 · STUDY — OVERLAP / CAUSAL RELATION</h2>
+  <h3>걸쳐 있는 자리, 그리고 옮겨가는 변화</h3>
+  <div class="lede">실제 소프트웨어의 의미는 폴더처럼 갈라지지 않는다.
+    로그인과 세션은 서로 걸쳐 있고, 사용자 저장은 둘 다와 닿아 있다.
+    이 몸은 그것을 <b>세 개의 상자로 무너뜨리지 않는다.</b> 걸친 자리는 두 이름을 다 갖는다.
+    그리고 한 자리를 Qode하면 <b>옆 자리의 뜻까지 조금 달라진다</b> — 결의 방향이 실제로 움직인다.</div>
+  <div class="sc" id="s4"></div>
+</section>
+
+<section>
+  <h2>05 · CROSS-TYPE</h2>
+  <h3>같은 법칙, 다른 소프트웨어</h3>
+  <div class="lede">유형별 렌더러도, 유형별 모드도 없다. <b>자리의 개수 · 방향 · 질량만 다르다.</b>
+    아래 넷은 전부 같은 코드가 그린 정지 화면이다. 재생도 조작도 없다.</div>
+  <div class="strip" id="strip"></div>
+</section>
+
+<section>
+  <h2>06 · JUDGEMENT</h2>
+  <h3>무엇을 보고 판단하면 되는가</h3>
+  <div class="two">
+    <div>
+      <h4>이 연구가 통과해야 하는 것</h4>
+      <ul>
+        <li><b>여전히 하나의 몸인가.</b> 자리가 생겼는데도 물건들의 모음으로 보이지 않는가.</li>
+        <li><b>테두리 없이 자리가 보이는가.</b> 선을 하나도 긋지 않았는데 구역이 읽히는가.</li>
+        <li><b>집으면 말하는가.</b> 가리킨 곳의 뜻을 JuQode가 답하는가.</li>
+        <li><b>말하면 나서는가.</b> "세션 쪽"이라고 하면 그 자리가 스스로 또렷해지는가.</li>
+        <li><b>겹침이 살아 있는가.</b> 걸친 자리가 두 이름을 다 갖는가.</li>
+        <li><b>기본 화면이 조용한가.</b> 이름이 상시로 떠 있지 않은가.</li>
+      </ul>
+    </div>
+    <div>
+      <h4>일부러 하지 않은 것</h4>
+      <ul>
+        <li><b>새 개념을 하나만 들였다.</b> 결의 방향. 나머지는 전부 그 결과다.</li>
+        <li><b>범주에 색을 주지 않았다.</b> 자리를 색으로 구분하지 않는다. 색은 여전히 상태에만 쓴다.</li>
+        <li><b>경계선을 그리지 않았다.</b> 자리의 가장자리는 결이 도는 지점일 뿐 선이 아니다.</li>
+        <li><b>상시 라벨을 만들지 않았다.</b> 이름은 보고 있을 때만, 한 번에 하나만 나타난다.</li>
+        <li><b>봉우리를 만들지 않았다.</b> 방향이 아무리 돌아도 닫힌 고리가 생기지 않는다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<div class="foot">
+  <span>JUQODE · SEMANTIC PLACE STUDY · 3R.5</span>
+  <span>MEANING OCCUPIES SPACE WITHOUT BECOMING AN OBJECT</span>
+</div>
+</div>
+
+<script>
+"use strict";
+var JQ = (function(){
+/* ══════════════════════════════════════════════════════════════════════════
+   JuQode — Semantic Place
+   재료는 3R.4 그대로다. 바뀐 것은 하나뿐이다:
+   결의 방향이 상수가 아니라 의미가 정하는 값이 되었다.
+   ══════════════════════════════════════════════════════════════════════════ */
+var W = 864, H = 470;
+var G = 7;
+var SURF = 0.060;      // 겉면 레벨
+var DG   = 0.034;      // 결 간격
+var MASSK= 0.20;       // 질량이 그 자리의 결을 얼마나 조이는가 — 방향은 건드리지 않는다
+var WARP = 50;         // 재료의 고정된 흔들림
+var BASE_RES = 0.62;
+var W0   = 0.20;       // 주변 결의 발언권 — 자리가 없는 곳은 이 방향으로 흐른다
+var GDIR = 0.00350;    // 자리의 결도 주변과 같은 간격을 갖는다
+var SEM  = 1.06;       // 뜻이 미치는 범위 (질량 타원 대비)
+var AMB  = -20;        // 뜻이 없는 곳이 향하는 방향(도)
+var SHLD = 0.34;       // 어깨 — 이 폭에서 결이 돈다. 선이 아니다
+
+function resStep(r){ return r < 0.34 ? 4 : (r < 0.70 ? 2 : 1); }
+function bandOf(mass){ return mass<0.26?0:(mass<0.62?1:(mass<1.04?2:3)); }
+
+function D(v,k){ return {v:v, t:v, vel:0, k:k||24}; }
+function stepD(d,dt){
+  if(d.v === d.t && d.vel === 0) return false;
+  var c = 2*Math.sqrt(d.k);
+  d.vel += ((d.t-d.v)*d.k - d.vel*c)*dt;
+  d.v   += d.vel*dt;
+  if(Math.abs(d.t-d.v) < 2e-4 && Math.abs(d.vel) < 2e-3){ d.v=d.t; d.vel=0; return false; }
+  return true;
+}
+function stiff(mass){ return 30/(1 + 2.4*(mass||0)); }
+
+/* ── 모델 ─────────────────────────────────────────────────────────────── */
+function newModel(){
+  return {places:[], byId:{}, seams:[], voids:[], pulses:[], timers:[], breath:null, focus:null};
+}
+/* 자리 하나 = 의미 하나. 질량도 방향도 이름도 여기 붙는다. 개체가 아니라 성질이다. */
+function mkPlace(o){
+  var k = stiff(o.mass);
+  return {id:o.id, names:o.names||[], mass:o.mass||0, rot:o.rot||0, semantic:o.semantic!==false,
+    x:D(o.x,k), y:D(o.y,k), rx:D(o.rx,k), ry:D(o.ry,k), amp:D(o.amp||0,k),
+    dir:D(o.dir||0, 14), coh:D(o.coh===undefined?1:o.coh, 16), lab:D(0,20)};
+}
+function add(m,p){ m.places.push(p); m.byId[p.id]=p; return p; }
+function to(m,id,f,v){ var p=m.byId[id]; if(p) p[f].t=v; }
+function jump(m,id,f,v){ var p=m.byId[id]; if(p){ p[f].v=v; p[f].t=v; p[f].vel=0; } }
+function addSeam(m,o){
+  var s={id:o.id, x:o.x, y:o.y, rx:o.rx, ry:o.ry,
+    off:D(o.off||0,26), res:D(o.res===undefined?BASE_RES:o.res,26), tint:o.tint||0, brk:o.brk||0};
+  m.seams.push(s); return s;
+}
+function seam(m,id){ for(var i=0;i<m.seams.length;i++) if(m.seams[i].id===id) return m.seams[i]; return null; }
+
+/* ── 격자 ─────────────────────────────────────────────────────────────── */
+function newGrid(){
+  var cols=Math.ceil(W/G)+1, rows=Math.ceil(H/G)+1, n=cols*rows;
+  var wx=new Float32Array(n), wy=new Float32Array(n), flow=new Float32Array(n);
+  var agx=new Float32Array(n), agy=new Float32Array(n);
+  var i,j,px,py,o,ax,ay,da;
+  for(j=0;j<rows;j++) for(i=0;i<cols;i++){
+    px=i*G; py=j*G; o=j*cols+i;
+    ax=px+26*Math.sin(py*0.0132+0.7)+13*Math.sin(px*0.0207+2.1)+5*Math.sin(px*0.045+0.3);
+    ay=py+19*Math.sin(px*0.0111+1.9)+10*Math.sin(py*0.0241+0.4)+4.5*Math.sin(py*0.041+1.1);
+    wx[o]=ax; wy[o]=ay;
+    /* 주변 결 — 뜻이 없는 곳이 향하는 방향. 완만하게 흔들린다(재료의 성질) */
+    da=(AMB+7.5*Math.sin(px*0.0052+py*0.0031+1.1))*Math.PI/180;
+    agx[o]=-Math.sin(da)*GDIR; agy[o]=Math.cos(da)*GDIR;
+    flow[o]=0.00358*(ay*0.92+ax*0.34)+0.130*Math.sin(ax*0.0068+ay*0.0045+1.2);
+  }
+  return {cols:cols, rows:rows, wx:wx, wy:wy, flow:flow, agx:agx, agy:agy, warm:false,
+    val:new Float32Array(n), gf:new Float32Array(n),
+    ws:new Float32Array(n), gxs:new Float32Array(n), gys:new Float32Array(n),
+    res:new Float32Array(n), tint:new Uint8Array(n), mask:new Uint8Array(n)};
+}
+function sampleFlow(gr,x,y){
+  var i=Math.round(x/G), j=Math.round(y/G);
+  if(i<0)i=0; if(i>gr.cols-1)i=gr.cols-1;
+  if(j<0)j=0; if(j>gr.rows-1)j=gr.rows-1;
+  return gr.flow[j*gr.cols+i];
+}
+function addMass(gr,x,y,rx,ry,rot,amp){
+  if(Math.abs(amp)<0.004||rx<=1||ry<=1) return;
+  var cols=gr.cols, rows=gr.rows, val=gr.val, R=Math.max(rx,ry)+WARP;
+  var i0=Math.max(0,Math.floor((x-R)/G)), i1=Math.min(cols-1,Math.ceil((x+R)/G));
+  var j0=Math.max(0,Math.floor((y-R)/G)), j1=Math.min(rows-1,Math.ceil((y+R)/G));
+  var co=Math.cos(rot), si=Math.sin(rot), i,j,o,px,py,dx,dy,u,v,d2,w;
+  for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
+    o=j*cols+i; px=gr.wx[o]-x; py=gr.wy[o]-y;
+    dx=px*co+py*si; dy=-px*si+py*co;
+    u=dx/rx; v=dy/ry; d2=u*u+v*v;
+    if(d2>=1) continue;
+    w=1-d2; val[o]+=amp*w*w;
+  }
+}
+/* 뜻이 미치는 범위 안에서 결의 방향을 자기 쪽으로 당긴다.
+   테두리를 만들지 않는다 — 어깨에서 서서히 이긴다. */
+function addDir(gr,p){
+  var ax=p.x.v, ay=p.y.v, RX=p.rx.v*SEM, RY=p.ry.v*SEM, rot=p.rot;
+  var coh=p.coh.v;
+  /* 질량은 자기 결의 기울기를 키운다 = 그 자리의 결이 조여든다.
+     방향은 그대로다 — 같은 축을 따라 더 가팔라질 뿐이다. */
+  var slope=GDIR*(1+MASSK*p.amp.v);
+  var vx=-Math.sin(p.dir.v*Math.PI/180)*slope, vy=Math.cos(p.dir.v*Math.PI/180)*slope;
+  var cols=gr.cols, rows=gr.rows, R=Math.max(RX,RY)+WARP;
+  var i0=Math.max(0,Math.floor((ax-R)/G)), i1=Math.min(cols-1,Math.ceil((ax+R)/G));
+  var j0=Math.max(0,Math.floor((ay-R)/G)), j1=Math.min(rows-1,Math.ceil((ay+R)/G));
+  var co=Math.cos(rot), si=Math.sin(rot), i,j,o,px,py,dx,dy,u,v,d2,d,t,w;
+  for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
+    o=j*cols+i; px=gr.wx[o]-ax; py=gr.wy[o]-ay;
+    dx=px*co+py*si; dy=-px*si+py*co;
+    u=dx/RX; v=dy/RY; d2=u*u+v*v;
+    if(d2>=1) continue;
+    d=Math.sqrt(d2); t=(1-d)/SHLD; if(t>1)t=1;
+    w=coh*t*t*(3-2*t);
+    if(w<0.004) continue;
+    gr.ws[o]+=w; gr.gxs[o]+=w*vx; gr.gys[o]+=w*vy;
+  }
+}
+/* 한 지점에서 어떤 뜻이 얼마나 지배하는가 — 가리킨 곳의 의미는 계산된다 */
+function meaningAt(m,x,y){
+  var out=[], i,p,px,py,dx,dy,u,v,d2,d,t,w,co,si;
+  for(i=0;i<m.places.length;i++){
+    p=m.places[i]; if(!p.semantic) continue;
+    co=Math.cos(p.rot); si=Math.sin(p.rot);
+    px=x-p.x.v; py=y-p.y.v;
+    dx=px*co+py*si; dy=-px*si+py*co;
+    u=dx/(p.rx.v*SEM); v=dy/(p.ry.v*SEM); d2=u*u+v*v;
+    if(d2>=1) continue;
+    d=Math.sqrt(d2); t=(1-d)/SHLD; if(t>1)t=1;
+    w=t*t*(3-2*t);
+    if(w>0.02) out.push({p:p, w:w});
+  }
+  out.sort(function(a,b){ return b.w-a.w; });
+  return out;
+}
+function ellipseVisit(gr,x,y,rx,ry,fn){
+  var cols=gr.cols, rows=gr.rows, R=Math.max(rx,ry)+WARP;
+  var i0=Math.max(0,Math.floor((x-R)/G)), i1=Math.min(cols-1,Math.ceil((x+R)/G));
+  var j0=Math.max(0,Math.floor((y-R)/G)), j1=Math.min(rows-1,Math.ceil((y+R)/G));
+  var i,j,o,u,v,d2;
+  for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
+    o=j*cols+i;
+    u=(gr.wx[o]-x)/rx; v=(gr.wy[o]-y)/ry; d2=u*u+v*v;
+    if(d2<1) fn(o, Math.sqrt(d2));
+  }
+}
+
+function compute(gr,m,now,attn,resOv){
+  var base=(resOv===undefined? BASE_RES : resOv), i, j, p;
+  var n=gr.val.length;
+  gr.val.fill(0); gr.res.fill(base); gr.tint.fill(0); gr.mask.fill(0);
+  /* ① 몸 */
+  for(i=0;i<m.places.length;i++){
+    p=m.places[i];
+    var a=p.amp.v;
+    if(m.breath && m.breath.id===p.id) a += m.breath.amp*Math.sin(now*m.breath.w);
+    addMass(gr,p.x.v,p.y.v,p.rx.v,p.ry.v,p.rot,a);
+  }
+  for(i=0;i<m.pulses.length;i++){
+    var pu=m.pulses[i], u=(now-pu.t0)/pu.dur;
+    if(u<0||u>1) continue;
+    addMass(gr, pu.x0+(pu.x1-pu.x0)*u, pu.y0+(pu.y1-pu.y0)*u, pu.rx, pu.ry, 0, pu.amp*Math.sin(Math.PI*u));
+  }
+  for(i=0;i<m.voids.length;i++){
+    var vd=m.voids[i];
+    addMass(gr, vd.x, vd.y, vd.rx*1.55, vd.ry*1.55, 0, -vd.depth);
+    ellipseVisit(gr, vd.x, vd.y, vd.rx, vd.ry, function(o){ gr.mask[o]=3; });
+  }
+  /* ② 방향장 — 자리가 없는 곳은 주변 결로 흐른다 */
+  var ws=gr.ws, gxs=gr.gxs, gys=gr.gys, flow=gr.flow;
+  for(i=0;i<n;i++){ ws[i]=W0; gxs[i]=W0*gr.agx[i]; gys[i]=W0*gr.agy[i]; }
+  for(i=0;i<m.places.length;i++){
+    p=m.places[i];
+    if(p.semantic && p.coh.v>0.02) addDir(gr,p);
+  }
+  /* ③ 결 — 방향장 + 질량이 눌러 조인 만큼 */
+  var val=gr.val, cols=gr.cols, rows=gr.rows, iw;
+  for(i=0;i<n;i++){ iw=1/ws[i]; gxs[i]*=iw; gys[i]*=iw; }
+  for(i=0;i<m.seams.length;i++){
+    (function(sm){
+      var rr=sm.res.v, tn=sm.tint, brk=sm.brk, mr=Math.min(sm.rx,sm.ry), cut=sm.off.v;
+      ellipseVisit(gr, sm.x, sm.y, sm.rx, sm.ry, function(o,d){
+        var w=(1-d)/0.22; if(w>1)w=1; if(w<0)w=0;
+        var f=(w-0.35)/0.30; if(f>1)f=1; if(f<0)f=0;
+        if(f>0){ var v2=gr.res[o]+(rr-gr.res[o])*f; if(v2<gr.res[o]) gr.res[o]=v2; }
+        if(w>0.45 && tn) gr.tint[o]=tn;
+        /* 새 재료의 결은 몸의 결과 이어지지 않는다 — 경계에서 끊긴다 */
+        if(cut>0.004){ var dp=(1-d)*mr; if(dp>-3 && dp<(brk?20:11)) gr.mask[o]=3; }
+      });
+    })(m.seams[i]);
+  }
+  /* 주의를 받은 자리는 결이 더 촘촘해진다 — 이름이 아니라 몸이 먼저 답한다 */
+  for(i=0;i<m.places.length;i++){
+    (function(p2){
+      if(!p2.semantic||p2.lab.v<0.04) return;
+      var st=p2.lab.v;
+      ellipseVisit(gr, p2.x.v, p2.y.v, p2.rx.v*1.05, p2.ry.v*1.05, function(o,d){
+        var f=(1-d)/0.45; if(f>1)f=1; if(f<0)f=0;
+        var r2=base+(1-base)*st*f;
+        if(r2>gr.res[o]) gr.res[o]=r2;
+      });
+    })(m.places[i]);
+  }
+  if(attn && attn.a>0.02){
+    ellipseVisit(gr, attn.x, attn.y, 104, 104, function(o,d){
+      var f=(1-d)*attn.a, r2=base+(1-base)*(f>1?1:f);
+      if(r2>gr.res[o]) gr.res[o]=r2;
+    });
+  }
+}
+
+/* ── 결 뽑기 ──────────────────────────────────────────────────────────── */
+function newPaths(){
+  var a=[],i,j;
+  for(i=0;i<4;i++){ a.push([]); for(j=0;j<6;j++) a[i].push(new Path2D()); }
+  return a;
+}
+/* ── ① 겉면 — 몸이 끝나는 자리 (등치선 하나) ─────────────────────────── */
+function tess(gr,paths,forceTint){
+  var cols=gr.cols, rows=gr.rows, val=gr.val, tint=gr.tint, mask=gr.mask;
+  var i,j,o,a,b,c,d,mn,mx,lv,tn,ci,xi,yj,xr,yb,tX,rY,bX,lY;
+  for(j=0;j<rows-1;j++){
+    yj=j*G; yb=yj+G;
+    for(i=0;i<cols-1;i++){
+      o=j*cols+i; xi=i*G; xr=xi+G;
+      a=val[o]; b=val[o+1]; c=val[o+cols+1]; d=val[o+cols];
+      mn=a; mx=a;
+      if(b<mn)mn=b; else if(b>mx)mx=b;
+      if(c<mn)mn=c; else if(c>mx)mx=c;
+      if(d<mn)mn=d; else if(d>mx)mx=d;
+      if(mx<=SURF||mn>SURF) continue;
+      if(mask[o]===2) continue;
+      tn=(forceTint===undefined? tint[o] : forceTint);
+      lv=SURF;
+      ci=(a>lv?1:0)|(b>lv?2:0)|(c>lv?4:0)|(d>lv?8:0);
+      if(ci===0||ci===15) continue;
+      tX=xi+G*(lv-a)/(b-a); rY=yj+G*(lv-b)/(c-b);
+      bX=xi+G*(lv-d)/(c-d); lY=yj+G*(lv-a)/(d-a);
+      emit(paths[tn][4],ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY);
+    }
+  }
+}
+/* ── ② 결 — 방향장을 따라 흐르는 선들 ────────────────────────────────────
+   등치선으로는 이것을 그릴 수 없다. 방향이 자리마다 다른 장은 하나의 스칼라로
+   적분되지 않기 때문이다(회전 성분이 버려진다). 그래서 결을 직접 따라 그린다.
+   ──────────────────────────────────────────────────────────────────────── */
+var D0=15, SEED_K=0.92, BREAK_K=0.52, STEP=3.0, MAXLEN=760;
+function bilin(arr,gr,x,y){
+  var fx=x/G, fy=y/G, i=fx|0, j=fy|0, cols=gr.cols;
+  if(i<0)i=0; if(j<0)j=0; if(i>gr.cols-2)i=gr.cols-2; if(j>gr.rows-2)j=gr.rows-2;
+  var tx=fx-i, ty=fy-j, o=j*cols+i;
+  return arr[o]*(1-tx)*(1-ty)+arr[o+1]*tx*(1-ty)+arr[o+cols]*(1-tx)*ty+arr[o+cols+1]*tx*ty;
+}
+function nearIdx(gr,x,y){
+  var i=Math.round(x/G), j=Math.round(y/G);
+  if(i<0)i=0; if(j<0)j=0; if(i>gr.cols-1)i=gr.cols-1; if(j>gr.rows-1)j=gr.rows-1;
+  return j*gr.cols+i;
+}
+function streams(gr,paths,attn,forceTint){
+  var cols=gr.cols, rows=gr.rows, val=gr.val, res=gr.res, tint=gr.tint, mask=gr.mask;
+  var gxs=gr.gxs, gys=gr.gys;
+  /* 간격 격자 — 이미 그린 결과 너무 가까우면 새 결을 시작하지 않는다 */
+  var CS=D0, gc=Math.ceil(W/CS)+1, gr2=Math.ceil(H/CS)+1;
+  var buckets=new Array(gc*gr2); for(var z=0;z<buckets.length;z++) buckets[z]=null;
+  function push(x,y){
+    var b=((y/CS)|0)*gc+((x/CS)|0);
+    if(b<0||b>=buckets.length) return;
+    if(!buckets[b]) buckets[b]=[];
+    buckets[b].push(x,y);
+  }
+  function tooClose(x,y,r){
+    var bi=(x/CS)|0, bj=(y/CS)|0, r2=r*r, i,j,b,arr,k,dx,dy;
+    for(j=bj-1;j<=bj+1;j++) for(i=bi-1;i<=bi+1;i++){
+      if(i<0||j<0||i>=gc||j>=gr2) continue;
+      arr=buckets[j*gc+i]; if(!arr) continue;
+      for(k=0;k<arr.length;k+=2){ dx=arr[k]-x; dy=arr[k+1]-y; if(dx*dx+dy*dy<r2) return true; }
+    }
+    return false;
+  }
+  function sepAt(o,x,y){
+    var m=val[o], d=D0/(1+0.45*m);
+    var r=res[o]; if(r>0.70) d*=0.56; else if(r<0.34) d*=1.7;
+    return d;
+  }
+  function ok(x,y){
+    if(x<2||y<2||x>W-2||y>H-2) return 0;
+    var o=nearIdx(gr,x,y);
+    if(mask[o]===3) return 0;
+    return bilin(val,gr,x,y)>SURF ? o : 0;
+  }
+  /* 한 줄 그리기 — 앞뒤 양쪽으로 자란다 */
+  function grow(sx,sy){
+    var o0=ok(sx,sy); if(!o0) return null;
+    if(tooClose(sx,sy,sepAt(o0,sx,sy)*SEED_K)) return null;
+    var pts=[], k, x, y, gx, gy, tx, ty, px, py, o, sgn, run, n;
+    for(sgn=1;sgn>=-1;sgn-=2){
+      x=sx; y=sy; px=0; py=0; run=[];
+      for(k=0;k<MAXLEN/STEP;k++){
+        o=ok(x,y); if(!o) break;
+        gx=bilin(gxs,gr,x,y); gy=bilin(gys,gr,x,y);
+        tx=-gy; ty=gx;
+        n=Math.sqrt(tx*tx+ty*ty); if(n<1e-7) break;
+        tx/=n; ty/=n; tx*=sgn; ty*=sgn;
+        if(px||py){ if(tx*px+ty*py<0){ tx=-tx; ty=-ty; } }
+        if(k>1 && tooClose(x,y,sepAt(o,x,y)*BREAK_K)) break;
+        run.push(x,y); px=tx; py=ty;
+        x+=tx*STEP; y+=ty*STEP;
+      }
+      if(sgn===1) pts=run; else { for(k=run.length-2;k>=0;k-=2) pts.unshift(run[k],run[k+1]); }
+    }
+    if(pts.length<10) return null;
+    var mid=(pts.length>>1)&~1;
+    var o1=nearIdx(gr,pts[mid],pts[mid+1]);
+    var tn=(forceTint!==undefined)?forceTint:tint[o1];
+    var pth=paths[tn][bandOf(val[o1])];
+    pth.moveTo(pts[0],pts[1]);
+    for(k=2;k<pts.length;k+=2) pth.lineTo(pts[k],pts[k+1]);
+    for(k=0;k<pts.length;k+=2) push(pts[k],pts[k+1]);
+    return pts;
+  }
+  /* 씨앗은 이미 그린 결의 옆에서 나온다 — 고르게 채워지고, 난수는 없다 */
+  var queue=[], head=0, best=-1, bx=0, by=0, i2, j2, oo;
+  for(j2=0;j2<rows;j2++) for(i2=0;i2<cols;i2++){
+    oo=j2*cols+i2; if(val[oo]<=SURF||mask[oo]===3) continue;
+    if(val[oo]>best){ best=val[oo]; bx=i2*G; by=j2*G; }
+  }
+  if(best<0) return;
+  queue.push(bx,by);
+  var guard=0;
+  while(head<queue.length && guard++<12000){
+    var qx=queue[head], qy=queue[head+1]; head+=2;
+    var pts=grow(qx,qy); if(!pts) continue;
+    for(var k2=0;k2<pts.length;k2+=2){
+      if(k2%8) continue;
+      var o3=nearIdx(gr,pts[k2],pts[k2+1]), dd=sepAt(o3,pts[k2],pts[k2+1]);
+      var ax2=bilin(gxs,gr,pts[k2],pts[k2+1]), ay2=bilin(gys,gr,pts[k2],pts[k2+1]);
+      var nn=Math.sqrt(ax2*ax2+ay2*ay2); if(nn<1e-7) continue;
+      ax2/=nn; ay2/=nn;
+      queue.push(pts[k2]+ax2*dd, pts[k2+1]+ay2*dd);
+      queue.push(pts[k2]-ax2*dd, pts[k2+1]-ay2*dd);
+    }
+  }
+}
+function emit(p,ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY){
+  switch(ci){
+    case 1: case 14: p.moveTo(xi,lY); p.lineTo(tX,yj); break;
+    case 2: case 13: p.moveTo(tX,yj); p.lineTo(xr,rY); break;
+    case 3: case 12: p.moveTo(xi,lY); p.lineTo(xr,rY); break;
+    case 4: case 11: p.moveTo(xr,rY); p.lineTo(bX,yb); break;
+    case 6: case 9:  p.moveTo(tX,yj); p.lineTo(bX,yb); break;
+    case 7: case 8:  p.moveTo(xi,lY); p.lineTo(bX,yb); break;
+    default:
+      var ctr=(a+b+c+d)*0.25;
+      var joinAC=(ci===5)?(ctr>lv):(ctr<=lv);
+      if(joinAC){ p.moveTo(tX,yj); p.lineTo(xr,rY); p.moveTo(xi,lY); p.lineTo(bX,yb); }
+      else      { p.moveTo(xi,lY); p.lineTo(tX,yj); p.moveTo(xr,rY); p.lineTo(bX,yb); }
+  }
+}
+var TSTR=['13,12,11','154,91,18','140,43,32','91,107,132'];
+var BA=[0.26,0.40,0.58,0.78,0.46,0.15], BW=[0.55,0.62,0.72,0.86,0.95,0.58];
+function drawSet(ctx,paths,dim){
+  for(var t=0;t<4;t++){
+    var boost=(t===1||t===2)?1.35:1;
+    for(var b=0;b<6;b++){
+      var al=BA[b]*boost*dim; if(al>0.96) al=0.96;
+      ctx.strokeStyle='rgba('+TSTR[t]+','+al.toFixed(3)+')';
+      ctx.lineWidth=BW[b]*(dim<1?0.85:1);
+      ctx.stroke(paths[t][b]);
+    }
+  }
+}
+return {W:W,H:H,G:G,SURF:SURF,DG:DG,BASE_RES:BASE_RES,SEM:SEM,
+  D:D,stepD:stepD,newModel:newModel,mkPlace:mkPlace,add:add,to:to,jump:jump,
+  addSeam:addSeam,seam:seam,newGrid:newGrid,compute:compute,meaningAt:meaningAt,
+  newPaths:newPaths,tess:tess,streams:streams,drawSet:drawSet};
+})();
+</script>
+
+<script>
+"use strict";
+(function(){
+var Q=JQ;
+
+/* ══ 몸 만들기 ═══════════════════════════════════════════════════════════
+   substrate 는 뜻이 없다(semantic:false). 뜻이 없는 곳에서는 주변 결이 그대로 지나간다.
+   ═════════════════════════════════════════════════════════════════════ */
+function substrate(m,amp,rx){
+  Q.add(m,Q.mkPlace({id:'base', semantic:false, x:410,y:268, rx:rx||336, ry:156,
+    rot:-0.05, amp:amp===undefined?0.40:amp, mass:0.9}));
+}
+var BODY=[
+  {id:'intake',  names:['요청 받기','들어오는 길'],   x:250,y:168, rx:152,ry:60, rot: 0.10, amp:0.55, mass:0.30, dir:  0},
+  {id:'auth',    names:['로그인','사용자 인증'],      x:418,y:246, rx:150,ry:84, rot:-0.10, amp:0.92, mass:0.55, dir: 34},
+  {id:'session', names:['세션','로그인 유지'],        x:596,y:306, rx:128,ry:62, rot: 0.16, amp:0.60, mass:0.50, dir: 20},
+  {id:'fail',    names:['실패 처리','재시도'],        x:576,y:172, rx:106,ry:54, rot:-0.24, amp:0.42, mass:0.25, dir: 50},
+  {id:'store',   names:['사용자 저장','계정 데이터'], x:262,y:334, rx:178,ry:74, rot: 0.05, amp:1.06, mass:0.95, dir:-44}
+];
+function buildBody(o){
+  o=o||{};
+  var m=Q.newModel(); substrate(m);
+  for(var i=0;i<BODY.length;i++) Q.add(m,Q.mkPlace(BODY[i]));
+  m.voids.push({x:520,y:190,rx:40,ry:27,depth:0.90});
+  if(o.seam) Q.addSeam(m,{id:'sa', x:424,y:240, rx:120,ry:80, off:0.102, res:0.30, tint:1});
+  return m;
+}
+/* 자리 하나에 주의를 준다 — 그 자리의 합의가 강해지고 나머지는 주변 결로 풀린다 */
+function focus(m,id){
+  m.focus=id||null;
+  for(var i=0;i<m.places.length;i++){
+    var p=m.places[i]; if(!p.semantic) continue;
+    var on=(p.id===id);
+    p.coh.t = id? (on?1.55:0.40) : 1;
+    p.lab.t = on?1:0;
+  }
+}
+function strength(w){ return w>0.80?'강하게':(w>0.45?'보통으로':'약하게'); }
+
+/* ══ 연구 ═══════════════════════════════════════════════════════════════ */
+var STUDIES=[
+{
+  id:'s1', hero:true, phrase:'로그인부터 만들어줘.', point:false,
+  build:function(){
+    var m=Q.newModel(); substrate(m,0.46);
+    Q.add(m,Q.mkPlace({id:'auth', names:['로그인','사용자 인증'], x:400,y:242,
+      rx:156,ry:92, rot:-0.10, amp:0, mass:0.55, dir:34, coh:0}));
+    return m;
+  },
+  beats:[
+   {n:'빈 소프트웨어', s:'자리 0', d:2000, w:'자리가 하나도 없다. 결은 몸 전체에서 한 방향으로만 흐른다. 가짜 자리를 미리 만들어 두지 않는다 — 빈 소프트웨어에는 의미가 없는 것이 정직하다.',
+    run:function(){}},
+   {n:'요청', s:'자리 0', d:1300, phrase:true, w:'말이 몸에 닿는다. 아직 아무 자리도 없으므로 JuQode는 어디에 만들지를 스스로 정해야 한다.',
+    run:function(){}},
+   {n:'자리가 생긴다', s:'자리 1', d:3200, w:'한 구역의 결이 몸의 나머지와 다른 쪽으로 돌아눕는다. 카드가 뜬 것이 아니라 재료의 그 구역이 다른 성질을 갖게 된 것이다. 테두리는 하나도 그리지 않았다.',
+    run:function(m){ Q.to(m,'auth','amp',1.05); Q.to(m,'auth','coh',1); Q.to(m,'base','amp',0.40); }},
+   {n:'아직 확인 전', s:'자리 1 · 가라앉는 중', d:3600, w:'자리는 생겼지만 아직 사실이 아니다. 새 결이 몸의 결과 어긋난 채 멈춰 있다. 자리가 있다는 것과 그것이 맞다는 것은 다른 문제다.',
+    run:function(m){ Q.addSeam(m,{id:'sa', x:400,y:238, rx:150,ry:100, off:0.105, res:0.30, tint:1});
+                     m.breath={id:'auth', amp:0.013, w:0.0007}; }},
+   {n:'증거 · 이름', s:'자리 1 · 확인됨', d:0, w:'확인이 통과하면 결이 하나로 이어진다. 이제 이 자리에 이름을 붙일 수 있다 — 이름이 자리를 만든 것이 아니라, 자리가 먼저 있었고 이름이 그것을 확인한다.',
+    run:function(m){ for(var i=0;i<m.seams.length;i++){ m.seams[i].off.t=0; m.seams[i].res.t=Q.BASE_RES; }
+                     m.breath=null; Q.to(m,'auth','lab',1); }}
+  ]
+},
+{
+  id:'s2', hero:true, point:true, build:function(){ return buildBody(); },
+  readTitle:'가리킨 곳',
+  hint:'몸 위로 마우스를 움직여 보라 · 툴팁이 아니라 몸이 먼저 응답한다',
+  note:[['테두리가 없다','자리를 나누는 선이 화면에 하나도 없다. 그런데도 결이 도는 지점에서 구역이 갈린다.'],
+        ['이름은 하나만','보고 있는 자리에만 이름이 뜬다. 기본 화면에는 이름이 하나도 없다.'],
+        ['확신도 함께','JuQode는 “여기는 로그인”이라고 단정하지 않는다. 얼마나 그런지를 같이 말한다.'],
+        ['모르는 곳도 말한다','뜻이 없는 자리에서는 주변 결이 그대로 지나간다. 그때는 모른다고 답한다.']]
+},
+{
+  id:'s3', hero:true, point:false, say:true, build:function(){ return buildBody(); },
+  readTitle:'말한 곳',
+  hint:'문장을 눌러 보라 · 조명도 조준원도 화살표도 쓰지 않는다',
+  says:[['로그인 쪽 보여줘','auth'],['세션 쪽 보여줘','session'],['사용자 데이터 쪽','store'],
+        ['실패했을 때 처리하는 데','fail'],['요청 들어오는 데','intake'],['전체 다시 보기',null]],
+  note:[['말이 좌표를 대신한다','비개발자는 좌표를 모른다. 말을 안다. 이 방향이 실제 제품의 주 경로다.'],
+        ['몸이 빗질된다','그 자리의 결이 또렷해지고 나머지가 주변 결로 풀린다. 그것이 전부다.'],
+        ['틀리면 되돌린다','JuQode가 잘못 짚었으면 다른 문장을 말하면 된다. 확인은 사람이 한다.']]
+},
+{
+  id:'s4', hero:true, point:true, phrase:'로그인 실패하면 세션을 끊어줘.',
+  build:function(){ return buildBody(); },
+  readTitle:'가리킨 곳',
+  beats:[
+   {n:'걸쳐 있다', s:'자리 5 · 안정', d:3000, w:'로그인과 세션은 서로 걸쳐 있다. 걸친 자리에서 결은 두 방향 사이를 돈다. 그 자리는 두 이름을 다 갖는다 — 나눌 필요가 없다. (그 부근을 가리켜 보라)',
+    run:function(){}},
+   {n:'요청', s:'교란됨', d:1400, phrase:true, w:'한 자리를 Qode한다. 옆 자리는 건드리지 않았다.',
+    run:function(m){ focus(m,null); }},
+   {n:'국소 교란', s:'교란됨', d:1900, w:'로그인 자리의 재료가 늘어난다. 이 자리만 쉬던 형태를 벗어난다.',
+    run:function(m){ Q.to(m,'auth','amp',1.10); Q.to(m,'auth','rx',158);
+                     Q.addSeam(m,{id:'sa', x:424,y:242, rx:126,ry:84, off:0.102, res:0.30, tint:1}); }},
+   {n:'전달', s:'교란됨', d:1300, w:'눌린 힘이 세션 쪽으로 옮겨간다. 지나가는 동안에만 두 자리 사이의 결이 뭉친다.',
+    run:function(m,sc){ m.pulses.push({x0:424,y0:242,x1:590,y1:300,t0:sc.now,dur:1200,amp:0.50,rx:88,ry:58}); }},
+   {n:'뜻이 옮겨간다', s:'교란됨', d:2600, w:'세션은 이제 로그인 실패를 함께 감당한다. 그래서 세션 자리의 결이 로그인 쪽으로 돌아눕는다 — 자리가 옮겨간 것이 아니라 그 자리의 뜻이 달라진 것이다.',
+    run:function(m){ Q.to(m,'session','dir',33); Q.to(m,'session','amp',0.72);
+                     Q.addSeam(m,{id:'ss', x:596,y:302, rx:118,ry:70, off:0.088, res:0.30, tint:1});
+                     m.breath={id:'session', amp:0.012, w:0.00075}; }},
+   {n:'증거', s:'자리 5 · 확인됨', d:0, w:'확인이 통과하면 두 이음매가 모두 닫힌다. 사용자 저장 자리는 이 변경 내내 거의 움직이지 않았다 — 가장 무겁고, 뜻도 가장 멀기 때문이다.',
+    run:function(m){ for(var i=0;i<m.seams.length;i++){ m.seams[i].off.t=0; m.seams[i].res.t=Q.BASE_RES; }
+                     m.breath=null; }}
+  ]
+}];
+
+/* ══ 유형 스트립 ═════════════════════════════════════════════════════════ */
+var TYPES=[
+ {t:'Frontend', d:'사람과 닿는 자리가 넓고 얕게 여럿. 방향이 자주 바뀌고 질량은 고르게 낮다.',
+  base:0.42, ps:[
+   ['화면 진입',210,150,150,54,0.50,0.30,  6],['로그인',420,176,132,58,0.62,0.45, 40],
+   ['편집기',330,300,178,80,0.85,0.60,  -8],['설정',596,180,120,52,0.42,0.25,-34],
+   ['결제',612,320,132,64,0.72,0.70, 52]]},
+ {t:'Backend', d:'하나의 관통 흐름이 몸을 가로지른다. 저장 자리가 가장 무겁고 뜻이 가장 멀다.',
+  base:0.40, ps:[
+   ['요청 받기',196,206,140,62,0.55,0.30,  2],['인증',372,232,132,72,0.80,0.50, 32],
+   ['처리',520,262,150,80,0.95,0.60, 14],['저장',300,352,180,76,1.10,0.95,-46],
+   ['외부 호출',650,196,116,54,0.48,0.35,-56]]},
+ {t:'Agent', d:'자리들이 되돌아오는 순서로 눕는다. 기억이 무겁고, 재시도는 판단과 뜻이 가깝다.',
+  base:0.40, ps:[
+   ['관찰',236,178,140,58,0.55,0.30, 48],['판단',420,230,146,80,0.90,0.55, 18],
+   ['도구 사용',612,268,132,64,0.66,0.45,-16],['기억',296,346,176,74,1.05,0.95,-48],
+   ['재시도',548,166,104,50,0.40,0.25, 26]]},
+ {t:'Data', d:'무게가 아래로 깊게 쏠린다. 자리들이 한 방향으로 서서히 돌아간다 — 파이프라인이다.',
+  base:0.40, ps:[
+   ['수집',214,176,144,58,0.52,0.30, 12],['정규화',392,214,140,68,0.72,0.45,-14],
+   ['관계',560,258,138,72,0.80,0.55,-38],['저장',312,348,190,80,1.20,0.95,-54],
+   ['내보내기',652,180,110,50,0.44,0.30, 30]]}
+];
+function buildType(spec){
+  var m=Q.newModel(); substrate(m,spec.base);
+  for(var i=0;i<spec.ps.length;i++){
+    var a=spec.ps[i];
+    Q.add(m,Q.mkPlace({id:'p'+i,names:[a[0]],x:a[1],y:a[2],rx:a[3],ry:a[4],amp:a[5],mass:a[6],dir:a[7]}));
+  }
+  return m;
+}
+
+/* ══ 실행기 ═══════════════════════════════════════════════════════════════ */
+var scenes=[], raf=0, last=0, running=false;
+var DPR=Math.min(window.devicePixelRatio||1,2);
+function el(t,c,h){ var e=document.createElement(t); if(c)e.className=c; if(h!==undefined)e.innerHTML=h; return e; }
+
+function mount(def){
+  var host=document.getElementById(def.id);
+  var sc={def:def, i:-1, playing:false, ever:false, visible:false, dirty:true,
+          now:0, nextAt:0, attn:{x:0,y:0,a:Q.D(0,20)}, gr:Q.newGrid(), btEls:[]};
+  sc.m=def.build();
+  var L=el('div');
+  var st=el('div','stat','<span class="lab">몸의 상태</span><b></b>');
+  sc.stateEl=st.querySelector('b'); L.appendChild(st);
+  var cvw=el('div','cvw'+(def.hero?' hero':''));
+  var cv=el('canvas'); cv.width=Q.W*DPR; cv.height=Q.H*DPR;
+  cvw.appendChild(cv); L.appendChild(cvw);
+  sc.ctx=cv.getContext('2d'); sc.ctx.setTransform(DPR,0,0,DPR,0,0); sc.cv=cv;
+
+  var R=el('div','scR');
+  if(def.beats){
+    for(var k=0;k<def.beats.length;k++){
+      var bt=def.beats[k], e=el('div','bt');
+      e.innerHTML='<div class="n">'+String(k).padStart(2,'0')+'</div><div class="t">'+bt.n+'</div><div class="w">'+bt.w+'</div>';
+      R.appendChild(e); sc.btEls.push(e);
+    }
+  }
+  if(def.note){
+    for(var q=0;q<def.note.length;q++){
+      var e2=el('div','bt read');
+      e2.innerHTML='<div class="n">'+String(q+1).padStart(2,'0')+'</div><div class="t">'+def.note[q][0]+'</div><div class="w">'+def.note[q][1]+'</div>';
+      R.appendChild(e2);
+    }
+  }
+  if(def.point||def.say){
+    sc.readEl=el('div','readout','<div class="h">'+(def.readTitle||'가리킨 곳')+'</div><div class="m">—</div><div class="s"></div>');
+    R.appendChild(sc.readEl);
+    sc.readM=sc.readEl.querySelector('.m'); sc.readS=sc.readEl.querySelector('.s');
+  }
+  if(def.say){
+    var chips=el('div','chips');
+    def.says.forEach(function(pair){
+      var ch=el('div','chip','"'+pair[0]+'"');
+      ch.onclick=function(){
+        chips.querySelectorAll('.chip').forEach(function(x){ x.className='chip'; });
+        ch.className='chip on';
+        focus(sc.m, pair[1]);
+        if(pair[1]){
+          var p=sc.m.byId[pair[1]];
+          sc.readM.textContent=p.names[0]; sc.readM.className='m on';
+          sc.readS.textContent='이 자리로 주의를 옮겼다. 결이 이쪽으로 또렷해지고 나머지는 주변 결로 풀린다.';
+        } else {
+          sc.readM.textContent='전체'; sc.readM.className='m on';
+          sc.readS.textContent='모든 자리가 같은 발언권으로 돌아왔다. 기본 화면에는 이름이 하나도 없다.';
+        }
+        sc.dirty=true; kick();
+      };
+      chips.appendChild(ch);
+    });
+    R.appendChild(chips);
+  }
+  if(def.phrase){
+    sc.sayEl=el('div','say','<span class="q">"'+def.phrase+'"</span><span class="go">보내기</span>');
+    sc.sayEl.style.cssText='margin-top:16px;border:1px solid var(--hair);background:var(--surface);padding:11px 13px;display:flex;justify-content:space-between;align-items:baseline;gap:10px;opacity:.45;transition:opacity .35s ease,border-color .35s ease';
+    sc.sayEl.querySelector('.q').style.cssText='font-size:13.5px;letter-spacing:-.022em';
+    sc.sayEl.querySelector('.go').style.cssText='font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;color:var(--ink3);white-space:nowrap';
+    sc.sayEl.onclick=function(){ var nb=sc.def.beats&&sc.def.beats[sc.i+1]; if(nb&&nb.phrase){ fire(sc,sc.i+1,performance.now()); kick(); } };
+    R.appendChild(sc.sayEl);
+  }
+  if(def.beats){
+    var ctl=el('div','ctl');
+    var b1=el('button',null,'↺ 처음부터'), b2=el('button',null,'❙❙ 멈춤'), b3=el('button',null,'→ 다음 사건');
+    b1.onclick=function(){ restart(sc); };
+    b2.onclick=function(){ sc.playing=!sc.playing; if(sc.playing) sc.nextAt=performance.now()+240; paint(sc); kick(); };
+    b3.onclick=function(){ if(sc.i<def.beats.length-1){ fire(sc,sc.i+1,performance.now()); kick(); } };
+    sc.toggleEl=b2; ctl.appendChild(b1); ctl.appendChild(b2); ctl.appendChild(b3); R.appendChild(ctl);
+  }
+  if(def.hint) R.appendChild(el('div','hint',def.hint));
+  host.appendChild(L); host.appendChild(R);
+
+  cv.addEventListener('pointermove',function(ev){
+    var b=cv.getBoundingClientRect();
+    sc.attn.x=(ev.clientX-b.left)*(Q.W/b.width);
+    sc.attn.y=(ev.clientY-b.top)*(Q.H/b.height);
+    sc.attn.a.t=1;
+    if(def.point) probe(sc);
+    sc.dirty=true; kick();
+  });
+  cv.addEventListener('pointerleave',function(){
+    sc.attn.a.t=0;
+    if(def.point){ focus(sc.m,null); if(sc.readM){ sc.readM.textContent='—'; sc.readM.className='m'; sc.readS.textContent=''; } }
+    sc.dirty=true; kick();
+  });
+  scenes.push(sc);
+  if(def.beats){ fire(sc,0,performance.now()); sc.playing=false; }
+  else { sc.stateEl.textContent='자리 '+sc.m.places.filter(function(p){return p.semantic;}).length+' · 안정'; }
+  paint(sc);
+  return sc;
+}
+
+/* 가리킨 곳의 뜻 — 몸이 먼저 응답하고, 이름은 뒤따른다 */
+function probe(sc){
+  var m=sc.m, x=sc.attn.x, y=sc.attn.y, i;
+  for(i=0;i<m.voids.length;i++){
+    var v=m.voids[i], u=(x-v.x)/(v.rx*1.6), w=(y-v.y)/(v.ry*1.6);
+    if(u*u+w*w<1){
+      focus(m,null);
+      sc.readM.textContent='모르는 곳'; sc.readM.className='m on';
+      sc.readS.textContent='여기에는 아직 뜻이 없다. 주변 결이 그대로 지나간다 — JuQode는 이 안을 모른다고 말한다.';
+      return;
+    }
+  }
+  var c=Q.meaningAt(m,x,y);
+  if(!c.length){
+    focus(m,null);
+    sc.readM.textContent='아직 아무 자리도 아님'; sc.readM.className='m';
+    sc.readS.textContent='이 자리에는 뜻이 없다. 몸의 재료이긴 하지만 아직 무엇도 아니다.';
+    return;
+  }
+  focus(m,c[0].p.id);
+  sc.readM.textContent=c[0].p.names[0]; sc.readM.className='m on';
+  var s='이 자리를 '+strength(c[0].w)+' 지배한다.';
+  if(c.length>1){
+    var others=[];
+    for(var k=1;k<c.length&&k<3;k++) others.push(c[k].p.names[0]+'('+strength(c[k].w)+')');
+    s+=' 함께 걸쳐 있는 뜻 — '+others.join(' · ')+'.';
+  }
+  sc.readS.textContent=s;
+}
+
+function fire(sc,i,now){
+  var b=sc.def.beats[i]; if(!b) return;
+  sc.i=i; sc.now=now; b.run(sc.m,sc); sc.nextAt=now+b.d; sc.dirty=true; paint(sc);
+}
+function restart(sc){
+  sc.m=sc.def.build(); sc.i=-1; sc.playing=true;
+  fire(sc,0,performance.now()); paint(sc); kick();
+}
+function paint(sc){
+  for(var k=0;k<sc.btEls.length;k++)
+    sc.btEls[k].className='bt'+(k<sc.i?' done':(k===sc.i?' now':''));
+  if(sc.def.beats){ var b=sc.def.beats[sc.i]; if(b) sc.stateEl.textContent=b.s; }
+  if(sc.sayEl){ var nb=sc.def.beats&&sc.def.beats[sc.i+1]; sc.sayEl.style.opacity=(nb&&nb.phrase)?1:0.45;
+    sc.sayEl.style.borderColor=(nb&&nb.phrase)?'var(--ink)':'var(--hair)';
+    sc.sayEl.style.cursor=(nb&&nb.phrase)?'pointer':'default'; }
+  if(sc.toggleEl) sc.toggleEl.textContent=sc.playing?'❙❙ 멈춤':'▶ 재생';
+}
+function stepScene(sc,now,dt){
+  var m=sc.m, moving=false, i, p;
+  sc.now=now;
+  for(i=0;i<m.places.length;i++){ p=m.places[i];
+    if(Q.stepD(p.x,dt))moving=true;   if(Q.stepD(p.y,dt))moving=true;
+    if(Q.stepD(p.rx,dt))moving=true;  if(Q.stepD(p.ry,dt))moving=true;
+    if(Q.stepD(p.amp,dt))moving=true; if(Q.stepD(p.dir,dt))moving=true;
+    if(Q.stepD(p.coh,dt))moving=true; if(Q.stepD(p.lab,dt))moving=true; }
+  for(i=m.seams.length-1;i>=0;i--){ var sm=m.seams[i];
+    if(Q.stepD(sm.off,dt))moving=true; if(Q.stepD(sm.res,dt))moving=true;
+    if(sm.off.t===0&&Math.abs(sm.off.v)<0.024) sm.tint=0;
+    if(sm.off.t===0&&Math.abs(sm.off.v)<0.005&&Math.abs(sm.res.v-Q.BASE_RES)<0.02) m.seams.splice(i,1); }
+  if(Q.stepD(sc.attn.a,dt)) moving=true;
+  for(i=m.pulses.length-1;i>=0;i--){
+    if(now>m.pulses[i].t0+m.pulses[i].dur) m.pulses.splice(i,1); else moving=true; }
+  for(i=m.timers.length-1;i>=0;i--){
+    if(now>=m.timers[i].at){ var f=m.timers[i].fn; m.timers.splice(i,1); f(); moving=true; } }
+  if(m.breath) moving=true;
+  if(sc.def.beats&&sc.playing&&sc.i<sc.def.beats.length-1&&now>=sc.nextAt){ fire(sc,sc.i+1,now); moving=true; }
+  return moving;
+}
+function render(sc,now){
+  var ctx=sc.ctx, m=sc.m;
+  var attn=sc.attn.a.v>0.02?{x:sc.attn.x,y:sc.attn.y,a:sc.attn.a.v}:null;
+  Q.compute(sc.gr,m,now,attn);
+  var p=Q.newPaths(); Q.tess(sc.gr,p); Q.streams(sc.gr,p,attn);
+  ctx.clearRect(0,0,Q.W,Q.H);
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  Q.drawSet(ctx,p,1);
+  /* 이름 — 보고 있는 자리에만. 이름이 자리를 만들지 않는다. */
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(var i=0;i<m.places.length;i++){
+    var pl=m.places[i];
+    if(!pl.semantic||pl.lab.v<0.04||!pl.names.length) continue;
+    ctx.font='600 13px "Noto Sans KR","Malgun Gothic",sans-serif';
+    ctx.lineWidth=4; ctx.strokeStyle='rgba(255,255,255,'+(0.92*pl.lab.v).toFixed(3)+')';
+    ctx.strokeText(pl.names[0], pl.x.v, pl.y.v);
+    ctx.fillStyle='rgba(13,12,11,'+(0.92*pl.lab.v).toFixed(3)+')';
+    ctx.fillText(pl.names[0], pl.x.v, pl.y.v);
+  }
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+}
+function frame(now){
+  raf=0;
+  var dt=Math.min(0.034,(now-last)/1000); last=now;
+  var alive=false;
+  for(var i=0;i<scenes.length;i++){
+    var sc=scenes[i];
+    if(!sc.visible) continue;
+    var moving=stepScene(sc,now,dt);
+    if(moving||sc.dirty){ render(sc,now); sc.dirty=false; }
+    if(moving||(sc.def.beats&&sc.playing&&sc.i<sc.def.beats.length-1)||sc.attn.a.v>0.02) alive=true;
+  }
+  running=alive;
+  if(alive) raf=requestAnimationFrame(frame);
+}
+function kick(){ if(!running){ running=true; last=performance.now(); raf=requestAnimationFrame(frame); } }
+
+/* ══ 부팅 ═════════════════════════════════════════════════════════════════ */
+for(var i=0;i<STUDIES.length;i++) mount(STUDIES[i]);
+var strip=document.getElementById('strip');
+for(var t=0;t<TYPES.length;t++){
+  (function(spec){
+    var box=el('div','c');
+    var cv=el('canvas'); cv.width=Q.W*DPR; cv.height=Q.H*DPR;
+    box.appendChild(cv);
+    box.appendChild(el('div','cap','<div class="t">'+spec.t+'</div><div class="d">'+spec.d+'</div>'));
+    strip.appendChild(box);
+    var ctx=cv.getContext('2d'); ctx.setTransform(DPR,0,0,DPR,0,0);
+    var gr=Q.newGrid(), mm=buildType(spec);
+    Q.compute(gr,mm,0,null); var pp=Q.newPaths(); Q.tess(gr,pp); Q.streams(gr,pp,null);
+    ctx.lineCap='round'; ctx.lineJoin='round'; Q.drawSet(ctx,pp,1);
+  })(TYPES[t]);
+}
+var io=new IntersectionObserver(function(es){
+  for(var a=0;a<es.length;a++){
+    var id=es[a].target.id, sc=null;
+    for(var b=0;b<scenes.length;b++) if(scenes[b].def.id===id) sc=scenes[b];
+    if(!sc) continue;
+    sc.visible=es[a].isIntersecting;
+    if(sc.visible){ sc.dirty=true; sc.nextAt=performance.now()+500;
+      if(!sc.ever){ sc.ever=true; if(sc.def.beats) restart(sc); } kick(); }
+  }
+},{threshold:0.28});
+for(var s=0;s<STUDIES.length;s++) io.observe(document.getElementById(STUDIES[s].id));
+var bootEl=document.getElementById('boot'); if(bootEl) bootEl.parentNode.removeChild(bootEl);
+kick();
+})();
+</script>
+</body>
+</html>

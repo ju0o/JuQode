@@ -10,6 +10,9 @@
 |---|---|
 | [`design/KINETIC_SOFTWARE_REPRESENTATION.md`](design/KINETIC_SOFTWARE_REPRESENTATION.md) | **운동 표상 연구**(3R.4). 재료 = 장(場)과 결. **Founder 판단 대기** |
 | [`design/kinetic-software-study.html`](design/kinetic-software-study.html) | 위 연구의 **인터랙티브 모션 스터디** 5장면 + 정지 프레임. 의존성 0 |
+| [`design/SEMANTIC_PLACE_CANON.md`](design/SEMANTIC_PLACE_CANON.md) | **의미의 자리 법칙**(3R.5). 의미 = 결의 방향. **Founder 판단 대기** |
+| [`design/semantic-place-study.html`](design/semantic-place-study.html) | 위 법칙의 **인터랙티브 연구** 4편 + 유형 스트립. 의존성 0 |
+| [`design/SEMANTIC_PLACE_PM_REVIEW.md`](design/SEMANTIC_PLACE_PM_REVIEW.md) | 위 산출물의 **실제 렌더 검토**. 근거 이미지 `design/evidence/semantic-place/` |
 | [`design/KINETIC_PM_VISUAL_GATE.md`](design/KINETIC_PM_VISUAL_GATE.md) | 위 산출물의 **실제 렌더 검토**(3R.4B). 근거 이미지 `design/evidence/kinetic/` |
 | [`design/SOFTWARE_PHYSICS_CANON.md`](design/SOFTWARE_PHYSICS_CANON.md) | **법칙**(3R.2). 믿음 3 · 행동 5 · 통제 2. **상위 SSOT** |
 | [`design/software-physics-canon.html`](design/software-physics-canon.html) | 위 법칙의 **참조 카드**. 제품 화면이 아니다 |
