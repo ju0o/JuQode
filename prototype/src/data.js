@@ -1,107 +1,120 @@
-/* JuQode v0.1 — Functional Prototype · static data
- * 출처: JuQode-Private/docs/handoffs/LOVABLE_HANDOFF_V01.md §7
- * 이 파일은 Mock이다. Repository 파싱 · Backend · Git 없음. */
+"use strict";
+/* ══════════════════════════════════════════════════════════════════════════
+   JuQode Phase 4A — 하나의 시연 Software
+   여기에 있는 것은 전부 목(mock)이다. 실행도, 파일도, 결과도.
+   목이 아닌 것은 사용자의 상호작용 하나다.
+   ══════════════════════════════════════════════════════════════════════════ */
 
-const WORLD = [
-  {
-    id: 'blog', name: 'Blog', featureCount: 2, note: '아직 없는 것 1',
-    // 관계 구조 — 이것이 그 소프트웨어의 형태다 (A 문법)
-    layers: [1, 1], edges: [[0, 1]], absent: [1], attention: [],
-  },
-  {
-    id: 'store', name: 'Store', featureCount: 3, note: '확인 필요 1',
-    layers: [1, 1, 1], edges: [[0, 1], [1, 2]], absent: [], attention: [2],
-  },
-  {
-    id: 'juguard', name: 'JuGuard', featureCount: 5, note: '정상',
-    layers: [1, 2, 2], edges: [[0, 1], [0, 2], [1, 3], [2, 4]], absent: [], attention: [],
-  },
-  {
-    id: 'myservice', name: 'My Service', featureCount: 8,
-    note: '확인 필요 2 · 아직 없는 것 1', current: true,
-    layers: [2, 2, 3, 1],
-    edges: [[0, 2], [1, 3], [1, 6], [2, 4], [3, 5], [5, 7]],
-    absent: [6], attention: [3, 7],
-  },
+/* ── 자리 = 의미. 좌표·질량·방향은 동결 설계와 같은 값이다 ─────────────── */
+var PLACES = [
+  {id:'intake', name:'요청 받기',  x:250,y:168, rx:152,ry:60, rot: 0.10, amp:0.55, mass:0.30, dir:  0},
+  {id:'auth',   name:'로그인',     x:418,y:246, rx:150,ry:84, rot:-0.10, amp:0.92, mass:0.55, dir: 34},
+  {id:'session',name:'세션 유지',  x:596,y:306, rx:128,ry:62, rot: 0.16, amp:0.60, mass:0.50, dir: 20},
+  {id:'pay',    name:'결제 요청',  x:576,y:172, rx:106,ry:54, rot:-0.24, amp:0.42, mass:0.25, dir: 50},
+  {id:'store',  name:'사용자 저장',x:262,y:334, rx:178,ry:74, rot: 0.05, amp:1.06, mass:0.95, dir:-44}
 ];
+var VOIDS = [{x:520,y:190,rx:40,ry:27,depth:0.90}];
 
-/* My Service — Feature. layer = 관계 깊이. 크기는 동작 수에서 나온다 (임의 아님) */
-const FEATURES = [
-  { id: 'signup',  name: '회원가입', layer: 0,
-    behaviors: ['정보 입력', '중복 확인', '계정 만들기', '환영 메일'] },
-  { id: 'search',  name: '검색',     layer: 0,
-    behaviors: ['검색어 입력', '결과 찾기', '조건 좁히기', '정렬', '최근 검색 저장'] },
-  { id: 'login',   name: '로그인',   layer: 1, state: '정상 작동',
-    related: ['프로필', '세션'], lastChange: '로그인 실패 메시지 수정',
-    behaviors: ['사용자 입력', '사용자 확인', '인증', '세션 생성', '홈 이동', '로그인 실패'] },
-  { id: 'payment', name: '결제',     layer: 1, attention: true,
-    behaviors: ['결제수단 확인', '금액 계산', '쿠폰 적용', '결제 요청', '결제 성공', '결제 실패', '주문 생성'] },
-  { id: 'profile', name: '프로필',   layer: 2,
-    behaviors: ['정보 보기', '정보 고치기', '사진 바꾸기', '비밀번호 바꾸기'] },
-  { id: 'order',   name: '주문',     layer: 2,
-    behaviors: ['주문 확인', '배송지 입력', '주문 접수', '상태 바꾸기', '주문 취소'] },
-  { id: 'reco',    name: 'AI 추천',  layer: 2, absent: true,
-    behaviors: ['사용자 관심 파악', '추천 보여주기'] },
-  { id: 'notify',  name: '알림',     layer: 3, attention: true,
-    behaviors: ['알림 만들기', '보내기', '읽음 처리'] },
-];
-
-const FEATURE_EDGES = [
-  ['signup', 'login'], ['login', 'profile'], ['search', 'payment'],
-  ['payment', 'order'], ['order', 'notify'], ['search', 'reco'],
-];
-
-/* 로그인 Behavior 구조 — 성공/실패 분기 */
-const LOGIN_BEHAVIORS = [
-  { id: 'input',   idx: '01', name: '사용자 입력', note: '로그인 화면',      layer: 0, row: 0 },
-  { id: 'check',   idx: '02', name: '사용자 확인', note: '입력이 맞는지',    layer: 1, row: 0 },
-  { id: 'auth',    idx: '03', name: '인증',        note: '비밀번호 확인',    layer: 2, row: 0 },
-  { id: 'session', idx: '04', name: '세션 생성',   note: '로그인 상태 유지', layer: 3, row: -1 },
-  { id: 'home',    idx: '05', name: '홈 이동',     note: '첫 화면으로',      layer: 4, row: -1 },
-  { id: 'fail',    idx: '실패', name: '로그인 실패', note: '다시 시도해야 한다', layer: 3, row: 1, fail: true },
-];
-
-/* Qode 완료 시 구조에 삽입되는 동작 — 결과는 Software에 반영된다 */
-const NEW_BEHAVIOR = {
-  id: 'wait', idx: '새 동작', name: '30초 기다리기', note: '세 번 실패한 뒤',
-  layer: 4, row: 1, made: true,
+/* ── 문제 = 그 자리의 결이 어긋나거나 끊긴 상태 ──────────────────────────
+   misalign : 이어져 있으나 주위와 안 맞는다
+   break    : 양쪽 결이 만나지 못한다 (더 센 실패)                        */
+var PROBLEM_DEFS = {
+  pay: {
+    place:'pay', title:'결제 요청', human:'응답이 늦어요 · 3번 중 2번',
+    kind:'misalign',
+    seam:{x:576,y:174,rx:112,ry:64,off:0.130,res:0.52,tint:2},
+    amp:0.42,
+    context:['결제 요청','외부 결제 호출','최근 실행 기록 3건'],
+    working:'외부 호출에 재시도와 대기 시간을 넣는 중',
+    result:{
+      title:'결제 요청이 달라졌어요.',
+      body:'외부 결제 호출에 재시도와 대기 시간을 넣었습니다.',
+      measure:'같은 요청 20회 · 모두 3초 이내 · 실패 0',
+      changed:'src/payments/gateway.ts · 재시도 3회 · 대기 2초'
+    },
+    settledAmp:0.54
+  },
+  store: {
+    place:'store', title:'사용자 저장', human:'가끔 목록이 비어요',
+    kind:'misalign',
+    seam:{x:262,y:332,rx:150,ry:66,off:0.110,res:0.52,tint:2},
+    amp:1.06,
+    context:['사용자 저장','목록 읽기','최근 실행 기록 2건'],
+    working:'목록을 읽는 순서를 저장이 끝난 뒤로 옮기는 중',
+    result:{
+      title:'사용자 저장이 달라졌어요.',
+      body:'저장이 끝난 것을 확인한 뒤에 목록을 읽도록 했습니다.',
+      measure:'목록 20회 · 모두 채워짐 · 빈 목록 0',
+      changed:'src/users/list.query.ts · 저장 완료 대기'
+    },
+    settledAmp:1.00
+  },
+  session: {
+    place:'session', title:'세션 유지', human:'실행 중 연결이 끊겨요 · 로그인 후 4초',
+    kind:'break',
+    seam:{x:594,y:304,rx:128,ry:76,off:0.170,res:0.52,tint:2,brk:1},
+    amp:0.74,
+    context:['세션 유지','로그인','방금 실행 기록 1건'],
+    working:'로그인 후 토큰 갱신 시점을 앞으로 옮기는 중',
+    result:{
+      title:'세션 유지가 달라졌어요.',
+      body:'로그인 직후 토큰을 미리 갱신하도록 했습니다.',
+      measure:'로그인 20회 · 연결 유지 20회 · 끊김 0',
+      changed:'src/auth/refresh.ts · 갱신 시점 -30초'
+    },
+    settledAmp:0.60
+  }
 };
 
-const LOGIN_EDGES_BEFORE = [
-  ['input', 'check'], ['check', 'auth'],
-  ['auth', 'session', '성공'], ['auth', 'fail', '실패'],
-  ['session', 'home'],
-];
-const RETURN_EDGE_BEFORE = { from: 'fail', to: 'input', label: '다시 입력으로' };
-
-const LOGIN_EDGES_AFTER = [
-  ...LOGIN_EDGES_BEFORE, ['fail', 'wait'],
-];
-const RETURN_EDGE_AFTER = { from: 'wait', to: 'input', label: '다시 입력으로' };
-
-/* Qode — 자동 준비된 것. 사용자가 고르지 않는다 */
-const QODE = {
-  ask: '로그인에 세 번 실패하면 30초 뒤에 다시 시도할 수 있게 해줘.',
-  agent: 'Claude Code',
-  contextCount: 4,
-  skillCount: 1,
-  context: ['로그인 규칙', '세션 정책', '실패 처리 기준', '한국어'],
-  skill: '동작 추가',
-  working: '로그인 실패 후 30초 대기 기능을 만드는 중',
-  // 실제로 일어난 일. 진행률이 아니다 — 사건이다
-  events: [
-    { at: 400,  text: '요청 이해' },
-    { at: 1500, text: '관련 로그인 동작 확인' },
-    { at: 2900, text: '실패 흐름 수정' },
-    { at: 4200, text: '동작 확인 중', pending: true },
-  ],
-  completeAt: 5600,
-  result: {
-    outcome: '로그인 실패 후 30초 뒤 다시 시도할 수 있게 됐습니다.',
-    impact: '로그인',
-    verified: 3,
-    attention: 1,
-    attentionText: '실제 사용자가 30초를 기다릴지',
-    structural: '동작 1개 · 30초 기다리기',
+/* ── 깊은 기술적 사실 — 전부 선택된 자리에 매여 있다 ─────────────────────
+   이 자리 밖의 파일은 여기 없다. 그것이 이 화면의 논지다.                */
+var ANATOMY = {
+  session:{
+    files:[['src/auth/session.ts','로그인과 공유'],['src/auth/refresh.ts',''],
+           ['src/api/session.route.ts',''],['supabase/migrations/0009_session.sql','',1]],
+    rel:[['POST /session/refresh',''],['sessions','테이블'],['Supabase Auth','',1]],
+    ev:[['로그인 후 4초 · 연결 종료','×3'],['tests/session.spec.ts','실패 1'],['직전 평형 · 3일 전','',1]]
   },
+  pay:{
+    files:[['src/payments/request.ts','결제 시작'],['src/payments/gateway.ts',''],
+           ['src/api/pay.route.ts',''],['src/config/timeout.ts','',1]],
+    rel:[['POST /pay/authorize',''],['외부 결제사 API',''],['payments','테이블',1]],
+    ev:[['응답 3회 중 2회 5초 초과',''],['tests/pay.spec.ts','실패 1'],['직전 평형 · 12분 전','',1]]
+  },
+  store:{
+    files:[['src/users/store.ts','저장'],['src/users/list.query.ts',''],
+           ['src/api/users.route.ts',''],['supabase/migrations/0007_users.sql','',1]],
+    rel:[['GET /users',''],['users','테이블'],['캐시 계층','',1]],
+    ev:[['목록 20회 중 3회 비어 있음',''],['tests/users.spec.ts','실패 1'],['직전 평형 · 어제','',1]]
+  },
+  auth:{
+    files:[['src/auth/login.ts','세션과 공유'],['src/auth/password.ts',''],
+           ['src/api/login.route.ts',''],['supabase/migrations/0004_auth.sql','',1]],
+    rel:[['POST /login',''],['users','테이블'],['Supabase Auth','',1]],
+    ev:[['로그인 200회 · 실패 0',''],['tests/login.spec.ts','통과'],['직전 평형 · 3일 전','',1]]
+  },
+  intake:{
+    files:[['src/http/router.ts','들어오는 문'],['src/http/validate.ts',''],
+           ['src/api/index.ts',''],['src/http/rate.ts','',1]],
+    rel:[['GET /health',''],['모든 경로의 입구',''],['프록시 설정','',1]],
+    ev:[['요청 1만 건 · 거절 0',''],['tests/router.spec.ts','통과'],['직전 평형 · 3일 전','',1]]
+  }
+};
+
+/* ── 런처 — 최근 Software. 4A에서 열리는 것은 하나다 ─────────────────── */
+var RECENT = [
+  {id:'order', name:'주문 서비스', human:'결제 응답이 늦고, 저장한 목록이 가끔 비어요',
+   when:'12분 전', open:true},
+  {id:'dash',  name:'사내 대시보드', human:'지난번에 고친 뒤로 조용해요',
+   when:'어제', open:false},
+  {id:'pipe',  name:'문서 파이프라인', human:'정리됐어요 · 아직 JuQode가 모르는 곳 1',
+   when:'3일 전', open:false}
+];
+
+/* ── 실행 = 관측. 무엇을 보게 되는가 ──────────────────────────────────── */
+var RUN_OBSERVE = {
+  finds:'session',                       /* 아직 모르는 문제 하나를 실제로 들여온다 */
+  watching:'실제 동작을 지켜보는 중 · 로그인 → 주문 → 결제',
+  known:'이미 아는 문제만 다시 보였어요',
+  clean:'새로 발견한 문제가 없어요'
 };

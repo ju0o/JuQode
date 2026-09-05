@@ -1,859 +1,1487 @@
 <!doctype html>
-<!-- 생성된 파일이다. 고치려면 src/ 를 고치고 `node build.mjs` -->
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>JuQode — Software Workspace</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JuQode — 주문 서비스</title>
 <style>
-/* JuQode v0.1 — Functional Prototype
- * 모든 값의 출처: JuQode-Private/docs/design/DESIGN.md (v0.1 Visual Tone · FROZEN)
- * 이 파일에서 토큰을 새로 만들지 않는다. */
 
+/* ══════════════════════════════════════════════════════════════════════════
+   JuQode Phase 4A — 껍데기
+   토큰·기하·리듬은 docs/design/MVP_DESIGN_CONVERGENCE.md 에서 왔다.
+   여기서 새 토큰을 만들지 않는다.
+   ══════════════════════════════════════════════════════════════════════════ */
 :root{
   --paper:#F7F5F2; --surface:#FFFFFF; --sunk:#EDEAE5;
   --ink:#0D0C0B; --ink2:#4A4641; --ink3:#857F77; --ink4:#B5AEA5;
   --hair:#D8D3CC; --attn:#9A5B12; --fail:#8C2B20; --past:#5B6B84;
-  --sans:"Archivo","Noto Sans KR","Helvetica Neue",Arial,sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-  --ease:cubic-bezier(.22,.61,.36,1);
-  --dur:520ms;            /* 의미 전이. 장식이 아니다 */
-  --ctxw:340px;
+  --sans:"Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo",
+         "Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;
+  /* 하나의 왼쪽 기준선 — 상단 · 판 · 말하는 줄이 모두 여기 선다 */
+  --M:22px;
+  --C1:24px;    /* 번호 */
+  --C2:112px;   /* 자리 이름 */
 }
 *{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
-  -webkit-font-smoothing:antialiased;overflow:hidden;min-width:1280px}
-button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+html,body{margin:0;height:100%}
+body{background:var(--surface);color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;overflow:hidden}
+[hidden]{display:none!important}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;
+  text-align:left;cursor:pointer;border-radius:0}
+button[aria-disabled="true"]{cursor:default}
+:focus{outline:none}
+:focus-visible{outline:1px solid var(--ink);outline-offset:3px}
 
-.app{height:100vh;min-height:760px;display:flex;flex-direction:column}
+/* ══ 부팅 확인 — 조용히 빈 화면이 되지 않게 ══════════════════════════════ */
+#boot{padding:40px;font-size:15px;color:var(--ink2);line-height:1.7}
 
-/* 검수용: 전이를 즉시 끝낸다 (?still=1). 제품 동작에는 영향 없음
-   delay 도 0으로 — duration 만 0으로 하면 delay 가 남아 값이 도달하지 않는다 */
-.still *,.still *::before,.still *::after{transition-duration:0ms!important;
-  transition-delay:0ms!important;animation-duration:0ms!important;animation-delay:0ms!important}
+/* ══ 제품 창 — 상단 한 줄 · World · 도구 판 하나 · 말하는 한 줄 ══════════ */
+.app{height:100%;display:flex;flex-direction:column;background:var(--surface)}
 
-/* ── Product Chrome — 44px. IDE 툴바가 아니다 ─────────── */
-.chrome{height:44px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;
-  border-bottom:1px solid var(--hair);background:var(--surface)}
-.chrome .wm{font-size:15px;font-weight:700;letter-spacing:-.03em}
-.chrome .back{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink3);
-  border:1px solid var(--hair);padding:5px 10px;opacity:0;pointer-events:none;transition:opacity 200ms}
-.chrome .back.on{opacity:1;pointer-events:auto}
-.chrome .back:hover{color:var(--ink);border-color:var(--ink3)}
-.chrome .sp{flex:1}
-.chrome .agent{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink2);
-  display:flex;align-items:center;gap:7px}
-.chrome .agent i{width:7px;height:7px;background:var(--ink);display:block;transition:background 200ms}
-.chrome .agent.busy i{background:var(--attn)}
-.chrome .path{font-family:var(--mono);font-size:10.5px;color:var(--ink4)}
+/* ── 상단 한 줄 — 왼쪽 정체 · 가운데 유일한 동사 · 오른쪽 렌즈 ─────────── */
+.top{height:38px;flex:none;border-bottom:1px solid var(--hair);
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
+  padding:0 var(--M);position:relative}
+.top .id{display:flex;align-items:baseline;gap:9px;min-width:0}
+.top .id b{font-size:13px;font-weight:700;letter-spacing:-.028em;white-space:nowrap}
+.top .id .st{font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;
+  color:var(--ink3);white-space:nowrap}
+.top .id .st.f{color:var(--fail)}
+.top .id .st.a{color:var(--attn)}
 
-.body{flex:1;display:flex;min-height:0}
-.stagewrap{flex:1;min-width:0;position:relative;overflow:hidden}
+.verb{justify-self:center;display:flex;align-items:baseline;gap:9px;white-space:nowrap;
+  padding:6px 10px;margin:0 -10px}
+.verb b{font-size:13px;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
+.verb i{font-style:normal;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+  color:var(--ink4)}
+.verb:hover b{color:var(--attn)}
+.verb.on b{color:var(--attn)}
+.verb.on:hover b{color:var(--fail)}
 
-/* ── Containment Frame — 지나온 단계가 테두리로 남는다 (C 문법) ── */
-.frame{position:absolute;border:2px solid var(--ink);pointer-events:none;
-  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
-             right var(--dur) var(--ease),bottom var(--dur) var(--ease),
-             opacity 300ms var(--ease)}
-.notch{position:absolute;top:-9px;left:20px;background:var(--paper);padding:0 10px;
-  font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink2);white-space:nowrap}
-.nstat{position:absolute;top:-9px;right:20px;background:var(--paper);padding:0 10px;
-  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--ink3);white-space:nowrap}
-.memo{position:absolute;bottom:-8px;left:20px;background:var(--paper);padding:0 10px;
-  font-size:11.5px;color:var(--ink4);white-space:nowrap}
+.lens{justify-self:end;display:flex;align-items:center}
+.lens button{position:relative;font-family:var(--mono);font-size:9.5px;letter-spacing:.17em;
+  color:var(--ink3);padding:11px}
+.lens button:last-child{padding-right:0}
+.lens button+button::before{content:'';position:absolute;left:0;top:50%;
+  width:1px;height:1px;background:var(--ink4)}
+.lens button:hover{color:var(--ink)}
+.lens button[aria-disabled="true"]{color:var(--ink4)}
+.lens button[aria-disabled="true"]:hover{color:var(--ink4)}
+.lens button[aria-pressed="true"]{color:var(--ink)}
+.lens button[aria-pressed="true"]::after{content:'';position:absolute;left:11px;right:0;
+  bottom:-2px;height:2px;background:var(--ink)}
+.lens button:last-child[aria-pressed="true"]::after{right:0}
 
-/* ── Software Object — 카드가 아니다 ────────────────── */
-.sw{position:absolute;background:var(--surface);border:2px solid var(--ink);
-  display:flex;flex-direction:column;padding:16px 18px 14px;overflow:hidden;
-  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
-             width var(--dur) var(--ease),height var(--dur) var(--ease),
-             opacity 380ms var(--ease),transform var(--dur) var(--ease),
-             border-width 200ms;cursor:pointer}
-.sw.current{border-width:3px}
-.sw:hover{background:#FDFCFB}
-.sw.receded{opacity:.05;pointer-events:none}
-.sw.entered{cursor:default;z-index:4;overflow:visible}
-.sw.entered:hover{background:var(--surface)}
-.sw .swName{font-size:30px;font-weight:700;letter-spacing:-.035em;line-height:1;
-  transition:font-size var(--dur) var(--ease)}
-.sw.current .swName{font-size:40px}
-.sw.entered .swName{font-size:0;opacity:0}
-.sw .swMeta{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--ink3);
-  margin-top:6px;transition:opacity 240ms}
-.sw.entered .swMeta{opacity:0;height:0;margin:0}
-.sw .swFig{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
-  transition:opacity 260ms}
-.sw.entered .swFig{opacity:0;height:0;flex:none;overflow:hidden}
-.sw .swHint{font-size:12px;color:var(--ink3);border-top:1px solid var(--hair);
-  padding-top:9px;margin-top:9px;line-height:1.6;transition:opacity 240ms}
-.sw.entered .swHint{opacity:0;height:0;padding:0;margin:0;overflow:hidden}
+/* ── Software World — 절대 잘리지 않는다. 판이 커지면 몸이 다시 자리잡는다 ── */
+.world{flex:1;position:relative;overflow:hidden;background:var(--surface);min-height:0}
+.world canvas{position:absolute;left:0;top:0;display:block}
+.world.pick canvas{cursor:pointer}
 
-/* 진입한 소프트웨어의 내부 — Feature 층 */
-.inner{position:absolute;left:0;right:0;top:30px;bottom:0;overflow:hidden;opacity:0;pointer-events:none;
-  transition:opacity 300ms var(--ease) 180ms}
-.inner.on{opacity:1;pointer-events:auto}
+/* ── 도구 판 — 하나. 절대 쌓이지 않는다. 위 경계는 2px 먹선 ─────────────── */
+.band{flex:none;background:var(--paper);border-top:2px solid var(--ink);
+  padding:11px var(--M) 13px}
+.bh2{display:flex;align-items:baseline;gap:10px}
+.bh2 .lb{font-family:var(--mono);font-size:9.5px;letter-spacing:.19em;color:var(--ink3)}
+.bh2 .lb.ok{color:var(--ink)}
+.bh2 .lb.a{color:var(--attn)}
+.bh2 .sp{flex:1}
+.bh2 .ac{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3);
+  white-space:nowrap}
+.bh2 button.ac:hover{color:var(--ink)}
+.bh2 .ac em{font-style:normal;color:var(--ink)}
+.bh2 .ac .stop{color:var(--fail)}
 
-/* ── Feature Object — 폴더·메뉴·카드가 아니다 ───────── */
-.ft{position:absolute;background:var(--surface);border:2px solid var(--ink);
-  padding:13px 15px 12px;display:flex;flex-direction:column;overflow:hidden;z-index:2;
-  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
-             width var(--dur) var(--ease),height var(--dur) var(--ease),
-             opacity 380ms var(--ease),background 160ms,border-color 160ms;cursor:pointer}
-.ft:hover{background:#FDFCFB}
-.ft.selected{background:var(--ink);border-width:3px}
-.ft.selected .ftName,.ft.selected .ftMeta,.ft.selected .ftList{color:#fff}
-.ft.selected .ftList{color:#C6C1BA}
-.ft.selected:hover{background:var(--ink)}
-.ft.attention{border-color:var(--attn)}
-.ft.absent{border-style:dashed;border-color:var(--ink4)}
-.ft.absent .ftName{color:var(--ink3)}
-.ft.receded{opacity:0;pointer-events:none}
-.ft.entered{cursor:default;background:var(--surface);border-width:3px;z-index:5;overflow:visible}
-.ft.entered .ftName,.ft.entered .ftMeta,.ft.entered .ftList{color:var(--ink)}
-.ft .ftName{font-size:23px;font-weight:700;letter-spacing:-.03em;line-height:1.1;
-  display:flex;align-items:center;gap:8px;transition:opacity 240ms}
-.ft.entered .ftName{opacity:0;height:0;overflow:hidden}
-.ft .ftMeta{font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;color:var(--ink3);
-  margin-top:6px;transition:opacity 240ms}
-.ft.entered .ftMeta{opacity:0;height:0;margin:0;overflow:hidden}
-.ft .ftList{font-size:12px;color:var(--ink3);line-height:1.72;margin-top:auto;
-  transition:opacity 240ms}
-.ft.entered .ftList{opacity:0;height:0;margin:0;overflow:hidden}
-.mk{width:9px;height:9px;flex:none;background:var(--ink);display:inline-block}
-.mk.a{background:var(--attn)}
+/* 지표 — World가 읽히는 순서 그대로. 번호가 World와 지표를 잇는다 */
+.ix{margin-top:9px}
+.ix .r{display:grid;grid-template-columns:var(--C1) var(--C2) 1fr;align-items:baseline;
+  padding:5px 0;position:relative;width:100%}
+.ix .r i{font-style:normal;font-family:var(--mono);font-size:11px;color:var(--ink3);
+  letter-spacing:.04em}
+.ix .r b{font-size:13.5px;font-weight:700;letter-spacing:-.03em;color:var(--ink)}
+.ix .r span{font-size:12.5px;color:var(--ink3);letter-spacing:-.012em}
+.ix .r b em{font-style:normal;font-family:var(--mono);font-size:9px;letter-spacing:.13em;
+  color:var(--ink3);margin-left:9px;vertical-align:1px}
+.ix .r::before{content:'';position:absolute;left:-13px;top:3px;bottom:3px;width:2px;
+  background:var(--ink);opacity:0}
+.ix button.r:hover::before{opacity:.34}
+.ix .r.on::before{opacity:1}
+.ix .r.on i{color:var(--ink)}
+.ix .r.dim i{color:var(--ink4)}
+.ix .r.dim b{color:var(--ink4);font-weight:500}
+.ix .r.dim span{color:var(--ink4)}
+.ix button.r:hover i{color:var(--ink)}
+.ix button.r:hover b{color:var(--ink);font-weight:700}
 
-/* ── Behavior Node ─────────────────────────────────── */
-.bh{position:absolute;background:var(--surface);border:2px solid var(--ink);
-  padding:12px 14px 11px;display:flex;flex-direction:column;z-index:2;
-  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),
-             opacity 420ms var(--ease),transform 420ms var(--ease)}
-.bh .bIdx{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--ink4)}
-.bh .bName{font-size:21px;font-weight:700;letter-spacing:-.03em;margin-top:6px;line-height:1.15}
-.bh .bNote{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--ink3);margin-top:auto}
-.bh.fail{border-color:var(--fail);border-style:dashed}
-.bh.fail .bName,.bh.fail .bIdx,.bh.fail .bNote{color:var(--fail)}
-.bh.made{border-color:var(--attn);border-width:3px}
-.bh.made .bName{color:var(--attn)}
-@keyframes bhAppear{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
-.bh.made{animation:bhAppear 300ms var(--ease) both}
-.bTag{position:absolute;top:-10px;right:-2px;background:var(--attn);color:#fff;
-  font-family:var(--mono);font-size:9px;letter-spacing:.12em;padding:3px 8px}
+/* 맥락 — 양식이 아니라 판 안의 접힌 한 줄 */
+.ldg{display:flex;align-items:baseline;gap:11px;margin-top:10px;padding-top:9px;
+  border-top:1px solid var(--hair)}
+.ldg .lb{font-family:var(--mono);font-size:9.5px;letter-spacing:.19em;color:var(--ink3);
+  white-space:nowrap}
+.ldg b{font-size:12.5px;font-weight:500;letter-spacing:-.02em;color:var(--ink2)}
+.ldg span{font-size:12.5px;color:var(--ink4)}
+.ldg .sp{flex:1}
+.ldg .ac{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3)}
 
-/* 관계선 — 직교. bezier 금지 */
-.edges{position:absolute;inset:0;pointer-events:none;z-index:1;overflow:visible}
-.eLabel{position:absolute;background:var(--paper);font-family:var(--mono);font-size:9px;
-  letter-spacing:.12em;color:var(--ink3);padding:1px 6px;z-index:2;white-space:nowrap;
-  transition:left var(--dur) var(--ease),top var(--dur) var(--ease),opacity 300ms}
-.eLabel.f{color:var(--fail)}
+/* 결과 — 상자도 배지도 없다. 문장과 계측이다 */
+.band.res{padding-top:11px;padding-bottom:15px;animation:rise .40s cubic-bezier(.2,.7,.2,1)}
+@keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.band.res .h{margin-top:9px;font-size:19px;font-weight:700;letter-spacing:-.04em;line-height:1.2}
+.band.res .d{font-size:13px;color:var(--ink2);line-height:1.62;margin-top:8px;max-width:660px}
+.band.res .ev{margin-top:11px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+  color:var(--ink2)}
+.band.res .chg{margin-top:8px;font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;
+  color:var(--ink3)}
+.band.res .ac2{display:flex;gap:22px;margin-top:12px}
+.band.res .ac2 button{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3)}
+.band.res .ac2 button:hover{color:var(--ink)}
+.band.res .ac2 button.pt{color:var(--past)}
+.band.res .ac2 button.pt:hover{color:#3E4E68}
 
-/* ── Contextual Work Surface — 상시 아님 ──────────── */
-.ctx{width:0;flex:none;border-left:2px solid var(--ink);background:var(--surface);
-  overflow:hidden;transition:width var(--dur) var(--ease);border-left-width:0}
-.ctx.on{width:var(--ctxw);border-left-width:2px}
-.ctxIn{width:var(--ctxw);padding:20px 20px 0;height:100%;display:flex;flex-direction:column;
-  opacity:0;transition:opacity 260ms var(--ease) 140ms}
-.ctx.on .ctxIn{opacity:1}
-.ctxKind{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink3)}
-.ctxH1{font-size:32px;font-weight:700;letter-spacing:-.035em;line-height:1.05;margin:9px 0 18px}
-.ctxH2{font-size:20px;font-weight:700;letter-spacing:-.025em;line-height:1.35;margin:9px 0 18px}
-.blk{border-top:1px solid var(--hair);padding:12px 0}
-.blk:last-of-type{border-bottom:1px solid var(--hair)}
-.blkLabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3);margin-bottom:6px}
-.blkVal{font-size:15px;font-weight:500;letter-spacing:-.01em}
-.blkVal.a{color:var(--attn)}
-.list{display:flex;flex-direction:column}
-.list span{font-size:13.5px;padding:4px 0 4px 11px;border-left:2px solid var(--hair);margin-left:1px}
-.list span.f{color:var(--fail);border-left-color:var(--fail)}
-.list span.a{color:var(--attn);border-left-color:var(--attn)}
-.chips{display:flex;flex-wrap:wrap;gap:6px}
-.chips span{font-size:12.5px;border:1px solid var(--hair);padding:3px 8px}
-.chips span.strong{border-color:var(--ink);font-weight:600}
-.events{display:flex;flex-direction:column;gap:5px}
-.events span{font-size:13px;display:flex;gap:9px;align-items:baseline}
-.events span b{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--ink3);
-  width:26px;flex:none;font-weight:500}
-.events span.now,.events span.now b{color:var(--attn)}
-.nums{display:flex;gap:22px;align-items:baseline}
-.nums div{display:flex;flex-direction:column;gap:3px}
-.nums .n{font-family:var(--mono);font-size:26px;font-weight:500;line-height:1}
-.nums .n.a{color:var(--attn)}
-.nums .l{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink3)}
-.ctxNote{font-size:11.5px;color:var(--ink4);line-height:1.75;padding:12px 0}
-.rawEntry{margin-top:auto;border-top:2px solid var(--ink);padding:12px 0;
-  font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--ink3);
-  display:flex;justify-content:space-between}
+/* 깊이 — 오른쪽 레일이 아니다. 자리 이름에 매달려 아래에서 열리는 해부도 */
+.band.deep{padding-top:15px;padding-bottom:0;animation:rise .34s cubic-bezier(.2,.7,.2,1)}
+.band.deep .dh{display:flex;align-items:baseline;gap:14px}
+.band.deep .dh b{font-size:20px;font-weight:700;letter-spacing:-.04em}
+.band.deep .dh span{font-size:12.5px;color:var(--ink3)}
+.band.deep .cols{display:grid;grid-template-columns:1.15fr 1fr 1.1fr;margin-top:14px;
+  padding-bottom:14px}
+.band.deep .cols>div{padding-left:26px;border-left:1px solid var(--hair);min-width:0}
+.band.deep .cols>div:first-child{padding-left:0;border-left:0}
+.band.deep .ch{font-family:var(--mono);font-size:9.5px;letter-spacing:.19em;color:var(--ink3);
+  padding-bottom:9px}
+.band.deep .l{font-family:var(--mono);font-size:10.5px;line-height:2.05;color:var(--ink);
+  letter-spacing:.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.band.deep .l u{text-decoration:none;color:var(--ink3);margin-left:9px}
+.band.deep .l.g{color:var(--ink3)}
+.band.deep .df{display:flex;align-items:baseline;border-top:1px solid var(--hair);
+  padding:11px 0 12px;font-size:12.5px;color:var(--ink3)}
+.band.deep .df .sp{flex:1}
+.band.deep .df button{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3)}
+.band.deep .df button:hover{color:var(--ink)}
 
-/* ── Qode Composer — Chat이 아니다 ────────────────── */
-.qode{flex:none;border-top:2px solid var(--ink);background:var(--surface);padding:0 20px}
-.prep{height:26px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--hair);
-  font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink3)}
-.prep b{color:var(--ink);font-weight:500}
-.prep .a{color:var(--attn)}
-.prep .hint{margin-left:auto;color:var(--ink4);letter-spacing:.06em}
-.qrow{height:74px;display:flex;align-items:center;gap:20px}
-.qrow input{flex:1;border:0;outline:0;background:none;font-family:var(--sans);
-  font-size:22px;letter-spacing:-.025em;color:var(--ink);min-width:0}
-.qrow input::placeholder{color:var(--ink4)}
-.qrow .go{font-family:var(--mono);font-size:12px;letter-spacing:.12em;font-weight:500;
-  border:2px solid var(--ink);padding:11px 20px;white-space:nowrap;transition:background 160ms,color 160ms}
-.qrow .go.armed{background:var(--ink);color:#fff}
-.qrow .go[disabled]{opacity:.35;cursor:default}
+/* ── 말하는 한 줄 — 상자가 아니다. 주어를 제품이 먼저 쓴 문장이다 ───────── */
+.say{flex:none;height:54px;border-top:2px solid var(--ink);background:var(--surface);
+  display:flex;align-items:center;padding:0 var(--M)}
+.say .subj{font-size:17px;font-weight:700;letter-spacing:-.035em;color:var(--ink);
+  white-space:nowrap}
+.say .mk{font-style:normal;font-size:13px;color:var(--ink4);margin:0 11px 0 10px;
+  transform:translateY(-1px)}
+.say input{flex:1;min-width:0;font-family:var(--sans);font-size:17px;letter-spacing:-.03em;
+  color:var(--ink);border:0;background:transparent;padding:0;height:34px;
+  caret-color:var(--ink)}
+.say input::placeholder{color:var(--ink4);opacity:1}
+/* 이 줄만은 초점 테두리를 두르지 않는다 — 상자가 생기면 채팅 입력으로 되읽힌다.
+   실제로 눌러 보고 알았다: :focus-visible 이 여기에 사각형을 그렸다. */
+.say input:focus,.say input:focus-visible{outline:none;box-shadow:none;border:0}
+.say .hint{font-family:var(--mono);font-size:9.5px;letter-spacing:.17em;color:var(--ink3);
+  white-space:nowrap;padding-left:18px}
+.say .hint u{text-decoration:none;color:var(--ink)}
+.say .hint.na{color:var(--ink4)}
+
+/* ══ 런처 — 카드 갤러리가 아니라 몸과 문제 수의 목록 ═════════════════════ */
+.lch{height:100%;overflow:auto;padding:44px 0 40px}
+.lch .in{max-width:1080px;margin:0 auto;padding:0 40px}
+.lch .mark{font-family:var(--mono);font-size:10px;letter-spacing:.3em;color:var(--ink)}
+.lch h1{font-size:30px;font-weight:700;letter-spacing:-.042em;margin:14px 0 0;line-height:1.15}
+.lch .thesis{font-size:12.5px;color:var(--ink3);margin-top:9px}
+.lsec{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--ink3);
+  border-top:1px solid var(--ink);padding-top:10px;margin-top:26px}
+.lr{display:grid;grid-template-columns:262px 1fr 96px 92px;align-items:center;
+  border-bottom:1px solid var(--hair);padding:10px 0;width:100%}
+.lr .mini{width:262px;height:102px;position:relative;overflow:hidden}
+.lr .mini canvas{position:absolute;left:0;top:0}
+.lr .meta{padding-left:28px;min-width:0}
+.lr .meta b{font-size:16px;font-weight:700;letter-spacing:-.032em;display:block}
+.lr .meta span{font-size:12.5px;color:var(--ink3);display:block;margin-top:6px}
+.lr .when{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;color:var(--ink4);
+  text-align:right}
+.lr .cnt{text-align:right}
+.lr .cnt em{font-style:normal;font-size:19px;font-weight:700;letter-spacing:-.04em;color:var(--fail)}
+.lr .cnt i{font-style:normal;font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;
+  color:var(--ink3);margin-left:7px}
+.lr .cnt .ok{font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;color:var(--ink3)}
+button.lr:hover .meta b{color:var(--fail)}
+button.lr:hover{background:var(--paper)}
+.lr[aria-disabled="true"] .meta b{color:var(--ink3)}
+.lnew{display:flex;align-items:baseline;margin-top:15px}
+.lnew span{font-size:14.5px;font-weight:700;letter-spacing:-.03em;padding-right:26px;
+  color:var(--ink4)}
+.lnew .sp{flex:1}
+.lnew i{font-style:normal;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+  color:var(--ink4)}
+.lnote{margin-top:22px;font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;
+  color:var(--ink4)}
+
 
 </style>
 </head>
 <body>
-<!-- 부팅 확인. JS 가 뜨면 app.js 가 이 블록을 지운다.
-     이 문장이 보인다는 것은 스크립트가 실행되지 않았다는 뜻이다 (조용히 깨지지 않게). -->
-<div id="bootmsg" style="position:fixed;inset:0;z-index:999;background:#F7F5F2;
-  font:15px/1.7 -apple-system,'Malgun Gothic',sans-serif;color:#0D0C0B;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px;text-align:center">
-  <div style="font-weight:700;font-size:19px">화면이 아직 뜨지 않았습니다</div>
-  <div style="color:#4A4641">이 파일은 하나로 완결되어 있어 인터넷도 서버도 필요하지 않습니다.<br>
-    브라우저에서 JavaScript 가 꺼져 있으면 이 문장이 남습니다.</div>
-  <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#857F77;letter-spacing:.06em">
-    JuQode prototype · self-contained</div>
+
+<!-- 조용히 빈 화면이 되지 않게. app.js 가 이 블록을 지운다. -->
+<div id="boot">
+  <b>이 화면이 아직 뜨지 않았습니다.</b><br>
+  index.html 을 그대로 열어야 합니다. 외부 파일을 불러오지 않으므로
+  인터넷도 서버도 필요하지 않습니다.
 </div>
-<div class="app">
 
-  <div class="chrome">
-    <span class="wm">JuQode</span>
-    <button class="back" id="back">← 밖으로</button>
-    <span class="sp"></span>
-    <span class="agent" id="agent"><i></i><span id="agentText">Claude Code · 연결됨</span></span>
-    <span class="path">C:\Desktop\MyService</span>
+<!-- ══ 런처 ═══════════════════════════════════════════════════════════ -->
+<section class="lch" id="launcher" hidden>
+  <div class="in">
+    <div class="mark">JUQODE</div>
+    <h1>어떤 Software로 갈까요?</h1>
+    <div class="thesis">Developers Code. Vibe Coders Qode.</div>
+    <div class="lsec">이어서 하기</div>
+    <div id="recent"></div>
+    <div class="lsec">새로 가져오기</div>
+    <div class="lnew">
+      <span>이 컴퓨터에서</span><span>GitHub에서</span><span>빈 Software로</span>
+      <div class="sp"></div><i>폴더를 끌어 놓아도 됩니다</i>
+    </div>
+    <div class="lnote">PHASE 4A 프로토타입 · 주문 서비스만 열립니다</div>
   </div>
+</section>
 
-  <div class="body">
-    <div class="stagewrap" id="stage"></div>
-    <aside class="ctx" id="ctx"><div class="ctxIn" id="ctxIn"></div></aside>
-  </div>
-
-  <div class="qode">
-    <div class="prep" id="prep"></div>
-    <div class="qrow">
-      <input id="ask" placeholder="원하는 걸 말해보세요." autocomplete="off" spellcheck="false">
-      <button class="go" id="go">Qode 실행</button>
+<!-- ══ 작업 공간 — 하나의 껍데기. 상태만 바뀐다 ═══════════════════════ -->
+<section class="app" id="ws" hidden>
+  <div class="top">
+    <div class="id"><b id="swName">주문 서비스</b><span class="st" id="swState"></span></div>
+    <button class="verb" id="btnRun" type="button">
+      <b id="runLabel">실행</b><i id="runHint"></i>
+    </button>
+    <div class="lens">
+      <button id="lensTime" type="button" aria-disabled="true"
+        title="시간은 Phase 4A에서 열리지 않습니다">시간</button>
+      <button id="lensConn" type="button" aria-disabled="true"
+        title="연결은 Phase 4A에서 열리지 않습니다">연결</button>
+      <button id="lensDeep" type="button" aria-pressed="false">깊이</button>
     </div>
   </div>
+  <div class="world" id="world"><canvas id="cv"></canvas></div>
+  <div class="band" id="band" hidden></div>
+  <form class="say" id="say" autocomplete="off">
+    <b class="subj" id="subj">주문 서비스</b><i class="mk">▸</i>
+    <input id="inp" type="text" placeholder="무엇을 바꿀까요?" aria-label="원하는 변화를 말해보세요">
+    <span class="hint" id="hint"></span>
+  </form>
+</section>
 
-</div>
 <script>
+
+/* ── src/world.js ────────────────────────────────── */
+
+"use strict";
+/* ── 동결된 물리 엔진 — docs/design/mvp-wireframe.html 에서 그대로 옮겼다.
+   프로토타입에서 표상을 다시 만들지 않는다. 바꾼 것은 반환 목록 한 줄뿐이다. ── */
+var JQ = (function(){
+/* ══════════════════════════════════════════════════════════════════════════
+   JuQode — Semantic Place
+   재료는 3R.4 그대로다. 바뀐 것은 하나뿐이다:
+   결의 방향이 상수가 아니라 의미가 정하는 값이 되었다.
+   ══════════════════════════════════════════════════════════════════════════ */
+var W = 864, H = 470;
+var G = 7;
+var SURF = 0.060;      // 겉면 레벨
+var DG   = 0.034;      // 결 간격
+var MASSK= 0.20;       // 질량이 그 자리의 결을 얼마나 조이는가 — 방향은 건드리지 않는다
+var WARP = 50;         // 재료의 고정된 흔들림
+var BASE_RES = 0.62;
+var W0   = 0.20;       // 주변 결의 발언권 — 자리가 없는 곳은 이 방향으로 흐른다
+var GDIR = 0.00350;    // 자리의 결도 주변과 같은 간격을 갖는다
+var SEM  = 1.06;       // 뜻이 미치는 범위 (질량 타원 대비)
+var AMB  = -20;        // 뜻이 없는 곳이 향하는 방향(도)
+var SHLD = 0.34;       // 어깨 — 이 폭에서 결이 돈다. 선이 아니다
+
+function resStep(r){ return r < 0.34 ? 4 : (r < 0.70 ? 2 : 1); }
+function bandOf(mass){ return mass<0.26?0:(mass<0.62?1:(mass<1.04?2:3)); }
+
+function D(v,k){ return {v:v, t:v, vel:0, k:k||24}; }
+function stepD(d,dt){
+  if(d.v === d.t && d.vel === 0) return false;
+  var c = 2*Math.sqrt(d.k);
+  d.vel += ((d.t-d.v)*d.k - d.vel*c)*dt;
+  d.v   += d.vel*dt;
+  if(Math.abs(d.t-d.v) < 2e-4 && Math.abs(d.vel) < 2e-3){ d.v=d.t; d.vel=0; return false; }
+  return true;
+}
+function stiff(mass){ return 30/(1 + 2.4*(mass||0)); }
+
+/* ── 모델 ─────────────────────────────────────────────────────────────── */
+function newModel(){
+  return {places:[], byId:{}, seams:[], voids:[], pulses:[], timers:[], breath:null, focus:null};
+}
+/* 자리 하나 = 의미 하나. 질량도 방향도 이름도 여기 붙는다. 개체가 아니라 성질이다. */
+function mkPlace(o){
+  var k = stiff(o.mass);
+  return {id:o.id, names:o.names||[], mass:o.mass||0, rot:o.rot||0, semantic:o.semantic!==false,
+    x:D(o.x,k), y:D(o.y,k), rx:D(o.rx,k), ry:D(o.ry,k), amp:D(o.amp||0,k),
+    dir:D(o.dir||0, 14), coh:D(o.coh===undefined?1:o.coh, 16), lab:D(0,20)};
+}
+function add(m,p){ m.places.push(p); m.byId[p.id]=p; return p; }
+function to(m,id,f,v){ var p=m.byId[id]; if(p) p[f].t=v; }
+function jump(m,id,f,v){ var p=m.byId[id]; if(p){ p[f].v=v; p[f].t=v; p[f].vel=0; } }
+function addSeam(m,o){
+  var s={id:o.id, x:o.x, y:o.y, rx:o.rx, ry:o.ry,
+    off:D(o.off||0,26), res:D(o.res===undefined?BASE_RES:o.res,26), tint:o.tint||0, brk:o.brk||0};
+  m.seams.push(s); return s;
+}
+function seam(m,id){ for(var i=0;i<m.seams.length;i++) if(m.seams[i].id===id) return m.seams[i]; return null; }
+
+/* ── 격자 ─────────────────────────────────────────────────────────────── */
+function newGrid(){
+  var cols=Math.ceil(W/G)+1, rows=Math.ceil(H/G)+1, n=cols*rows;
+  var wx=new Float32Array(n), wy=new Float32Array(n), flow=new Float32Array(n);
+  var agx=new Float32Array(n), agy=new Float32Array(n);
+  var i,j,px,py,o,ax,ay,da;
+  for(j=0;j<rows;j++) for(i=0;i<cols;i++){
+    px=i*G; py=j*G; o=j*cols+i;
+    ax=px+26*Math.sin(py*0.0132+0.7)+13*Math.sin(px*0.0207+2.1)+5*Math.sin(px*0.045+0.3);
+    ay=py+19*Math.sin(px*0.0111+1.9)+10*Math.sin(py*0.0241+0.4)+4.5*Math.sin(py*0.041+1.1);
+    wx[o]=ax; wy[o]=ay;
+    /* 주변 결 — 뜻이 없는 곳이 향하는 방향. 완만하게 흔들린다(재료의 성질) */
+    da=(AMB+7.5*Math.sin(px*0.0052+py*0.0031+1.1))*Math.PI/180;
+    agx[o]=-Math.sin(da)*GDIR; agy[o]=Math.cos(da)*GDIR;
+    flow[o]=0.00358*(ay*0.92+ax*0.34)+0.130*Math.sin(ax*0.0068+ay*0.0045+1.2);
+  }
+  return {cols:cols, rows:rows, wx:wx, wy:wy, flow:flow, agx:agx, agy:agy, warm:false,
+    val:new Float32Array(n), gf:new Float32Array(n),
+    ws:new Float32Array(n), gxs:new Float32Array(n), gys:new Float32Array(n),
+    res:new Float32Array(n), tint:new Uint8Array(n), mask:new Uint8Array(n)};
+}
+function sampleFlow(gr,x,y){
+  var i=Math.round(x/G), j=Math.round(y/G);
+  if(i<0)i=0; if(i>gr.cols-1)i=gr.cols-1;
+  if(j<0)j=0; if(j>gr.rows-1)j=gr.rows-1;
+  return gr.flow[j*gr.cols+i];
+}
+function addMass(gr,x,y,rx,ry,rot,amp){
+  if(Math.abs(amp)<0.004||rx<=1||ry<=1) return;
+  var cols=gr.cols, rows=gr.rows, val=gr.val, R=Math.max(rx,ry)+WARP;
+  var i0=Math.max(0,Math.floor((x-R)/G)), i1=Math.min(cols-1,Math.ceil((x+R)/G));
+  var j0=Math.max(0,Math.floor((y-R)/G)), j1=Math.min(rows-1,Math.ceil((y+R)/G));
+  var co=Math.cos(rot), si=Math.sin(rot), i,j,o,px,py,dx,dy,u,v,d2,w;
+  for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
+    o=j*cols+i; px=gr.wx[o]-x; py=gr.wy[o]-y;
+    dx=px*co+py*si; dy=-px*si+py*co;
+    u=dx/rx; v=dy/ry; d2=u*u+v*v;
+    if(d2>=1) continue;
+    w=1-d2; val[o]+=amp*w*w;
+  }
+}
+/* 뜻이 미치는 범위 안에서 결의 방향을 자기 쪽으로 당긴다.
+   테두리를 만들지 않는다 — 어깨에서 서서히 이긴다. */
+function addDir(gr,p){
+  var ax=p.x.v, ay=p.y.v, RX=p.rx.v*SEM, RY=p.ry.v*SEM, rot=p.rot;
+  var coh=p.coh.v;
+  /* 질량은 자기 결의 기울기를 키운다 = 그 자리의 결이 조여든다.
+     방향은 그대로다 — 같은 축을 따라 더 가팔라질 뿐이다. */
+  var slope=GDIR*(1+MASSK*p.amp.v);
+  var vx=-Math.sin(p.dir.v*Math.PI/180)*slope, vy=Math.cos(p.dir.v*Math.PI/180)*slope;
+  var cols=gr.cols, rows=gr.rows, R=Math.max(RX,RY)+WARP;
+  var i0=Math.max(0,Math.floor((ax-R)/G)), i1=Math.min(cols-1,Math.ceil((ax+R)/G));
+  var j0=Math.max(0,Math.floor((ay-R)/G)), j1=Math.min(rows-1,Math.ceil((ay+R)/G));
+  var co=Math.cos(rot), si=Math.sin(rot), i,j,o,px,py,dx,dy,u,v,d2,d,t,w;
+  for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
+    o=j*cols+i; px=gr.wx[o]-ax; py=gr.wy[o]-ay;
+    dx=px*co+py*si; dy=-px*si+py*co;
+    u=dx/RX; v=dy/RY; d2=u*u+v*v;
+    if(d2>=1) continue;
+    d=Math.sqrt(d2); t=(1-d)/SHLD; if(t>1)t=1;
+    w=coh*t*t*(3-2*t);
+    if(w<0.004) continue;
+    gr.ws[o]+=w; gr.gxs[o]+=w*vx; gr.gys[o]+=w*vy;
+  }
+}
+/* 한 지점에서 어떤 뜻이 얼마나 지배하는가 — 가리킨 곳의 의미는 계산된다 */
+function meaningAt(m,x,y){
+  var out=[], i,p,px,py,dx,dy,u,v,d2,d,t,w,co,si;
+  for(i=0;i<m.places.length;i++){
+    p=m.places[i]; if(!p.semantic) continue;
+    co=Math.cos(p.rot); si=Math.sin(p.rot);
+    px=x-p.x.v; py=y-p.y.v;
+    dx=px*co+py*si; dy=-px*si+py*co;
+    u=dx/(p.rx.v*SEM); v=dy/(p.ry.v*SEM); d2=u*u+v*v;
+    if(d2>=1) continue;
+    d=Math.sqrt(d2); t=(1-d)/SHLD; if(t>1)t=1;
+    w=t*t*(3-2*t);
+    if(w>0.02) out.push({p:p, w:w});
+  }
+  out.sort(function(a,b){ return b.w-a.w; });
+  return out;
+}
+function ellipseVisit(gr,x,y,rx,ry,fn){
+  var cols=gr.cols, rows=gr.rows, R=Math.max(rx,ry)+WARP;
+  var i0=Math.max(0,Math.floor((x-R)/G)), i1=Math.min(cols-1,Math.ceil((x+R)/G));
+  var j0=Math.max(0,Math.floor((y-R)/G)), j1=Math.min(rows-1,Math.ceil((y+R)/G));
+  var i,j,o,u,v,d2;
+  for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
+    o=j*cols+i;
+    u=(gr.wx[o]-x)/rx; v=(gr.wy[o]-y)/ry; d2=u*u+v*v;
+    if(d2<1) fn(o, Math.sqrt(d2));
+  }
+}
+
+function compute(gr,m,now,attn,resOv){
+  var base=(resOv===undefined? BASE_RES : resOv), i, j, p;
+  var n=gr.val.length;
+  gr.val.fill(0); gr.res.fill(base); gr.tint.fill(0); gr.mask.fill(0);
+  /* ① 몸 */
+  for(i=0;i<m.places.length;i++){
+    p=m.places[i];
+    var a=p.amp.v;
+    if(m.breath && m.breath.id===p.id) a += m.breath.amp*Math.sin(now*m.breath.w);
+    addMass(gr,p.x.v,p.y.v,p.rx.v,p.ry.v,p.rot,a);
+  }
+  for(i=0;i<m.pulses.length;i++){
+    var pu=m.pulses[i], u=(now-pu.t0)/pu.dur;
+    if(u<0||u>1) continue;
+    addMass(gr, pu.x0+(pu.x1-pu.x0)*u, pu.y0+(pu.y1-pu.y0)*u, pu.rx, pu.ry, 0, pu.amp*Math.sin(Math.PI*u));
+  }
+  for(i=0;i<m.voids.length;i++){
+    var vd=m.voids[i];
+    addMass(gr, vd.x, vd.y, vd.rx*1.55, vd.ry*1.55, 0, -vd.depth);
+    ellipseVisit(gr, vd.x, vd.y, vd.rx, vd.ry, function(o){ gr.mask[o]=3; });
+  }
+  /* ② 방향장 — 자리가 없는 곳은 주변 결로 흐른다 */
+  var ws=gr.ws, gxs=gr.gxs, gys=gr.gys, flow=gr.flow;
+  for(i=0;i<n;i++){ ws[i]=W0; gxs[i]=W0*gr.agx[i]; gys[i]=W0*gr.agy[i]; }
+  for(i=0;i<m.places.length;i++){
+    p=m.places[i];
+    if(p.semantic && p.coh.v>0.02) addDir(gr,p);
+  }
+  /* ③ 결 — 방향장 + 질량이 눌러 조인 만큼 */
+  var val=gr.val, cols=gr.cols, rows=gr.rows, iw;
+  for(i=0;i<n;i++){ iw=1/ws[i]; gxs[i]*=iw; gys[i]*=iw; }
+  for(i=0;i<m.seams.length;i++){
+    (function(sm){
+      var rr=sm.res.v, tn=sm.tint, brk=sm.brk, mr=Math.min(sm.rx,sm.ry), cut=sm.off.v;
+      ellipseVisit(gr, sm.x, sm.y, sm.rx, sm.ry, function(o,d){
+        var w=(1-d)/0.22; if(w>1)w=1; if(w<0)w=0;
+        var f=(w-0.35)/0.30; if(f>1)f=1; if(f<0)f=0;
+        if(f>0){ var v2=gr.res[o]+(rr-gr.res[o])*f; if(v2<gr.res[o]) gr.res[o]=v2; }
+        if(w>0.45 && tn) gr.tint[o]=tn;
+        /* 새 재료의 결은 몸의 결과 이어지지 않는다 — 경계에서 끊긴다 */
+        if(cut>0.004){ var dp=(1-d)*mr; if(dp>-3 && dp<(brk?20:11)) gr.mask[o]=3; }
+      });
+    })(m.seams[i]);
+  }
+  /* 주의를 받은 자리는 결이 더 촘촘해진다 — 이름이 아니라 몸이 먼저 답한다 */
+  for(i=0;i<m.places.length;i++){
+    (function(p2){
+      if(!p2.semantic||p2.lab.v<0.04) return;
+      var st=p2.lab.v;
+      ellipseVisit(gr, p2.x.v, p2.y.v, p2.rx.v*1.05, p2.ry.v*1.05, function(o,d){
+        var f=(1-d)/0.45; if(f>1)f=1; if(f<0)f=0;
+        var r2=base+(1-base)*st*f;
+        if(r2>gr.res[o]) gr.res[o]=r2;
+      });
+    })(m.places[i]);
+  }
+  if(attn && attn.a>0.02){
+    ellipseVisit(gr, attn.x, attn.y, 104, 104, function(o,d){
+      var f=(1-d)*attn.a, r2=base+(1-base)*(f>1?1:f);
+      if(r2>gr.res[o]) gr.res[o]=r2;
+    });
+  }
+}
+
+/* ── 결 뽑기 ──────────────────────────────────────────────────────────── */
+function newPaths(){
+  var a=[],i,j;
+  for(i=0;i<4;i++){ a.push([]); for(j=0;j<6;j++) a[i].push(new Path2D()); }
+  return a;
+}
+/* ── ① 겉면 — 몸이 끝나는 자리 (등치선 하나) ─────────────────────────── */
+function tess(gr,paths,forceTint){
+  var cols=gr.cols, rows=gr.rows, val=gr.val, tint=gr.tint, mask=gr.mask;
+  var i,j,o,a,b,c,d,mn,mx,lv,tn,ci,xi,yj,xr,yb,tX,rY,bX,lY;
+  for(j=0;j<rows-1;j++){
+    yj=j*G; yb=yj+G;
+    for(i=0;i<cols-1;i++){
+      o=j*cols+i; xi=i*G; xr=xi+G;
+      a=val[o]; b=val[o+1]; c=val[o+cols+1]; d=val[o+cols];
+      mn=a; mx=a;
+      if(b<mn)mn=b; else if(b>mx)mx=b;
+      if(c<mn)mn=c; else if(c>mx)mx=c;
+      if(d<mn)mn=d; else if(d>mx)mx=d;
+      if(mx<=SURF||mn>SURF) continue;
+      if(mask[o]===2) continue;
+      tn=(forceTint===undefined? tint[o] : forceTint);
+      lv=SURF;
+      ci=(a>lv?1:0)|(b>lv?2:0)|(c>lv?4:0)|(d>lv?8:0);
+      if(ci===0||ci===15) continue;
+      tX=xi+G*(lv-a)/(b-a); rY=yj+G*(lv-b)/(c-b);
+      bX=xi+G*(lv-d)/(c-d); lY=yj+G*(lv-a)/(d-a);
+      emit(paths[tn][4],ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY);
+    }
+  }
+}
+/* ── ② 결 — 방향장을 따라 흐르는 선들 ────────────────────────────────────
+   등치선으로는 이것을 그릴 수 없다. 방향이 자리마다 다른 장은 하나의 스칼라로
+   적분되지 않기 때문이다(회전 성분이 버려진다). 그래서 결을 직접 따라 그린다.
+   ──────────────────────────────────────────────────────────────────────── */
+var D0=15, SEED_K=0.92, BREAK_K=0.52, STEP=3.0, MAXLEN=760;
+function bilin(arr,gr,x,y){
+  var fx=x/G, fy=y/G, i=fx|0, j=fy|0, cols=gr.cols;
+  if(i<0)i=0; if(j<0)j=0; if(i>gr.cols-2)i=gr.cols-2; if(j>gr.rows-2)j=gr.rows-2;
+  var tx=fx-i, ty=fy-j, o=j*cols+i;
+  return arr[o]*(1-tx)*(1-ty)+arr[o+1]*tx*(1-ty)+arr[o+cols]*(1-tx)*ty+arr[o+cols+1]*tx*ty;
+}
+function nearIdx(gr,x,y){
+  var i=Math.round(x/G), j=Math.round(y/G);
+  if(i<0)i=0; if(j<0)j=0; if(i>gr.cols-1)i=gr.cols-1; if(j>gr.rows-1)j=gr.rows-1;
+  return j*gr.cols+i;
+}
+function streams(gr,paths,attn,forceTint){
+  var cols=gr.cols, rows=gr.rows, val=gr.val, res=gr.res, tint=gr.tint, mask=gr.mask;
+  var gxs=gr.gxs, gys=gr.gys;
+  /* 간격 격자 — 이미 그린 결과 너무 가까우면 새 결을 시작하지 않는다 */
+  var CS=D0, gc=Math.ceil(W/CS)+1, gr2=Math.ceil(H/CS)+1;
+  var buckets=new Array(gc*gr2); for(var z=0;z<buckets.length;z++) buckets[z]=null;
+  function push(x,y){
+    var b=((y/CS)|0)*gc+((x/CS)|0);
+    if(b<0||b>=buckets.length) return;
+    if(!buckets[b]) buckets[b]=[];
+    buckets[b].push(x,y);
+  }
+  function tooClose(x,y,r){
+    var bi=(x/CS)|0, bj=(y/CS)|0, r2=r*r, i,j,b,arr,k,dx,dy;
+    for(j=bj-1;j<=bj+1;j++) for(i=bi-1;i<=bi+1;i++){
+      if(i<0||j<0||i>=gc||j>=gr2) continue;
+      arr=buckets[j*gc+i]; if(!arr) continue;
+      for(k=0;k<arr.length;k+=2){ dx=arr[k]-x; dy=arr[k+1]-y; if(dx*dx+dy*dy<r2) return true; }
+    }
+    return false;
+  }
+  function sepAt(o,x,y){
+    var m=val[o], d=D0/(1+0.45*m);
+    var r=res[o]; if(r>0.70) d*=0.56; else if(r<0.34) d*=1.7;
+    return d;
+  }
+  function ok(x,y){
+    if(x<2||y<2||x>W-2||y>H-2) return 0;
+    var o=nearIdx(gr,x,y);
+    if(mask[o]===3) return 0;
+    return bilin(val,gr,x,y)>SURF ? o : 0;
+  }
+  /* 한 줄 그리기 — 앞뒤 양쪽으로 자란다 */
+  function grow(sx,sy){
+    var o0=ok(sx,sy); if(!o0) return null;
+    if(tooClose(sx,sy,sepAt(o0,sx,sy)*SEED_K)) return null;
+    var pts=[], k, x, y, gx, gy, tx, ty, px, py, o, sgn, run, n;
+    for(sgn=1;sgn>=-1;sgn-=2){
+      x=sx; y=sy; px=0; py=0; run=[];
+      for(k=0;k<MAXLEN/STEP;k++){
+        o=ok(x,y); if(!o) break;
+        gx=bilin(gxs,gr,x,y); gy=bilin(gys,gr,x,y);
+        tx=-gy; ty=gx;
+        n=Math.sqrt(tx*tx+ty*ty); if(n<1e-7) break;
+        tx/=n; ty/=n; tx*=sgn; ty*=sgn;
+        if(px||py){ if(tx*px+ty*py<0){ tx=-tx; ty=-ty; } }
+        if(k>1 && tooClose(x,y,sepAt(o,x,y)*BREAK_K)) break;
+        run.push(x,y); px=tx; py=ty;
+        x+=tx*STEP; y+=ty*STEP;
+      }
+      if(sgn===1) pts=run; else { for(k=run.length-2;k>=0;k-=2) pts.unshift(run[k],run[k+1]); }
+    }
+    if(pts.length<10) return null;
+    var mid=(pts.length>>1)&~1;
+    var o1=nearIdx(gr,pts[mid],pts[mid+1]);
+    var tn;
+    if(forceTint!==undefined) tn=forceTint;
+    else {                       /* 선 전체에서 투표 — 상태는 선 하나 단위로 읽힌다 */
+      var vote=[0,0,0,0], q, oq;
+      for(q=0;q<pts.length;q+=2){ oq=nearIdx(gr,pts[q],pts[q+1]); vote[tint[oq]]++; }
+      tn=0; var bestv=0;
+      for(q=1;q<4;q++) if(vote[q]>bestv && vote[q]*3>pts.length/2){ bestv=vote[q]; tn=q; }
+    }
+    var pth=paths[tn][bandOf(val[o1])];
+    pth.moveTo(pts[0],pts[1]);
+    for(k=2;k<pts.length;k+=2) pth.lineTo(pts[k],pts[k+1]);
+    for(k=0;k<pts.length;k+=2) push(pts[k],pts[k+1]);
+    return pts;
+  }
+  /* 씨앗은 이미 그린 결의 옆에서 나온다 — 고르게 채워지고, 난수는 없다 */
+  var queue=[], head=0, best=-1, bx=0, by=0, i2, j2, oo;
+  for(j2=0;j2<rows;j2++) for(i2=0;i2<cols;i2++){
+    oo=j2*cols+i2; if(val[oo]<=SURF||mask[oo]===3) continue;
+    if(val[oo]>best){ best=val[oo]; bx=i2*G; by=j2*G; }
+  }
+  if(best<0) return;
+  queue.push(bx,by);
+  var guard=0;
+  while(head<queue.length && guard++<12000){
+    var qx=queue[head], qy=queue[head+1]; head+=2;
+    var pts=grow(qx,qy); if(!pts) continue;
+    for(var k2=0;k2<pts.length;k2+=2){
+      if(k2%8) continue;
+      var o3=nearIdx(gr,pts[k2],pts[k2+1]), dd=sepAt(o3,pts[k2],pts[k2+1]);
+      var ax2=bilin(gxs,gr,pts[k2],pts[k2+1]), ay2=bilin(gys,gr,pts[k2],pts[k2+1]);
+      var nn=Math.sqrt(ax2*ax2+ay2*ay2); if(nn<1e-7) continue;
+      ax2/=nn; ay2/=nn;
+      queue.push(pts[k2]+ax2*dd, pts[k2+1]+ay2*dd);
+      queue.push(pts[k2]-ax2*dd, pts[k2+1]-ay2*dd);
+    }
+  }
+  /* 끊긴 자리로 둘러싸인 구역은 옆에서 씨앗이 넘어가지 못한다 — 남은 곳을 훑어 채운다.
+     그래야 이음매 안쪽에도 결이 있고, 그 결이 바깥과 만나지 못하는 것이 보인다. */
+  for(j2=0;j2<rows;j2+=2) for(i2=0;i2<cols;i2+=2){
+    oo=j2*cols+i2; if(val[oo]<=SURF||mask[oo]===3) continue;
+    grow(i2*G, j2*G);
+  }
+}
+function emit(p,ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY){
+  switch(ci){
+    case 1: case 14: p.moveTo(xi,lY); p.lineTo(tX,yj); break;
+    case 2: case 13: p.moveTo(tX,yj); p.lineTo(xr,rY); break;
+    case 3: case 12: p.moveTo(xi,lY); p.lineTo(xr,rY); break;
+    case 4: case 11: p.moveTo(xr,rY); p.lineTo(bX,yb); break;
+    case 6: case 9:  p.moveTo(tX,yj); p.lineTo(bX,yb); break;
+    case 7: case 8:  p.moveTo(xi,lY); p.lineTo(bX,yb); break;
+    default:
+      var ctr=(a+b+c+d)*0.25;
+      var joinAC=(ci===5)?(ctr>lv):(ctr<=lv);
+      if(joinAC){ p.moveTo(tX,yj); p.lineTo(xr,rY); p.moveTo(xi,lY); p.lineTo(bX,yb); }
+      else      { p.moveTo(xi,lY); p.lineTo(tX,yj); p.moveTo(xr,rY); p.lineTo(bX,yb); }
+  }
+}
+var TSTR=['13,12,11','154,91,18','140,43,32','91,107,132'];
+var BA=[0.26,0.40,0.58,0.78,0.46,0.15], BW=[0.55,0.62,0.72,0.86,0.95,0.58];
+function drawSet(ctx,paths,dim){
+  for(var t=0;t<4;t++){
+    var boost=(t===1||t===2)?1.35:1;
+    for(var b=0;b<6;b++){
+      var al=BA[b]*boost*dim; if(al>0.96) al=0.96;
+      ctx.strokeStyle='rgba('+TSTR[t]+','+al.toFixed(3)+')';
+      ctx.lineWidth=BW[b]*(dim<1?0.85:1);
+      ctx.stroke(paths[t][b]);
+    }
+  }
+}
+return {W:W,H:H,G:G,SURF:SURF,DG:DG,BASE_RES:BASE_RES,SEM:SEM,
+  TSTR:TSTR,BA:BA,BW:BW,bandOf:bandOf,stiff:stiff,
+  D:D,stepD:stepD,newModel:newModel,mkPlace:mkPlace,add:add,to:to,jump:jump,
+  addSeam:addSeam,seam:seam,newGrid:newGrid,compute:compute,meaningAt:meaningAt,
+  newPaths:newPaths,tess:tess,streams:streams,drawSet:drawSet};
+})();
+
 /* ── src/data.js ─────────────────────────────────── */
-/* JuQode v0.1 — Functional Prototype · static data
- * 출처: JuQode-Private/docs/handoffs/LOVABLE_HANDOFF_V01.md §7
- * 이 파일은 Mock이다. Repository 파싱 · Backend · Git 없음. */
+"use strict";
+/* ══════════════════════════════════════════════════════════════════════════
+   JuQode Phase 4A — 하나의 시연 Software
+   여기에 있는 것은 전부 목(mock)이다. 실행도, 파일도, 결과도.
+   목이 아닌 것은 사용자의 상호작용 하나다.
+   ══════════════════════════════════════════════════════════════════════════ */
 
-const WORLD = [
-  {
-    id: 'blog', name: 'Blog', featureCount: 2, note: '아직 없는 것 1',
-    // 관계 구조 — 이것이 그 소프트웨어의 형태다 (A 문법)
-    layers: [1, 1], edges: [[0, 1]], absent: [1], attention: [],
-  },
-  {
-    id: 'store', name: 'Store', featureCount: 3, note: '확인 필요 1',
-    layers: [1, 1, 1], edges: [[0, 1], [1, 2]], absent: [], attention: [2],
-  },
-  {
-    id: 'juguard', name: 'JuGuard', featureCount: 5, note: '정상',
-    layers: [1, 2, 2], edges: [[0, 1], [0, 2], [1, 3], [2, 4]], absent: [], attention: [],
-  },
-  {
-    id: 'myservice', name: 'My Service', featureCount: 8,
-    note: '확인 필요 2 · 아직 없는 것 1', current: true,
-    layers: [2, 2, 3, 1],
-    edges: [[0, 2], [1, 3], [1, 6], [2, 4], [3, 5], [5, 7]],
-    absent: [6], attention: [3, 7],
-  },
+/* ── 자리 = 의미. 좌표·질량·방향은 동결 설계와 같은 값이다 ─────────────── */
+var PLACES = [
+  {id:'intake', name:'요청 받기',  x:250,y:168, rx:152,ry:60, rot: 0.10, amp:0.55, mass:0.30, dir:  0},
+  {id:'auth',   name:'로그인',     x:418,y:246, rx:150,ry:84, rot:-0.10, amp:0.92, mass:0.55, dir: 34},
+  {id:'session',name:'세션 유지',  x:596,y:306, rx:128,ry:62, rot: 0.16, amp:0.60, mass:0.50, dir: 20},
+  {id:'pay',    name:'결제 요청',  x:576,y:172, rx:106,ry:54, rot:-0.24, amp:0.42, mass:0.25, dir: 50},
+  {id:'store',  name:'사용자 저장',x:262,y:334, rx:178,ry:74, rot: 0.05, amp:1.06, mass:0.95, dir:-44}
 ];
+var VOIDS = [{x:520,y:190,rx:40,ry:27,depth:0.90}];
 
-/* My Service — Feature. layer = 관계 깊이. 크기는 동작 수에서 나온다 (임의 아님) */
-const FEATURES = [
-  { id: 'signup',  name: '회원가입', layer: 0,
-    behaviors: ['정보 입력', '중복 확인', '계정 만들기', '환영 메일'] },
-  { id: 'search',  name: '검색',     layer: 0,
-    behaviors: ['검색어 입력', '결과 찾기', '조건 좁히기', '정렬', '최근 검색 저장'] },
-  { id: 'login',   name: '로그인',   layer: 1, state: '정상 작동',
-    related: ['프로필', '세션'], lastChange: '로그인 실패 메시지 수정',
-    behaviors: ['사용자 입력', '사용자 확인', '인증', '세션 생성', '홈 이동', '로그인 실패'] },
-  { id: 'payment', name: '결제',     layer: 1, attention: true,
-    behaviors: ['결제수단 확인', '금액 계산', '쿠폰 적용', '결제 요청', '결제 성공', '결제 실패', '주문 생성'] },
-  { id: 'profile', name: '프로필',   layer: 2,
-    behaviors: ['정보 보기', '정보 고치기', '사진 바꾸기', '비밀번호 바꾸기'] },
-  { id: 'order',   name: '주문',     layer: 2,
-    behaviors: ['주문 확인', '배송지 입력', '주문 접수', '상태 바꾸기', '주문 취소'] },
-  { id: 'reco',    name: 'AI 추천',  layer: 2, absent: true,
-    behaviors: ['사용자 관심 파악', '추천 보여주기'] },
-  { id: 'notify',  name: '알림',     layer: 3, attention: true,
-    behaviors: ['알림 만들기', '보내기', '읽음 처리'] },
-];
-
-const FEATURE_EDGES = [
-  ['signup', 'login'], ['login', 'profile'], ['search', 'payment'],
-  ['payment', 'order'], ['order', 'notify'], ['search', 'reco'],
-];
-
-/* 로그인 Behavior 구조 — 성공/실패 분기 */
-const LOGIN_BEHAVIORS = [
-  { id: 'input',   idx: '01', name: '사용자 입력', note: '로그인 화면',      layer: 0, row: 0 },
-  { id: 'check',   idx: '02', name: '사용자 확인', note: '입력이 맞는지',    layer: 1, row: 0 },
-  { id: 'auth',    idx: '03', name: '인증',        note: '비밀번호 확인',    layer: 2, row: 0 },
-  { id: 'session', idx: '04', name: '세션 생성',   note: '로그인 상태 유지', layer: 3, row: -1 },
-  { id: 'home',    idx: '05', name: '홈 이동',     note: '첫 화면으로',      layer: 4, row: -1 },
-  { id: 'fail',    idx: '실패', name: '로그인 실패', note: '다시 시도해야 한다', layer: 3, row: 1, fail: true },
-];
-
-/* Qode 완료 시 구조에 삽입되는 동작 — 결과는 Software에 반영된다 */
-const NEW_BEHAVIOR = {
-  id: 'wait', idx: '새 동작', name: '30초 기다리기', note: '세 번 실패한 뒤',
-  layer: 4, row: 1, made: true,
+/* ── 문제 = 그 자리의 결이 어긋나거나 끊긴 상태 ──────────────────────────
+   misalign : 이어져 있으나 주위와 안 맞는다
+   break    : 양쪽 결이 만나지 못한다 (더 센 실패)                        */
+var PROBLEM_DEFS = {
+  pay: {
+    place:'pay', title:'결제 요청', human:'응답이 늦어요 · 3번 중 2번',
+    kind:'misalign',
+    seam:{x:576,y:174,rx:112,ry:64,off:0.130,res:0.52,tint:2},
+    amp:0.42,
+    context:['결제 요청','외부 결제 호출','최근 실행 기록 3건'],
+    working:'외부 호출에 재시도와 대기 시간을 넣는 중',
+    result:{
+      title:'결제 요청이 달라졌어요.',
+      body:'외부 결제 호출에 재시도와 대기 시간을 넣었습니다.',
+      measure:'같은 요청 20회 · 모두 3초 이내 · 실패 0',
+      changed:'src/payments/gateway.ts · 재시도 3회 · 대기 2초'
+    },
+    settledAmp:0.54
+  },
+  store: {
+    place:'store', title:'사용자 저장', human:'가끔 목록이 비어요',
+    kind:'misalign',
+    seam:{x:262,y:332,rx:150,ry:66,off:0.110,res:0.52,tint:2},
+    amp:1.06,
+    context:['사용자 저장','목록 읽기','최근 실행 기록 2건'],
+    working:'목록을 읽는 순서를 저장이 끝난 뒤로 옮기는 중',
+    result:{
+      title:'사용자 저장이 달라졌어요.',
+      body:'저장이 끝난 것을 확인한 뒤에 목록을 읽도록 했습니다.',
+      measure:'목록 20회 · 모두 채워짐 · 빈 목록 0',
+      changed:'src/users/list.query.ts · 저장 완료 대기'
+    },
+    settledAmp:1.00
+  },
+  session: {
+    place:'session', title:'세션 유지', human:'실행 중 연결이 끊겨요 · 로그인 후 4초',
+    kind:'break',
+    seam:{x:594,y:304,rx:128,ry:76,off:0.170,res:0.52,tint:2,brk:1},
+    amp:0.74,
+    context:['세션 유지','로그인','방금 실행 기록 1건'],
+    working:'로그인 후 토큰 갱신 시점을 앞으로 옮기는 중',
+    result:{
+      title:'세션 유지가 달라졌어요.',
+      body:'로그인 직후 토큰을 미리 갱신하도록 했습니다.',
+      measure:'로그인 20회 · 연결 유지 20회 · 끊김 0',
+      changed:'src/auth/refresh.ts · 갱신 시점 -30초'
+    },
+    settledAmp:0.60
+  }
 };
 
-const LOGIN_EDGES_BEFORE = [
-  ['input', 'check'], ['check', 'auth'],
-  ['auth', 'session', '성공'], ['auth', 'fail', '실패'],
-  ['session', 'home'],
-];
-const RETURN_EDGE_BEFORE = { from: 'fail', to: 'input', label: '다시 입력으로' };
-
-const LOGIN_EDGES_AFTER = [
-  ...LOGIN_EDGES_BEFORE, ['fail', 'wait'],
-];
-const RETURN_EDGE_AFTER = { from: 'wait', to: 'input', label: '다시 입력으로' };
-
-/* Qode — 자동 준비된 것. 사용자가 고르지 않는다 */
-const QODE = {
-  ask: '로그인에 세 번 실패하면 30초 뒤에 다시 시도할 수 있게 해줘.',
-  agent: 'Claude Code',
-  contextCount: 4,
-  skillCount: 1,
-  context: ['로그인 규칙', '세션 정책', '실패 처리 기준', '한국어'],
-  skill: '동작 추가',
-  working: '로그인 실패 후 30초 대기 기능을 만드는 중',
-  // 실제로 일어난 일. 진행률이 아니다 — 사건이다
-  events: [
-    { at: 400,  text: '요청 이해' },
-    { at: 1500, text: '관련 로그인 동작 확인' },
-    { at: 2900, text: '실패 흐름 수정' },
-    { at: 4200, text: '동작 확인 중', pending: true },
-  ],
-  completeAt: 5600,
-  result: {
-    outcome: '로그인 실패 후 30초 뒤 다시 시도할 수 있게 됐습니다.',
-    impact: '로그인',
-    verified: 3,
-    attention: 1,
-    attentionText: '실제 사용자가 30초를 기다릴지',
-    structural: '동작 1개 · 30초 기다리기',
+/* ── 깊은 기술적 사실 — 전부 선택된 자리에 매여 있다 ─────────────────────
+   이 자리 밖의 파일은 여기 없다. 그것이 이 화면의 논지다.                */
+var ANATOMY = {
+  session:{
+    files:[['src/auth/session.ts','로그인과 공유'],['src/auth/refresh.ts',''],
+           ['src/api/session.route.ts',''],['supabase/migrations/0009_session.sql','',1]],
+    rel:[['POST /session/refresh',''],['sessions','테이블'],['Supabase Auth','',1]],
+    ev:[['로그인 후 4초 · 연결 종료','×3'],['tests/session.spec.ts','실패 1'],['직전 평형 · 3일 전','',1]]
   },
+  pay:{
+    files:[['src/payments/request.ts','결제 시작'],['src/payments/gateway.ts',''],
+           ['src/api/pay.route.ts',''],['src/config/timeout.ts','',1]],
+    rel:[['POST /pay/authorize',''],['외부 결제사 API',''],['payments','테이블',1]],
+    ev:[['응답 3회 중 2회 5초 초과',''],['tests/pay.spec.ts','실패 1'],['직전 평형 · 12분 전','',1]]
+  },
+  store:{
+    files:[['src/users/store.ts','저장'],['src/users/list.query.ts',''],
+           ['src/api/users.route.ts',''],['supabase/migrations/0007_users.sql','',1]],
+    rel:[['GET /users',''],['users','테이블'],['캐시 계층','',1]],
+    ev:[['목록 20회 중 3회 비어 있음',''],['tests/users.spec.ts','실패 1'],['직전 평형 · 어제','',1]]
+  },
+  auth:{
+    files:[['src/auth/login.ts','세션과 공유'],['src/auth/password.ts',''],
+           ['src/api/login.route.ts',''],['supabase/migrations/0004_auth.sql','',1]],
+    rel:[['POST /login',''],['users','테이블'],['Supabase Auth','',1]],
+    ev:[['로그인 200회 · 실패 0',''],['tests/login.spec.ts','통과'],['직전 평형 · 3일 전','',1]]
+  },
+  intake:{
+    files:[['src/http/router.ts','들어오는 문'],['src/http/validate.ts',''],
+           ['src/api/index.ts',''],['src/http/rate.ts','',1]],
+    rel:[['GET /health',''],['모든 경로의 입구',''],['프록시 설정','',1]],
+    ev:[['요청 1만 건 · 거절 0',''],['tests/router.spec.ts','통과'],['직전 평형 · 3일 전','',1]]
+  }
+};
+
+/* ── 런처 — 최근 Software. 4A에서 열리는 것은 하나다 ─────────────────── */
+var RECENT = [
+  {id:'order', name:'주문 서비스', human:'결제 응답이 늦고, 저장한 목록이 가끔 비어요',
+   when:'12분 전', open:true},
+  {id:'dash',  name:'사내 대시보드', human:'지난번에 고친 뒤로 조용해요',
+   when:'어제', open:false},
+  {id:'pipe',  name:'문서 파이프라인', human:'정리됐어요 · 아직 JuQode가 모르는 곳 1',
+   when:'3일 전', open:false}
+];
+
+/* ── 실행 = 관측. 무엇을 보게 되는가 ──────────────────────────────────── */
+var RUN_OBSERVE = {
+  finds:'session',                       /* 아직 모르는 문제 하나를 실제로 들여온다 */
+  watching:'실제 동작을 지켜보는 중 · 로그인 → 주문 → 결제',
+  known:'이미 아는 문제만 다시 보였어요',
+  clean:'새로 발견한 문제가 없어요'
 };
 
 /* ── src/app.js ──────────────────────────────────── */
-/* JuQode v0.1 — Functional Prototype
- *
- * 핵심 원칙 (LOVABLE_HANDOFF_V01.md §6):
- *   들어가는 것은 라우팅이 아니다. 하나의 DOM 트리에서 컨테이너가 커진다.
- *   지나온 단계는 언마운트되지 않고 테두리로 남는다.
- *
- * 그래서 이 파일에는 router가 없다. depth가 바뀌면 좌표만 다시 계산한다. */
+"use strict";
+/* ══════════════════════════════════════════════════════════════════════════
+   JuQode Phase 4A — 하나의 기계, 아홉 개의 상태
 
-/* data.js 가 먼저 로드되어 전역에 있다 (index.html 의 script 순서) */
+   여덟 개의 설계 프레임은 여덟 개의 페이지가 아니다.
+   껍데기는 그대로 있고 그 안의 상태가 바뀐다. 이 파일이 그 상태 기계다.
 
-window.addEventListener('error', (e) => {
-  document.title = 'JQ_ERR ' + e.message + ' @ ' + (e.lineno || '?');
-});
-const $ = (s) => document.querySelector(s);
-const stage = $('#stage');
-const ctx = $('#ctx');
-const ctxIn = $('#ctxIn');
-const ask = $('#ask');
-const go = $('#go');
-const prep = $('#prep');
-const back = $('#back');
-const agent = $('#agent');
-const agentText = $('#agentText');
+   목(mock)인 것    : Software 실행 · 코딩 에이전트 · 파일 · 결과 수치
+   목이 아닌 것     : 사용자의 상호작용 전부
+   ══════════════════════════════════════════════════════════════════════════ */
+(function(){
 
-/* ── state ───────────────────────────────────────────── */
-const S = {
-  depth: 'world',          // world | service | feature
-  selected: null,          // feature id
-  qode: 'idle',            // idle | working | done
-  events: [],
-  changed: false,          // 30초 기다리기가 구조에 들어갔는가
-};
-let timers = [];
-const clearTimers = () => { timers.forEach(clearTimeout); timers = []; };
+var Q = JQ;
+var MAC = /Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent);
+var RUNKEY = MAC ? '\u2318R' : 'CTRL R';
+var DPR = Math.min(2, window.devicePixelRatio || 1);
 
-/* ── world-level 관계 도형 (A 문법) ──────────────────── */
-function figureSVG(sw, w, h) {
-  const { layers, edges, absent, attention } = sw;
-  const cols = layers.length, cw = w / cols;
-  const pos = []; let i = 0;
-  layers.forEach((count, c) => {
-    const step = h / (count + 1);
-    for (let r = 0; r < count; r++) pos[i++] = { x: cw * c + cw / 2, y: step * (r + 1) };
-  });
-  const lines = edges.map(([a, b]) => {
-    const p = pos[a], q = pos[b]; if (!p || !q) return '';
-    const mx = (p.x + q.x) / 2;
-    return `<path d="M ${p.x} ${p.y} L ${mx} ${p.y} L ${mx} ${q.y} L ${q.x} ${q.y}" fill="none" stroke="#4A4641" stroke-width="1"/>`;
-  }).join('');
-  const sz = 12;
-  const nodes = pos.map((p, n) => {
-    const off = absent.includes(n), at = attention.includes(n);
-    const fill = off ? '#F7F5F2' : at ? '#9A5B12' : '#0D0C0B';
-    const extra = off ? ' stroke="#B5AEA5" stroke-width="1" stroke-dasharray="2 2"' : '';
-    return `<rect x="${(p.x - sz / 2).toFixed(1)}" y="${(p.y - sz / 2).toFixed(1)}" width="${sz}" height="${sz}" fill="${fill}"${extra}/>`;
-  }).join('');
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${lines}${nodes}</svg>`;
-}
-
-/* ── DOM 최초 구성. 이후 다시 만들지 않는다 ──────────── */
-const el = {};
-
-function build() {
-  stage.innerHTML = `
-    <div class="frame" id="worldFrame">
-      <span class="notch" id="worldNotch">이 컴퓨터</span>
-      <span class="nstat" id="worldStat">소프트웨어 4 · 기능 18</span>
-      <span class="memo" id="worldMemo">각 도형은 그 소프트웨어의 기능과 관계다 — 자라면 구조가 자란다</span>
-    </div>`;
-  el.worldFrame = $('#worldFrame');
-  el.worldNotch = $('#worldNotch');
-  el.worldStat = $('#worldStat');
-  el.worldMemo = $('#worldMemo');
-
-  el.sw = {};
-  for (const sw of WORLD) {
-    const d = document.createElement('div');
-    d.className = 'sw' + (sw.current ? ' current' : '');
-    d.dataset.id = sw.id;
-    d.innerHTML = `
-      <div class="swName">${sw.name}</div>
-      <div class="swMeta">기능 ${sw.featureCount} · ${sw.note}${sw.current ? ' · 지금 여기' : ''}</div>
-      <div class="swFig"></div>
-      ${sw.current ? '<div class="swHint">이 도형이 My Service의 구조다 — 채운 칸은 되어 있는 것, 주황은 확인 필요, 점선은 아직 없는 것</div>' : ''}
-      ${sw.current ? `<span class="notch" style="opacity:0" data-role="svcNotch">MY SERVICE</span>
-        <span class="nstat" style="opacity:0" data-role="svcStat">기능 8 · 확인 필요 2 · 아직 없는 것 1</span>
-        <div class="inner" data-role="svcInner"><svg class="edges" data-role="ftEdges"></svg></div>` : ''}`;
-    d.addEventListener('click', () => onSoftwareClick(sw.id));
-    stage.appendChild(d);
-    el.sw[sw.id] = d;
-  }
-
-  const ms = el.sw.myservice;
-  el.svcNotch = ms.querySelector('[data-role=svcNotch]');
-  el.svcStat = ms.querySelector('[data-role=svcStat]');
-  el.svcInner = ms.querySelector('[data-role=svcInner]');
-  el.ftEdges = ms.querySelector('[data-role=ftEdges]');
-
-  el.ft = {};
-  for (const f of FEATURES) {
-    const d = document.createElement('div');
-    d.className = 'ft' + (f.attention ? ' attention' : '') + (f.absent ? ' absent' : '');
-    d.dataset.id = f.id;
-    d.innerHTML = `
-      <div class="ftName">${f.name}${f.attention ? '<span class="mk a"></span>' : ''}</div>
-      <div class="ftMeta">동작 ${f.behaviors.length}${f.absent ? ' · 아직 없음' : f.attention ? ' · 확인 필요' : ''}</div>
-      <div class="ftList">${f.behaviors.join('<br>')}</div>
-      ${f.id === 'login' ? `<span class="notch" style="opacity:0" data-role="lgNotch">로그인</span>
-        <span class="nstat" style="opacity:0" data-role="lgStat">동작 6 · 정상 작동</span>
-        <div class="inner" data-role="lgInner"><svg class="edges" data-role="bhEdges"></svg></div>` : ''}`;
-    d.addEventListener('click', (e) => { e.stopPropagation(); onFeatureClick(f.id); });
-    el.svcInner.appendChild(d);
-    el.ft[f.id] = d;
-  }
-
-  const lg = el.ft.login;
-  el.lgNotch = lg.querySelector('[data-role=lgNotch]');
-  el.lgStat = lg.querySelector('[data-role=lgStat]');
-  el.lgInner = lg.querySelector('[data-role=lgInner]');
-  el.bhEdges = lg.querySelector('[data-role=bhEdges]');
-
-  el.bh = {};
-  for (const b of [...LOGIN_BEHAVIORS, NEW_BEHAVIOR]) {
-    const d = document.createElement('div');
-    d.className = 'bh' + (b.fail ? ' fail' : '') + (b.made ? ' made' : '');
-    d.dataset.id = b.id;
-    d.innerHTML = `<div class="bIdx">${b.idx}</div><div class="bName">${b.name}</div>
-      <div class="bNote">${b.note}</div>${b.made ? '<span class="bTag">새로 생김</span>' : ''}`;
-    if (b.made) d.style.display = 'none';
-    el.lgInner.appendChild(d);
-    el.bh[b.id] = d;
-  }
-}
-
-/* ── 직교 관계선 ─────────────────────────────────────── */
-const MARKERS = `<defs>
-  <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#0D0C0B"/></marker>
-  <marker id="af" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#8C2B20"/></marker>
-</defs>`;
-
-function orthPath(a, b, stub) {
-  if (Math.abs(a.y - b.y) < 1) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
-  const mx = a.x + stub;
-  return `M ${a.x} ${a.y} L ${mx} ${a.y} L ${mx} ${b.y} L ${b.x} ${b.y}`;
-}
-
-function drawEdges(svg, host, pairs, boxes, opts = {}) {
-  const paths = pairs.map(([from, to]) => {
-    const A = boxes[from], B = boxes[to];
-    if (!A || !B) return '';
-    const a = { x: A.x + A.w, y: A.y + A.h / 2 };
-    const b = { x: B.x, y: B.y + B.h / 2 };
-    return `<path d="${orthPath(a, b, opts.stub || 24)}" fill="none" stroke="#0D0C0B" stroke-width="1" marker-end="url(#ah)"/>`;
-  }).join('');
-  let extra = '';
-  if (opts.ret) {
-    const A = boxes[opts.ret.from], B = boxes[opts.ret.to];
-    if (A && B) {
-      const y = Math.min(A.y + A.h + (opts.retLane || 58), (opts.bottom || 1e9) - 14);
-      extra = `<path d="M ${A.x + A.w / 2} ${A.y + A.h} L ${A.x + A.w / 2} ${y} L ${B.x + B.w / 2} ${y} L ${B.x + B.w / 2} ${B.y + B.h}" fill="none" stroke="#8C2B20" stroke-width="1" stroke-dasharray="6 4" marker-end="url(#af)"/>`;
+/* ── 결 그리기 — 굵기를 화면 픽셀 기준으로 고정한다(축소해도 희미해지지 않게) ── */
+function paint(ctx, paths, dim, lwK){
+  var T=Q.TSTR, BA=Q.BA, BW=Q.BW, t, b, al;
+  for(t=0;t<4;t++){
+    var boost=(t===1||t===2)?1.35:1;
+    for(b=0;b<6;b++){
+      al=BA[b]*boost*dim; if(al>0.96) al=0.96; if(al<0.002) continue;
+      ctx.strokeStyle='rgba('+T[t]+','+al.toFixed(3)+')';
+      ctx.lineWidth=BW[b]*lwK;
+      ctx.stroke(paths[t][b]);
     }
   }
-  svg.innerHTML = MARKERS + paths + extra;
-  // 분기 라벨은 DOM으로 (배경으로 선을 덮어야 읽힌다)
-  host.querySelectorAll('.eLabel').forEach((n) => n.remove());
-  (opts.labels || []).forEach(({ from, to, text, fail }) => {
-    const A = boxes[from], B = boxes[to]; if (!A || !B) return;
-    const s = document.createElement('span');
-    s.className = 'eLabel' + (fail ? ' f' : '');
-    s.textContent = text;
-    s.style.left = `${A.x + A.w + (opts.stub || 24) + 6}px`;
-    s.style.top = `${(A.y + A.h / 2 + B.y + B.h / 2) / 2 - 8}px`;
-    host.appendChild(s);
-  });
+}
+/* ── 집힘 = 나머지가 물러나는 것. 테두리를 만들지 않는다 ────────────────── */
+var poolCv=null;
+function lightPool(paths, pl, lwK){
+  if(!poolCv){ poolCv=document.createElement('canvas'); }
+  if(poolCv.width!==Q.W*DPR || poolCv.height!==Q.H*DPR){
+    poolCv.width=Q.W*DPR; poolCv.height=Q.H*DPR;
+  }
+  var oc=poolCv.getContext('2d');
+  oc.setTransform(1,0,0,1,0,0);
+  oc.clearRect(0,0,poolCv.width,poolCv.height);
+  oc.setTransform(DPR,0,0,DPR,0,0);
+  oc.lineCap='round'; oc.lineJoin='round';
+  oc.globalCompositeOperation='source-over';
+  paint(oc,paths,1,lwK);
+  oc.setTransform(DPR,0,0,DPR,0,0);
+  oc.globalCompositeOperation='destination-in';
+  oc.translate(pl.x.v,pl.y.v); oc.rotate(pl.rot);
+  oc.scale(pl.rx.v*1.52, pl.ry.v*1.62);
+  var g=oc.createRadialGradient(0,0,0,0,0,1);
+  g.addColorStop(0,'rgba(0,0,0,1)');
+  g.addColorStop(0.50,'rgba(0,0,0,1)');
+  g.addColorStop(0.78,'rgba(0,0,0,0.55)');
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  oc.fillStyle=g; oc.beginPath(); oc.arc(0,0,1,0,6.2832); oc.fill();
+  return poolCv;
 }
 
-/* ── 레이아웃 ────────────────────────────────────────── */
-const WORLD_POS = {
-  myservice: [0.04, 0.30, 0.47, 0.62],
-  juguard:   [0.55, 0.07, 0.33, 0.35],
-  store:     [0.60, 0.53, 0.29, 0.31],
-  blog:      [0.11, 0.07, 0.23, 0.18],
+/* ══ 상태 ═══════════════════════════════════════════════════════════════
+   흩어진 boolean 더미를 만들지 않는다. 화면은 이 객체의 함수다.          */
+var S = {
+  screen : 'launcher',   /* launcher | workspace                          */
+  phase  : 'idle',       /* idle focused prepared working settled running */
+  focus  : null,         /* 집힌 자리 id                                  */
+  lens   : null,         /* null | 'deep'                                 */
+  input  : '',
+  problems : ['pay','store'],   /* 순서 = 지표 번호 = World의 번호        */
+  fixed  : {},
+  result : null,
+  showChanged : false,
+  runOn  : false, runT0 : 0,
+  workKey: null,  workT0: 0,
+  justNow: null,
+  hover  : null,
+  note   : null,         /* 판 머리에 한 줄. 다음 행동에서 사라진다        */
+  obsNote: null,
+  past   : null          /* 이전 평형 — 되돌리기용                        */
 };
 
-/* 레이아웃은 애니메이션 중인 실측값이 아니라 목표 좌표에서 계산한다.
- * (실측을 쓰면 전이 도중에 계산되어 음수 좌표가 나온다 — 실제로 겪은 버그) */
-function ctxVisible() {
-  return S.qode === 'working' || S.qode === 'done' || !!S.selected;
+function placeName(id){
+  for(var i=0;i<PLACES.length;i++) if(PLACES[i].id===id) return PLACES[i].name;
+  return null;
 }
-function stageBox() {
-  const b = document.querySelector('.body');
-  const W = b.clientWidth - (ctxVisible() ? 342 : 0);
-  return { W, H: b.clientHeight };
+function problemAt(placeId){
+  for(var i=0;i<S.problems.length;i++)
+    if(PROBLEM_DEFS[S.problems[i]].place===placeId) return S.problems[i];
+  return null;
+}
+function ordOf(key){ return S.problems.indexOf(key)+1; }
+function fmt(ms){
+  var s=Math.max(0,Math.floor(ms/1000));
+  return (s/60|0)+':'+('0'+(s%60)).slice(-2);
 }
 
-function layout() {
-  const { W, H } = stageBox();
-  if (!W || !H) return;
-  const inService = S.depth === 'service' || S.depth === 'feature';
-  const inFeature = S.depth === 'feature';
+/* ══ 몸 — 모델은 하나뿐이다. 상태가 바뀌면 목표값만 바꾼다 ══════════════ */
+var M=null, GRID=null, SEAMS={}, FK=Q.D(0,20);
 
-  /* 세계 테두리 — 사라지지 않는다. 얇아진다 */
-  const wi = S.depth === 'world' ? 14 : inFeature ? 8 : 12;
-  Object.assign(el.worldFrame.style, { left: `${wi}px`, top: `${wi}px`, right: `${wi}px`, bottom: `${wi}px` });
-  el.worldNotch.textContent = S.depth === 'world' ? '이 컴퓨터' : '이 컴퓨터 ›';
-  el.worldStat.style.opacity = S.depth === 'world' ? '1' : '0';
-  el.worldMemo.style.opacity = S.depth === 'world' ? '1' : '0';
-
-  /* 소프트웨어 */
-  for (const sw of WORLD) {
-    const d = el.sw[sw.id];
-    if (sw.id === 'myservice' && inService) {
-      const inset = inFeature ? 24 : 34;
-      Object.assign(d.style, { left: `${inset}px`, top: `${inset}px`,
-        width: `${W - inset * 2}px`, height: `${H - inset * 2}px`, transform: 'none' });
-      d.classList.add('entered'); d.classList.remove('receded');
-    } else if (inService) {
-      const [x, y, w, h] = WORLD_POS[sw.id];
-      // 바깥으로 물러난다 — 사라지는 게 아니라 밀려난다
-      const dx = (x + w / 2 - 0.5) * 760, dy = (y + h / 2 - 0.5) * 560;
-      Object.assign(d.style, { left: `${x * W}px`, top: `${y * H}px`,
-        width: `${w * W}px`, height: `${h * H}px`,
-        transform: `translate(${dx}px,${dy}px) scale(.9)` });
-      d.classList.add('receded'); d.classList.remove('entered');
-    } else {
-      const [x, y, w, h] = WORLD_POS[sw.id];
-      Object.assign(d.style, { left: `${x * W}px`, top: `${y * H}px`,
-        width: `${w * W}px`, height: `${h * H}px`, transform: 'none' });
-      d.classList.remove('receded', 'entered');
-      const fig = d.querySelector('.swFig');
-      const fw = Math.round(w * W) - 40, fh = Math.max(46, Math.round(h * H) - 118);
-      const key = `${fw}x${fh}`;
-      if (fig.dataset.key !== key) { fig.dataset.key = key; fig.innerHTML = figureSVG(sw, fw, fh); }
+function newBody(problemKeys, focusId){
+  var m=Q.newModel(), i;
+  Q.add(m,Q.mkPlace({id:'base',semantic:false,x:410,y:268,rx:336,ry:156,
+    rot:-0.05,amp:0.40,mass:0.9}));
+  for(i=0;i<PLACES.length;i++){
+    var a=PLACES[i];
+    Q.add(m,Q.mkPlace({id:a.id,names:[a.name],x:a.x,y:a.y,rx:a.rx,ry:a.ry,
+      rot:a.rot,amp:a.amp,mass:a.mass,dir:a.dir}));
+  }
+  for(i=0;i<VOIDS.length;i++) m.voids.push(VOIDS[i]);
+  return m;
+}
+function buildMain(){
+  M=newBody(); GRID=Q.newGrid(); SEAMS={};
+  syncWorld(true);
+}
+/* 상태 → 몸. 개별 값을 튕겨 보내고 물리가 나머지를 한다. */
+function syncWorld(instant){
+  var i,k,p,def;
+  /* ① 자리의 질량 — 문제가 있으면 부풀고, 고쳐지면 새 평형으로 가라앉는다 */
+  for(i=0;i<PLACES.length;i++){
+    var a=PLACES[i]; p=M.byId[a.id];
+    k=problemAt(a.id);
+    var amp=a.amp;
+    if(k) amp=PROBLEM_DEFS[k].amp;
+    else { for(var fk in S.fixed) if(S.fixed[fk] && PROBLEM_DEFS[fk].place===a.id)
+             amp=PROBLEM_DEFS[fk].settledAmp; }
+    p.amp.t=amp;
+    if(S.workKey && PROBLEM_DEFS[S.workKey].place===a.id) p.rx.t=a.rx*1.14;
+    else p.rx.t=a.rx;
+    /* ② 집힘 — 집힌 자리의 결은 조여들고 나머지는 발언권을 잃는다 */
+    var on=(a.id===S.focus);
+    p.coh.t = S.focus ? (on?1.55:0.40) : 1;
+    p.lab.t = on?1:0;
+    if(instant){ p.amp.v=p.amp.t; p.rx.v=p.rx.t; p.coh.v=p.coh.t; p.lab.v=p.lab.t; }
+  }
+  /* ③ 이음매 — 문제 하나 = 이음매 하나 */
+  for(i=0;i<S.problems.length;i++){
+    k=S.problems[i]; def=PROBLEM_DEFS[k];
+    if(!SEAMS[k]){
+      var s=Q.addSeam(M,{id:k,x:def.seam.x,y:def.seam.y,rx:def.seam.rx,ry:def.seam.ry,
+        off:0,res:Q.BASE_RES,tint:def.seam.tint,brk:def.seam.brk||0});
+      SEAMS[k]=s;
+      if(instant){ s.off.v=def.seam.off; s.res.v=def.seam.res; }
+    }
+    SEAMS[k].dying=false;
+    SEAMS[k].tint=def.seam.tint;
+    SEAMS[k].off.t=def.seam.off;
+    SEAMS[k].res.t=def.seam.res;
+  }
+  for(k in SEAMS){
+    if(S.problems.indexOf(k)<0){
+      /* 상태가 바뀌었으므로 색은 즉시 사라지고, 결은 눈에 보이게 다시 맞춰진다 */
+      SEAMS[k].tint=0; SEAMS[k].off.t=0; SEAMS[k].res.t=Q.BASE_RES; SEAMS[k].dying=true;
     }
   }
-
-  el.svcInner.classList.toggle('on', inService);
-  el.svcNotch.style.opacity = inService ? '1' : '0';
-  el.svcNotch.textContent = inFeature ? 'MY SERVICE ›' : 'MY SERVICE';
-  el.svcStat.style.opacity = inService && !inFeature ? '1' : '0';
-  if (!inService) return;
-
-  /* Feature 층 배치 — 격자가 아니라 관계 방향. 목표 좌표로 계산한다 */
-  const svcInset = inFeature ? 24 : 34;
-  const aw = (W - svcInset * 2) - 4;
-  const ah = (H - svcInset * 2) - 4 - 30;
-  const LAYERS = 4;
-  let GAP = 40;
-  const colW = Math.round((aw - GAP * (LAYERS - 1)) / LAYERS);
-  const raw = (f) => 74 + f.behaviors.length * 24;             // DESIGN.md §E — 면적이 곧 내용
-  const byLayer = [0, 1, 2, 3].map((L) => FEATURES.filter((f) => f.layer === L));
-  // 가장 빡빡한 층이 넘치면 비례를 유지한 채 함께 줄인다
-  let scale = 1;
-  for (const list of byLayer) {
-    if (!list.length) continue;
-    const need = list.reduce((a, f) => a + raw(f), 0) + GAP * (list.length - 1);
-    if (need > ah) scale = Math.min(scale, (ah - GAP * (list.length - 1)) / (need - GAP * (list.length - 1)));
-  }
-  scale = Math.max(0.62, scale);
-  const hOf = (f) => Math.round(raw(f) * scale);
-  const boxes = {};
-  byLayer.forEach((list, L) => {
-    const total = list.reduce((a, f) => a + hOf(f), 0) + GAP * (list.length - 1);
-    let y = Math.max(0, Math.round((ah - total) / 2));
-    for (const f of list) {
-      boxes[f.id] = { x: L * (colW + GAP), y, w: colW, h: hOf(f) };
-      y += hOf(f) + GAP;
-    }
-  });
-
-  for (const f of FEATURES) {
-    const d = el.ft[f.id], b = boxes[f.id];
-    if (f.id === 'login' && inFeature) {
-      Object.assign(d.style, { left: '26px', top: '26px', width: `${aw - 52}px`, height: `${ah - 52}px` });
-      d.classList.add('entered'); d.classList.remove('receded', 'selected');
-    } else if (inFeature) {
-      Object.assign(d.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` });
-      d.classList.add('receded'); d.classList.remove('entered', 'selected');
-    } else {
-      Object.assign(d.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` });
-      d.classList.remove('receded', 'entered');
-      d.classList.toggle('selected', S.selected === f.id);
+  /* ④ 일하는 동안 — 그 자리만 실제로 흔들린다 */
+  M.breath = (S.phase==='working' && S.workKey)
+    ? {id:PROBLEM_DEFS[S.workKey].place, amp:0.085, w:0.0058} : null;
+  FK.t = S.focus?1:0;
+  if(instant) FK.v=FK.t;
+  reapSeams();
+}
+function reapSeams(){
+  for(var k in SEAMS){
+    var s=SEAMS[k];
+    if(s.dying && s.off.v<0.004){
+      var i=M.seams.indexOf(s); if(i>=0) M.seams.splice(i,1);
+      delete SEAMS[k];
     }
   }
-  drawEdges(el.ftEdges, el.svcInner, FEATURE_EDGES, boxes, { stub: 26 });
-  el.ftEdges.style.opacity = inFeature ? '0' : '1';
-  el.svcInner.querySelectorAll('.eLabel').forEach((n) => { n.style.opacity = inFeature ? '0' : '1'; });
-
-  el.lgInner.classList.toggle('on', inFeature);
-  el.lgNotch.style.opacity = inFeature ? '1' : '0';
-  el.lgStat.style.opacity = inFeature ? '1' : '0';
-  el.lgStat.textContent = S.changed ? '동작 7 · 방금 1개 늘었다' : '동작 6 · 정상 작동';
-  if (!inFeature) return;
-
-  /* Behavior 배치 — 성공/실패 분기. 목표 좌표로 계산한다 */
-  const bw = aw - 52 - 4;
-  const bh = ah - 52 - 4 - 30;
-  const NG = 34;
-  const NW = Math.min(212, Math.round((bw - 4 * NG) / 5));
-  const NH = Math.max(104, Math.min(132, Math.round((bh - 150) / 3)));
-  // 세 줄(성공 / 본류 / 실패) + 되돌아가는 점선이 지나갈 차선까지 계산해 가운데 둔다
-  const upGap = Math.round(NH * 1.2), loGap = Math.round(NH * 1.35), RET_LANE = 62;
-  const span = upGap + NH + loGap + RET_LANE;
-  const top0 = Math.max(0, Math.round((bh - span) / 2));
-  const midY = top0 + upGap;
-  const rowY = { '-1': top0, 0: midY, 1: midY + loGap };
-  const list = S.changed ? [...LOGIN_BEHAVIORS, NEW_BEHAVIOR] : LOGIN_BEHAVIORS;
-  const bboxes = {};
-  for (const b of list) {
-    bboxes[b.id] = { x: b.layer * (NW + NG), y: rowY[String(b.row)], w: NW, h: NH };
-    const d = el.bh[b.id];
-    d.style.display = '';
-    Object.assign(d.style, { left: `${bboxes[b.id].x}px`, top: `${bboxes[b.id].y}px`,
-      width: `${NW}px`, height: `${NH}px` });
-  }
-  if (!S.changed) el.bh.wait.style.display = 'none';
-
-  const pairs = (S.changed ? LOGIN_EDGES_AFTER : LOGIN_EDGES_BEFORE).map(([a, b]) => [a, b]);
-  const ret = S.changed ? RETURN_EDGE_AFTER : RETURN_EDGE_BEFORE;
-  drawEdges(el.bhEdges, el.lgInner, pairs, bboxes, {
-    stub: 17, ret, retLane: 34, bottom: bh,
-    labels: [
-      { from: 'auth', to: 'session', text: '성공' },
-      { from: 'auth', to: 'fail', text: '실패', fail: true },
-    ],
-  });
 }
 
-/* ── Contextual Work Surface ────────────────────────── */
-function renderCtx() {
-  let html = '';
-  if (S.qode === 'working') {
-    html = `
-      <div class="ctxKind">이번 QODE</div>
-      <div class="ctxH2">${QODE.working}</div>
-      <div class="blk"><div class="blkLabel">AGENT</div><div class="blkVal">${QODE.agent}</div></div>
-      <div class="blk"><div class="blkLabel">자동 준비됨</div>
-        <div class="list">${QODE.context.map((c) => `<span>${c}</span>`).join('')}
-          <span class="a">SKILL · ${QODE.skill}</span></div></div>
-      <div class="blk"><div class="blkLabel">실제로 일어난 일</div>
-        <div class="events">${S.events.map((e) => `<span class="${e.pending ? 'now' : ''}"><b>${e.pending ? '지금' : '됨'}</b>${e.text}</span>`).join('')}</div></div>
-      <div class="ctxNote">진행률은 없습니다.<br>실제로 일어난 것만 적습니다.</div>`;
-  } else if (S.qode === 'done') {
-    const r = QODE.result;
-    html = `
-      <div class="ctxKind">변경 결과</div>
-      <div class="ctxH2">${r.outcome}</div>
-      <div class="blk"><div class="blkLabel">영향</div>
-        <div class="chips"><span class="strong">${r.impact}</span></div></div>
-      <div class="blk"><div class="blkLabel">검증</div>
-        <div class="nums">
-          <div><span class="n">${r.verified}</span><span class="l">확인됨</span></div>
-          <div><span class="n a">${r.attention}</span><span class="l">확인 필요</span></div>
-        </div></div>
-      <div class="blk"><div class="blkLabel">확인 필요</div>
-        <div class="list"><span class="a">${r.attentionText}</span></div></div>
-      <div class="blk"><div class="blkLabel">구조에 생긴 것</div><div class="blkVal">${r.structural}</div></div>
-      <div class="ctxNote">화면이 보고서로 바뀌지 않았습니다.<br>결과는 Software 안에 들어 있습니다.</div>
-      <div class="rawEntry"><span>원본 그대로</span><span>LEVEL 5</span></div>`;
-  } else if (S.selected) {
-    const f = FEATURES.find((x) => x.id === S.selected);
-    html = `
-      <div class="ctxKind">기능</div>
-      <div class="ctxH1">${f.name}</div>
-      <div class="blk"><div class="blkLabel">현재 상태</div>
-        <div class="blkVal${f.attention ? ' a' : ''}">${f.absent ? '아직 없음' : f.attention ? '확인 필요' : f.state || '정상 작동'}</div></div>
-      <div class="blk"><div class="blkLabel">동작 ${f.behaviors.length}가지</div>
-        <div class="list">${f.behaviors.map((b) => `<span class="${b.includes('실패') ? 'f' : ''}">${b}</span>`).join('')}</div></div>
-      ${f.related ? `<div class="blk"><div class="blkLabel">연관</div>
-        <div class="chips">${f.related.map((r) => `<span>${r}</span>`).join('')}</div></div>` : ''}
-      ${f.lastChange ? `<div class="blk"><div class="blkLabel">최근 변경</div>
-        <div class="blkVal">${f.lastChange}</div></div>` : ''}
-      ${f.id === 'login' ? '<div class="blk" style="border-bottom:0"><button class="go" id="enterBtn" style="border:2px solid var(--ink);padding:10px 16px;font-family:var(--mono);font-size:11px;letter-spacing:.12em">안으로 들어가기 →</button></div>' : ''}
-      <div class="ctxNote">이 면은 고정되어 있지 않습니다.<br>선택을 풀면 사라집니다.</div>`;
+/* ══ 애니메이션 — 상태 전이는 잘라 붙이지 않는다. 몸이 움직인다 ══════════ */
+var raf=0, lastTs=0, cvSize={w:0,h:0}, scaleNow=1;
+function req(){ if(!M) return; if(!raf) raf=requestAnimationFrame(tick); }
+function tick(ts){
+  raf=0;
+  if(!M) return;
+  var dt=Math.min(0.034,(ts-lastTs)/1000); if(!(dt>0)) dt=0.016; lastTs=ts;
+  var moving=false, i, p, k;
+  for(i=0;i<M.places.length;i++){
+    p=M.places[i];
+    moving = Q.stepD(p.amp,dt)|moving; moving = Q.stepD(p.rx,dt)|moving;
+    moving = Q.stepD(p.coh,dt)|moving; moving = Q.stepD(p.lab,dt)|moving;
   }
-  ctxIn.innerHTML = html;
-  ctx.classList.toggle('on', !!html);
-  const b = $('#enterBtn');
-  if (b) b.addEventListener('click', (e) => { e.stopPropagation(); enterFeature('login'); });
-  requestAnimationFrame(() => requestAnimationFrame(layout));   // ctx 폭 변화 후 재배치
+  for(i=0;i<M.seams.length;i++){
+    moving = Q.stepD(M.seams[i].off,dt)|moving;
+    moving = Q.stepD(M.seams[i].res,dt)|moving;
+  }
+  moving = Q.stepD(FK,dt)|moving;
+  reapSeams();
+  draw(ts);
+  if(S.phase==='working' || S.runOn) clocks();
+  if(moving || S.phase==='working' || S.runOn) req();
+}
+function clocks(){
+  var t=performance.now();
+  var el=document.getElementById('clk');
+  if(el) el.textContent = fmt(t - (S.phase==='working'?S.workT0:S.runT0));
+  var rh=document.getElementById('runHint');
+  if(S.runOn && rh) rh.textContent = fmt(t-S.runT0)+' · 멈추기';
 }
 
-/* ── Qode Composer 보조 표시 ────────────────────────── */
-function renderPrep() {
-  if (S.qode === 'working') {
-    prep.innerHTML = `자동 준비됨 · <b>CONTEXT ${QODE.contextCount}</b> · <b>SKILL ${QODE.skillCount}</b> · <span class="a">${QODE.agent.toUpperCase()} 작업 중</span>`;
-  } else if (S.depth === 'world') {
-    prep.innerHTML = '<span class="hint" style="margin:0">소프트웨어를 골라 안으로 들어가세요</span>';
+/* ── 몸을 그린다. 판이 커지면 잘리지 않고 다시 자리잡는다 ────────────────── */
+var BB={x0:120,y0:104,x1:754,y1:448};
+function draw(now){
+  var host=document.getElementById('world'); if(!host) return;
+  var cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+  var hw=host.clientWidth, hh=host.clientHeight;
+  if(hw<2||hh<2) return;
+  var s=Math.min((hw-150)/(BB.x1-BB.x0),(hh-64)/(BB.y1-BB.y0));
+  s=Math.max(0.52,Math.min(1.70,s)); scaleNow=s;
+  if(cvSize.w!==Q.W*DPR || cvSize.h!==Q.H*DPR){
+    cv.width=Q.W*DPR; cv.height=Q.H*DPR; cvSize={w:cv.width,h:cv.height};
+  }
+  var lwK=0.95/s;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,Q.W,Q.H);
+  ctx.lineCap='round'; ctx.lineJoin='round';
+
+  Q.compute(GRID,M,now||0,null);
+  var P=Q.newPaths(); Q.tess(GRID,P); Q.streams(GRID,P,null);
+
+  var fk=FK.v, fp=S.focus?M.byId[S.focus]:null;
+  var dimBase=(S.lens==='deep')?0.26:0.42;
+  paint(ctx,P,1-fk*(1-dimBase),lwK);
+  if(fp && fk>0.012){
+    var off=lightPool(P,fp,lwK);
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+    ctx.globalAlpha=Math.min(1,fk);
+    ctx.drawImage(off,0,0);
+    ctx.restore();
+  }
+  drawMarks(ctx,s,fk);
+
+  cv.style.width=(Q.W*s)+'px'; cv.style.height=(Q.H*s)+'px';
+  cv.style.left=Math.round(hw/2 - 437*s)+'px';
+  cv.style.top =Math.round(hh/2 - 275*s)+'px';
+}
+/* 번호는 World가 스스로 붙인다. 아래 지표의 같은 번호와 같은 것을 가리킨다.
+   이름은 집혔거나 가리켰을 때만 뒤따른다 — 지도와 범례의 관계다. */
+function drawMarks(ctx,s,fk){
+  var list=[], i, k, def, p;
+  for(i=0;i<S.problems.length;i++){
+    k=S.problems[i]; def=PROBLEM_DEFS[k]; p=M.byId[def.place]; if(!p) continue;
+    list.push({p:p,n:String(i+1),
+      name:(def.place===S.focus)?def.title:null,
+      strong:(def.place===S.focus)});
+  }
+  if(S.focus && !problemAt(S.focus)){
+    p=M.byId[S.focus];
+    if(p) list.push({p:p,n:'',name:placeName(S.focus),strong:true});
+  }
+  if(S.hover && S.hover!==S.focus && !problemAt(S.hover)){
+    p=M.byId[S.hover];
+    if(p) list.push({p:p,n:'',name:placeName(S.hover),strong:false,soft:true});
+  }
+  if(S.hover && S.hover!==S.focus && problemAt(S.hover)){
+    for(i=0;i<list.length;i++) if(list[i].p.id===S.hover){
+      list[i].name=PROBLEM_DEFS[problemAt(S.hover)].title; list[i].soft=true;
+    }
+  }
+  ctx.textBaseline='middle'; ctx.textAlign='left';
+  var nf='500 '+(14/s).toFixed(2)+'px '+'ui-monospace,Menlo,monospace';
+  var tf='700 '+(15/s).toFixed(2)+'px "Noto Sans KR","Malgun Gothic",sans-serif';
+  for(i=0;i<list.length;i++){
+    var it=list[i], px=it.p.x.v, py=it.p.y.v, nw=0, tw=0, gap=12/s;
+    if(it.n){ ctx.font=nf; nw=ctx.measureText(it.n).width; }
+    if(it.name){ ctx.font=tf; tw=ctx.measureText(it.name).width; }
+    var tot=nw+(it.n&&it.name?gap:0)+tw, sx=px-tot/2;
+    ctx.miterLimit=2;
+    ctx.strokeStyle='rgba(255,255,255,0.90)'; ctx.lineWidth=4.5/s;
+    if(it.n){ ctx.font=nf; ctx.strokeText(it.n,sx,py); }
+    if(it.name){ ctx.font=tf; ctx.strokeText(it.name,sx+nw+(it.n?gap:0),py); }
+    if(it.n){
+      ctx.font=nf;
+      ctx.fillStyle=it.strong?'rgba(13,12,11,0.95)':'rgba(13,12,11,'+(0.72*(1-fk*0.42)).toFixed(2)+')';
+      ctx.fillText(it.n,sx,py);
+    }
+    if(it.name){
+      ctx.font=tf;
+      ctx.fillStyle=it.soft?'rgba(74,70,65,0.86)':'rgba(13,12,11,0.96)';
+      ctx.fillText(it.name,sx+nw+(it.n?gap:0),py);
+    }
+    ctx.lineCap='round'; ctx.lineJoin='round';
+  }
+}
+
+/* ══ 화면 ═══════════════════════════════════════════════════════════════ */
+function esc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+function bandHTML(){
+  var n=S.problems.length, i, k, def, rows='', right, label, cls='';
+
+  if(S.lens==='deep' && S.focus){
+    var a=ANATOMY[S.focus]||ANATOMY.auth, name=placeName(S.focus);
+    var pk=problemAt(S.focus);
+    var sub = pk ? '이 자리를 이루는 것 · '+esc(PROBLEM_DEFS[pk].human)
+                 : '이 자리를 이루는 것 · 지금은 조용해요';
+    function col(t,rowsArr){
+      var h='<div><div class="ch">'+t+'</div>';
+      for(var j=0;j<rowsArr.length;j++){
+        var r=rowsArr[j];
+        h+='<div class="l'+(r[2]?' g':'')+'">'+esc(r[0])
+          +(r[1]?'<u>'+esc(r[1])+'</u>':'')+'</div>';
+      }
+      return h+'</div>';
+    }
+    return {cls:'deep', html:
+      '<div class="dh"><b>'+esc(name)+'</b><span>'+sub+'</span></div>'
+      +'<div class="cols">'+col('파일',a.files)+col('바깥과의 관계',a.rel)+col('증거',a.ev)+'</div>'
+      +'<div class="df">이 자리 밖의 것은 여기 없습니다.<div class="sp"></div>'
+      +'<button type="button" data-act="closeDeep">닫기</button></div>'};
+  }
+
+  if(S.phase==='settled' && S.result){
+    var d=S.result.def;
+    return {cls:'res', html:
+      '<div class="bh2"><span class="lb ok">확인됨</span><div class="sp"></div>'
+      +'<span class="ac">'+(n?'남은 문제 <em>'+n+'</em>':'남은 문제 <em>0</em>')+'</span></div>'
+      +'<div class="h">'+esc(d.result.title)+'</div>'
+      +'<div class="d">'+esc(d.result.body)+'</div>'
+      +'<div class="ev">'+esc(d.result.measure)+'</div>'
+      +(S.showChanged?'<div class="chg">'+esc(d.result.changed)+'</div>':'')
+      +'<div class="ac2">'
+      +'<button type="button" data-act="changed">'
+      +(S.showChanged?'접기':'무엇이 바뀌었나요?')+'</button>'
+      +'<button type="button" class="pt" data-act="rollback">이전으로 돌아가기</button>'
+      +'</div>'};
+  }
+
+  if(S.phase==='working' && S.workKey){
+    def=PROBLEM_DEFS[S.workKey];
+    return {cls:'', html:
+      '<div class="bh2"><span class="lb a">고치는 중</span><div class="sp"></div>'
+      +'<span class="ac"><span id="clk">0:00</span> · '
+      +'<button type="button" data-act="stopWork" class="ac"><span class="stop">멈추기</span></button>'
+      +'</span></div>'
+      +'<div class="ix"><div class="r on"><i>'+ordOf(S.workKey)+'</i><b>'+esc(def.title)+'</b>'
+      +'<span>'+esc(def.working)+'</span></div></div>'};
+  }
+
+  if(S.phase==='running'){
+    return {cls:'', html:
+      '<div class="bh2"><span class="lb a">실행 관측</span><div class="sp"></div>'
+      +'<span class="ac"><span id="clk">0:00</span> · '
+      +'<button type="button" data-act="stopRun" class="ac"><span class="stop">멈추기</span></button>'
+      +'</span></div>'
+      +'<div class="ix"><div class="r"><i>·</i><b>주문 서비스</b>'
+      +'<span>'+esc(RUN_OBSERVE.watching)+'</span></div></div>'};
+  }
+
+  if(S.phase==='prepared' && S.focus && problemAt(S.focus)){
+    k=problemAt(S.focus); def=PROBLEM_DEFS[k];
+    var chips='';
+    for(i=0;i<def.context.length;i++)
+      chips += (i<2?'<b>':'<span>')+esc(def.context[i])+(i<2?'</b>':'</span>');
+    return {cls:'', html:
+      '<div class="bh2"><span class="lb">고칠 문제</span><div class="sp"></div>'
+      +'<button type="button" class="ac" data-act="clearFocus">다른 문제 보기</button></div>'
+      +'<div class="ix"><div class="r on"><i>'+ordOf(k)+'</i><b>'+esc(def.title)
+      +(S.justNow===k?'<em>방금</em>':'')+'</b>'
+      +'<span>'+esc(def.human)+'</span></div></div>'
+      +'<div class="ldg"><span class="lb">준비됨</span>'+chips
+      +'<div class="sp"></div><span class="ac">JuQode가 알아서 모았어요</span></div>'};
+  }
+
+  /* idle · focused — 문제 지표 */
+  label='문제';
+  right = S.note ? '<span class="ac">'+esc(S.note)+'</span>'
+        : S.obsNote ? '<span class="ac">실행 관측 · '+esc(S.obsNote)+'</span>'
+        : S.justNow ? '<span class="ac">방금 실행에서 발견</span>'
+        : '<span class="ac">전부 <em>'+n+'</em></span>';
+  for(i=0;i<S.problems.length;i++){
+    k=S.problems[i]; def=PROBLEM_DEFS[k];
+    var on=(def.place===S.focus), dim=(S.focus&&!on);
+    rows+='<button type="button" class="r'+(on?' on':'')+(dim?' dim':'')+'" '
+      +'data-act="pick" data-key="'+k+'" aria-pressed="'+(on?'true':'false')+'">'
+      +'<i>'+(i+1)+'</i><b>'+esc(def.title)
+      +(S.justNow===k?'<em>방금</em>':'')+'</b>'
+      +'<span>'+esc(def.human)+'</span></button>';
+  }
+  if(!S.problems.length)
+    rows='<div class="r"><i>·</i><b>고칠 것이 없어요</b>'
+        +'<span>실행해서 실제 동작을 보면 새로 찾을 수 있어요</span></div>';
+  return {cls:'', html:
+    '<div class="bh2"><span class="lb">'+label+'</span><div class="sp"></div>'+right+'</div>'
+    +'<div class="ix">'+rows+'</div>'};
+}
+
+function render(){
+  document.getElementById('launcher').hidden = (S.screen!=='launcher');
+  document.getElementById('ws').hidden       = (S.screen!=='workspace');
+  if(S.screen!=='workspace') return;
+
+  var n=S.problems.length;
+
+  /* 상단 왼쪽 — 상태는 늘 사람 말 한 마디로 있다 */
+  var st=document.getElementById('swState');
+  if(S.phase==='working'){ st.textContent='고치는 중 · 문제 '+n; st.className='st a'; }
+  else if(n){ st.textContent='문제 '+n; st.className='st f'; }
+  else { st.textContent='확인됨'; st.className='st'; }
+
+  /* 상단 가운데 — 유일한 동사 */
+  var run=document.getElementById('btnRun');
+  document.getElementById('runLabel').textContent = S.runOn?'실행 중':'실행';
+  document.getElementById('runHint').textContent  = S.runOn?fmt(performance.now()-S.runT0)+' · 멈추기':RUNKEY;
+  run.className = 'verb'+(S.runOn?' on':'');
+  run.setAttribute('aria-pressed', S.runOn?'true':'false');
+
+  /* 상단 오른쪽 — 렌즈 */
+  var ld=document.getElementById('lensDeep');
+  ld.setAttribute('aria-pressed', S.lens==='deep'?'true':'false');
+  if(S.focus){ ld.removeAttribute('aria-disabled'); ld.title='이 자리의 해부도를 엽니다'; }
+  else { ld.setAttribute('aria-disabled','true'); ld.title='먼저 자리를 하나 고르세요'; }
+
+  /* 도구 판 — 하나. 절대 쌓이지 않는다 */
+  var band=document.getElementById('band');
+  var show = !!(S.problems.length || S.phase!=='idle' || S.note || S.obsNote || S.lens);
+  band.hidden = !show;
+  if(show){
+    var b=bandHTML();
+    band.className='band'+(b.cls?' '+b.cls:'');
+    band.innerHTML=b.html;
+  }
+
+  /* 말하는 한 줄 — 주어는 제품이 쓴다 */
+  document.getElementById('subj').textContent = S.focus? placeName(S.focus) : '주문 서비스';
+  var hint=document.getElementById('hint'), inp=document.getElementById('inp');
+  inp.value=S.input;
+  if(S.input.trim() && S.focus && problemAt(S.focus)){
+    hint.className='hint'; hint.innerHTML='<u>⏎</u> QODE';
+  } else if(S.input.trim() && !S.focus){
+    hint.className='hint na'; hint.textContent='문제 번호를 누르세요';
+  } else if(S.input.trim() && S.focus){
+    hint.className='hint na'; hint.textContent='이 자리엔 고칠 문제가 없어요';
+  } else if(S.phase==='working'){
+    var other=n-(S.workKey?1:0);
+    hint.className='hint'; hint.textContent = other>0?'다른 문제 '+other:'';
+  } else { hint.className='hint'; hint.textContent=''; }
+
+  document.getElementById('world').className='world'+(S.screen==='workspace'?' pick':'');
+  req();
+}
+
+/* ══ 행동 ═══════════════════════════════════════════════════════════════ */
+var workTimer=0, runTimer=0;
+
+function clearNote(){ S.note=null; S.obsNote=null; }
+/* 무엇을 누르든 커서는 말하는 줄로 돌아온다 — 치는 것이 주 행위이므로.
+   실제로 눌러 보고 알았다: 이것이 없으면 Enter 가 방금 누른 버튼을 다시 누른다. */
+function refocus(){
+  if(S.screen!=='workspace') return;
+  var inp=document.getElementById('inp');
+  if(inp && document.activeElement!==inp) inp.focus({preventScroll:true});
+}
+
+function focusPlace(id){
+  clearNote();
+  if(S.phase==='working') return;
+  S.focus = (S.focus===id)?null:id;
+  if(!S.focus) S.lens=null;
+  S.phase = S.focus ? (S.input.trim()&&problemAt(S.focus)?'prepared':'focused') : 'idle';
+  if(S.phase!=='settled') S.result=null;
+  syncWorld(); render();
+}
+function clearFocus(){
+  clearNote();
+  S.focus=null; S.lens=null; S.input=''; S.phase='idle'; S.result=null;
+  syncWorld(); render();
+}
+function snapshot(){
+  return {problems:S.problems.slice(), fixed:JSON.parse(JSON.stringify(S.fixed)),
+          focus:S.focus, justNow:S.justNow};
+}
+function startQode(){
+  clearNote();
+  if(!S.input.trim()) return;
+  if(!S.focus){ S.note='고칠 문제를 먼저 고르세요'; render(); return; }
+  var k=problemAt(S.focus);
+  if(!k){ S.note='이 자리엔 아직 고칠 문제가 없어요'; render(); return; }
+  S.past=snapshot();
+  S.workKey=k; S.workT0=performance.now();
+  S.phase='working'; S.lens=null; S.input=''; S.justNow=null; S.result=null;
+  syncWorld(); render();
+  clearTimeout(workTimer); workTimer=setTimeout(finishQode,2700);
+}
+function finishQode(){
+  var k=S.workKey; if(!k) return;
+  S.fixed[k]=true;
+  S.problems=S.problems.filter(function(x){ return x!==k; });
+  S.result={key:k, def:PROBLEM_DEFS[k]};
+  S.showChanged=false;
+  S.phase='settled'; S.workKey=null;
+  S.focus=null;                     /* 몸이 통째로 새 평형으로 가라앉는다 */
+  syncWorld(); render();
+}
+function stopWork(){
+  clearTimeout(workTimer);
+  var k=S.workKey; S.workKey=null;
+  S.phase = k?'focused':'idle';
+  S.focus = k?PROBLEM_DEFS[k].place:null;
+  syncWorld(); render();
+}
+function rollback(){
+  if(!S.past) return;
+  S.problems=S.past.problems.slice();
+  S.fixed=S.past.fixed;
+  S.justNow=S.past.justNow;
+  S.focus=S.past.focus;
+  S.result=null; S.showChanged=false;
+  S.phase=S.focus?'focused':'idle';
+  S.past=null;
+  syncWorld(); render();
+}
+function toggleRun(){
+  clearNote();
+  if(S.runOn){
+    S.runOn=false; clearTimeout(runTimer);
+    if(S.phase==='running') S.phase=S.focus?'focused':'idle';
+    render(); return;
+  }
+  if(S.phase==='working') return;
+  S.runOn=true; S.runT0=performance.now(); S.phase='running';
+  S.lens=null; S.result=null; S.justNow=null;
+  render(); req();
+  clearTimeout(runTimer); runTimer=setTimeout(observe,2400);
+}
+/* 실행은 입력이 아니라 관측이다. 실제 동작이 몸에 들어온다. */
+function observe(){
+  var k=RUN_OBSERVE.finds;
+  if(S.problems.indexOf(k)<0 && !S.fixed[k]){
+    S.problems.unshift(k);                       /* 새 문제가 1번이 된다 */
+    S.justNow=k;
+    S.focus=PROBLEM_DEFS[k].place;               /* 그 자리가 스스로 집힌다 */
+    S.phase='focused'; S.obsNote=null;
   } else {
-    prep.innerHTML = `자동 준비됨 · <b>CONTEXT ${QODE.contextCount}</b> · <b>SKILL ${QODE.skillCount}</b> · ${QODE.agent} — 직접 준비하지 않았습니다`;
+    S.justNow=null; S.focus=null; S.phase='idle';
+    S.obsNote = S.fixed[k]?RUN_OBSERVE.clean:RUN_OBSERVE.known;
   }
-  const armed = S.depth === 'feature' && S.qode === 'idle' && ask.value.trim().length > 0;
-  go.classList.toggle('armed', armed);
-  go.disabled = S.depth !== 'feature' || S.qode !== 'idle';
-  ask.disabled = S.depth !== 'feature' || S.qode !== 'idle';
-  ask.placeholder = S.depth === 'feature' ? '원하는 걸 말해보세요.'
-    : S.depth === 'service' ? '기능을 고르고 안으로 들어가면 말할 수 있습니다.'
-    : '원하는 걸 말해보세요.';
+  syncWorld(); render();
 }
-
-function render() {
-  back.classList.toggle('on', S.depth !== 'world');
-  agent.classList.toggle('busy', S.qode === 'working');
-  agentText.textContent = S.qode === 'working' ? `${QODE.agent} · 작업 중` : `${QODE.agent} · 연결됨`;
-  renderCtx();
-  renderPrep();
-  layout();
-}
-
-/* ── 전이 ───────────────────────────────────────────── */
-function onSoftwareClick(id) {
-  if (S.depth !== 'world') return;
-  if (id !== 'myservice') return;          // 이 프로토타입은 My Service 하나만 들어간다
-  S.depth = 'service'; S.selected = null;
-  render();
-}
-function onFeatureClick(id) {
-  if (S.depth === 'feature') return;
-  if (S.depth !== 'service') return;
-  if (S.selected === id && id === 'login') return enterFeature('login');
-  S.selected = S.selected === id ? null : id;
-  render();
-}
-function enterFeature(id) {
-  if (id !== 'login') return;
-  S.depth = 'feature'; S.selected = 'login';
-  ask.value = QODE.ask;
-  render();
-  setTimeout(() => ask.focus(), 560);
-}
-function goBack() {
-  clearTimers();
-  if (S.depth === 'feature') {
-    S.depth = 'service'; S.selected = 'login'; S.qode = 'idle'; S.events = [];
-    ask.value = '';
-  } else if (S.depth === 'service') {
-    S.depth = 'world'; S.selected = null;
-  }
+function toggleDeep(){
+  if(!S.focus) return;
+  S.lens = (S.lens==='deep')?null:'deep';
   render();
 }
 
-/* ── Qode 실행 (시뮬레이션) ─────────────────────────── */
-function runQode() {
-  if (S.depth !== 'feature' || S.qode !== 'idle' || !ask.value.trim()) return;
-  S.qode = 'working'; S.events = [];
+/* ══ 런처 ═══════════════════════════════════════════════════════════════ */
+function buildDash(){
+  var m=Q.newModel();
+  Q.add(m,Q.mkPlace({id:'base',semantic:false,x:410,y:268,rx:336,ry:156,rot:-0.05,amp:0.42,mass:0.9}));
+  var ps=[['화면 진입',214,166,148,56,0.50,0.30,8],['로그인',424,196,130,58,0.62,0.45,44],
+          ['편집기',330,318,176,78,0.85,0.60,-10],['설정',596,206,118,52,0.42,0.25,-38]];
+  for(var i=0;i<ps.length;i++){var a=ps[i];
+    Q.add(m,Q.mkPlace({id:'p'+i,names:[a[0]],x:a[1],y:a[2],rx:a[3],ry:a[4],amp:a[5],mass:a[6],dir:a[7]}));}
+  return m;
+}
+function buildPipe(){
+  var m=Q.newModel();
+  Q.add(m,Q.mkPlace({id:'base',semantic:false,x:410,y:268,rx:336,ry:156,rot:-0.05,amp:0.40,mass:0.9}));
+  var ps=[['수집',216,182,142,58,0.52,0.30,12],['정규화',392,220,138,68,0.72,0.45,-16],
+          ['관계',556,264,136,70,0.80,0.55,-40],['저장',312,352,186,78,1.18,0.95,-56],
+          ['내보내기',648,190,108,50,0.44,0.30,30]];
+  for(var i=0;i<ps.length;i++){var a=ps[i];
+    Q.add(m,Q.mkPlace({id:'p'+i,names:[a[0]],x:a[1],y:a[2],rx:a[3],ry:a[4],amp:a[5],mass:a[6],dir:a[7]}));}
+  m.voids.push({x:600,y:190,rx:42,ry:29,depth:0.94});
+  return m;
+}
+function orderMini(){
+  var m=newBody();
+  var d1=PROBLEM_DEFS.pay.seam, d2=PROBLEM_DEFS.store.seam, s;
+  s=Q.addSeam(m,{id:'a',x:d1.x,y:d1.y,rx:d1.rx,ry:d1.ry,off:d1.off,res:d1.res,tint:d1.tint});
+  s.off.v=d1.off; s.res.v=d1.res;
+  s=Q.addSeam(m,{id:'b',x:d2.x,y:d2.y,rx:d2.rx,ry:d2.ry,off:d2.off,res:d2.res,tint:d2.tint});
+  s.off.v=d2.off; s.res.v=d2.res;
+  m.byId.pay.amp.v=PROBLEM_DEFS.pay.amp; m.byId.store.amp.v=PROBLEM_DEFS.store.amp;
+  return m;
+}
+function paintMini(cv,m){
+  var s=0.33, lwK=1.05/s;
+  cv.width=Q.W*DPR; cv.height=Q.H*DPR;
+  var ctx=cv.getContext('2d'); ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  var gr=Q.newGrid(); Q.compute(gr,m,0,null);
+  var P=Q.newPaths(); Q.tess(gr,P); Q.streams(gr,P,null);
+  paint(ctx,P,1.10,lwK);
+  cv.style.width=(Q.W*s)+'px'; cv.style.height=(Q.H*s)+'px';
+  cv.style.left=Math.round(131 - 437*s)+'px';
+  cv.style.top =Math.round(51 - 275*s)+'px';
+}
+function buildLauncher(){
+  var host=document.getElementById('recent'), h='', i;
+  for(i=0;i<RECENT.length;i++){
+    var r=RECENT[i];
+    var cnt = r.open ? '<em>'+S.problems.length+'</em><i>문제</i>'
+                     : '<span class="ok">확인됨</span>';
+    h += '<'+(r.open?'button':'div')+' class="lr" '
+      +(r.open?'type="button" data-open="'+r.id+'"':'aria-disabled="true" '
+        +'title="Phase 4A 프로토타입에서는 주문 서비스만 열립니다"')+'>'
+      +'<div class="mini"><canvas id="mini-'+r.id+'"></canvas></div>'
+      +'<div class="meta"><b>'+esc(r.name)+'</b><span>'+esc(r.human)+'</span></div>'
+      +'<div class="when">'+esc(r.when)+'</div>'
+      +'<div class="cnt">'+cnt+'</div>'
+      +'</'+(r.open?'button':'div')+'>';
+  }
+  host.innerHTML=h;
+  paintMini(document.getElementById('mini-order'), orderMini());
+  paintMini(document.getElementById('mini-dash'),  buildDash());
+  paintMini(document.getElementById('mini-pipe'),  buildPipe());
+  host.addEventListener('click',function(e){
+    var b=e.target.closest('[data-open]'); if(!b) return;
+    openSoftware();
+  });
+}
+function openSoftware(){
+  S.screen='workspace'; S.phase='idle';
   render();
-  for (const e of QODE.events) {
-    timers.push(setTimeout(() => {
-      S.events.forEach((x) => { x.pending = false; });
-      S.events.push({ ...e });
-      renderCtx();
-    }, e.at));
-  }
-  timers.push(setTimeout(() => {
-    S.qode = 'done';
-    S.changed = true;                    // 결과는 Software 구조에 반영된다
-    S.events.forEach((x) => { x.pending = false; });
-    render();
-    // 새 동작은 display 가 켜지는 순간 CSS animation 으로 한 번 나타난다.
-    // (rAF 로 클래스를 벗기는 방식은 프레임이 안 돌면 영구히 숨겨진다 — 실제로 그랬다)
-  }, QODE.completeAt));
+  requestAnimationFrame(function(){ buildMain(); draw(0); render(); refocus(); });
 }
 
-/* ── 이벤트 ─────────────────────────────────────────── */
-back.addEventListener('click', goBack);
-go.addEventListener('click', runQode);
-ask.addEventListener('input', renderPrep);
-ask.addEventListener('keydown', (e) => { if (e.key === 'Enter') runQode(); });
-stage.addEventListener('click', (e) => {
-  if (e.target === stage && S.depth === 'service' && S.selected) { S.selected = null; render(); }
-});
-window.addEventListener('resize', layout);
-stage.addEventListener('transitionend', (e) => {
-  if (e.propertyName === 'width' || e.propertyName === 'height') layout();
-});
-ctx.addEventListener('transitionend', (e) => { if (e.propertyName === 'width') layout(); });
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape') goBack(); });
+/* ══ 사건 ═══════════════════════════════════════════════════════════════ */
+function wire(){
+  document.getElementById('btnRun').addEventListener('click',function(){ toggleRun(); refocus(); });
+  document.getElementById('lensDeep').addEventListener('click',function(){ toggleDeep(); refocus(); });
 
-build();
-render();
-setTimeout(layout, 60);
+  document.getElementById('band').addEventListener('click',function(e){
+    var b=e.target.closest('[data-act]'); if(!b) return;
+    var a=b.getAttribute('data-act');
+    if(a==='pick')       focusPlace(PROBLEM_DEFS[b.getAttribute('data-key')].place);
+    else if(a==='clearFocus') clearFocus();
+    else if(a==='stopWork')   stopWork();
+    else if(a==='stopRun')    toggleRun();
+    else if(a==='changed'){ S.showChanged=!S.showChanged; render(); }
+    else if(a==='rollback')   rollback();
+    else if(a==='closeDeep'){ S.lens=null; render(); }
+    refocus();
+  });
 
-/* 부팅 확인 블록 제거 — 여기까지 왔으면 스크립트가 정상 실행됐다 */
-const boot = document.getElementById('bootmsg');
-if (boot) boot.remove();
+  var inp=document.getElementById('inp');
+  inp.addEventListener('input',function(){
+    S.input=inp.value; clearNote();
+    if(S.focus && problemAt(S.focus))
+      S.phase = S.input.trim()?'prepared':'focused';
+    render(); inp.focus();
+  });
+  document.getElementById('say').addEventListener('submit',function(e){
+    e.preventDefault(); startQode();
+  });
 
-/* ── 검수용 자동 클릭 (?drive=…) — 실제 click 이벤트를 쏜다 ── */
-const params = new URLSearchParams(location.search);
-if (params.get('still')) document.documentElement.classList.add('still');
-const drive = params.get('drive');
-if (drive) {
-  const click = (n) => n && n.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  const seq = [];
-  if (['service', 'feature', 'selected', 'working', 'done'].includes(drive)) {
-    seq.push([100, () => click(el.sw.myservice)]);
+  /* World 를 직접 겨냥한다 — SEE → POINT → SAY */
+  var cv=document.getElementById('cv');
+  function at(e){
+    var r=cv.getBoundingClientRect();
+    var ex=(e.clientX-r.left)/scaleNow, ey=(e.clientY-r.top)/scaleNow;
+    var hit=Q.meaningAt(M,ex,ey);
+    return hit.length?hit[0].p.id:null;
   }
-  if (['selected'].includes(drive)) seq.push([700, () => click(el.ft.login)]);
-  if (['feature', 'working', 'done'].includes(drive)) {
-    seq.push([700, () => click(el.ft.login)]);
-    seq.push([1300, () => click($('#enterBtn'))]);
-  }
-  if (['working', 'done'].includes(drive)) seq.push([2100, () => click(go)]);
-  if (drive === 'working') seq.push([5000, () => {}]);
-  if (drive === 'done') seq.push([8200, () => {}]);
-  for (const [at, fn] of seq) setTimeout(fn, at);
+  cv.addEventListener('mousemove',function(e){
+    if(!M) return;
+    var id=at(e);
+    if(id!==S.hover){ S.hover=id; cv.style.cursor=id?'pointer':'default'; req(); }
+  });
+  cv.addEventListener('mouseleave',function(){ if(S.hover){ S.hover=null; req(); } });
+  cv.addEventListener('click',function(e){
+    if(!M) return;
+    var id=at(e); if(id){ focusPlace(id); refocus(); }
+  });
+
+  window.addEventListener('keydown',function(e){
+    if(S.screen!=='workspace') return;
+    if((e.metaKey||e.ctrlKey) && (e.key==='r'||e.key==='R')){ e.preventDefault(); toggleRun(); }
+    else if(e.key==='Escape'){
+      if(S.lens){ S.lens=null; render(); }
+      else if(S.focus) clearFocus();
+    }
+  });
+  window.addEventListener('resize',function(){ if(M){ draw(performance.now()); } });
 }
+
+/* ══ 부팅 ═══════════════════════════════════════════════════════════════ */
+function boot(){
+  document.getElementById('boot').remove();
+  buildLauncher();
+  wire();
+  /* 근거 이미지 채취용 — 실제 상태 기계를 그대로 쓴다 */
+  window.JQ_DEV = {S:S, open:openSoftware, focus:focusPlace, run:toggleRun,
+    qode:startQode, deep:toggleDeep, render:render,
+    say:function(t){ S.input=t; document.getElementById('inp').value=t;
+      if(S.focus&&problemAt(S.focus)) S.phase=t.trim()?'prepared':'focused'; render(); }};
+  render();
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot);
+else boot();
+
+})();
+
 
 </script>
 </body>

@@ -17,6 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const src = (f) => readFileSync(join(here, 'src', f), 'utf8');
 
 const css = src('app.css');
+const world = src('world.js');
 const data = src('data.js');
 const app = src('app.js');
 let html = src('index.template.html');
@@ -26,13 +27,14 @@ const safe = (s) => s.replace(/<\/script>/gi, '<\\/script>');
 
 html = html.replace('/*{{CSS}}*/', () => '\n' + css + '\n');
 html = html.replace('/*{{JS}}*/', () => '\n'
-  + '/* ── src/data.js ─────────────────────────────────── */\n' + safe(data)
+  + '/* ── src/world.js ────────────────────────────────── */\n' + safe(world)
+  + '\n/* ── src/data.js ─────────────────────────────────── */\n' + safe(data)
   + '\n/* ── src/app.js ──────────────────────────────────── */\n' + safe(app) + '\n');
 
 if (html.includes('{{CSS}}') || html.includes('{{JS}}')) {
   throw new Error('플레이스홀더가 남았다 — 템플릿을 확인하라');
 }
-for (const bad of ['src="app.js"', 'src="data.js"', 'href="app.css"', 'type="module"']) {
+for (const bad of ['src="app.js"', 'src="data.js"', 'src="world.js"', 'href="app.css"', 'type="module"']) {
   if (html.includes(bad)) throw new Error(`외부 참조가 남았다: ${bad}`);
 }
 

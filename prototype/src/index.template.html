@@ -1,47 +1,65 @@
 <!doctype html>
-<!-- 생성된 파일이다. 고치려면 src/ 를 고치고 `node build.mjs` -->
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>JuQode — Software Workspace</title>
-<style>/*{{CSS}}*/</style>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JuQode — 주문 서비스</title>
+<style>
+/*{{CSS}}*/
+</style>
 </head>
 <body>
-<!-- 부팅 확인. JS 가 뜨면 app.js 가 이 블록을 지운다.
-     이 문장이 보인다는 것은 스크립트가 실행되지 않았다는 뜻이다 (조용히 깨지지 않게). -->
-<div id="bootmsg" style="position:fixed;inset:0;z-index:999;background:#F7F5F2;
-  font:15px/1.7 -apple-system,'Malgun Gothic',sans-serif;color:#0D0C0B;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px;text-align:center">
-  <div style="font-weight:700;font-size:19px">화면이 아직 뜨지 않았습니다</div>
-  <div style="color:#4A4641">이 파일은 하나로 완결되어 있어 인터넷도 서버도 필요하지 않습니다.<br>
-    브라우저에서 JavaScript 가 꺼져 있으면 이 문장이 남습니다.</div>
-  <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#857F77;letter-spacing:.06em">
-    JuQode prototype · self-contained</div>
+
+<!-- 조용히 빈 화면이 되지 않게. app.js 가 이 블록을 지운다. -->
+<div id="boot">
+  <b>이 화면이 아직 뜨지 않았습니다.</b><br>
+  index.html 을 그대로 열어야 합니다. 외부 파일을 불러오지 않으므로
+  인터넷도 서버도 필요하지 않습니다.
 </div>
-<div class="app">
 
-  <div class="chrome">
-    <span class="wm">JuQode</span>
-    <button class="back" id="back">← 밖으로</button>
-    <span class="sp"></span>
-    <span class="agent" id="agent"><i></i><span id="agentText">Claude Code · 연결됨</span></span>
-    <span class="path">C:\Desktop\MyService</span>
+<!-- ══ 런처 ═══════════════════════════════════════════════════════════ -->
+<section class="lch" id="launcher" hidden>
+  <div class="in">
+    <div class="mark">JUQODE</div>
+    <h1>어떤 Software로 갈까요?</h1>
+    <div class="thesis">Developers Code. Vibe Coders Qode.</div>
+    <div class="lsec">이어서 하기</div>
+    <div id="recent"></div>
+    <div class="lsec">새로 가져오기</div>
+    <div class="lnew">
+      <span>이 컴퓨터에서</span><span>GitHub에서</span><span>빈 Software로</span>
+      <div class="sp"></div><i>폴더를 끌어 놓아도 됩니다</i>
+    </div>
+    <div class="lnote">PHASE 4A 프로토타입 · 주문 서비스만 열립니다</div>
   </div>
+</section>
 
-  <div class="body">
-    <div class="stagewrap" id="stage"></div>
-    <aside class="ctx" id="ctx"><div class="ctxIn" id="ctxIn"></div></aside>
-  </div>
-
-  <div class="qode">
-    <div class="prep" id="prep"></div>
-    <div class="qrow">
-      <input id="ask" placeholder="원하는 걸 말해보세요." autocomplete="off" spellcheck="false">
-      <button class="go" id="go">Qode 실행</button>
+<!-- ══ 작업 공간 — 하나의 껍데기. 상태만 바뀐다 ═══════════════════════ -->
+<section class="app" id="ws" hidden>
+  <div class="top">
+    <div class="id"><b id="swName">주문 서비스</b><span class="st" id="swState"></span></div>
+    <button class="verb" id="btnRun" type="button">
+      <b id="runLabel">실행</b><i id="runHint"></i>
+    </button>
+    <div class="lens">
+      <button id="lensTime" type="button" aria-disabled="true"
+        title="시간은 Phase 4A에서 열리지 않습니다">시간</button>
+      <button id="lensConn" type="button" aria-disabled="true"
+        title="연결은 Phase 4A에서 열리지 않습니다">연결</button>
+      <button id="lensDeep" type="button" aria-pressed="false">깊이</button>
     </div>
   </div>
+  <div class="world" id="world"><canvas id="cv"></canvas></div>
+  <div class="band" id="band" hidden></div>
+  <form class="say" id="say" autocomplete="off">
+    <b class="subj" id="subj">주문 서비스</b><i class="mk">▸</i>
+    <input id="inp" type="text" placeholder="무엇을 바꿀까요?" aria-label="원하는 변화를 말해보세요">
+    <span class="hint" id="hint"></span>
+  </form>
+</section>
 
-</div>
-<script>/*{{JS}}*/</script>
+<script>
+/*{{JS}}*/
+</script>
 </body>
 </html>

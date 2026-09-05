@@ -1,6 +1,9 @@
-# JuQode — Functional Prototype (Phase 3)
+# JuQode — Functional Prototype (Phase 4A)
 
-**인터랙션 검증용 프론트엔드 프로토타입.** 제품 전체가 아니다.
+**Qode Loop 검증용 프론트엔드 프로토타입.** 제품 전체가 아니다.
+
+> 상세 문서: [`../docs/prototype/PHASE_4A_FUNCTIONAL_PROTOTYPE.md`](../docs/prototype/PHASE_4A_FUNCTIONAL_PROTOTYPE.md)
+> 설계 SSOT: [`../docs/design/MVP_DESIGN_CONVERGENCE.md`](../docs/design/MVP_DESIGN_CONVERGENCE.md)
 
 ## 열기
 
@@ -31,12 +34,22 @@ CSS · JS · 데이터가 모두 그 파일 안에 들어 있다.
 ## 무엇을 증명하는가
 
 ```
-Software World → My Service → 로그인 → Qode → Working → Result
-                                                          ↓
-                                        구조에 "30초 기다리기" 가 나타난다
+런처 → World를 본다 → 문제를 누른다 → 그 자리가 집힌다 → "이거 고쳐줘"
+   → 맥락 자동 준비 → 교란 → 결과(문제 2 → 1)
+   → 실행(=관측) → 새 문제가 몸에 들어온다 → 그 자리가 집힌다 → "고쳐줘"
 ```
 
-**가장 중요한 결과는 요약이 아니라 Software 구조가 바뀌는 것이다.**
+**여덟 개의 설계 프레임은 여덟 개의 페이지가 아니다.** 껍데기는 한 번도 바뀌지 않는다 —
+`상단 한 줄 · Software World · 도구 판 하나 · 말하는 한 줄`. 그 안의 상태만 바뀐다.
+
+| 조작 | |
+|---|---|
+| 지표의 문제를 누른다 | 그 자리가 집힌다 |
+| **World의 자리를 직접 누른다** | 같은 자리가 집힌다 (`SEE → POINT → SAY`) |
+| World 위에서 가리킨다 | 그 자리의 이름이 뜬다 |
+| `⏎` | Qode 시작 |
+| `Ctrl/⌘ R` | 실행 토글 (페이지를 새로 고치지 않는다) |
+| `Esc` | 깊이 닫기 → 집힘 풀기 |
 
 ## 근거 문서
 
