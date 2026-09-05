@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>JuQode — Whole Product Board</title>
+<style>
+:root{
+  --paper:#F7F5F2; --surface:#FFFFFF; --sunk:#EDEAE5;
+  --ink:#0D0C0B; --ink2:#4A4641; --ink3:#857F77; --ink4:#B5AEA5;
+  --hair:#D8D3CC; --attn:#9A5B12; --fail:#8C2B20; --past:#5B6B84;
+  --sans:"Archivo","Noto Sans KR","Helvetica Neue","Malgun Gothic",Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased}
+.board{width:1856px;margin:0 auto;padding:44px 40px 90px}
+.bh{border-bottom:2px solid var(--ink);padding-bottom:20px;margin-bottom:14px}
+.bh .k{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ink3)}
+.bh h1{font-size:38px;font-weight:700;letter-spacing:-.04em;margin:12px 0 0}
+.bh .s{font-size:15px;color:var(--ink2);line-height:1.65;margin-top:11px;max-width:1000px}
+.bh .s b{color:var(--ink)}
+.flow{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;color:var(--ink);margin-top:18px;line-height:2.1}
+.flow .d{color:var(--ink4)}
+.flow .sec{color:var(--ink3);font-size:9.5px}
+.grid{display:grid;grid-template-columns:864px 864px;gap:34px 64px;margin-top:34px}
+.fr{}
+.fr .cap{display:flex;gap:10px;align-items:baseline;padding-bottom:9px}
+.fr .cap i{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--ink4);font-style:normal}
+.fr .cap b{font-size:15px;letter-spacing:-.025em}
+.fr .cap span{font-size:11.5px;color:var(--ink3)}
+/* ── 제품 창 ─────────────────────────────────────────── */
+.app{width:864px;height:560px;background:var(--surface);border:1px solid var(--ink);
+  display:flex;flex-direction:column;overflow:hidden;position:relative}
+.top{height:42px;flex:none;border-bottom:1px solid var(--hair);display:flex;align-items:center;
+  padding:0 14px;gap:12px}
+.top .nm{font-size:13.5px;font-weight:600;letter-spacing:-.02em}
+.top .st{font-family:var(--mono);font-size:9px;letter-spacing:.13em;color:var(--ink3)}
+.top .sp{flex:1}
+.top .tool{font-family:var(--mono);font-size:9px;letter-spacing:.13em;color:var(--ink3)}
+.top .tool.on{color:var(--ink)}
+.world{flex:1;position:relative;overflow:hidden;background:var(--surface)}
+.world canvas{position:absolute;left:0;top:0;width:864px;height:470px}
+.bot{flex:none;border-top:1px solid var(--hair)}
+.inp{height:46px;display:flex;align-items:center;padding:0 14px;gap:10px}
+.inp .ph{font-size:13.5px;color:var(--ink4);letter-spacing:-.02em}
+.inp .typed{font-size:13.5px;color:var(--ink);letter-spacing:-.02em}
+.inp .car{display:inline-block;width:1px;height:15px;background:var(--ink);
+  vertical-align:-2px;margin-left:1px}
+.inp .sp{flex:1}
+.inp .hint{font-family:var(--mono);font-size:8.5px;letter-spacing:.13em;color:var(--ink4)}
+/* ── 도구(instrument) — 필요할 때만 나타나는 얇은 판 ── */
+.slab{border-top:1px solid var(--hair);background:var(--paper);padding:10px 14px}
+.slab.ink{border-top:1px solid var(--ink)}
+.row{display:flex;align-items:baseline;gap:9px}
+.row .lb{font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;color:var(--ink3);white-space:nowrap}
+.row .it{font-size:12px;color:var(--ink);letter-spacing:-.015em}
+.row .it.dim{color:var(--ink3)}
+.row .sp{flex:1}
+.row .act{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--ink3);white-space:nowrap}
+.res .h{font-size:17px;font-weight:700;letter-spacing:-.03em}
+.res .d{font-size:12.5px;color:var(--ink2);line-height:1.62;margin-top:6px;max-width:600px}
+.res .acts{display:flex;gap:18px;margin-top:11px}
+.res .acts span{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--ink3)}
+.badge{font-family:var(--mono);font-size:9px;letter-spacing:.14em}
+.badge.ok{color:var(--ink)}
+.badge.at{color:var(--attn)}
+.badge.no{color:var(--fail)}
+/* ── 런처 ────────────────────────────────────────────── */
+.launch{padding:26px 30px}
+.launch .lk{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--ink3)}
+.launch h2{font-size:26px;font-weight:700;letter-spacing:-.035em;margin:14px 0 0}
+.launch .sec{font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;color:var(--ink3);
+  border-top:1px solid var(--ink);padding-top:9px;margin-top:22px}
+.recent{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:14px}
+.recent .it .w{height:132px;border:1px solid var(--hair);position:relative;overflow:hidden;background:var(--surface)}
+.recent .it .w canvas{position:absolute;left:0;top:0;width:243px;height:132px}
+.recent .it .n{font-size:13.5px;font-weight:600;letter-spacing:-.022em;margin-top:9px}
+.recent .it .m{font-family:var(--mono);font-size:8.5px;letter-spacing:.11em;color:var(--ink3);margin-top:5px}
+.recent .it .m em{font-style:normal;color:var(--attn)}
+.recent .it .m u{text-decoration:none;color:var(--ink4)}
+.starts{margin-top:12px}
+.starts .r{display:flex;align-items:baseline;gap:12px;padding:11px 0;border-bottom:1px solid var(--hair)}
+.starts .r b{font-size:14.5px;font-weight:600;letter-spacing:-.025em;width:210px;flex:none}
+.starts .r span{font-size:12px;color:var(--ink3)}
+.starts .r i{font-family:var(--mono);font-size:8.5px;letter-spacing:.13em;color:var(--ink4);font-style:normal;margin-left:auto}
+/* ── 깊은 기술 뷰 ────────────────────────────────────── */
+.deep{position:absolute;right:0;top:42px;bottom:0;width:352px;background:var(--paper);
+  border-left:1px solid var(--ink);display:flex;flex-direction:column}
+.deep .dh{padding:11px 14px;border-bottom:1px solid var(--hair)}
+.deep .dh .b{font-size:13px;font-weight:600;letter-spacing:-.02em}
+.deep .dh .c{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--ink3);margin-top:4px}
+.deep .tabs{display:flex;gap:14px;padding:9px 14px;border-bottom:1px solid var(--hair)}
+.deep .tabs span{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--ink4)}
+.deep .tabs span.on{color:var(--ink)}
+.deep .body{padding:11px 14px;font-family:var(--mono);font-size:9.5px;line-height:1.85;color:var(--ink2);overflow:hidden}
+.deep .body .f{color:var(--ink)}
+.deep .body .g{color:var(--ink4)}
+.deep .foot{margin-top:auto;padding:10px 14px;border-top:1px solid var(--hair);
+  font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--ink3)}
+.note{margin-top:10px;font-size:11.5px;color:var(--ink3);line-height:1.62;max-width:840px}
+.note b{color:var(--ink2)}
+.foot2{border-top:2px solid var(--ink);padding-top:16px;margin-top:46px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;color:var(--ink3);
+  display:flex;justify-content:space-between}
+
+/* ── 문제 모듈 — 얇은 맥락 도구. 사이드바도 대시보드도 아니다 ── */
+.prob{border-top:1px solid var(--hair);background:var(--paper);padding:9px 14px 11px}
+.prob .hd{display:flex;align-items:baseline;gap:10px}
+.prob .hd .c{font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;color:var(--ink3)}
+.prob .hd .sp{flex:1}
+.prob .hd .a{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--ink3)}
+.prob .list{display:flex;margin-top:8px}
+.prob .p{padding:1px 18px;border-left:1px solid var(--hair)}
+.prob .p:first-child{padding-left:0;border-left:0}
+.prob .p .t{font-size:13px;font-weight:600;letter-spacing:-.022em;color:var(--ink)}
+.prob .p .t em{font-style:normal;font-family:var(--mono);font-size:8px;letter-spacing:.1em;
+  color:var(--fail);margin-left:7px;vertical-align:1px}
+.prob .p .d{font-size:11px;color:var(--ink3);margin-top:4px}
+.prob .p.on{border-left:2px solid var(--ink);padding-left:14px}
+.prob .p.on .t{color:var(--ink)}
+.prob .p.dim .t{color:var(--ink4)}
+.prob .p.dim .d{color:var(--ink4)}
+.prob.one .list{margin-top:6px}
+/* ── 와이어플로 ─────────────────────────────────────── */
+.wf{border:1px solid var(--ink);background:var(--surface);padding:22px 26px;margin-top:26px}
+.wf .t{font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--ink3)}
+.wf .line{display:flex;align-items:center;flex-wrap:wrap;gap:0;margin-top:14px}
+.wf .s{padding:7px 13px;border:1px solid var(--hair);background:var(--paper);
+  font-size:12.5px;letter-spacing:-.02em;white-space:nowrap}
+.wf .s b{font-weight:600}
+.wf .s i{font-style:normal;font-family:var(--mono);font-size:8px;letter-spacing:.1em;
+  color:var(--ink3);display:block;margin-top:3px}
+.wf .s.k{border-color:var(--ink)}
+.wf .ar{font-family:var(--mono);font-size:11px;color:var(--ink4);padding:0 9px}
+.wf .sub{margin-top:16px;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+  color:var(--ink3);line-height:2}
+.wf .sub b{color:var(--ink);font-weight:400}
+.wf .loop{margin-top:12px;font-size:12px;color:var(--ink2);letter-spacing:-.015em}
+.wf .loop b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="board">
+<div class="bh">
+  <div class="k">JUQODE · MVP WIREFRAME FREEZE</div>
+  <h1>MVP 와이어프레임 — 현상은 World가, 설명은 문제 모듈이</h1>
+  <div class="s">이 판은 <b>구현 직전의 마지막 제품 설계</b>다. 새 철학도, 새 표상도, 새 Realm도 만들지 않는다.
+    MVP에 하나만 더한다 — <b>추상만으로는 부족하다.</b> World가 현상을 보여주고,
+    <b>문제 모듈</b>이 그것을 사람 말로 설명한다. 그리고 그 문제를 누르면 곧바로 Qode가 시작된다.</div>
+  
+</div>
+<div class="wf" id="wf">
+  <div class="t">MVP WIREFLOW · 하나의 순환</div>
+  <div class="line">
+    <div class="s"><b>Software 열기</b><i>LAUNCH</i></div><div class="ar">→</div>
+    <div class="s k"><b>World를 본다</b><i>SEE</i></div><div class="ar">→</div>
+    <div class="s k"><b>문제를 누른다</b><i>PROBLEM</i></div><div class="ar">→</div>
+    <div class="s k"><b>그 자리가 잡힌다</b><i>FOCUS</i></div><div class="ar">→</div>
+    <div class="s k"><b>“고쳐줘”</b><i>SAY</i></div><div class="ar">→</div>
+    <div class="s"><b>Qode</b><i>맥락 자동 준비</i></div><div class="ar">→</div>
+    <div class="s"><b>교란</b><i>WORKING</i></div><div class="ar">→</div>
+    <div class="s"><b>결과</b><i>확인됨</i></div><div class="ar">→</div>
+    <div class="s"><b>가라앉음</b><i>SETTLE</i></div>
+  </div>
+  <div class="loop">↺ <b>실행하면 새 문제가 World로 들어오고, 문제 모듈에 한 줄이 늘어난다.</b>
+    사용자는 그 줄을 누르고 다시 “고쳐줘”라고 말한다 — 이것이 MVP의 전부다.</div>
+  <div class="sub">
+    가져오기 <b>→</b> 맥락 주입&nbsp;&nbsp;·&nbsp;&nbsp;연결 <b>→</b> 바깥과의 관계&nbsp;&nbsp;·&nbsp;&nbsp;시간 <b>→</b> 이전 평형&nbsp;&nbsp;·&nbsp;&nbsp;깊이 <b>→</b> 파일 · 코드 · API · 증거
+  </div>
+</div>
+<div class="grid">
+
+<!-- 01 -->
+<div class="fr" id="f1">
+  <div class="cap"><i>FRAME 01</i><b>Launcher</b><span>어디로 갈지부터 고른다</span></div>
+  <div class="app">
+    <div class="launch">
+      <div class="lk">JUQODE</div>
+      <h2>어떤 Software로 갈까요?</h2>
+      <div class="sec">이어서 하기</div>
+      <div class="recent">
+        <div class="it"><div class="w"><canvas id="w1a"></canvas></div>
+          <div class="n">주문 서비스</div><div class="m"><em>문제 2</em> · 12분 전</div></div>
+        <div class="it"><div class="w"><canvas id="w1b"></canvas></div>
+          <div class="n">사내 대시보드</div><div class="m">확인됨 · 어제</div></div>
+        <div class="it"><div class="w"><canvas id="w1c"></canvas></div>
+          <div class="n">문서 파이프라인</div><div class="m">확인됨 · 3일 전 · <u>모르는 곳 1</u></div></div>
+      </div>
+      <div class="sec">새로 가져오기</div>
+      <div class="starts">
+        <div class="r"><b>이 컴퓨터에서 가져오기</b><span>폴더를 고르면 JuQode가 읽고 자리를 찾습니다</span><i>드래그해도 됩니다</i></div>
+        <div class="r"><b>GitHub에서 가져오기</b><span>주소만 붙여넣으면 됩니다</span><i></i></div>
+        <div class="r"><b>새로 시작하기</b><span>빈 Software 하나로 시작합니다</span><i></i></div>
+      </div>
+    </div>
+  </div>
+  <div class="note">최근 Software는 <b>실제 몸의 축소판</b>으로 보인다. 열기 전에 이미
+    <b>문제가 몇 개인지</b> 알 수 있다. 저장소·브랜치·경로는 한 단계 아래에 있다.</div>
+</div>
+
+<!-- 02 -->
+<div class="fr" id="f2">
+  <div class="cap"><i>FRAME 02</i><b>Main Workspace</b><span>기본 화면</span></div>
+  <div class="app">
+    <div class="top"><div class="nm">주문 서비스</div><div class="st" style="color:#8C2B20">문제 2</div><div class="sp"></div>
+      <div class="tool">시간</div><div class="tool">실행</div><div class="tool">가져오기</div><div class="tool">연결</div><div class="tool">깊이</div></div>
+    <div class="world"><canvas id="w2"></canvas></div>
+    <div class="bot">
+      <div class="prob"><div class="hd"><div class="c">현재 문제 2</div><div class="sp"></div><div class="a">전부 보기</div></div>
+        <div class="list">
+          <div class="p"><div class="t">결제 요청</div><div class="d">응답이 늦어요</div></div>
+          <div class="p"><div class="t">사용자 저장</div><div class="d">가끔 목록이 비어요</div></div>
+        </div></div>
+      <div class="inp"><div class="ph">원하는 걸 말해보세요.</div><div class="sp"></div><div class="hint">⏎</div></div>
+    </div>
+  </div>
+  <div class="note">World가 현상을 보여주고 — 오른쪽 위와 왼쪽 아래의 결이 어긋나 있다 —
+    문제 모듈이 그것을 <b>사람 말로</b> 옮긴다. 모듈은 두 줄짜리 얇은 도구이지 사이드바가 아니다.</div>
+</div>
+
+<!-- 03 -->
+<div class="fr" id="f3">
+  <div class="cap"><i>FRAME 03</i><b>Problem → Focus</b><span>문제를 누르면 그 자리가 잡힌다</span></div>
+  <div class="app">
+    <div class="top"><div class="nm">주문 서비스</div><div class="st" style="color:#8C2B20">문제 2</div><div class="sp"></div>
+      <div class="tool">시간</div><div class="tool">실행</div><div class="tool">가져오기</div><div class="tool">연결</div><div class="tool">깊이</div></div>
+    <div class="world"><canvas id="w3"></canvas></div>
+    <div class="bot">
+      <div class="prob"><div class="hd"><div class="c">현재 문제 2</div><div class="sp"></div><div class="a">전부 보기</div></div>
+        <div class="list">
+          <div class="p on"><div class="t">결제 요청</div><div class="d">응답이 늦어요 · 3번 중 2번</div></div>
+          <div class="p dim"><div class="t">사용자 저장</div><div class="d">가끔 목록이 비어요</div></div>
+        </div></div>
+      <div class="inp"><div class="ph">결제 요청 문제에 원하는 변화를 말해보세요.</div><div class="sp"></div><div class="hint">⏎</div></div>
+    </div>
+  </div>
+  <div class="note">화살표도 연결선도 쓰지 않는다. 누른 문제의 <b>자리가 World에서 스스로 또렷해지고</b>
+    이름이 뒤따른다. 입력 문장이 바뀌는 것이 대상 선택 UI 전체를 대신한다.</div>
+</div>
+
+<!-- 04 -->
+<div class="fr" id="f4">
+  <div class="cap"><i>FRAME 04</i><b>Qode · Auto Context</b><span>“이거 고쳐줘”</span></div>
+  <div class="app">
+    <div class="top"><div class="nm">주문 서비스</div><div class="st" style="color:#8C2B20">문제 2</div><div class="sp"></div>
+      <div class="tool">시간</div><div class="tool">실행</div><div class="tool">가져오기</div><div class="tool">연결</div><div class="tool">깊이</div></div>
+    <div class="world"><canvas id="w4"></canvas></div>
+    <div class="bot">
+      <div class="prob one"><div class="hd"><div class="c">고칠 문제</div><div class="sp"></div><div class="a">다른 문제 보기</div></div>
+        <div class="list"><div class="p on"><div class="t">결제 요청</div><div class="d">응답이 늦어요 · 3번 중 2번</div></div></div></div>
+      <div class="slab"><div class="row"><div class="lb">준비됨</div>
+        <div class="it">결제 요청</div><div class="it">외부 결제 호출</div><div class="it dim">최근 실행 기록 3건</div>
+        <div class="sp"></div><div class="act">준비한 내용 보기</div></div></div>
+      <div class="inp"><div class="typed">이거 고쳐줘<span class="car"></span></div><div class="sp"></div><div class="hint">⏎ QODE</div></div>
+    </div>
+  </div>
+  <div class="note">양식(form)이 아니다. 맥락은 <b>이미 준비되어 접힌 한 줄</b>로만 보이고,
+    틀렸을 때만 펼친다. 사용자가 한 일은 <b>문제 하나를 누르고 세 글자를 친 것</b>뿐이다.</div>
+</div>
+
+<!-- 05 -->
+<div class="fr" id="f5">
+  <div class="cap"><i>FRAME 05</i><b>Working</b><span>실제 상태만</span></div>
+  <div class="app">
+    <div class="top"><div class="nm">주문 서비스</div><div class="st" style="color:#9A5B12">교란됨</div><div class="sp"></div>
+      <div class="tool">시간</div><div class="tool on">실행</div><div class="tool">가져오기</div><div class="tool">연결</div><div class="tool">깊이</div></div>
+    <div class="world"><canvas id="w5"></canvas></div>
+    <div class="bot">
+      <div class="prob one"><div class="hd"><div class="c">고치는 중</div><div class="sp"></div><div class="a">00:38 · 멈추기</div></div>
+        <div class="list"><div class="p on"><div class="t">결제 요청</div><div class="d">외부 호출에 재시도와 대기 시간을 넣는 중</div></div></div></div>
+      <div class="inp"><div class="ph">기다리는 동안 다른 곳을 봐도 됩니다.</div><div class="sp"></div><div class="hint">남은 문제 1</div></div>
+    </div>
+  </div>
+  <div class="note">진행률 막대도 스피너도 없다. <b>교란된 자리만 몸에서 흔들리고</b>,
+    글자는 지금 실제로 하는 일 한 줄뿐이다. 남은 문제 수는 그대로 보인다.</div>
+</div>
+
+<!-- 06 -->
+<div class="fr" id="f6">
+  <div class="cap"><i>FRAME 06</i><b>Result</b><span>결과보다 몸이 먼저 바뀐다</span></div>
+  <div class="app">
+    <div class="top"><div class="nm">주문 서비스</div><div class="st" style="color:#8C2B20">문제 1</div><div class="sp"></div>
+      <div class="tool">시간</div><div class="tool">실행</div><div class="tool">가져오기</div><div class="tool">연결</div><div class="tool">깊이</div></div>
+    <div class="world"><canvas id="w6"></canvas></div>
+    <div class="bot">
+      <div class="slab ink res">
+        <div class="row"><div class="h">결제 요청이 달라졌어요.</div><div class="sp"></div><div class="badge ok">확인됨</div></div>
+        <div class="d">외부 결제 호출에 재시도와 대기 시간을 넣었습니다. 같은 요청을 20번 보내 모두 3초 안에 돌아왔습니다.</div>
+        <div class="acts"><span>어떻게 확인했나요?</span><span>무엇이 바뀌었나요?</span><span>이전으로 돌아가기</span></div>
+      </div>
+      <div class="prob one"><div class="hd"><div class="c">현재 문제 1</div><div class="sp"></div><div class="a">전부 보기</div></div>
+        <div class="list"><div class="p"><div class="t">사용자 저장</div><div class="d">가끔 목록이 비어요</div></div></div></div>
+      <div class="inp"><div class="ph">원하는 걸 말해보세요.</div><div class="sp"></div><div class="hint">⏎</div></div>
+    </div>
+  </div>
+  <div class="note">문제 모듈이 <b>2 → 1</b>로 줄었다. 결과는 에이전트의 긴 응답이 아니라
+    <b>몸이 새 평형으로 가라앉은 것</b>이고, 글자는 그것을 사람 말로 확인해 준다.</div>
+</div>
+
+<!-- 07 -->
+<div class="fr" id="f7">
+  <div class="cap"><i>FRAME 07</i><b>Run → New Problem</b><span>MVP의 핵심 순환</span></div>
+  <div class="app">
+    <div class="top"><div class="nm">주문 서비스</div><div class="st" style="color:#8C2B20">실행 중 · 문제 2</div><div class="sp"></div>
+      <div class="tool">시간</div><div class="tool on">실행</div><div class="tool">가져오기</div><div class="tool">연결</div><div class="tool">깊이</div></div>
+    <div class="world"><canvas id="w7"></canvas></div>
+    <div class="bot">
+      <div class="prob"><div class="hd"><div class="c">현재 문제 2</div><div class="sp"></div><div class="a">방금 실행에서 발견</div></div>
+        <div class="list">
+          <div class="p on"><div class="t">세션 유지<em>NEW</em></div><div class="d">실행 중 연결이 끊겨요 · 로그인 후 4초</div></div>
+          <div class="p dim"><div class="t">사용자 저장</div><div class="d">가끔 목록이 비어요</div></div>
+        </div></div>
+      <div class="inp"><div class="typed">고쳐줘<span class="car"></span></div><div class="sp"></div><div class="hint">⏎ QODE</div></div>
+    </div>
+  </div>
+  <div class="note">실행은 입력이 아니라 <b>관측</b>이다. 실제 동작이 몸에 들어와 그 자리의 결을 끊고,
+    모듈에 한 줄이 늘어난다. 사용자는 이미 그 자리를 보고 있으므로
+    <b>“고쳐줘” 세 글자로 다음 Qode가 시작된다.</b> 이 순환이 MVP의 전부다.</div>
+</div>
+
+<!-- 08 -->
+<div class="fr" id="f8">
+  <div class="cap"><i>FRAME 08</i><b>Deep Technical View</b><span>기술적 사실은 의미에 매달려 있다</span></div>
+  <div class="app">
+    <div class="top"><div class="nm">주문 서비스</div><div class="st" style="color:#8C2B20">문제 2</div><div class="sp"></div>
+      <div class="tool">시간</div><div class="tool">실행</div><div class="tool">가져오기</div><div class="tool">연결</div><div class="tool on">깊이</div></div>
+    <div class="world" style="width:512px"><canvas id="w8"></canvas></div>
+    <div class="deep">
+      <div class="dh"><div class="b">세션 유지 — 실제 파일</div>
+        <div class="c">이 자리를 이루는 것들 · 방금 실행에서 실패</div></div>
+      <div class="tabs"><span class="on">파일</span><span>코드</span><span>API</span><span>스키마</span><span>증거</span></div>
+      <div class="body">
+        <span class="f">src/auth/session.ts</span> <span class="g">· 로그인과 공유</span><br>
+        <span class="f">src/auth/refresh.ts</span><br>
+        <span class="f">src/api/session.route.ts</span><br>
+        <span class="g">supabase/migrations/0009_session.sql</span><br>
+        <span class="g">tests/session.spec.ts</span> <span class="g">· 실패 1</span><br><br>
+        <span class="g">실행 기록 · 4초 뒤 연결 종료 ×3</span><br>
+        <span class="g">이 자리 밖의 파일은 여기 없습니다.</span>
+      </div>
+      <div class="foot">자리로 돌아가기</div>
+    </div>
+    <div class="bot"><div class="inp"><div class="ph">세션 유지 문제에 원하는 변화를 말해보세요.</div><div class="sp"></div><div class="hint">⏎</div></div></div>
+  </div>
+  <div class="note">IDE로 돌아가는 것이 아니다. 목록의 머리에 <b>“세션 유지 —”</b> 가 붙어 있고
+    보이는 것은 <b>그 자리를 이루는 것들뿐</b>이다. 개발자는 닿을 수 있고 비개발자는 지나갈 수 있다.</div>
+</div>
+</div>
+<div class="foot2">
+  <span>JUQODE · MVP WIREFRAME FREEZE</span>
+  <span>WORLD SHOWS · MODULE EXPLAINS · SAY FIXES</span>
+</div>
+</div>
+
+<script>
+
+"use strict";
+var JQ = (function(){
+/* ══════════════════════════════════════════════════════════════════════════
+   JuQode — Semantic Place
+   재료는 3R.4 그대로다. 바뀐 것은 하나뿐이다:
+   결의 방향이 상수가 아니라 의미가 정하는 값이 되었다.
+   ══════════════════════════════════════════════════════════════════════════ */
+var W = 864, H = 470;
+var G = 7;
+var SURF = 0.060;      // 겉면 레벨
+var DG   = 0.034;      // 결 간격
+var MASSK= 0.20;       // 질량이 그 자리의 결을 얼마나 조이는가 — 방향은 건드리지 않는다
+var WARP = 50;         // 재료의 고정된 흔들림
+var BASE_RES = 0.62;
+var W0   = 0.20;       // 주변 결의 발언권 — 자리가 없는 곳은 이 방향으로 흐른다
+var GDIR = 0.00350;    // 자리의 결도 주변과 같은 간격을 갖는다
+var SEM  = 1.06;       // 뜻이 미치는 범위 (질량 타원 대비)
+var AMB  = -20;        // 뜻이 없는 곳이 향하는 방향(도)
+var SHLD = 0.34;       // 어깨 — 이 폭에서 결이 돈다. 선이 아니다
+
+function resStep(r){ return r < 0.34 ? 4 : (r < 0.70 ? 2 : 1); }
+function bandOf(mass){ return mass<0.26?0:(mass<0.62?1:(mass<1.04?2:3)); }
+
+function D(v,k){ return {v:v, t:v, vel:0, k:k||24}; }
+function stepD(d,dt){
+  if(d.v === d.t && d.vel === 0) return false;
+  var c = 2*Math.sqrt(d.k);
+  d.vel += ((d.t-d.v)*d.k - d.vel*c)*dt;
+  d.v   += d.vel*dt;
+  if(Math.abs(d.t-d.v) < 2e-4 && Math.abs(d.vel) < 2e-3){ d.v=d.t; d.vel=0; return false; }
+  return true;
+}
+function stiff(mass){ return 30/(1 + 2.4*(mass||0)); }
+
+/* ── 모델 ─────────────────────────────────────────────────────────────── */
+function newModel(){
+  return {places:[], byId:{}, seams:[], voids:[], pulses:[], timers:[], breath:null, focus:null};
+}
+/* 자리 하나 = 의미 하나. 질량도 방향도 이름도 여기 붙는다. 개체가 아니라 성질이다. */
+function mkPlace(o){
+  var k = stiff(o.mass);
+  return {id:o.id, names:o.names||[], mass:o.mass||0, rot:o.rot||0, semantic:o.semantic!==false,
+    x:D(o.x,k), y:D(o.y,k), rx:D(o.rx,k), ry:D(o.ry,k), amp:D(o.amp||0,k),
+    dir:D(o.dir||0, 14), coh:D(o.coh===undefined?1:o.coh, 16), lab:D(0,20)};
+}
+function add(m,p){ m.places.push(p); m.byId[p.id]=p; return p; }
+function to(m,id,f,v){ var p=m.byId[id]; if(p) p[f].t=v; }
+function jump(m,id,f,v){ var p=m.byId[id]; if(p){ p[f].v=v; p[f].t=v; p[f].vel=0; } }
+function addSeam(m,o){
+  var s={id:o.id, x:o.x, y:o.y, rx:o.rx, ry:o.ry,
+    off:D(o.off||0,26), res:D(o.res===undefined?BASE_RES:o.res,26), tint:o.tint||0, brk:o.brk||0};
+  m.seams.push(s); return s;
+}
+function seam(m,id){ for(var i=0;i<m.seams.length;i++) if(m.seams[i].id===id) return m.seams[i]; return null; }
+
+/* ── 격자 ─────────────────────────────────────────────────────────────── */
+function newGrid(){
+  var cols=Math.ceil(W/G)+1, rows=Math.ceil(H/G)+1, n=cols*rows;
+  var wx=new Float32Array(n), wy=new Float32Array(n), flow=new Float32Array(n);
+  var agx=new Float32Array(n), agy=new Float32Array(n);
+  var i,j,px,py,o,ax,ay,da;
+  for(j=0;j<rows;j++) for(i=0;i<cols;i++){
+    px=i*G; py=j*G; o=j*cols+i;
+    ax=px+26*Math.sin(py*0.0132+0.7)+13*Math.sin(px*0.0207+2.1)+5*Math.sin(px*0.045+0.3);
+    ay=py+19*Math.sin(px*0.0111+1.9)+10*Math.sin(py*0.0241+0.4)+4.5*Math.sin(py*0.041+1.1);
+    wx[o]=ax; wy[o]=ay;
+    /* 주변 결 — 뜻이 없는 곳이 향하는 방향. 완만하게 흔들린다(재료의 성질) */
+    da=(AMB+7.5*Math.sin(px*0.0052+py*0.0031+1.1))*Math.PI/180;
+    agx[o]=-Math.sin(da)*GDIR; agy[o]=Math.cos(da)*GDIR;
+    flow[o]=0.00358*(ay*0.92+ax*0.34)+0.130*Math.sin(ax*0.0068+ay*0.0045+1.2);
+  }
+  return {cols:cols, rows:rows, wx:wx, wy:wy, flow:flow, agx:agx, agy:agy, warm:false,
+    val:new Float32Array(n), gf:new Float32Array(n),
+    ws:new Float32Array(n), gxs:new Float32Array(n), gys:new Float32Array(n),
+    res:new Float32Array(n), tint:new Uint8Array(n), mask:new Uint8Array(n)};
+}
+function sampleFlow(gr,x,y){
+  var i=Math.round(x/G), j=Math.round(y/G);
+  if(i<0)i=0; if(i>gr.cols-1)i=gr.cols-1;
+  if(j<0)j=0; if(j>gr.rows-1)j=gr.rows-1;
+  return gr.flow[j*gr.cols+i];
+}
+function addMass(gr,x,y,rx,ry,rot,amp){
+  if(Math.abs(amp)<0.004||rx<=1||ry<=1) return;
+  var cols=gr.cols, rows=gr.rows, val=gr.val, R=Math.max(rx,ry)+WARP;
+  var i0=Math.max(0,Math.floor((x-R)/G)), i1=Math.min(cols-1,Math.ceil((x+R)/G));
+  var j0=Math.max(0,Math.floor((y-R)/G)), j1=Math.min(rows-1,Math.ceil((y+R)/G));
+  var co=Math.cos(rot), si=Math.sin(rot), i,j,o,px,py,dx,dy,u,v,d2,w;
+  for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
+    o=j*cols+i; px=gr.wx[o]-x; py=gr.wy[o]-y;
+    dx=px*co+py*si; dy=-px*si+py*co;
+    u=dx/rx; v=dy/ry; d2=u*u+v*v;
+    if(d2>=1) continue;
+    w=1-d2; val[o]+=amp*w*w;
+  }
+}
+/* 뜻이 미치는 범위 안에서 결의 방향을 자기 쪽으로 당긴다.
+   테두리를 만들지 않는다 — 어깨에서 서서히 이긴다. */
+function addDir(gr,p){
+  var ax=p.x.v, ay=p.y.v, RX=p.rx.v*SEM, RY=p.ry.v*SEM, rot=p.rot;
+  var coh=p.coh.v;
+  /* 질량은 자기 결의 기울기를 키운다 = 그 자리의 결이 조여든다.
+     방향은 그대로다 — 같은 축을 따라 더 가팔라질 뿐이다. */
+  var slope=GDIR*(1+MASSK*p.amp.v);
+  var vx=-Math.sin(p.dir.v*Math.PI/180)*slope, vy=Math.cos(p.dir.v*Math.PI/180)*slope;
+  var cols=gr.cols, rows=gr.rows, R=Math.max(RX,RY)+WARP;
+  var i0=Math.max(0,Math.floor((ax-R)/G)), i1=Math.min(cols-1,Math.ceil((ax+R)/G));
+  var j0=Math.max(0,Math.floor((ay-R)/G)), j1=Math.min(rows-1,Math.ceil((ay+R)/G));
+  var co=Math.cos(rot), si=Math.sin(rot), i,j,o,px,py,dx,dy,u,v,d2,d,t,w;
+  for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
+    o=j*cols+i; px=gr.wx[o]-ax; py=gr.wy[o]-ay;
+    dx=px*co+py*si; dy=-px*si+py*co;
+    u=dx/RX; v=dy/RY; d2=u*u+v*v;
+    if(d2>=1) continue;
+    d=Math.sqrt(d2); t=(1-d)/SHLD; if(t>1)t=1;
+    w=coh*t*t*(3-2*t);
+    if(w<0.004) continue;
+    gr.ws[o]+=w; gr.gxs[o]+=w*vx; gr.gys[o]+=w*vy;
+  }
+}
+/* 한 지점에서 어떤 뜻이 얼마나 지배하는가 — 가리킨 곳의 의미는 계산된다 */
+function meaningAt(m,x,y){
+  var out=[], i,p,px,py,dx,dy,u,v,d2,d,t,w,co,si;
+  for(i=0;i<m.places.length;i++){
+    p=m.places[i]; if(!p.semantic) continue;
+    co=Math.cos(p.rot); si=Math.sin(p.rot);
+    px=x-p.x.v; py=y-p.y.v;
+    dx=px*co+py*si; dy=-px*si+py*co;
+    u=dx/(p.rx.v*SEM); v=dy/(p.ry.v*SEM); d2=u*u+v*v;
+    if(d2>=1) continue;
+    d=Math.sqrt(d2); t=(1-d)/SHLD; if(t>1)t=1;
+    w=t*t*(3-2*t);
+    if(w>0.02) out.push({p:p, w:w});
+  }
+  out.sort(function(a,b){ return b.w-a.w; });
+  return out;
+}
+function ellipseVisit(gr,x,y,rx,ry,fn){
+  var cols=gr.cols, rows=gr.rows, R=Math.max(rx,ry)+WARP;
+  var i0=Math.max(0,Math.floor((x-R)/G)), i1=Math.min(cols-1,Math.ceil((x+R)/G));
+  var j0=Math.max(0,Math.floor((y-R)/G)), j1=Math.min(rows-1,Math.ceil((y+R)/G));
+  var i,j,o,u,v,d2;
+  for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
+    o=j*cols+i;
+    u=(gr.wx[o]-x)/rx; v=(gr.wy[o]-y)/ry; d2=u*u+v*v;
+    if(d2<1) fn(o, Math.sqrt(d2));
+  }
+}
+
+function compute(gr,m,now,attn,resOv){
+  var base=(resOv===undefined? BASE_RES : resOv), i, j, p;
+  var n=gr.val.length;
+  gr.val.fill(0); gr.res.fill(base); gr.tint.fill(0); gr.mask.fill(0);
+  /* ① 몸 */
+  for(i=0;i<m.places.length;i++){
+    p=m.places[i];
+    var a=p.amp.v;
+    if(m.breath && m.breath.id===p.id) a += m.breath.amp*Math.sin(now*m.breath.w);
+    addMass(gr,p.x.v,p.y.v,p.rx.v,p.ry.v,p.rot,a);
+  }
+  for(i=0;i<m.pulses.length;i++){
+    var pu=m.pulses[i], u=(now-pu.t0)/pu.dur;
+    if(u<0||u>1) continue;
+    addMass(gr, pu.x0+(pu.x1-pu.x0)*u, pu.y0+(pu.y1-pu.y0)*u, pu.rx, pu.ry, 0, pu.amp*Math.sin(Math.PI*u));
+  }
+  for(i=0;i<m.voids.length;i++){
+    var vd=m.voids[i];
+    addMass(gr, vd.x, vd.y, vd.rx*1.55, vd.ry*1.55, 0, -vd.depth);
+    ellipseVisit(gr, vd.x, vd.y, vd.rx, vd.ry, function(o){ gr.mask[o]=3; });
+  }
+  /* ② 방향장 — 자리가 없는 곳은 주변 결로 흐른다 */
+  var ws=gr.ws, gxs=gr.gxs, gys=gr.gys, flow=gr.flow;
+  for(i=0;i<n;i++){ ws[i]=W0; gxs[i]=W0*gr.agx[i]; gys[i]=W0*gr.agy[i]; }
+  for(i=0;i<m.places.length;i++){
+    p=m.places[i];
+    if(p.semantic && p.coh.v>0.02) addDir(gr,p);
+  }
+  /* ③ 결 — 방향장 + 질량이 눌러 조인 만큼 */
+  var val=gr.val, cols=gr.cols, rows=gr.rows, iw;
+  for(i=0;i<n;i++){ iw=1/ws[i]; gxs[i]*=iw; gys[i]*=iw; }
+  for(i=0;i<m.seams.length;i++){
+    (function(sm){
+      var rr=sm.res.v, tn=sm.tint, brk=sm.brk, mr=Math.min(sm.rx,sm.ry), cut=sm.off.v;
+      ellipseVisit(gr, sm.x, sm.y, sm.rx, sm.ry, function(o,d){
+        var w=(1-d)/0.22; if(w>1)w=1; if(w<0)w=0;
+        var f=(w-0.35)/0.30; if(f>1)f=1; if(f<0)f=0;
+        if(f>0){ var v2=gr.res[o]+(rr-gr.res[o])*f; if(v2<gr.res[o]) gr.res[o]=v2; }
+        if(w>0.45 && tn) gr.tint[o]=tn;
+        /* 새 재료의 결은 몸의 결과 이어지지 않는다 — 경계에서 끊긴다 */
+        if(cut>0.004){ var dp=(1-d)*mr; if(dp>-3 && dp<(brk?20:11)) gr.mask[o]=3; }
+      });
+    })(m.seams[i]);
+  }
+  /* 주의를 받은 자리는 결이 더 촘촘해진다 — 이름이 아니라 몸이 먼저 답한다 */
+  for(i=0;i<m.places.length;i++){
+    (function(p2){
+      if(!p2.semantic||p2.lab.v<0.04) return;
+      var st=p2.lab.v;
+      ellipseVisit(gr, p2.x.v, p2.y.v, p2.rx.v*1.05, p2.ry.v*1.05, function(o,d){
+        var f=(1-d)/0.45; if(f>1)f=1; if(f<0)f=0;
+        var r2=base+(1-base)*st*f;
+        if(r2>gr.res[o]) gr.res[o]=r2;
+      });
+    })(m.places[i]);
+  }
+  if(attn && attn.a>0.02){
+    ellipseVisit(gr, attn.x, attn.y, 104, 104, function(o,d){
+      var f=(1-d)*attn.a, r2=base+(1-base)*(f>1?1:f);
+      if(r2>gr.res[o]) gr.res[o]=r2;
+    });
+  }
+}
+
+/* ── 결 뽑기 ──────────────────────────────────────────────────────────── */
+function newPaths(){
+  var a=[],i,j;
+  for(i=0;i<4;i++){ a.push([]); for(j=0;j<6;j++) a[i].push(new Path2D()); }
+  return a;
+}
+/* ── ① 겉면 — 몸이 끝나는 자리 (등치선 하나) ─────────────────────────── */
+function tess(gr,paths,forceTint){
+  var cols=gr.cols, rows=gr.rows, val=gr.val, tint=gr.tint, mask=gr.mask;
+  var i,j,o,a,b,c,d,mn,mx,lv,tn,ci,xi,yj,xr,yb,tX,rY,bX,lY;
+  for(j=0;j<rows-1;j++){
+    yj=j*G; yb=yj+G;
+    for(i=0;i<cols-1;i++){
+      o=j*cols+i; xi=i*G; xr=xi+G;
+      a=val[o]; b=val[o+1]; c=val[o+cols+1]; d=val[o+cols];
+      mn=a; mx=a;
+      if(b<mn)mn=b; else if(b>mx)mx=b;
+      if(c<mn)mn=c; else if(c>mx)mx=c;
+      if(d<mn)mn=d; else if(d>mx)mx=d;
+      if(mx<=SURF||mn>SURF) continue;
+      if(mask[o]===2) continue;
+      tn=(forceTint===undefined? tint[o] : forceTint);
+      lv=SURF;
+      ci=(a>lv?1:0)|(b>lv?2:0)|(c>lv?4:0)|(d>lv?8:0);
+      if(ci===0||ci===15) continue;
+      tX=xi+G*(lv-a)/(b-a); rY=yj+G*(lv-b)/(c-b);
+      bX=xi+G*(lv-d)/(c-d); lY=yj+G*(lv-a)/(d-a);
+      emit(paths[tn][4],ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY);
+    }
+  }
+}
+/* ── ② 결 — 방향장을 따라 흐르는 선들 ────────────────────────────────────
+   등치선으로는 이것을 그릴 수 없다. 방향이 자리마다 다른 장은 하나의 스칼라로
+   적분되지 않기 때문이다(회전 성분이 버려진다). 그래서 결을 직접 따라 그린다.
+   ──────────────────────────────────────────────────────────────────────── */
+var D0=15, SEED_K=0.92, BREAK_K=0.52, STEP=3.0, MAXLEN=760;
+function bilin(arr,gr,x,y){
+  var fx=x/G, fy=y/G, i=fx|0, j=fy|0, cols=gr.cols;
+  if(i<0)i=0; if(j<0)j=0; if(i>gr.cols-2)i=gr.cols-2; if(j>gr.rows-2)j=gr.rows-2;
+  var tx=fx-i, ty=fy-j, o=j*cols+i;
+  return arr[o]*(1-tx)*(1-ty)+arr[o+1]*tx*(1-ty)+arr[o+cols]*(1-tx)*ty+arr[o+cols+1]*tx*ty;
+}
+function nearIdx(gr,x,y){
+  var i=Math.round(x/G), j=Math.round(y/G);
+  if(i<0)i=0; if(j<0)j=0; if(i>gr.cols-1)i=gr.cols-1; if(j>gr.rows-1)j=gr.rows-1;
+  return j*gr.cols+i;
+}
+function streams(gr,paths,attn,forceTint){
+  var cols=gr.cols, rows=gr.rows, val=gr.val, res=gr.res, tint=gr.tint, mask=gr.mask;
+  var gxs=gr.gxs, gys=gr.gys;
+  /* 간격 격자 — 이미 그린 결과 너무 가까우면 새 결을 시작하지 않는다 */
+  var CS=D0, gc=Math.ceil(W/CS)+1, gr2=Math.ceil(H/CS)+1;
+  var buckets=new Array(gc*gr2); for(var z=0;z<buckets.length;z++) buckets[z]=null;
+  function push(x,y){
+    var b=((y/CS)|0)*gc+((x/CS)|0);
+    if(b<0||b>=buckets.length) return;
+    if(!buckets[b]) buckets[b]=[];
+    buckets[b].push(x,y);
+  }
+  function tooClose(x,y,r){
+    var bi=(x/CS)|0, bj=(y/CS)|0, r2=r*r, i,j,b,arr,k,dx,dy;
+    for(j=bj-1;j<=bj+1;j++) for(i=bi-1;i<=bi+1;i++){
+      if(i<0||j<0||i>=gc||j>=gr2) continue;
+      arr=buckets[j*gc+i]; if(!arr) continue;
+      for(k=0;k<arr.length;k+=2){ dx=arr[k]-x; dy=arr[k+1]-y; if(dx*dx+dy*dy<r2) return true; }
+    }
+    return false;
+  }
+  function sepAt(o,x,y){
+    var m=val[o], d=D0/(1+0.45*m);
+    var r=res[o]; if(r>0.70) d*=0.56; else if(r<0.34) d*=1.7;
+    return d;
+  }
+  function ok(x,y){
+    if(x<2||y<2||x>W-2||y>H-2) return 0;
+    var o=nearIdx(gr,x,y);
+    if(mask[o]===3) return 0;
+    return bilin(val,gr,x,y)>SURF ? o : 0;
+  }
+  /* 한 줄 그리기 — 앞뒤 양쪽으로 자란다 */
+  function grow(sx,sy){
+    var o0=ok(sx,sy); if(!o0) return null;
+    if(tooClose(sx,sy,sepAt(o0,sx,sy)*SEED_K)) return null;
+    var pts=[], k, x, y, gx, gy, tx, ty, px, py, o, sgn, run, n;
+    for(sgn=1;sgn>=-1;sgn-=2){
+      x=sx; y=sy; px=0; py=0; run=[];
+      for(k=0;k<MAXLEN/STEP;k++){
+        o=ok(x,y); if(!o) break;
+        gx=bilin(gxs,gr,x,y); gy=bilin(gys,gr,x,y);
+        tx=-gy; ty=gx;
+        n=Math.sqrt(tx*tx+ty*ty); if(n<1e-7) break;
+        tx/=n; ty/=n; tx*=sgn; ty*=sgn;
+        if(px||py){ if(tx*px+ty*py<0){ tx=-tx; ty=-ty; } }
+        if(k>1 && tooClose(x,y,sepAt(o,x,y)*BREAK_K)) break;
+        run.push(x,y); px=tx; py=ty;
+        x+=tx*STEP; y+=ty*STEP;
+      }
+      if(sgn===1) pts=run; else { for(k=run.length-2;k>=0;k-=2) pts.unshift(run[k],run[k+1]); }
+    }
+    if(pts.length<10) return null;
+    var mid=(pts.length>>1)&~1;
+    var o1=nearIdx(gr,pts[mid],pts[mid+1]);
+    var tn;
+    if(forceTint!==undefined) tn=forceTint;
+    else {                       /* 선 전체에서 투표 — 상태는 선 하나 단위로 읽힌다 */
+      var vote=[0,0,0,0], q, oq;
+      for(q=0;q<pts.length;q+=2){ oq=nearIdx(gr,pts[q],pts[q+1]); vote[tint[oq]]++; }
+      tn=0; var bestv=0;
+      for(q=1;q<4;q++) if(vote[q]>bestv && vote[q]*3>pts.length/2){ bestv=vote[q]; tn=q; }
+    }
+    var pth=paths[tn][bandOf(val[o1])];
+    pth.moveTo(pts[0],pts[1]);
+    for(k=2;k<pts.length;k+=2) pth.lineTo(pts[k],pts[k+1]);
+    for(k=0;k<pts.length;k+=2) push(pts[k],pts[k+1]);
+    return pts;
+  }
+  /* 씨앗은 이미 그린 결의 옆에서 나온다 — 고르게 채워지고, 난수는 없다 */
+  var queue=[], head=0, best=-1, bx=0, by=0, i2, j2, oo;
+  for(j2=0;j2<rows;j2++) for(i2=0;i2<cols;i2++){
+    oo=j2*cols+i2; if(val[oo]<=SURF||mask[oo]===3) continue;
+    if(val[oo]>best){ best=val[oo]; bx=i2*G; by=j2*G; }
+  }
+  if(best<0) return;
+  queue.push(bx,by);
+  var guard=0;
+  while(head<queue.length && guard++<12000){
+    var qx=queue[head], qy=queue[head+1]; head+=2;
+    var pts=grow(qx,qy); if(!pts) continue;
+    for(var k2=0;k2<pts.length;k2+=2){
+      if(k2%8) continue;
+      var o3=nearIdx(gr,pts[k2],pts[k2+1]), dd=sepAt(o3,pts[k2],pts[k2+1]);
+      var ax2=bilin(gxs,gr,pts[k2],pts[k2+1]), ay2=bilin(gys,gr,pts[k2],pts[k2+1]);
+      var nn=Math.sqrt(ax2*ax2+ay2*ay2); if(nn<1e-7) continue;
+      ax2/=nn; ay2/=nn;
+      queue.push(pts[k2]+ax2*dd, pts[k2+1]+ay2*dd);
+      queue.push(pts[k2]-ax2*dd, pts[k2+1]-ay2*dd);
+    }
+  }
+  /* 끊긴 자리로 둘러싸인 구역은 옆에서 씨앗이 넘어가지 못한다 — 남은 곳을 훑어 채운다.
+     그래야 이음매 안쪽에도 결이 있고, 그 결이 바깥과 만나지 못하는 것이 보인다. */
+  for(j2=0;j2<rows;j2+=2) for(i2=0;i2<cols;i2+=2){
+    oo=j2*cols+i2; if(val[oo]<=SURF||mask[oo]===3) continue;
+    grow(i2*G, j2*G);
+  }
+}
+function emit(p,ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY){
+  switch(ci){
+    case 1: case 14: p.moveTo(xi,lY); p.lineTo(tX,yj); break;
+    case 2: case 13: p.moveTo(tX,yj); p.lineTo(xr,rY); break;
+    case 3: case 12: p.moveTo(xi,lY); p.lineTo(xr,rY); break;
+    case 4: case 11: p.moveTo(xr,rY); p.lineTo(bX,yb); break;
+    case 6: case 9:  p.moveTo(tX,yj); p.lineTo(bX,yb); break;
+    case 7: case 8:  p.moveTo(xi,lY); p.lineTo(bX,yb); break;
+    default:
+      var ctr=(a+b+c+d)*0.25;
+      var joinAC=(ci===5)?(ctr>lv):(ctr<=lv);
+      if(joinAC){ p.moveTo(tX,yj); p.lineTo(xr,rY); p.moveTo(xi,lY); p.lineTo(bX,yb); }
+      else      { p.moveTo(xi,lY); p.lineTo(tX,yj); p.moveTo(xr,rY); p.lineTo(bX,yb); }
+  }
+}
+var TSTR=['13,12,11','154,91,18','140,43,32','91,107,132'];
+var BA=[0.26,0.40,0.58,0.78,0.46,0.15], BW=[0.55,0.62,0.72,0.86,0.95,0.58];
+function drawSet(ctx,paths,dim){
+  for(var t=0;t<4;t++){
+    var boost=(t===1||t===2)?1.35:1;
+    for(var b=0;b<6;b++){
+      var al=BA[b]*boost*dim; if(al>0.96) al=0.96;
+      ctx.strokeStyle='rgba('+TSTR[t]+','+al.toFixed(3)+')';
+      ctx.lineWidth=BW[b]*(dim<1?0.85:1);
+      ctx.stroke(paths[t][b]);
+    }
+  }
+}
+return {W:W,H:H,G:G,SURF:SURF,DG:DG,BASE_RES:BASE_RES,SEM:SEM,
+  D:D,stepD:stepD,newModel:newModel,mkPlace:mkPlace,add:add,to:to,jump:jump,
+  addSeam:addSeam,seam:seam,newGrid:newGrid,compute:compute,meaningAt:meaningAt,
+  newPaths:newPaths,tess:tess,streams:streams,drawSet:drawSet};
+})();
+
+</script>
+<script>
+"use strict";
+(function(){
+var Q=JQ;
+function substrate(m,amp,rx){
+  Q.add(m,Q.mkPlace({id:'base', semantic:false, x:410,y:268, rx:rx||336, ry:156,
+    rot:-0.05, amp:amp===undefined?0.40:amp, mass:0.9}));
+}
+/* MVP 하나의 Software — 자리 5개. Realm 은 하나만 쓴다(결/Field). */
+var MVP=[
+  {id:'intake', names:['요청 받기'],  x:250,y:168, rx:152,ry:60, rot: 0.10, amp:0.55, mass:0.30, dir:  0},
+  {id:'auth',   names:['로그인'],     x:418,y:246, rx:150,ry:84, rot:-0.10, amp:0.92, mass:0.55, dir: 34},
+  {id:'session',names:['세션 유지'],  x:596,y:306, rx:128,ry:62, rot: 0.16, amp:0.60, mass:0.50, dir: 20},
+  {id:'pay',    names:['결제 요청'],  x:576,y:172, rx:106,ry:54, rot:-0.24, amp:0.42, mass:0.25, dir: 50},
+  {id:'store',  names:['사용자 저장'],x:262,y:334, rx:178,ry:74, rot: 0.05, amp:1.06, mass:0.95, dir:-44}
+];
+function seamOn(m,o){ var s=Q.addSeam(m,o); s.off.v=s.off.t=o.off; s.res.v=s.res.t=o.res;
+  if(o.brk) s.brk=1; return s; }
+function body(opts){
+  opts=opts||{};
+  var m=Q.newModel(); substrate(m);
+  for(var i=0;i<MVP.length;i++) Q.add(m,Q.mkPlace(MVP[i]));
+  m.voids.push({x:520,y:190,rx:40,ry:27,depth:0.90});
+  /* 문제 = 그 자리의 결이 어긋나거나 끊긴 상태. 색은 상태에만 쓴다. */
+  if(opts.pay==='bad')  seamOn(m,{id:'sp',x:576,y:174,rx:112,ry:64,off:0.130,res:0.52,tint:2});
+  if(opts.pay==='work'){ Q.jump(m,'pay','amp',0.62); Q.jump(m,'pay','rx',122);
+                         seamOn(m,{id:'sp',x:578,y:176,rx:126,ry:74,off:0.108,res:0.30,tint:1}); }
+  if(opts.pay==='done')  Q.jump(m,'pay','amp',0.54);
+  if(opts.store==='bad') seamOn(m,{id:'ss',x:262,y:332,rx:150,ry:66,off:0.110,res:0.52,tint:2});
+  if(opts.session==='bad'){ Q.jump(m,'session','amp',0.74);
+                            seamOn(m,{id:'sn',x:594,y:304,rx:128,ry:76,off:0.170,res:0.52,tint:2,brk:1}); }
+  if(opts.focus) focusNow(m,opts.focus);
+  return m;
+}
+function focusNow(m,id){
+  for(var i=0;i<m.places.length;i++){
+    var p=m.places[i]; if(!p.semantic) continue;
+    var on=(p.id===id);
+    p.coh.v=p.coh.t=id?(on?1.55:0.40):1;
+    p.lab.v=p.lab.t=on?1:0;
+  }
+}
+function buildDash(){
+  var m=Q.newModel(); substrate(m,0.42);
+  var ps=[['화면 진입',214,166,148,56,0.50,0.30,  8],['로그인',424,196,130,58,0.62,0.45, 44],
+          ['편집기',330,318,176,78,0.85,0.60, -10],['설정',596,206,118,52,0.42,0.25,-38]];
+  for(var i=0;i<ps.length;i++){var a=ps[i];
+    Q.add(m,Q.mkPlace({id:'p'+i,names:[a[0]],x:a[1],y:a[2],rx:a[3],ry:a[4],amp:a[5],mass:a[6],dir:a[7]}));}
+  return m;
+}
+function buildPipe(){
+  var m=Q.newModel(); substrate(m,0.40);
+  var ps=[['수집',216,182,142,58,0.52,0.30, 12],['정규화',392,220,138,68,0.72,0.45,-16],
+          ['관계',556,264,136,70,0.80,0.55,-40],['저장',312,352,186,78,1.18,0.95,-56],
+          ['내보내기',648,190,108,50,0.44,0.30, 30]];
+  for(var i=0;i<ps.length;i++){var a=ps[i];
+    Q.add(m,Q.mkPlace({id:'p'+i,names:[a[0]],x:a[1],y:a[2],rx:a[3],ry:a[4],amp:a[5],mass:a[6],dir:a[7]}));}
+  m.voids.push({x:600,y:190,rx:42,ry:29,depth:0.94});
+  return m;
+}
+function W(id,m,scale,focal){
+  var cv=document.getElementById(id); if(!cv) return;
+  scale=scale||1;
+  var dpr=2;
+  cv.width=Q.W*dpr; cv.height=Q.H*dpr;
+  var ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  var gr=Q.newGrid();
+  Q.compute(gr,m,0,null);
+  var p=Q.newPaths(); Q.tess(gr,p); Q.streams(gr,p,null);
+  ctx.clearRect(0,0,Q.W,Q.H);
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  Q.drawSet(ctx,p,1);
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(var i=0;i<m.places.length;i++){
+    var pl=m.places[i];
+    if(!pl.semantic||pl.lab.v<0.04||!pl.names.length) continue;
+    ctx.font='600 '+(13/scale).toFixed(1)+'px "Noto Sans KR","Malgun Gothic",sans-serif';
+    ctx.lineWidth=4/scale; ctx.strokeStyle='rgba(255,255,255,0.92)';
+    ctx.strokeText(pl.names[0], pl.x.v, pl.y.v);
+    ctx.fillStyle='rgba(13,12,11,0.92)';
+    ctx.fillText(pl.names[0], pl.x.v, pl.y.v);
+  }
+  var host=cv.parentNode, h=host.clientHeight, w=host.clientWidth;
+  cv.style.width=(Q.W*scale)+'px'; cv.style.height=(Q.H*scale)+'px';
+  var fx=focal?focal.x:Q.W/2, fy=focal?focal.y:264.5;
+  cv.style.left=Math.round(w/2 - fx*scale)+'px';
+  cv.style.top=Math.round(h/2 - fy*scale)+'px';
+}
+var TH=243/864;
+W('w1a',body({pay:'bad',store:'bad'}),TH);
+W('w1b',buildDash(),TH);
+W('w1c',buildPipe(),TH);
+W('w2',body({pay:'bad',store:'bad'}));
+W('w3',body({pay:'bad',store:'bad',focus:'pay'}));
+W('w4',body({pay:'bad',store:'bad',focus:'pay'}));
+W('w5',body({pay:'work',store:'bad',focus:'pay'}));
+W('w6',body({pay:'done',store:'bad'}));
+W('w7',body({store:'bad',session:'bad',focus:'session'}));
+W('w8',body({store:'bad',session:'bad',focus:'session'}),0.84,{x:596,y:300});
+})();
+
+</script>
+</body>
+</html>
