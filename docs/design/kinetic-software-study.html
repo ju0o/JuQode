@@ -203,7 +203,7 @@ canvas{display:block;width:864px;height:470px}
   <h2>06 · STILL</h2>
   <h3>모션을 전부 멈춰도 남는 것</h3>
   <div class="lede">아래는 정지 화면이다. 애니메이션도, 재생도 없다.
-    라벨을 모두 지워도 <b>무게가 어디 쏠려 있는지 · 어디가 바깥과 닿는지 · 어디가 아직 확인되지 않았는지 ·
+    라벨을 모두 지워도 <b>무게가 어디 쏠려 있는지 · 어디가 아직 확인되지 않았는지 ·
     어디를 모르는지 · 무엇이 이미 밖으로 나갔는지</b>가 형태만으로 읽힌다.
     모션은 의미를 <b>강화</b>할 뿐, 의미를 <b>운반하는 유일한 수단</b>이 아니다.
     <b>몸 위에 마우스를 올려 보라</b> — 주의를 둔 자리만 결이 해상된다.</div>
@@ -252,12 +252,15 @@ var JQ = (function(){
 
 var W = 864, H = 470;
 var G = 7;              // 격자 간격(px)
-var SURF = 0.060;       // 표면(경계) 레벨 — 이 값의 등치선이 몸의 겉면이다
-var DL   = 0.075;       // 결 간격. 질량이 클수록 넘어야 하는 결이 많아진다
-var BASE_RES = 0.62;    // 기본 해상도 → 두 칸에 한 줄. 주의를 두면 1.0
+var SURF = 0.060;       // 표면 레벨 — 이 값의 등치선이 몸의 겉면이다
+var DG   = 0.020;       // 결 간격
+var COMP = 0.0022;      // 질량이 결을 얼마나 눌러 조이는가 (흐름 방향 누적)
+var WARP = 50;          // 재료의 고정된 방향성 — 정보가 아니라 재료의 성질이다
+var BASE_RES = 0.62;    // 기본 해상도 → 두 결에 하나. 주의를 두면 전부
 
 function resStep(r){ return r < 0.34 ? 4 : (r < 0.70 ? 2 : 1); }
-function bandOf(lv){ return lv < 0.30 ? 0 : (lv < 0.80 ? 1 : 2); }
+/* 톤은 그 자리의 질량이 정한다 — 무거운 곳이 진하다 */
+function bandOf(mass){ return mass<0.26?0:(mass<0.62?1:(mass<1.04?2:3)); }
 
 /* ── 감쇠기 ───────────────────────────────────────────────────────────── */
 function D(v,k){ return {v:v, t:v, vel:0, k:k||24}; }
@@ -298,43 +301,53 @@ function link(m,a,b){ m.links.push({a:a,b:b,f:D(0,20)}); }
 /* ── 격자 ─────────────────────────────────────────────────────────────── */
 function newGrid(){
   var cols=Math.ceil(W/G)+1, rows=Math.ceil(H/G)+1, n=cols*rows;
-  return {cols:cols, rows:rows,
-    val:new Float32Array(n), res:new Float32Array(n),
+  var wx=new Float32Array(n), wy=new Float32Array(n), flow=new Float32Array(n);
+  var i, j, px, py, o, ax, ay;
+  for(j=0;j<rows;j++) for(i=0;i<cols;i++){
+    px=i*G; py=j*G; o=j*cols+i;
+    ax=px+26*Math.sin(py*0.0132+0.7)+13*Math.sin(px*0.0207+2.1)+5*Math.sin(px*0.045+0.3);
+    ay=py+19*Math.sin(px*0.0111+1.9)+10*Math.sin(py*0.0241+0.4)+4.5*Math.sin(py*0.041+1.1);
+    wx[o]=ax; wy[o]=ay;
+    flow[o]=0.0019*(ay*0.92+ax*0.34)+0.115*Math.sin(ax*0.0068+ay*0.0045+1.2);
+  }
+  return {cols:cols, rows:rows, wx:wx, wy:wy, flow:flow,
+    val:new Float32Array(n), gf:new Float32Array(n), res:new Float32Array(n),
     tint:new Uint8Array(n), mask:new Uint8Array(n)};
 }
 
 /* 하나의 의미 단위가 장에 더하는 기여. 유한 지지 커널이므로 멀리 새지 않는다 */
 function addSrc(gr,x,y,rx,ry,rot,amp){
   if(Math.abs(amp)<0.004 || rx<=1 || ry<=1) return;
-  var cols=gr.cols, rows=gr.rows, val=gr.val, R=Math.max(rx,ry);
+  var cols=gr.cols, rows=gr.rows, val=gr.val, R=Math.max(rx,ry)+WARP;
   var i0=Math.max(0,Math.floor((x-R)/G)), i1=Math.min(cols-1,Math.ceil((x+R)/G));
   var j0=Math.max(0,Math.floor((y-R)/G)), j1=Math.min(rows-1,Math.ceil((y+R)/G));
-  var co=Math.cos(rot), si=Math.sin(rot), i,j,px,py,dx,dy,u,v,d2,w;
+  var co=Math.cos(rot), si=Math.sin(rot), i,j,o,px,py,dx,dy,u,v,d2,w;
   for(j=j0;j<=j1;j++){
-    py=j*G-y;
     for(i=i0;i<=i1;i++){
-      px=i*G-x;
+      o=j*cols+i; px=gr.wx[o]-x; py=gr.wy[o]-y;
       dx=px*co+py*si; dy=-px*si+py*co;
       u=dx/rx; v=dy/ry; d2=u*u+v*v;
       if(d2>=1) continue;
       w=1-d2;
-      val[j*cols+i]+=amp*w*w;
+      val[o]+=amp*w*w;
     }
   }
 }
 function ellipseVisit(gr,x,y,rx,ry,fn){
-  var cols=gr.cols, rows=gr.rows, R=Math.max(rx,ry);
+  var cols=gr.cols, rows=gr.rows, R=Math.max(rx,ry)+WARP;
   var i0=Math.max(0,Math.floor((x-R)/G)), i1=Math.min(cols-1,Math.ceil((x+R)/G));
   var j0=Math.max(0,Math.floor((y-R)/G)), j1=Math.min(rows-1,Math.ceil((y+R)/G));
-  var i,j,u,v,d2;
+  var i,j,o,u,v,d2;
   for(j=j0;j<=j1;j++) for(i=i0;i<=i1;i++){
-    u=(i*G-x)/rx; v=(j*G-y)/ry; d2=u*u+v*v;
-    if(d2<1) fn(j*cols+i, Math.sqrt(d2));
+    o=j*cols+i;
+    u=(gr.wx[o]-x)/rx; v=(gr.wy[o]-y)/ry; d2=u*u+v*v;
+    if(d2<1) fn(o, Math.sqrt(d2));
   }
 }
 
 function compute(gr,m,now,attn,resOv){
   var base = (resOv===undefined? BASE_RES : resOv);
+  var j;
   gr.val.fill(0); gr.res.fill(base); gr.tint.fill(0); gr.mask.fill(0);
   var i,s;
   for(i=0;i<m.srcs.length;i++){
@@ -360,17 +373,26 @@ function compute(gr,m,now,attn,resOv){
   for(i=0;i<m.voids.length;i++){
     var vd=m.voids[i];
     addSrc(gr, vd.x, vd.y, vd.rx*1.55, vd.ry*1.55, 0, -vd.depth);
-    ellipseVisit(gr, vd.x, vd.y, vd.rx, vd.ry, function(o){ gr.mask[o]=1; });
+    ellipseVisit(gr, vd.x, vd.y, vd.rx, vd.ry, function(o){ gr.mask[o]=3; });
   }
-  /* 이음매 — 새 재료와 몸의 결이 어긋나 있는 자리 */
+  /* 결을 만든다 — 흐름이 몸을 지나며 질량에 눌린 만큼 조여든다.
+     질량은 결을 밀어 올리지 않는다. 밀어 올리면 봉우리를 둘러싼 고리가 되고,
+     그것은 등고선 지도이지 재료가 아니다. 질량은 결의 간격을 좁힌다. */
+  var gf=gr.gf, flow=gr.flow, val=gr.val, cols2=gr.cols, rows2=gr.rows, acc, o2;
+  for(i=0;i<cols2;i++){
+    acc=0;
+    for(j=0;j<rows2;j++){ o2=j*cols2+i; acc+=val[o2]; gf[o2]=flow[o2]+COMP*acc*G; }
+  }
+  /* 이음매 — 새 재료의 결이 몸의 결과 어긋나 있는 자리 */
   for(i=0;i<m.seams.length;i++){
     (function(sm){
       var off=sm.off.v, rs=sm.res.v, tn=sm.tint, brk=sm.brk;
+      var mr=Math.min(sm.rx,sm.ry);
       ellipseVisit(gr, sm.x, sm.y, sm.rx, sm.ry, function(o,d){
-        var w=(1-d)/0.15; if(w>1)w=1; if(w<0)w=0;
-        gr.val[o]+=off*w;
+        var w=(1-d)/0.22; if(w>1)w=1; if(w<0)w=0;
+        gr.gf[o]+=off*w;
         if(w>0.5){ if(rs<gr.res[o]) gr.res[o]=rs; if(tn) gr.tint[o]=tn; }
-        if(brk && w>0.06 && w<0.94) gr.mask[o]=1;   /* 단층: 결이 서로 만나지 못한다 */
+        if(brk){ var dp=(1-d)*mr; if(dp>-3 && dp<18) gr.mask[o]=3; } /* 단층: 결이 만나지 못한다 */
       });
     })(m.seams[i]);
   }
@@ -378,7 +400,7 @@ function compute(gr,m,now,attn,resOv){
   for(i=0;i<m.vents.length;i++){
     (function(vt){
       if(vt.open.v<0.03) return;
-      ellipseVisit(gr, vt.x, vt.y, vt.r*vt.open.v, vt.r*vt.open.v, function(o){ if(!gr.mask[o]) gr.mask[o]=2; });
+      ellipseVisit(gr, vt.x, vt.y, vt.r*vt.open.v, vt.r*vt.open.v, function(o){ gr.mask[o]=2; });
     })(m.vents[i]);
   }
   if(attn && attn.a>0.02){
@@ -392,65 +414,80 @@ function compute(gr,m,now,attn,resOv){
 /* ── 등치선 추출 (marching squares) ───────────────────────────────────── */
 function newPaths(){
   var a=[],i,j;
-  for(i=0;i<4;i++){ a.push([]); for(j=0;j<4;j++) a[i].push(new Path2D()); }
+  for(i=0;i<4;i++){ a.push([]); for(j=0;j<5;j++) a[i].push(new Path2D()); }
   return a;
 }
 function tess(gr,paths,forceTint){
-  var cols=gr.cols, rows=gr.rows, val=gr.val, res=gr.res, tint=gr.tint, mask=gr.mask;
+  var cols=gr.cols, rows=gr.rows, val=gr.val, gf=gr.gf, res=gr.res, tint=gr.tint, mask=gr.mask;
   var i,j,o,a,b,c,d,mn,mx,l0,l1,li,lv,rs,tn,ci,xi,yj,xr,yb,tX,rY,bX,lY,ctr,joinAC,p;
   for(j=0;j<rows-1;j++){
     yj=j*G; yb=yj+G;
     for(i=0;i<cols-1;i++){
-      o=j*cols+i;
-      if(mask[o]===1) continue;
+      o=j*cols+i; xi=i*G; xr=xi+G;
       a=val[o]; b=val[o+1]; c=val[o+cols+1]; d=val[o+cols];
       mn=a; mx=a;
       if(b<mn)mn=b; else if(b>mx)mx=b;
       if(c<mn)mn=c; else if(c>mx)mx=c;
       if(d<mn)mn=d; else if(d>mx)mx=d;
       if(mx<=SURF) continue;
-      l0=Math.ceil((mn-SURF)/DL); if(l0<0) l0=0;
-      l1=Math.floor((mx-SURF)/DL);
+      tn=(forceTint===undefined? tint[o] : forceTint);
+      /* ① 겉면 — 몸이 끝나는 자리 */
+      if(mn<=SURF && mask[o]!==2){
+        lv=SURF;
+        ci=(a>lv?1:0)|(b>lv?2:0)|(c>lv?4:0)|(d>lv?8:0);
+        if(ci!==0&&ci!==15){
+          tX=xi+G*(lv-a)/(b-a); rY=yj+G*(lv-b)/(c-b);
+          bX=xi+G*(lv-d)/(c-d); lY=yj+G*(lv-a)/(d-a);
+          emit(paths[tn][4],ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY);
+        }
+        continue;                       /* 겉면 칸에는 결을 그리지 않는다 — 살결 */
+      }
+      /* ② 결 — 몸을 관통하는 흐름 */
+      if(mask[o]===3) continue;
+      a=gf[o]; b=gf[o+1]; c=gf[o+cols+1]; d=gf[o+cols];
+      mn=a; mx=a;
+      if(b<mn)mn=b; else if(b>mx)mx=b;
+      if(c<mn)mn=c; else if(c>mx)mx=c;
+      if(d<mn)mn=d; else if(d>mx)mx=d;
+      l0=Math.ceil(mn/DG); l1=Math.floor(mx/DG);
       if(l1<l0) continue;
       rs=resStep(res[o]);
-      tn=(forceTint===undefined? tint[o] : forceTint);
-      xi=i*G; xr=xi+G;
+      p=paths[tn][bandOf(val[o])];
       for(li=l0;li<=l1;li++){
-        if(li===0){ if(mask[o]===2) continue; }
-        else if(li%rs) continue;
-        lv=SURF+li*DL;
+        if(li%rs) continue;
+        lv=li*DG;
         ci=(a>lv?1:0)|(b>lv?2:0)|(c>lv?4:0)|(d>lv?8:0);
         if(ci===0||ci===15) continue;
-        tX=xi+G*(lv-a)/(b-a);
-        rY=yj+G*(lv-b)/(c-b);
-        bX=xi+G*(lv-d)/(c-d);
-        lY=yj+G*(lv-a)/(d-a);
-        p=paths[tn][li===0?3:bandOf(lv)];
-        switch(ci){
-          case 1: case 14: p.moveTo(xi,lY); p.lineTo(tX,yj); break;
-          case 2: case 13: p.moveTo(tX,yj); p.lineTo(xr,rY); break;
-          case 3: case 12: p.moveTo(xi,lY); p.lineTo(xr,rY); break;
-          case 4: case 11: p.moveTo(xr,rY); p.lineTo(bX,yb); break;
-          case 6: case 9:  p.moveTo(tX,yj); p.lineTo(bX,yb); break;
-          case 7: case 8:  p.moveTo(xi,lY); p.lineTo(bX,yb); break;
-          default:
-            ctr=(a+b+c+d)*0.25;
-            joinAC = (ci===5) ? (ctr>lv) : (ctr<=lv);
-            if(joinAC){ p.moveTo(tX,yj); p.lineTo(xr,rY); p.moveTo(xi,lY); p.lineTo(bX,yb); }
-            else      { p.moveTo(xi,lY); p.lineTo(tX,yj); p.moveTo(xr,rY); p.lineTo(bX,yb); }
-        }
+        tX=xi+G*(lv-a)/(b-a); rY=yj+G*(lv-b)/(c-b);
+        bX=xi+G*(lv-d)/(c-d); lY=yj+G*(lv-a)/(d-a);
+        emit(p,ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY);
       }
     }
+  }
+}
+function emit(p,ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY){
+  switch(ci){
+    case 1: case 14: p.moveTo(xi,lY); p.lineTo(tX,yj); break;
+    case 2: case 13: p.moveTo(tX,yj); p.lineTo(xr,rY); break;
+    case 3: case 12: p.moveTo(xi,lY); p.lineTo(xr,rY); break;
+    case 4: case 11: p.moveTo(xr,rY); p.lineTo(bX,yb); break;
+    case 6: case 9:  p.moveTo(tX,yj); p.lineTo(bX,yb); break;
+    case 7: case 8:  p.moveTo(xi,lY); p.lineTo(bX,yb); break;
+    default:
+      var ctr=(a+b+c+d)*0.25;
+      var joinAC=(ci===5)?(ctr>lv):(ctr<=lv);
+      if(joinAC){ p.moveTo(tX,yj); p.lineTo(xr,rY); p.moveTo(xi,lY); p.lineTo(bX,yb); }
+      else      { p.moveTo(xi,lY); p.lineTo(tX,yj); p.moveTo(xr,rY); p.lineTo(bX,yb); }
   }
 }
 
 /* ── 그리기 ───────────────────────────────────────────────────────────── */
 var TSTR=['13,12,11','154,91,18','140,43,32','91,107,132'];
-var BA=[0.26,0.42,0.62,0.90], BW=[0.70,0.75,0.95,1.50];
+var BA=[0.26,0.40,0.58,0.78,0.46], BW=[0.55,0.62,0.72,0.86,0.95];
 function drawSet(ctx,paths,dim){
   for(var t=0;t<4;t++){
-    var boost = (t===1||t===2)?1.25:1;
-    for(var b=0;b<4;b++){
+    var boost = (t===1||t===2)?1.35:1;
+    for(var b=0;b<5;b++){
       var al=BA[b]*boost*dim; if(al>0.96) al=0.96;
       ctx.strokeStyle='rgba('+TSTR[t]+','+al.toFixed(3)+')';
       ctx.lineWidth=BW[b]*(dim<1?0.85:1);
@@ -458,7 +495,7 @@ function drawSet(ctx,paths,dim){
     }
   }
 }
-return {W:W,H:H,G:G,SURF:SURF,DL:DL,BASE_RES:BASE_RES,
+return {W:W,H:H,G:G,SURF:SURF,DG:DG,BASE_RES:BASE_RES,
   D:D,stepD:stepD,newModel:newModel,mkSrc:mkSrc,add:add,to:to,jump:jump,
   addSeam:addSeam,seam:seam,link:link,newGrid:newGrid,compute:compute,
   newPaths:newPaths,tess:tess,drawSet:drawSet,stiff:stiff};
@@ -474,51 +511,51 @@ var Q=JQ, W=Q.W, H=Q.H;
    같은 소프트웨어 하나가 02→05 장면을 관통한다. 유형별 렌더러는 없다.
    ═════════════════════════════════════════════════════════════════════ */
 function baseSurface(m,amp,rx){
-  Q.add(m,Q.mkSrc({id:'base', x:428,y:372, rx:rx||392, ry:128, rot:-0.042, amp:amp===undefined?0.40:amp, mass:0.9}));
+  Q.add(m,Q.mkSrc({id:'base', x:410,y:268, rx:rx||336, ry:156, rot:-0.05, amp:amp===undefined?0.40:amp, mass:0.9}));
 }
 function buildBody(o){
   o=o||{};
   var m=Q.newModel();
   baseSurface(m);
-  Q.add(m,Q.mkSrc({id:'surface', x:232,y:152, rx:136, ry:96,  amp:0.60, mass:0.30}));
-  Q.add(m,Q.mkSrc({id:'auth',    x:420,y:238, rx:152, ry:118, amp:1.05, mass:0.55}));
-  Q.add(m,Q.mkSrc({id:'store',   x:252,y:356, rx:178, ry:106, amp:1.24, mass:0.95}));
-  Q.add(m,Q.mkSrc({id:'fail',    x:622,y:212, rx:104, ry:78,  amp:0.46, mass:0.25}));
-  Q.add(m,Q.mkSrc({id:'session', x:616,y:348, rx:120, ry:84,  amp:0.64, mass:0.50}));
-  Q.add(m,Q.mkSrc({id:'idp',     x:706,y:138, rx:100, ry:76,  amp:0.52, mass:0.40}));
-  m.voids.push({x:706,y:138,rx:44,ry:34,depth:0.78});
+  Q.add(m,Q.mkSrc({id:'surface', x:278,y:176, rx:146, ry:58, rot: 0.10, amp:0.62, mass:0.30}));
+  Q.add(m,Q.mkSrc({id:'auth',    x:424,y:234, rx:166, ry:88, rot:-0.10, amp:0.92, mass:0.55}));
+  Q.add(m,Q.mkSrc({id:'store',   x:258,y:320, rx:180, ry:74, rot: 0.05, amp:1.10, mass:0.95}));
+  Q.add(m,Q.mkSrc({id:'fail',    x:574,y:222, rx:110, ry:56, rot:-0.24, amp:0.40, mass:0.25}));
+  Q.add(m,Q.mkSrc({id:'session', x:560,y:324, rx:118, ry:56, rot: 0.18, amp:0.56, mass:0.50}));
+  Q.add(m,Q.mkSrc({id:'idp',     x:556,y:176, rx:110, ry:70, rot: 0.30, amp:0.46, mass:0.40}));
+  m.voids.push({x:546,y:190,rx:38,ry:25,depth:0.92});
   Q.link(m,'surface','auth'); Q.link(m,'fail','auth');
   Q.link(m,'auth','store');   Q.link(m,'auth','session');
   if(o.retry){
-    Q.jump(m,'fail','amp',0.92); Q.jump(m,'fail','rx',138); Q.jump(m,'fail','ry',104);
-    Q.jump(m,'fail','x',606);    Q.jump(m,'fail','y',206);
-    Q.jump(m,'auth','amp',1.20); Q.jump(m,'auth','ry',126); Q.jump(m,'auth','x',432);
-    Q.jump(m,'session','amp',0.70);
+    Q.jump(m,'fail','amp',0.86); Q.jump(m,'fail','rx',146); Q.jump(m,'fail','ry',74);
+    Q.jump(m,'fail','x',556);    Q.jump(m,'fail','y',216);
+    Q.jump(m,'auth','amp',1.06); Q.jump(m,'auth','ry',96); Q.jump(m,'auth','x',430);
+    Q.jump(m,'session','amp',0.62);
   }
   if(o.seam){
-    Q.addSeam(m,{id:'sf', x:606,y:206, rx:150,ry:118, off:0.155, res:0.30, tint:1});
-    Q.addSeam(m,{id:'sa', x:436,y:246, rx:120,ry:96,  off:0.105, res:0.30, tint:1});
+    Q.addSeam(m,{id:'sf', x:556,y:216, rx:118,ry:70, off:0.060, res:0.30, tint:1});
+    Q.addSeam(m,{id:'sa', x:430,y:232, rx:98,ry:62, off:0.042, res:0.30, tint:1});
   }
   if(o.mark){
-    Q.add(m,Q.mkSrc({id:'notch', x:706,y:318, rx:56, ry:42, amp:-0.13, mass:1}));
-    Q.add(m,Q.mkSrc({id:'packet',x:818,y:296, rx:38, ry:31, amp:0.44, mass:1}));
+    Q.add(m,Q.mkSrc({id:'notch', x:678,y:296, rx:58, ry:44, amp:-0.24, mass:1}));
+    Q.add(m,Q.mkSrc({id:'packet',x:788,y:276, rx:37, ry:31, amp:0.62, mass:1}));
   }
   return m;
 }
 function RETRY(m){
-  Q.to(m,'fail','amp',0.92); Q.to(m,'fail','rx',138); Q.to(m,'fail','ry',104);
-  Q.to(m,'fail','x',606);    Q.to(m,'fail','y',206);
+  Q.to(m,'fail','amp',0.86); Q.to(m,'fail','rx',146); Q.to(m,'fail','ry',74);
+  Q.to(m,'fail','x',556);    Q.to(m,'fail','y',216);
 }
 function revertRetry(m){
-  Q.to(m,'fail','amp',0.46); Q.to(m,'fail','rx',104); Q.to(m,'fail','ry',78);
-  Q.to(m,'fail','x',622);    Q.to(m,'fail','y',212);
-  Q.to(m,'auth','amp',1.05); Q.to(m,'auth','ry',118); Q.to(m,'auth','x',420);
-  Q.to(m,'session','amp',0.64);
+  Q.to(m,'fail','amp',0.40); Q.to(m,'fail','rx',110); Q.to(m,'fail','ry',56);
+  Q.to(m,'fail','x',574);    Q.to(m,'fail','y',222);
+  Q.to(m,'auth','amp',0.92); Q.to(m,'auth','ry',88); Q.to(m,'auth','x',424);
+  Q.to(m,'session','amp',0.56);
 }
 /* 확인이 끝나면 몸 전체가 한 번 다시 자리를 잡는다 */
 function relax(m){
-  Q.to(m,'base','amp',0.41); Q.to(m,'auth','y',236);
-  Q.to(m,'store','ry',108);  Q.to(m,'session','rx',122);
+  Q.to(m,'base','amp',0.43); Q.to(m,'auth','y',232);
+  Q.to(m,'store','ry',76);   Q.to(m,'session','rx',122);
 }
 function settleSeams(m){
   for(var i=0;i<m.seams.length;i++){ m.seams[i].off.t=0; m.seams[i].res.t=Q.BASE_RES; m.seams[i].brk=0; }
@@ -531,26 +568,26 @@ var SCENES=[
   id:'sc1', hero:true, phrase:'로그인부터 만들어줘.',
   build:function(){
     var m=Q.newModel();
-    baseSurface(m,0.34);
-    Q.add(m,Q.mkSrc({id:'origin', x:414,y:286, rx:92, ry:70, amp:0.108, mass:0.35}));
+    baseSurface(m,0.46);
+    Q.add(m,Q.mkSrc({id:'origin', x:398,y:234, rx:72, ry:42, rot:0.26, amp:0.26, mass:0.35}));
     return m;
   },
   beats:[
    {n:'잠재', s:'잠재', d:1700, w:'아직 아무것도 만들어지지 않았다. 표면 하나와, 아직 실현되지 않은 장력 하나. 빈 화면이 아니라 되어갈 준비가 된 재료다.',
     run:function(){}},
    {n:'요청', s:'교란됨', d:1200, phrase:true, w:'말이 몸에 닿는다. 잠재돼 있던 자리가 먼저 응답한다 — 어디에 만들지를 사람이 고른 적이 없는데도.',
-    run:function(m){ Q.to(m,'origin','amp',0.16); }},
+    run:function(m){ Q.to(m,'origin','amp',0.42); }},
    {n:'융기', s:'형성 중', d:2900, w:'구조는 어디선가 나타나지 않는다. 표면에 있던 재료가 한 곳으로 재분배되면서 깊이가 생긴다. 넘어야 할 결이 많아진 만큼 그 자리가 무거워졌다.',
-    run:function(m){ Q.to(m,'origin','amp',1.18); Q.to(m,'origin','rx',150); Q.to(m,'origin','ry',124);
-                     Q.to(m,'origin','y',262); Q.to(m,'base','amp',0.285); Q.to(m,'base','rx',412); }},
+    run:function(m){ Q.to(m,'origin','amp',1.24); Q.to(m,'origin','rx',162); Q.to(m,'origin','ry',92);
+                     Q.to(m,'origin','y',228); Q.to(m,'base','amp',0.40); Q.to(m,'base','rx',352); }},
    {n:'외부 접촉', s:'형성 중', d:2600, w:'로그인은 바깥에서 사람이 들어오는 일이다. 표면이 한 지점에서 바깥으로 밀려 나가며 접점이 생긴다. 이 융기는 장식이 아니라 경계가 뚫린 자리다.',
-    run:function(m){ Q.add(m,Q.mkSrc({id:'port', x:286,y:210, rx:118, ry:88, amp:0.02, mass:0.35}));
-                     Q.to(m,'port','amp',0.66); Q.link(m,'port','origin'); }},
+    run:function(m){ Q.add(m,Q.mkSrc({id:'port', x:272,y:172, rx:150, ry:58, rot:0.10, amp:0.02, mass:0.35}));
+                     Q.to(m,'port','amp',0.76); Q.link(m,'port','origin'); }},
    {n:'실행 완료', s:'가라앉는 중', d:4200, w:'코드는 써졌다. 그러나 새로 생긴 부분의 결은 아직 몸의 결과 이어지지 않는다. 움직임이 잦아들어도 이것은 “완료”가 아니다.',
-    run:function(m){ Q.addSeam(m,{id:'so', x:414,y:262, rx:164,ry:136, off:0.155, res:0.30, tint:1});
+    run:function(m){ Q.addSeam(m,{id:'so', x:398,y:228, rx:158,ry:96, off:0.062, res:0.30, tint:1});
                      m.breath={id:'origin', amp:0.013, w:0.0007}; }},
    {n:'증거', s:'확인됨', d:0, w:'확인이 들어오자 어긋남이 사라지고 결이 몸 전체에 하나로 이어진다. 이 순간에만 Software Time에 점이 찍힌다.',
-    run:function(m){ settleSeams(m); Q.to(m,'origin','ry',118); Q.to(m,'base','amp',0.30); }}
+    run:function(m){ settleSeams(m); Q.to(m,'origin','ry',88); Q.to(m,'base','amp',0.42); }}
   ]
 },
 {
@@ -562,14 +599,14 @@ var SCENES=[
    {n:'요청', s:'교란됨', d:1300, phrase:true, w:'Qode가 시작된다. 화면 전체가 로딩으로 바뀌지 않는다. 교란되는 것은 영향을 받는 자리뿐이다.',
     run:function(m){}},
    {n:'국소 교란', s:'교란됨', d:1900, w:'실패 처리 영역이 쉬던 형태를 벗어난다. 카드가 하나 추가되는 것이 아니라 그 자리의 재료가 늘어나며 몸의 윤곽이 달라진다.',
-    run:function(m){ RETRY(m); Q.addSeam(m,{id:'sf', x:606,y:206, rx:150,ry:118, off:0.135, res:0.30, tint:1}); }},
+    run:function(m){ RETRY(m); Q.addSeam(m,{id:'sf', x:556,y:216, rx:118,ry:70, off:0.054, res:0.30, tint:1}); }},
    {n:'전달', s:'교란됨', d:1250, w:'변경은 그 자리에 머물지 않는다. 눌린 힘이 판정 영역까지 전달되고, 지나가는 동안에만 두 영역 사이에 목이 생겼다가 사라진다. 화살표가 아니라 재료가 잠시 통하는 것이다.',
-    run:function(m,sc){ m.pulses.push({x0:606,y0:206,x1:432,y1:242,t0:sc.now,dur:1150,amp:0.30,rx:86,ry:66}); }},
+    run:function(m,sc){ m.pulses.push({x0:556,y0:216,x1:430,y1:232,t0:sc.now,dur:1150,amp:0.30,rx:84,ry:56}); }},
    {n:'2차 반응', s:'교란됨', d:2200, w:'판정 영역은 이제 재시도 상태를 쥐고 있어야 한다. 결이 조여지고 형태가 한 단계 더 밀린다. 그 너머로는 그리지 않는다 — 앎은 두 단계에서 멈춘다.',
     run:function(m){ Q.to(m,'auth','amp',1.20); Q.to(m,'auth','ry',126); Q.to(m,'auth','x',432);
-                     Q.addSeam(m,{id:'sa', x:436,y:246, rx:120,ry:96, off:0.095, res:0.30, tint:1}); }},
+                     Q.addSeam(m,{id:'sa', x:430,y:232, rx:98,ry:62, off:0.038, res:0.30, tint:1}); }},
    {n:'관성', s:'교란됨', d:0, w:'같은 힘이 사용자 저장 영역에도 닿지만 그곳은 거의 움직이지 않는다. 의미상 가장 무거운 곳이기 때문이다. 질량은 큰 사각형이 아니라 이 저항으로 보인다.',
-    run:function(m,sc){ m.pulses.push({x0:432,y0:242,x1:272,y1:346,t0:sc.now,dur:1000,amp:0.20,rx:78,ry:60});
+    run:function(m,sc){ m.pulses.push({x0:430,y0:232,x1:268,y1:316,t0:sc.now,dur:1000,amp:0.20,rx:76,ry:52});
                         Q.to(m,'store','amp',1.26); Q.to(m,'session','amp',0.70); }}
   ]
 },
@@ -584,12 +621,12 @@ var SCENES=[
     run:function(){}},
    {n:'증거 · 실패', s:'안정 실패', d:2800, w:'확인이 실패했다. 어긋남이 이음매에서 단층이 된다. 양쪽 결이 서로 만나지 못하고 끊긴다 — 흔들리는 것이 아니라 구조적으로 이어지지 못하는 것이다.',
     run:function(m){ var a=Q.seam(m,'sf'), b=Q.seam(m,'sa');
-                     a.off.t=0.42; a.brk=1; a.tint=2; b.off.t=0.22; b.tint=2; m.breath=null; }},
+                     a.off.t=0.190; a.brk=1; a.tint=2; a.res.t=0.52; b.off.t=0.105; b.tint=2; b.res.t=0.52; m.breath=null; }},
    {n:'이전 평형', s:'안정 실패', d:2800, w:'이전에 안정됐던 형태가 옅게 남는다. 실패해도 돌아갈 곳을 잃지 않는다는 것이 몸에서 보인다.',
     run:function(m){ m.showGhost=true; }},
    {n:'보정 후 재실행', s:'가라앉는 중', d:3000, w:'고쳐서 다시 실행한다. 단층이 이음매로 줄어들고 몸이 다시 조금 움직인다. 아직 확인은 아니다.',
     run:function(m){ var a=Q.seam(m,'sf'), b=Q.seam(m,'sa');
-                     a.off.t=0.12; a.brk=0; a.tint=1; b.off.t=0.09; b.brk=0; b.tint=1;
+                     a.off.t=0.050; a.brk=0; a.tint=1; a.res.t=0.30; b.off.t=0.036; b.brk=0; b.tint=1; b.res.t=0.30;
                      m.showGhost=false; Q.to(m,'fail','rx',132); Q.to(m,'auth','amp',1.16);
                      m.breath={id:'fail', amp:0.012, w:0.00075}; }},
    {n:'증거 · 통과', s:'확인됨', d:0, w:'이번엔 확인이 통과한다. 이음매가 사라지고 결이 몸 전체에 하나로 이어진다. 그리고 몸은 정말로 멈춘다 — 렌더링도 함께 멈춘다.',
@@ -600,10 +637,10 @@ var SCENES=[
   id:'sc4', hero:true, phrase:'사용자에게 이메일을 보내줘.',
   build:function(){
     var m=buildBody({retry:1});
-    m.vents.push({x:720,y:322,r:34,open:Q.D(0,22)});
+    m.vents.push({x:688,y:298,r:32,open:Q.D(0,22)});
     return m;
   },
-  gatePt:{x:716,y:320},
+  gatePt:{x:684,y:296},
   beats:[
    {n:'안정', s:'안정', d:1900, w:'확인된 몸. 결은 이어져 있고 표면은 닫혀 있다.', run:function(){}},
    {n:'내부 변경', s:'교란됨', d:3200, w:'먼저 안에서만 일어나는 변경. 형태가 눌렸다가 되돌아온다. 몸 밖에는 아무것도 남지 않는다 — 이것이 가역이다.',
@@ -612,20 +649,20 @@ var SCENES=[
    {n:'요청', s:'교란됨', d:1300, phrase:true, w:'이번 변경은 몸 안에서 끝나지 않는다. 메일은 보내지면 취소되지 않는다.',
     run:function(){}},
    {n:'문턱', s:'저항', d:1500, w:'표면 한 지점에 압력이 쌓이고 결이 빽빽해진다. 그리고 움직임이 멈춘다. 모달이 막는 것이 아니라 재료가 저항하는 것이다. 넘기려면 사람이 그 지점을 눌러야 한다.',
-    run:function(m){ Q.add(m,Q.mkSrc({id:'press', x:686,y:324, rx:78, ry:62, amp:0.02, mass:0.2}));
+    run:function(m){ Q.add(m,Q.mkSrc({id:'press', x:642,y:304, rx:76, ry:58, amp:0.02, mass:0.2}));
                      Q.to(m,'press','amp',0.60); }},
    {n:'통과', s:'통과 중', d:2000, gate:true, w:'표면이 열리고 재료 한 덩어리가 경계를 넘는다. 여는 것은 JuQode가 아니라 사람이었다.',
     run:function(m){ m.vents[0].open.t=1;
-      Q.add(m,Q.mkSrc({id:'packet', x:712,y:320, rx:38, ry:31, amp:0.44, mass:0.15}));
-      Q.to(m,'packet','x',818); Q.to(m,'packet','y',296); Q.to(m,'press','amp',0.16); }},
+      Q.add(m,Q.mkSrc({id:'packet', x:684,y:296, rx:37, ry:31, amp:0.62, mass:0.15}));
+      Q.to(m,'packet','x',788); Q.to(m,'packet','y',276); Q.to(m,'press','amp',0.16); }},
    {n:'흔적', s:'확인됨 · 외부 흔적', d:0, w:'표면은 닫히지만 자국이 남고, 넘어간 덩어리는 바깥에 그대로 굳는다. 그것은 이제 몸이 아니다 — 몸이 어떻게 바뀌어도 저것은 바뀌지 않는다.',
     run:function(m){ m.vents[0].open.t=0; Q.to(m,'press','amp',0);
-      Q.add(m,Q.mkSrc({id:'notch', x:706,y:318, rx:56, ry:42, amp:0, mass:1})); Q.to(m,'notch','amp',-0.13); }}
+      Q.add(m,Q.mkSrc({id:'notch', x:678,y:296, rx:58, ry:44, amp:0, mass:1})); Q.to(m,'notch','amp',-0.24); }}
   ]
 },
 {
   id:'sc5',
-  build:function(){ var m=buildBody({retry:1, mark:1}); m.vents.push({x:720,y:322,r:34,open:Q.D(0,22)}); return m; },
+  build:function(){ var m=buildBody({retry:1, mark:1}); m.vents.push({x:688,y:298,r:32,open:Q.D(0,22)}); return m; },
   ghost:function(){ return buildBody({mark:1}); },
   beats:[
    {n:'현재 평형', s:'확인됨 · 외부 흔적', d:2000, w:'지금의 안정 상태. 재시도 동작이 들어가 있고, 바깥에는 이미 나간 일의 자국이 있다.', run:function(){}},
@@ -641,12 +678,12 @@ var SCENES=[
   build:function(){ var m=buildBody({retry:1, seam:1, mark:1}); return m; },
   beats:[{n:'정지', s:'가라앉는 중 · 외부 흔적', d:0, w:'', run:function(){}}],
   readings:[
-   ['무게가 어디 쏠려 있는가','왼쪽 아래의 결이 가장 깊다. 이 소프트웨어는 사용자 데이터 쪽으로 무겁다.'],
-   ['어디가 바깥과 닿는가','왼쪽 위에서 표면이 바깥으로 밀려 나와 있다. 사람이 들어오는 자리다.'],
-   ['무엇이 아직 확인되지 않았는가','오른쪽의 결이 성기고 주위와 어긋나 있다. 방금 바뀌었고 아직 확인되지 않았다.'],
-   ['무엇을 모르는가','오른쪽 위에 결이 없는 구멍. 압력은 읽히지만 안은 모른다.'],
-   ['무엇이 이미 밖으로 나갔는가','오른쪽 끝, 몸에서 떨어져 굳은 결. 되돌릴 수 없는 일이 한 번 있었다.'],
-   ['몸은 지금 안정한가','아니다. 이음매가 남아 있는 한 이 형태는 아직 사실이 아니다.']
+   ['무게가 어디 쏠려 있는가','왼쪽 아래에서 결이 가장 촘촘하고 진하다. 이 소프트웨어는 사용자 데이터 쪽으로 무겁다.'],
+   ['어디가 바깥과 닿았는가','오른쪽 가장자리가 안으로 패여 있다. 한 번 열렸던 자리다.'],
+   ['무엇이 아직 확인되지 않았는가','오른쪽 가운데의 결이 성기고 주위 결과 어긋나 있다. 방금 바뀌었고 아직 확인되지 않았다.'],
+   ['무엇을 모르는가','가운데 위의 결이 없는 구멍. 결이 그것을 피해 흐르지만 안은 그리지 않는다.'],
+   ['무엇이 이미 밖으로 나갔는가','오른쪽 바깥, 몸에서 떨어져 굳은 결. 되돌릴 수 없는 일이 한 번 있었다.'],
+   ['몸은 지금 안정한가','아니다. 어긋난 결이 남아 있는 한 이 형태는 아직 사실이 아니다.']
   ]
 }];
 
@@ -659,7 +696,7 @@ function el(tag,cls,html){ var e=document.createElement(tag); if(cls)e.className
 function mount(def){
   var host=document.getElementById(def.id);
   var sc={def:def, i:-1, playing:false, ever:false, waiting:false, visible:false,
-          dirty:true, now:0, nextAt:0, attn:{x:0,y:0,a:Q.D(0,20)}, gr:Q.newGrid(), btEls:[]};
+          dirty:true, now:0, nextAt:0, attn:{x:0,y:-24,a:Q.D(0,20)}, gr:Q.newGrid(), btEls:[]};
   sc.m=def.build();
 
   var L=el('div');
@@ -765,8 +802,8 @@ function stepScene(sc,now,dt){
     if(Q.stepD(s.ry,dt))moving=true; }
   for(i=m.seams.length-1;i>=0;i--){ var sm=m.seams[i];
     if(Q.stepD(sm.off,dt))moving=true; if(Q.stepD(sm.res,dt))moving=true;
-    if(sm.off.t===0&&Math.abs(sm.off.v)<0.035) sm.tint=0;
-    if(sm.off.t===0&&Math.abs(sm.off.v)<0.006&&Math.abs(sm.res.v-Q.BASE_RES)<0.02){ m.seams.splice(i,1); moving=true; } }
+    if(sm.off.t===0&&Math.abs(sm.off.v)<0.014) sm.tint=0;
+    if(sm.off.t===0&&Math.abs(sm.off.v)<0.003&&Math.abs(sm.res.v-Q.BASE_RES)<0.02){ m.seams.splice(i,1); moving=true; } }
   for(i=0;i<m.vents.length;i++) if(Q.stepD(m.vents[i].open,dt)) moving=true;
   for(i=0;i<m.links.length;i++) if(Q.stepD(m.links[i].f,dt)) moving=true;
   if(Q.stepD(sc.attn.a,dt)) moving=true;
@@ -796,11 +833,11 @@ function render(sc,now){
   if(sc.waiting&&sc.def.gatePt){
     var g=sc.def.gatePt;
     ctx.font='500 11px "Noto Sans KR","Malgun Gothic",sans-serif';
-    ctx.textAlign='right'; ctx.textBaseline='middle';
+    ctx.textAlign='left'; ctx.textBaseline='middle';
     ctx.lineWidth=3.4; ctx.strokeStyle='rgba(255,255,255,0.94)';
-    ctx.strokeText('여기를 눌러야 넘어간다', g.x-34, g.y-44);
-    ctx.fillStyle='#9A5B12'; ctx.fillText('여기를 눌러야 넘어간다', g.x-34, g.y-44);
-    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    ctx.strokeText('여기를 눌러야 넘어간다', g.x+24, g.y);
+    ctx.fillStyle='#9A5B12'; ctx.fillText('여기를 눌러야 넘어간다', g.x+24, g.y);
+    ctx.textBaseline='alphabetic';
   }
 }
 
