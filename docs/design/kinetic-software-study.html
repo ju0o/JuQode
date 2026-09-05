@@ -396,7 +396,9 @@ function compute(gr,m,now,attn,resOv){
       ellipseVisit(gr, sm.x, sm.y, sm.rx, sm.ry, function(o,d){
         var w=(1-d)/0.22; if(w>1)w=1; if(w<0)w=0;
         gr.gf[o]+=off*w;
-        if(w>0.5){ if(rs<gr.res[o]) gr.res[o]=rs; if(tn) gr.tint[o]=tn; }
+        var f=(w-0.35)/0.30; if(f>1)f=1; if(f<0)f=0;   /* 해상도 경계를 부드럽게 */
+        if(f>0){ var rr=gr.res[o]+(rs-gr.res[o])*f; if(rr<gr.res[o]) gr.res[o]=rr; }
+        if(w>0.45 && tn) gr.tint[o]=tn;
         if(brk){ var dp=(1-d)*mr; if(dp>-3 && dp<18) gr.mask[o]=3; } /* 단층: 결이 만나지 못한다 */
       });
     })(m.seams[i]);
@@ -419,7 +421,7 @@ function compute(gr,m,now,attn,resOv){
 /* ── 등치선 추출 (marching squares) ───────────────────────────────────── */
 function newPaths(){
   var a=[],i,j;
-  for(i=0;i<4;i++){ a.push([]); for(j=0;j<5;j++) a[i].push(new Path2D()); }
+  for(i=0;i<4;i++){ a.push([]); for(j=0;j<6;j++) a[i].push(new Path2D()); }
   return a;
 }
 function tess(gr,paths,forceTint){
@@ -456,16 +458,17 @@ function tess(gr,paths,forceTint){
       if(d<mn)mn=d; else if(d>mx)mx=d;
       l0=Math.ceil(mn/DG); l1=Math.floor(mx/DG);
       if(l1<l0) continue;
-      rs=resStep(res[o]);
+      rs=resStep(res[o]); var rs2=resStep(res[o]+0.16), pf=(rs2<rs)?paths[tn][5]:null, tgt;
       p=paths[tn][bandOf(val[o])];
       for(li=l0;li<=l1;li++){
-        if(li%rs) continue;
+        tgt=p;
+        if(li%rs){ if(pf && !(li%rs2)) tgt=pf; else continue; }
         lv=li*DG;
         ci=(a>lv?1:0)|(b>lv?2:0)|(c>lv?4:0)|(d>lv?8:0);
         if(ci===0||ci===15) continue;
         tX=xi+G*(lv-a)/(b-a); rY=yj+G*(lv-b)/(c-b);
         bX=xi+G*(lv-d)/(c-d); lY=yj+G*(lv-a)/(d-a);
-        emit(p,ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY);
+        emit(tgt,ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY);
       }
     }
   }
@@ -488,11 +491,11 @@ function emit(p,ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY){
 
 /* ── 그리기 ───────────────────────────────────────────────────────────── */
 var TSTR=['13,12,11','154,91,18','140,43,32','91,107,132'];
-var BA=[0.26,0.40,0.58,0.78,0.46], BW=[0.55,0.62,0.72,0.86,0.95];
+var BA=[0.26,0.40,0.58,0.78,0.46,0.15], BW=[0.55,0.62,0.72,0.86,0.95,0.58];
 function drawSet(ctx,paths,dim){
   for(var t=0;t<4;t++){
     var boost = (t===1||t===2)?1.35:1;
-    for(var b=0;b<5;b++){
+    for(var b=0;b<6;b++){
       var al=BA[b]*boost*dim; if(al>0.96) al=0.96;
       ctx.strokeStyle='rgba('+TSTR[t]+','+al.toFixed(3)+')';
       ctx.lineWidth=BW[b]*(dim<1?0.85:1);
@@ -528,7 +531,7 @@ function buildBody(o){
   Q.add(m,Q.mkSrc({id:'fail',    x:574,y:222, rx:110, ry:56, rot:-0.24, amp:0.40, mass:0.25}));
   Q.add(m,Q.mkSrc({id:'session', x:560,y:324, rx:118, ry:56, rot: 0.18, amp:0.56, mass:0.50}));
   Q.add(m,Q.mkSrc({id:'idp',     x:556,y:176, rx:110, ry:70, rot: 0.30, amp:0.46, mass:0.40}));
-  m.voids.push({x:546,y:190,rx:38,ry:25,depth:0.92});
+  m.voids.push({x:546,y:190,rx:45,ry:31,depth:0.98});
   Q.link(m,'surface','auth'); Q.link(m,'fail','auth');
   Q.link(m,'auth','store');   Q.link(m,'auth','session');
   if(o.retry){
@@ -606,12 +609,12 @@ var SCENES=[
    {n:'국소 교란', s:'교란됨', d:1900, w:'실패 처리 영역이 쉬던 형태를 벗어난다. 카드가 하나 추가되는 것이 아니라 그 자리의 재료가 늘어나며 몸의 윤곽이 달라진다.',
     run:function(m){ RETRY(m); Q.addSeam(m,{id:'sf', x:556,y:216, rx:118,ry:70, off:0.054, res:0.30, tint:1}); }},
    {n:'전달', s:'교란됨', d:1250, w:'변경은 그 자리에 머물지 않는다. 눌린 힘이 판정 영역까지 전달되고, 지나가는 동안에만 두 영역 사이에 목이 생겼다가 사라진다. 화살표가 아니라 재료가 잠시 통하는 것이다.',
-    run:function(m,sc){ m.pulses.push({x0:556,y0:216,x1:430,y1:232,t0:sc.now,dur:1150,amp:0.30,rx:84,ry:56}); }},
+    run:function(m,sc){ m.pulses.push({x0:556,y0:216,x1:430,y1:232,t0:sc.now,dur:1150,amp:0.54,rx:92,ry:60}); }},
    {n:'2차 반응', s:'교란됨', d:2200, w:'판정 영역은 이제 재시도 상태를 쥐고 있어야 한다. 결이 조여지고 형태가 한 단계 더 밀린다. 그 너머로는 그리지 않는다 — 앎은 두 단계에서 멈춘다.',
     run:function(m){ Q.to(m,'auth','amp',1.20); Q.to(m,'auth','ry',126); Q.to(m,'auth','x',432);
                      Q.addSeam(m,{id:'sa', x:430,y:232, rx:98,ry:62, off:0.038, res:0.30, tint:1}); }},
    {n:'관성', s:'교란됨', d:0, w:'같은 힘이 사용자 저장 영역에도 닿지만 그곳은 거의 움직이지 않는다. 의미상 가장 무거운 곳이기 때문이다. 질량은 큰 사각형이 아니라 이 저항으로 보인다.',
-    run:function(m,sc){ m.pulses.push({x0:430,y0:232,x1:268,y1:316,t0:sc.now,dur:1000,amp:0.20,rx:76,ry:52});
+    run:function(m,sc){ m.pulses.push({x0:430,y0:232,x1:268,y1:316,t0:sc.now,dur:1000,amp:0.36,rx:82,ry:56});
                         Q.to(m,'store','amp',1.26); Q.to(m,'session','amp',0.70); }}
   ]
 },
@@ -649,17 +652,17 @@ var SCENES=[
   beats:[
    {n:'안정', s:'안정', d:1900, w:'확인된 몸. 결은 이어져 있고 표면은 닫혀 있다.', run:function(){}},
    {n:'내부 변경', s:'교란됨', d:3200, w:'먼저 안에서만 일어나는 변경. 형태가 눌렸다가 되돌아온다. 몸 밖에는 아무것도 남지 않는다 — 이것이 가역이다.',
-    run:function(m,sc){ Q.to(m,'session','amp',0.92); Q.to(m,'session','rx',134);
-      m.timers.push({at:sc.now+1500, fn:function(){ Q.to(m,'session','amp',0.70); Q.to(m,'session','rx',120); }}); }},
+    run:function(m,sc){ Q.to(m,'session','amp',1.12); Q.to(m,'session','rx',148); Q.to(m,'session','ry',76);
+      m.timers.push({at:sc.now+1600, fn:function(){ Q.to(m,'session','amp',0.62); Q.to(m,'session','rx',118); Q.to(m,'session','ry',56); }}); }},
    {n:'요청', s:'교란됨', d:1300, phrase:true, w:'이번 변경은 몸 안에서 끝나지 않는다. 메일은 보내지면 취소되지 않는다.',
     run:function(){}},
    {n:'문턱', s:'저항', d:1500, w:'표면 한 지점에 압력이 쌓이고 결이 빽빽해진다. 그리고 움직임이 멈춘다. 모달이 막는 것이 아니라 재료가 저항하는 것이다. 넘기려면 사람이 그 지점을 눌러야 한다.',
     run:function(m){ Q.add(m,Q.mkSrc({id:'press', x:642,y:304, rx:76, ry:58, amp:0.02, mass:0.2}));
-                     Q.to(m,'press','amp',0.60); }},
+                     Q.to(m,'press','amp',0.92); }},
    {n:'통과', s:'통과 중', d:2000, gate:true, w:'표면이 열리고 재료 한 덩어리가 경계를 넘는다. 여는 것은 JuQode가 아니라 사람이었다.',
     run:function(m){ m.vents[0].open.t=1;
       Q.add(m,Q.mkSrc({id:'packet', x:684,y:296, rx:37, ry:31, amp:0.62, mass:0.15}));
-      Q.to(m,'packet','x',788); Q.to(m,'packet','y',276); Q.to(m,'press','amp',0.16); }},
+      Q.to(m,'packet','x',788); Q.to(m,'packet','y',276); Q.to(m,'press','amp',0.22); }},
    {n:'흔적', s:'확인됨 · 외부 흔적', d:0, w:'표면은 닫히지만 자국이 남고, 넘어간 덩어리는 바깥에 그대로 굳는다. 그것은 이제 몸이 아니다 — 몸이 어떻게 바뀌어도 저것은 바뀌지 않는다.',
     run:function(m){ m.vents[0].open.t=0; Q.to(m,'press','amp',0);
       Q.add(m,Q.mkSrc({id:'notch', x:678,y:296, rx:58, ry:44, amp:0, mass:1})); Q.to(m,'notch','amp',-0.24); }}

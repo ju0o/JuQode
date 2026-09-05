@@ -10,6 +10,7 @@
 |---|---|
 | [`design/KINETIC_SOFTWARE_REPRESENTATION.md`](design/KINETIC_SOFTWARE_REPRESENTATION.md) | **운동 표상 연구**(3R.4). 재료 = 장(場)과 결. **Founder 판단 대기** |
 | [`design/kinetic-software-study.html`](design/kinetic-software-study.html) | 위 연구의 **인터랙티브 모션 스터디** 5장면 + 정지 프레임. 의존성 0 |
+| [`design/KINETIC_PM_VISUAL_GATE.md`](design/KINETIC_PM_VISUAL_GATE.md) | 위 산출물의 **실제 렌더 검토**(3R.4B). 근거 이미지 `design/evidence/kinetic/` |
 | [`design/SOFTWARE_PHYSICS_CANON.md`](design/SOFTWARE_PHYSICS_CANON.md) | **법칙**(3R.2). 믿음 3 · 행동 5 · 통제 2. **상위 SSOT** |
 | [`design/software-physics-canon.html`](design/software-physics-canon.html) | 위 법칙의 **참조 카드**. 제품 화면이 아니다 |
 | [`design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`](design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md) | **시각 문법**(3R.3). 채널 소유표 + **Lovable 1차 Build Contract** |
