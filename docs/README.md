@@ -10,6 +10,8 @@
 |---|---|
 | [`design/KINETIC_SOFTWARE_REPRESENTATION.md`](design/KINETIC_SOFTWARE_REPRESENTATION.md) | **운동 표상 연구**(3R.4). 재료 = 장(場)과 결. **Founder 판단 대기** |
 | [`design/kinetic-software-study.html`](design/kinetic-software-study.html) | 위 연구의 **인터랙티브 모션 스터디** 5장면 + 정지 프레임. 의존성 0 |
+| [`design/WHOLE_PRODUCT_INTERACTION.md`](design/WHOLE_PRODUCT_INTERACTION.md) | **제품 전체 상호작용**(3R.6). World → Focus → Instrument. **Founder 판단 대기** |
+| [`design/whole-product-board.html`](design/whole-product-board.html) | 위 명세의 **8프레임 제품 보드**. World는 실제 렌더러가 그린다 |
 | [`design/SEMANTIC_PLACE_CANON.md`](design/SEMANTIC_PLACE_CANON.md) | **의미의 자리 법칙**(3R.5). 의미 = 결의 방향. **Founder 판단 대기** |
 | [`design/semantic-place-study.html`](design/semantic-place-study.html) | 위 법칙의 **인터랙티브 연구** 4편 + 유형 스트립. 의존성 0 |
 | [`design/SEMANTIC_PLACE_PM_REVIEW.md`](design/SEMANTIC_PLACE_PM_REVIEW.md) | 위 산출물의 **실제 렌더 검토**. 근거 이미지 `design/evidence/semantic-place/` |

@@ -546,7 +546,14 @@ function streams(gr,paths,attn,forceTint){
     if(pts.length<10) return null;
     var mid=(pts.length>>1)&~1;
     var o1=nearIdx(gr,pts[mid],pts[mid+1]);
-    var tn=(forceTint!==undefined)?forceTint:tint[o1];
+    var tn;
+    if(forceTint!==undefined) tn=forceTint;
+    else {                       /* 선 전체에서 투표 — 상태는 선 하나 단위로 읽힌다 */
+      var vote=[0,0,0,0], q, oq;
+      for(q=0;q<pts.length;q+=2){ oq=nearIdx(gr,pts[q],pts[q+1]); vote[tint[oq]]++; }
+      tn=0; var bestv=0;
+      for(q=1;q<4;q++) if(vote[q]>bestv && vote[q]*3>pts.length/2){ bestv=vote[q]; tn=q; }
+    }
     var pth=paths[tn][bandOf(val[o1])];
     pth.moveTo(pts[0],pts[1]);
     for(k=2;k<pts.length;k+=2) pth.lineTo(pts[k],pts[k+1]);
@@ -574,6 +581,12 @@ function streams(gr,paths,attn,forceTint){
       queue.push(pts[k2]+ax2*dd, pts[k2+1]+ay2*dd);
       queue.push(pts[k2]-ax2*dd, pts[k2+1]-ay2*dd);
     }
+  }
+  /* 끊긴 자리로 둘러싸인 구역은 옆에서 씨앗이 넘어가지 못한다 — 남은 곳을 훑어 채운다.
+     그래야 이음매 안쪽에도 결이 있고, 그 결이 바깥과 만나지 못하는 것이 보인다. */
+  for(j2=0;j2<rows;j2+=2) for(i2=0;i2<cols;i2+=2){
+    oo=j2*cols+i2; if(val[oo]<=SURF||mask[oo]===3) continue;
+    grow(i2*G, j2*G);
   }
 }
 function emit(p,ci,a,b,c,d,lv,xi,yj,xr,yb,tX,rY,bX,lY){
