@@ -6,6 +6,11 @@
 > 그 프로토타입은 인터랙션/전이 레퍼런스로 **보존**한다. 표상 모델로는 채택하지 않는다.
 > **Visual tone:** D-054 v0.1 Visual Tone — 동결. 이 문서에서 토큰을 새로 만들지 않는다.
 > **Lovable credits spent by this document:** 0.
+>
+> ### ⚠ 3R.2 / 3R.3 소급 정정 적용됨
+> 상위 SSOT는 [`SOFTWARE_PHYSICS_CANON.md`](SOFTWARE_PHYSICS_CANON.md)(3R.2)이고,
+> 시각 문법은 [`SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`](SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md)(3R.3)이다.
+> 충돌하면 그 두 문서가 이긴다. **§3.3은 폐기되었다** — 아래 배너 참조.
 
 ---
 
@@ -121,8 +126,8 @@ Contextual Surface가 열리면 Software 몸체는 **사라지지 않고 좌측�
 
 | # | 이름 | 의미 | 구현 |
 |---|---|---|---|
-| 1 | **BOUNDARY** | 이것이 하나의 Software다 | 2px `--ink` 사각. 미완성이면 1px `--ink4` dashed |
-| 2 | **REGION** | 깊이 층(band) × 관심사(lane). 질량을 가진다 | 배치 계산 + Density Field |
+| 1 | **BOUNDARY** | 이것이 하나의 Software다 **· 그리고 되돌릴 수 있음의 한계다**(E1) | 2px `--ink` 사각. 미완성이면 1px `--ink4` dashed |
+| 2 | **REGION** | 깊이 층(band) × 관심사(lane). 질량을 가진다 | 배치 계산 + **PARTITION**(정정됨) |
 | 3 | **PATH** | 의미 있는 이동·의존·핸드오프 | 직교 폴리라인. bezier 금지 |
 | 4 | **PORT** | 경계 위의 바깥 접촉 | 경계선 위 굵은 마디 + 12px 바깥 stub |
 
@@ -155,9 +160,17 @@ Backend-only에서 SURFACE band는 10px 선이 되고, 그 선은 곧 "요청이
 Lane도 같은 공식을 가로로 적용한다. 지능(Intelligence)은 별도 band가 아니라 **LOGIC band의 lane**이고,
 데이터 도메인은 **DATA band의 lane**이다. 규칙 하나가 여섯 실루엣을 전부 만든다.
 
-### 3.3 DENSITY FIELD — 100개를 100개의 라벨로 만들지 않는 장치
+### 3.3 ~~DENSITY FIELD~~ — **폐기 (3R.3)**
 
-Region의 질량은 **작은 정사각 표식의 밭**으로 그린다. 원 금지(radius 0).
+> **⛔ 이 절은 폐기되었다.**
+> Founder 판정: **"점들이 쫙 나열된 느낌"**. 표식을 뿌리는 것은 밀도를 *세는 것*이지
+> *보는 것*이 아니었고, 결과는 소프트웨어가 아니라 **산점도**였다.
+>
+> **대체:** 밀도는 표식을 더해서가 아니라 **연속 공간을 나눠서**(subdivision) 만든다.
+> 규격은 [`SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`](SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md) §2.3.
+> 아래 표는 **역사적 기록으로만** 남긴다. 구현하지 않는다.
+
+Region의 질량은 ~~작은 정사각 표식의 밭으로 그린다~~ (폐기).
 
 | 의미 객체 수 n | 표식 크기 | 표시 수 | 읽히는 것 |
 |---|---|---|---|
@@ -196,15 +209,25 @@ Port는 떠 있는 "연동 카드"가 아니다. **경계선 자체가 두꺼워
 ```
 라벨은 sans다. **사람이 아는 이름(브라우저 · 결제 · 메일)은 mono를 쓰지 않는다.**
 
-### 3.6 STATE 수식자 (절제)
+### 3.6 STATE 수식자 — **3R.2 6상태 모델로 정합 (정정됨)**
 
-| 상태 | 표현 |
+상태는 임의의 수식자가 아니라 **평형 상태 기계(L3)** 의 표현이다.
+
+| 평형 상태 | 표현 |
 |---|---|
-| 선택됨 | 해당 요소만 `--ink` 3px. 나머지는 그대로. 회색 처리 금지 |
-| 방금 바뀜 | `--attention #9A5B12` stroke + mono 태그 1개 |
-| 실패 | `--failure #8C2B20` + dashed |
-| 아직 없음 | `--ink4` dashed |
+| `SETTLED` | 톤 없음 · 실선 · `--ink2`. 고요함 |
+| `DISTURBED` | **영향 영역만** `--sunk` 톤. 전역 스피너 없음 |
+| `SETTLING` | `--sunk` 톤 + **파선** + `--attention`. 세 채널이 동시에 다르다 |
+| `SETTLED′` | 톤 소멸 · 실선 복귀 · 질량 반영 |
+| `UNSETTLED` | `--failure #8C2B20` + dashed. 이전 평형이 참조로 남는다 |
+| `UNKNOWN` | 윤곽만 · 만나지 않는 선 (`--ink4` dashed). **Empty와 다르다** |
+
+| 그 밖의 수식자 | 표현 |
+|---|---|
+| 선택됨 | 해당 요소만 `--ink` 3px. 회색 처리 금지 |
 | 과거 | `--past #5B6B84` (비교 뷰 전용) |
+
+전체 규격: [`SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`](SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md) §5.
 
 **동시에 화면에 존재할 수 있는 attention 요소는 최대 3개다.**
 
@@ -489,7 +512,7 @@ Region(band/lane) · Path(구간 단위) · 표식(의미 객체) · Port. **파
 | 요소 | 상태 |
 |---|---|
 | Chrome 상태 점 | `--ink` → `--attention` |
-| 영향 받는 region | 경계가 `--attention` 1px |
+| 영향 받는 region | **안정성을 잃는다** — `--sunk` 지반 톤이 그 영역에만 든다 (L3) |
 | 활성 Path 구간 | **그 구간 하나만** dash-offset이 흐른다 (1.2s linear) |
 | 나머지 캔버스 | **변하지 않는다** |
 | Contextual Surface | 실제로 일어난 이벤트만 mono 목록으로 append |
@@ -504,9 +527,13 @@ Region(band/lane) · Path(구간 단위) · 표식(의미 객체) · Port. **파
 
 ```
 1. Software가 먼저 바뀐다        520ms · cubic-bezier(.22,.61,.36,1)
-2. 바뀐 부분에 attention이 붙는다
-3. 그다음 Contextual Surface가 한 문장을 말한다
+2. 바뀐 부분이 SETTLING 이 된다   파선 + attention + 지반 톤 — 아직 확인 안 됨
+3. 증거가 도착하면 SETTLED′ 로 굳는다   실선 + 톤 소멸 (380ms)
+4. 그다음 Contextual Surface가 한 문장을 말한다
 ```
+
+> **결과는 "변경"이 아니라 "변경 + 확인 여부"다.** (정정됨 · L3 · E2)
+> 에이전트의 "완료" 주장은 2번까지만 만든다. 3번을 만드는 것은 **증거뿐이다.**
 
 Modal · Toast · 성공 카드 · 컨페티 — **금지.** 그것들은 결과가 아니라 결과의 *알림*이다.
 
@@ -619,6 +646,10 @@ FAR의 7개 구성 예: Software 이름 1 + band 라벨 2 + port 라벨 3 + 상�
 > **파일은 의미 객체가 아니다.**
 > 1,000개의 파일이 40개의 의미 객체일 수 있다.
 > 파일 이름은 **DEEP에서만** 존재한다. 캔버스에는 영원히 올라오지 않는다.
+>
+> **그리고 (정정됨 · L5): 관측하지 않은 것은 계산하지 않는다.**
+> JuQode는 저장소 전체를 미리 파싱하지 않는다. FAR에서는 FAR에 필요한 만큼만 안다.
+> 그래서 첫 화면이 빠르고, **`UNKNOWN`이 정직한 기본값**이 된다.
 
 ### 17.2 규모별 동작
 

@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1240">
+<title>JuQode — Software Physics · Visual Grammar</title>
+<style>
+:root{
+  --paper:#F7F5F2; --surface:#FFFFFF; --sunk:#EDEAE5;
+  --ink:#0D0C0B; --ink2:#4A4641; --ink3:#857F77; --ink4:#B5AEA5;
+  --hair:#D8D3CC; --attn:#9A5B12; --fail:#8C2B20; --past:#5B6B84;
+  --sans:"Archivo","Noto Sans KR","Helvetica Neue","Malgun Gothic",Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;min-width:1240px}
+.wrap{max-width:1280px;margin:0 auto;padding:52px 44px 120px}
+.head{border-bottom:2px solid var(--ink);padding-bottom:22px}
+.kick{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ink3)}
+h1{font-size:46px;font-weight:700;letter-spacing:-.042em;line-height:1;margin:14px 0 0}
+.sub{font-size:16.5px;color:var(--ink2);letter-spacing:-.015em;margin-top:14px;line-height:1.65;max-width:920px}
+.sub b{font-weight:700;color:var(--ink)}
+.meta{display:flex;gap:24px;margin-top:18px;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.13em;color:var(--ink3);flex-wrap:wrap}
+.kill{border:2px solid var(--ink);background:var(--surface);padding:18px 22px;margin-top:26px;
+  display:grid;grid-template-columns:200px 1fr;gap:24px;align-items:center}
+.kill .l{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--fail)}
+.kill .l b{display:block;font-family:var(--sans);font-size:19px;font-weight:700;
+  letter-spacing:-.03em;color:var(--ink);margin-top:8px}
+.kill .r{font-size:13.5px;color:var(--ink2);line-height:1.75}
+.kill .r b{color:var(--ink)}
+section{margin-top:64px}
+h2{font-size:11.5px;font-family:var(--mono);letter-spacing:.2em;color:var(--ink3);font-weight:500;
+  border-top:1px solid var(--hair);padding-top:12px;margin:0 0 6px}
+h3{font-size:27px;font-weight:700;letter-spacing:-.032em;margin:0 0 8px}
+.lede{font-size:14.5px;color:var(--ink2);line-height:1.7;max-width:900px;margin:0 0 28px}
+.lede b{color:var(--ink)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.panel{background:var(--surface);border:1px solid var(--hair)}
+.panel.hero{border:2px solid var(--ink)}
+.panel svg{display:block;width:100%;height:auto}
+.cap{border-top:1px solid var(--hair);padding:14px 18px 16px}
+.cap .n{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--ink3)}
+.cap .t{font-size:17px;font-weight:700;letter-spacing:-.025em;margin-top:5px}
+.cap .d{font-size:13px;color:var(--ink2);line-height:1.68;margin-top:9px}
+.cap .x{font-size:11.5px;color:var(--ink4);line-height:1.62;margin-top:8px}
+.cap.sm .t{font-size:14px}
+.cap.sm .d{font-size:12px}
+table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}
+th{font-family:var(--mono);font-size:9px;letter-spacing:.13em;color:var(--ink3);font-weight:500;
+  text-align:left;padding:9px 14px 9px 0;border-bottom:1px solid var(--ink)}
+td{padding:9px 14px 9px 0;border-bottom:1px solid var(--hair);color:var(--ink2);vertical-align:top}
+td:first-child{color:var(--ink);font-weight:600;white-space:nowrap}
+td.no{color:var(--fail)}
+td.own{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--ink);white-space:nowrap}
+.gate{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--hair);font-size:13.5px;align-items:baseline}
+.gate i{width:9px;height:9px;background:var(--ink);flex:none;display:block;position:relative;top:1px}
+.gate b{font-weight:600;letter-spacing:-.01em}
+.gate span{color:var(--ink2);font-size:12.5px}
+.foot{border-top:2px solid var(--ink);padding-top:18px;margin-top:70px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;color:var(--ink3);
+  display:flex;justify-content:space-between}
+#boot{position:fixed;inset:0;background:var(--paper);display:flex;align-items:center;
+  justify-content:center;flex-direction:column;gap:10px;text-align:center;padding:40px;z-index:99}
+</style>
+</head>
+<body>
+<div id="boot">
+  <div style="font-weight:700;font-size:19px">보드가 아직 그려지지 않았습니다</div>
+  <div style="color:#4A4641;font-size:14px;line-height:1.7">이 파일은 하나로 완결되어 있어 인터넷도 서버도 필요하지 않습니다.</div>
+  <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#857F77">software-physics-visual-grammar · self-contained</div>
+</div>
+<div class="wrap" id="wrap"></div>
+
+<script>
+"use strict";
+/* ══════════════════════════════════════════════════════════════════════
+   JuQode Phase 3R.3 — Visual Grammar Board
+   상위 SSOT: SOFTWARE_PHYSICS_CANON.md (3R.2)
+
+   3R.1 대비 결정적 변경 — 밀도를 점밭(stipple)이 아니라 분할(subdivision)로
+   표현한다. Founder 판정: "점들이 쫙 나열된 느낌". 그 판단이 옳았다.
+   형태는 이제 연속 공간이 나뉘는 방식에서 나온다.
+
+   외부 의존성 0 · 웹폰트 0 · 난수 0 (재렌더 시 공간 기억 보존)
+   ══════════════════════════════════════════════════════════════════════ */
+
+var T={paper:"#F7F5F2",surface:"#FFFFFF",sunk:"#EDEAE5",ink:"#0D0C0B",ink2:"#4A4641",
+       ink3:"#857F77",ink4:"#B5AEA5",hair:"#D8D3CC",attn:"#9A5B12",fail:"#8C2B20",past:"#5B6B84"};
+var SANS='Archivo,"Noto Sans KR","Malgun Gothic",Arial,sans-serif';
+var MONO='"IBM Plex Mono",ui-monospace,Menlo,monospace';
+var FLOOR=0.06;
+
+function f(n){return Math.round(n*10)/10}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")}
+
+/* ── MASS LAYOUT (3R.1에서 유지. 검증된 엔진) ────────────────────── */
+function split(masses,total){
+  var sum=masses.reduce(function(a,b){return a+b},0);
+  var w=masses.map(function(m){return FLOOR+(1-FLOOR)*(sum?m/sum:0)});
+  var W=w.reduce(function(a,b){return a+b},0), acc=0;
+  return w.map(function(x){var s=total*x/W,o={start:acc,size:s};acc+=s;return o});
+}
+
+/* ── SUBDIVISION — 점밭을 대체하는 밀도 표현 ──────────────────────
+   가장 큰 칸을 골라 긴 변을 자른다. 난수 없음 → 같은 입력, 같은 그림.
+   질량이 크면 더 잘게 나뉜다. 표식을 뿌리지 않는다. */
+var RATIOS=[.58,.44,.62,.48,.55,.41,.60,.47,.53,.45];
+function cellCount(n){return n<=1?1:n<=4?2:n<=12?3:n<=28?4:5}
+function subdivide(r,n,seed){
+  var k=cellCount(n), list=[{x:r.x,y:r.y,w:r.w,h:r.h}], lines=[], ri=seed%RATIOS.length;
+  var guard=0, first=true;
+  while(list.length<k && guard++<40){
+    var bi=0;
+    for(var i=1;i<list.length;i++) if(list[i].w*list[i].h>list[bi].w*list[bi].h) bi=i;
+    var c=list.splice(bi,1)[0], t=RATIOS[ri%RATIOS.length];
+    if(c.w<26||c.h<26){list.push(c);break}
+    var vert;
+    if(first&&c.h>=40){vert=false}                       /* 첫 분할은 층을 만든다 */
+    else if(c.w/c.h>1.5){vert=true}
+    else if(c.h/c.w>1.5){vert=false}
+    else{vert=(ri%2===0)}
+    first=false; ri++;
+    if(vert){
+      var x=c.x+c.w*t; lines.push([x,c.y,x,c.y+c.h]);
+      list.push({x:c.x,y:c.y,w:c.w*t,h:c.h},{x:x,y:c.y,w:c.w*(1-t),h:c.h});
+    }else{
+      var y=c.y+c.h*t; lines.push([c.x,y,c.x+c.w,y]);
+      list.push({x:c.x,y:c.y,w:c.w,h:c.h*t},{x:c.x,y:y,w:c.w,h:c.h*(1-t)});
+    }
+  }
+  return {lines:lines,cells:list};
+}
+
+/* ── 배치 ─────────────────────────────────────────────────────────── */
+function layout(b,box){
+  var rows=split(b.bands.map(function(x){
+    return x.lanes.reduce(function(a,l){return a+l.mass},0)}),box.h);
+  b.bands.forEach(function(bd,i){
+    bd._y=box.y+rows[i].start; bd._h=rows[i].size;
+    bd._m=bd.lanes.reduce(function(a,l){return a+l.mass},0);
+    var cols=split(bd.lanes.map(function(l){return l.mass}),box.w);
+    bd.lanes.forEach(function(l,j){l._x=box.x+cols[j].start;l._w=cols[j].size});
+  });
+  b._box=box; return b;
+}
+function band(b,id){for(var i=0;i<b.bands.length;i++)if(b.bands[i].id===id)return b.bands[i];return b.bands[0]}
+function pt(b,a){var d=band(b,a[0]);return{x:b._box.x+a[1]*b._box.w,y:d._y+a[2]*d._h}}
+
+/* ── PATH — 직교. bezier 금지. 화살촉 금지. ─────────────────────── */
+function ortho(b,pts){
+  var d="",p=null;
+  pts.forEach(function(q,i){
+    var v=pt(b,q);
+    if(i===0)d="M"+f(v.x)+" "+f(v.y);
+    else if(Math.abs(v.x-p.x)<.6||Math.abs(v.y-p.y)<.6)d+=" L"+f(v.x)+" "+f(v.y);
+    else if(q[3]==="v")d+=" L"+f(p.x)+" "+f(v.y)+" L"+f(v.x)+" "+f(v.y);
+    else d+=" L"+f(v.x)+" "+f(p.y)+" L"+f(v.x)+" "+f(v.y);
+    p=v;
+  });
+  return d;
+}
+function txt(x,y,s,size,fam,col,anc,ls,w){
+  return '<text x="'+f(x)+'" y="'+f(y)+'" font-family="'+fam+'" font-size="'+size+
+    '" fill="'+col+'" text-anchor="'+(anc||"start")+'"'+(ls?' letter-spacing="'+ls+'"':"")+
+    (w?' font-weight="'+w+'"':"")+'>'+esc(s)+'</text>';
+}
+function txtK(x,y,s,size,fam,col,anc,ls,w){
+  var wd=String(s).length*(size*.74)+10, ox=anc==="middle"?-wd/2:anc==="end"?-wd:-5;
+  return '<rect x="'+f(x+ox)+'" y="'+f(y-size+1)+'" width="'+f(wd)+'" height="'+f(size+5)+
+    '" fill="'+T.surface+'"/>'+txt(x,y,s,size,fam,col,anc,ls,w);
+}
+
+/* ── PORT — 경계선이 두꺼워지는 마디. 카드가 아니다. ─────────────── */
+function portSVG(b,p,labelOnly){
+  var bx=b._box, len=20+11*p.weight, stub=13, col=p.cross?T.attn:T.ink, o="", lx,ly,anc="middle",cx,cy;
+  if(p.edge==="top"){cx=bx.x+p.at*bx.w;cy=bx.y;
+    o+='<line x1="'+f(cx-len/2)+'" y1="'+cy+'" x2="'+f(cx+len/2)+'" y2="'+cy+'" stroke="'+col+'" stroke-width="5"/>'+
+       '<line x1="'+f(cx)+'" y1="'+cy+'" x2="'+f(cx)+'" y2="'+(cy-stub)+'" stroke="'+T.ink2+'" stroke-width="1.6"/>';
+    lx=cx;ly=cy-stub-7;}
+  else if(p.edge==="bottom"){cx=bx.x+p.at*bx.w;cy=bx.y+bx.h;
+    o+='<line x1="'+f(cx-len/2)+'" y1="'+cy+'" x2="'+f(cx+len/2)+'" y2="'+cy+'" stroke="'+col+'" stroke-width="5"/>'+
+       '<line x1="'+f(cx)+'" y1="'+cy+'" x2="'+f(cx)+'" y2="'+(cy+stub)+'" stroke="'+T.ink2+'" stroke-width="1.6"/>';
+    lx=cx;ly=cy+stub+12;}
+  else if(p.edge==="right"){cx=bx.x+bx.w;cy=bx.y+p.at*bx.h;
+    o+='<line x1="'+cx+'" y1="'+f(cy-len/2)+'" x2="'+cx+'" y2="'+f(cy+len/2)+'" stroke="'+col+'" stroke-width="5"/>'+
+       '<line x1="'+cx+'" y1="'+f(cy)+'" x2="'+(cx+stub)+'" y2="'+f(cy)+'" stroke="'+T.ink2+'" stroke-width="1.6"/>';
+    lx=cx+stub+6;ly=cy+4;anc="start";}
+  else{cx=bx.x;cy=bx.y+p.at*bx.h;
+    o+='<line x1="'+cx+'" y1="'+f(cy-len/2)+'" x2="'+cx+'" y2="'+f(cy+len/2)+'" stroke="'+col+'" stroke-width="5"/>'+
+       '<line x1="'+cx+'" y1="'+f(cy)+'" x2="'+(cx-stub)+'" y2="'+f(cy)+'" stroke="'+T.ink2+'" stroke-width="1.6"/>';
+    lx=cx-stub-6;ly=cy+4;anc="end";}
+  if(labelOnly)return p.label?txt(lx,ly,p.label,10.5,SANS,p.cross?T.attn:T.ink3,anc):"";
+  return o;
+}
+
+/* ── RENDER ───────────────────────────────────────────────────────── */
+function render(b,opt){
+  opt=opt||{};
+  var bx=opt.box, vb=opt.vb, o="";
+  layout(b,bx);
+  o+='<svg viewBox="0 0 '+vb.w+' '+vb.h+'" xmlns="http://www.w3.org/2000/svg">';
+  o+='<rect width="'+vb.w+'" height="'+vb.h+'" fill="'+T.surface+'"/>';
+  var empty=b.state==="empty", unknown=b.state==="unknown";
+
+  /* L3 — 지반의 단단함. 교란된 영역만 파인다 */
+  (b.tone||[]).forEach(function(t){
+    var d=band(b,t.band), x0=bx.x+t.x0*bx.w, x1=bx.x+t.x1*bx.w;
+    var y0=d._y+(t.y0||0)*d._h, y1=d._y+(t.y1==null?1:t.y1)*d._h;
+    o+='<rect x="'+f(x0)+'" y="'+f(y0)+'" width="'+f(x1-x0)+'" height="'+f(y1-y0)+
+       '" fill="'+(t.kind==="fail"?"#F6EDEC":T.sunk)+'"/>';
+  });
+
+  /* BOUNDARY */
+  o+='<rect x="'+bx.x+'" y="'+bx.y+'" width="'+bx.w+'" height="'+bx.h+'" fill="none" stroke="'+
+     (empty?T.ink4:T.ink)+'" stroke-width="'+(empty?1:2)+'"'+(empty?' stroke-dasharray="5 5"':"")+'/>';
+
+  if(!empty){
+    /* 층 구분 — 구조의 1차 위계 */
+    b.bands.forEach(function(d,i){
+      if(i>0)o+='<line x1="'+bx.x+'" y1="'+f(d._y)+'" x2="'+f(bx.x+bx.w)+'" y2="'+f(d._y)+
+        '" stroke="'+(unknown?T.ink4:T.hair)+'" stroke-width="'+(unknown?1:2)+'"'+
+        (unknown?' stroke-dasharray="7 5"':"")+'/>';
+    });
+    /* 관심사 구분 — 2차 */
+    b.bands.forEach(function(d){
+      d.lanes.forEach(function(l,j){
+        if(j>0&&d._h>10)o+='<line x1="'+f(l._x)+'" y1="'+f(d._y)+'" x2="'+f(l._x)+'" y2="'+f(d._y+d._h)+
+          '" stroke="'+(unknown?T.ink4:T.hair)+'" stroke-width="1"'+
+          (unknown?' stroke-dasharray="7 5"':"")+'/>';
+      });
+    });
+    /* 분할 — 3차. 밀도가 여기서 나온다. 점을 뿌리지 않는다 */
+    var seed=3;
+    b.bands.forEach(function(d){
+      d.lanes.forEach(function(l){
+        seed+=7;
+        if(d._h<24||l._w<24)return;
+        if(!unknown&&l.mass<2)return;
+        var sub=subdivide({x:l._x,y:d._y,w:l._w,h:d._h},unknown?(l.objects||8):(l.objects||0),seed);
+        sub.lines.forEach(function(ln){
+          if(unknown){
+            /* 미완결 윤곽 — 선이 서로 만나지 않는다 */
+            var dx=(ln[2]-ln[0])*.24, dy=(ln[3]-ln[1])*.24;
+            o+='<line x1="'+f(ln[0]+dx)+'" y1="'+f(ln[1]+dy)+'" x2="'+f(ln[2]-dx)+'" y2="'+f(ln[3]-dy)+
+               '" stroke="'+T.ink4+'" stroke-width="1" stroke-dasharray="5 4"/>';
+          }else{
+            o+='<line x1="'+f(ln[0])+'" y1="'+f(ln[1])+'" x2="'+f(ln[2])+'" y2="'+f(ln[3])+
+               '" stroke="'+T.hair+'" stroke-width="'+(l.unverified?1:0.75)+'"'+
+               (l.unverified?' stroke-dasharray="4 3"':"")+'/>';
+          }
+        });
+      });
+    });
+  }
+
+  /* 원점 — Empty 전용. 첫 번째 약속 */
+  if(b.origin){var oc=pt(b,b.origin);
+    o+='<rect x="'+f(oc.x-6)+'" y="'+f(oc.y-6)+'" width="12" height="12" fill="'+T.ink+'"/>';}
+
+  /* L2 — 인과. 분할선보다 두껍고 어둡다. 절대 헷갈리지 않는다 */
+  (b.paths||[]).forEach(function(p,k){
+    var d=ortho(b,p.points);
+    var col=p.state==="new"?T.attn:p.state==="fail"?T.fail:T.ink2;
+    var w=p.state==="new"?2.6:(p.weight||2.2);
+    o+='<path d="'+d+'" fill="none" stroke="'+T.surface+'" stroke-width="'+(w+5.5)+'" stroke-linejoin="miter"/>';
+    o+='<path d="'+d+'" fill="none" stroke="'+col+'" stroke-width="'+w+'" stroke-linejoin="miter"'+
+       (p.state==="fail"?' stroke-dasharray="4 3"':"")+(p.unverified?' stroke-dasharray="6 4"':"")+
+       ' data-mk="'+(p.mark==null?-1:p.mark)+'" id="q'+(opt.uid||"")+"_"+k+'"/>';
+  });
+
+  (b.ports||[]).forEach(function(p){o+=portSVG(b,p)});
+
+  (b.marks||[]).forEach(function(m){
+    var q=pt(b,m.a), s=m.size||10, c=m.state==="new"?T.attn:m.state==="fail"?T.fail:T.ink;
+    o+='<rect x="'+f(q.x-s/2)+'" y="'+f(q.y-s/2)+'" width="'+s+'" height="'+s+'" fill="'+c+'"/>';
+  });
+
+  /* TEXT — 예산 강제. 초과분은 말줄임이 아니라 표시 포기 */
+  var cand=[];
+  function want(pri,svg){cand.push({p:pri,i:cand.length,s:svg})}
+  if(b.name)want(100,txtK(bx.x+bx.w-16,bx.y+5,b.name,14,SANS,empty?T.ink3:T.ink,"end","-.02em",700));
+  (b.tags||[]).forEach(function(t){var q=pt(b,t.a);
+    want(90,txtK(q.x,q.y,t.label,9.5,MONO,t.state==="new"?T.attn:t.state==="fail"?T.fail:T.ink3,t.anchor||"start",".12em"));});
+  (b.marks||[]).forEach(function(m){if(!m.label)return;var q=pt(b,m.a);
+    want(75,txtK(q.x+(m.size||10)/2+7,q.y+4,m.label,11.5,SANS,
+      m.state==="new"?T.attn:m.state==="fail"?T.fail:T.ink2,"start",null,m.state?600:null));});
+  (b.ports||[]).forEach(function(p){if(p.label)want(58+2*p.weight,portSVG(b,p,true))});
+  b.bands.forEach(function(d){d.lanes.forEach(function(l){
+    if(l.label&&l._w>=70&&d._h>=34)
+      want(45+l.mass,txtK(f(l._x+l._w/2),f(d._y+d._h-9),l.label,10.5,SANS,T.ink3,"middle",".06em"));});});
+  b.bands.forEach(function(d){
+    if(d.label&&d._m>0&&d._h>=34)
+      want(40+d._m,txt(bx.x-11,f(d._y+d._h/2+4),d.label,10.5,SANS,T.ink3,"end",".1em"));});
+  var budget=opt.budget||7;
+  var keep=cand.slice().sort(function(a,c){return c.p-a.p||a.i-c.i}).slice(0,budget);
+  keep.sort(function(a,c){return a.i-c.i}).forEach(function(c){o+=c.s});
+  b._text=keep.length; b._over=cand.length>budget;
+  o+='</svg>';
+  return o;
+}
+function marksOn(root){
+  root.querySelectorAll('path[data-mk]').forEach(function(p){
+    var t=parseFloat(p.getAttribute("data-mk")); if(!(t>=0))return;
+    var L; try{L=p.getTotalLength()}catch(e){return} if(!L)return;
+    var a=p.getPointAtLength(L*t), c=p.getPointAtLength(Math.min(L,L*t+2));
+    var dx=c.x-a.x, dy=c.y-a.y, m=Math.hypot(dx,dy)||1; dx/=m; dy/=m;
+    var nx=-dy, ny=dx, s=7.5;
+    var el=document.createElementNS("http://www.w3.org/2000/svg","polygon");
+    el.setAttribute("points",[a.x+dx*s*.6,a.y+dy*s*.6,a.x-dx*s*.4+nx*s*.5,a.y-dy*s*.4+ny*s*.5,
+      a.x-dx*s*.4-nx*s*.5,a.y-dy*s*.4-ny*s*.5].map(function(v){return Math.round(v*10)/10}).join(" "));
+    el.setAttribute("fill",p.getAttribute("stroke"));
+    p.parentNode.appendChild(el);
+  });
+}
+
+/* ══ 명세 ══════════════════════════════════════════════════════════ */
+function bands(s,l,d,L){L=L||[];return[
+  {id:"surface",label:L[0],lanes:s},{id:"logic",label:L[1],lanes:l},{id:"data",label:L[2],lanes:d}]}
+function lane(id,mass,objects,label,extra){
+  var o={id:id,mass:mass,objects:objects,label:label};
+  if(extra)for(var k in extra)o[k]=extra[k]; return o}
+
+var BIG={w:600,h:378}, BIGB={x:74,y:48,w:452,h:283};
+var HERO={w:1150,h:560}, HEROB={x:196,y:56,w:760,h:452};
+var SEQ={w:560,h:352}, SEQB={x:64,y:42,w:432,h:270};
+var MED={w:560,h:356}, MEDB={x:64,y:46,w:432,h:270};
+
+var EMPTY={name:"새 프로젝트",state:"empty",
+  bands:bands([lane("s",0,0)],[lane("l",0,0)],[lane("d",0,0)]),
+  origin:["logic",.5,.5],ports:[],paths:[]};
+
+var UNKNOWN={name:"가져온 저장소",state:"unknown",
+  bands:bands([lane("s",3,9)],[lane("l1",5,14),lane("l2",4,11)],[lane("d",4,12)]),
+  ports:[],paths:[]};
+
+var BACKEND={name:"주문 처리",state:"live",
+  bands:bands([lane("s",0,0)],
+    [lane("l1",6,13,"받아서 다루는 곳"),lane("l2",4,7,"내보내는 곳")],
+    [lane("d",5,9)],[null,null,"저장"]),
+  ports:[{edge:"top",at:.20,weight:3,label:"요청"},
+         {edge:"right",at:.40,weight:2,label:"결제사"},
+         {edge:"right",at:.60,weight:1,label:"메일"}],
+  paths:[
+    {points:[["surface",.20,-1.6],["logic",.20,.14]],mark:.6},
+    {points:[["logic",.20,.14],["logic",.20,.92],["data",.20,.5]],mark:.55},
+    {points:[["logic",.20,.40],["logic",.66,.40],["logic",1.03,.40]],mark:.72},
+    {points:[["logic",.66,.40],["logic",.66,.66],["logic",1.03,.66]],mark:.75},
+    {points:[["logic",.20,.62],["logic",.40,.62],["logic",.40,.28],["logic",.20,.28]],mark:.5}
+  ],
+  tags:[{a:["logic",.245,.20],label:"RETRY"}]};
+
+var AGENT={name:"조사 에이전트",state:"live",
+  bands:bands([lane("s",1,2)],
+    [lane("l1",4,7,"보고 움직임"),lane("l2",7,26,"판단")],
+    [lane("d",3,6,"기억")]),
+  ports:[{edge:"top",at:.18,weight:1,label:null},
+         {edge:"right",at:.30,weight:2,label:"웹"},
+         {edge:"right",at:.46,weight:2,label:"파일"},
+         {edge:"right",at:.62,weight:3,label:"모델"}],
+  paths:[
+    {points:[["surface",.18,.4],["logic",.18,.18]],mark:.6},
+    {points:[["logic",.18,.18],["logic",.56,.18],["logic",.56,.50],["logic",1.03,.50]],mark:.55},
+    {points:[["logic",.56,.50],["logic",.56,.70],["logic",.36,.70],["logic",.36,.86],
+             ["logic",.18,.86],["logic",.18,.18]],mark:.38},
+    {points:[["logic",.56,.70],["logic",.72,.70],["logic",.72,1.14],["data",.72,.5]],mark:.6},
+    {points:[["data",.52,.5],["data",.52,-.34],["logic",.52,.50],["logic",.56,.50]],mark:.3,weight:1.3}
+  ],
+  tags:[]};
+
+var FULLSTACK={name:"내 서비스",state:"live",
+  bands:bands([lane("s1",5,11),lane("s2",2,4)],
+    [lane("l1",6,15),lane("l2",3,9,"지능")],
+    [lane("d1",4,10),lane("d2",2,5)],["경험",null,"저장"]),
+  ports:[{edge:"top",at:.24,weight:3,label:"브라우저"},
+         {edge:"right",at:.42,weight:2,label:"결제"},
+         {edge:"right",at:.58,weight:2,label:"모델"},
+         {edge:"bottom",at:.80,weight:1,label:null}],
+  paths:[
+    {points:[["surface",.24,-.30],["surface",.24,.66],["logic",.24,.44],["data",.24,.55]],mark:.68,weight:2.1},
+    {points:[["surface",.24,.66],["surface",.62,.66]],mark:.7},
+    {points:[["logic",.24,.44],["logic",.70,.44],["logic",1.03,.44]],mark:.74},
+    {points:[["logic",.70,.44],["logic",.70,.82],["data",.70,.36]],mark:.6},
+    {points:[["data",.80,.72],["data",.80,1.20]],mark:.5,weight:1.4}
+  ]};
+
+/* ── Qode 상태 4연 — 같은 몸 ─────────────────────────────────────── */
+function seqBody(o){
+  var b={name:"주문 처리",state:"live",
+    bands:bands([lane("s",0,0)],
+      [lane("l1",o.lm||8,o.lo||11,null,o.lx),lane("l2",3,5)],
+      [lane("d",5,8)]),
+    ports:[{edge:"top",at:.20,weight:3,label:null},{edge:"right",at:.55,weight:2,label:null}],
+    paths:o.paths, marks:o.marks, tone:o.tone, tags:o.tags};
+  return b;
+}
+var BASE_PATHS=[
+  {points:[["surface",.20,-1.6],["logic",.20,.10]],mark:.6},
+  {points:[["logic",.20,.10],["logic",.20,.30]],mark:.6},
+  {points:[["logic",.20,.30],["logic",.20,.52]],mark:.6,state:"fail"},
+  {points:[["logic",.20,.52],["logic",.62,.52],["logic",.62,1.10],["data",.62,.5]],mark:.55}
+];
+var BASE_MARKS=[{a:["logic",.20,.10],label:"요청"},{a:["logic",.20,.30],label:"로그인"},
+                {a:["logic",.20,.52],label:"실패",state:"fail"}];
+
+var S1=seqBody({paths:BASE_PATHS,marks:BASE_MARKS});
+var S2=seqBody({paths:BASE_PATHS,marks:BASE_MARKS,
+  tone:[{band:"logic",x0:0,x1:.62,y0:0,y1:1}]});
+var S3=seqBody({lm:10,lo:13,lx:{unverified:true},
+  tone:[{band:"logic",x0:0,x1:.62,y0:0,y1:1}],
+  paths:[
+    {points:[["surface",.20,-1.6],["logic",.20,.09]],mark:.6},
+    {points:[["logic",.20,.09],["logic",.20,.27]],mark:.6},
+    {points:[["logic",.20,.27],["logic",.20,.46]],mark:.6,state:"fail"},
+    {points:[["logic",.20,.46],["logic",.20,.66]],mark:.6,state:"new",unverified:true},
+    {points:[["logic",.20,.66],["logic",.46,.66],["logic",.46,.40],["logic",.32,.40],
+             ["logic",.32,.18],["logic",.20,.18]],mark:.42,state:"new",unverified:true},
+    {points:[["logic",.20,.46],["logic",.72,.46],["logic",.72,1.10],["data",.72,.5]],mark:.55}
+  ],
+  marks:[{a:["logic",.20,.09],label:"요청"},{a:["logic",.20,.27],label:"로그인"},
+         {a:["logic",.20,.46],label:"실패",state:"fail"},
+         {a:["logic",.20,.66],label:"기다린다",state:"new"}],
+  tags:[{a:["logic",.50,.80],label:"미확인",state:"new",anchor:"start"}]});
+var S4=seqBody({lm:10,lo:13,
+  paths:[
+    {points:[["surface",.20,-1.6],["logic",.20,.09]],mark:.6},
+    {points:[["logic",.20,.09],["logic",.20,.27]],mark:.6},
+    {points:[["logic",.20,.27],["logic",.20,.46]],mark:.6,state:"fail"},
+    {points:[["logic",.20,.46],["logic",.20,.66]],mark:.6},
+    {points:[["logic",.20,.66],["logic",.46,.66],["logic",.46,.40],["logic",.32,.40],
+             ["logic",.32,.18],["logic",.20,.18]],mark:.42},
+    {points:[["logic",.20,.46],["logic",.72,.46],["logic",.72,1.10],["data",.72,.5]],mark:.55}
+  ],
+  marks:[{a:["logic",.20,.09],label:"요청"},{a:["logic",.20,.27],label:"로그인"},
+         {a:["logic",.20,.46],label:"실패",state:"fail"},
+         {a:["logic",.20,.66],label:"기다린다"}]});
+
+/* ── Empty → 첫 Qode ─────────────────────────────────────────────── */
+var FIRST=({name:"새 프로젝트",state:"live",
+  bands:bands([lane("s",3,4,"로그인")],[lane("l",2,3)],[lane("d",1,1)]),
+  ports:[{edge:"top",at:.30,weight:2,label:"브라우저",cross:false}],
+  paths:[{points:[["surface",.30,-.42],["surface",.30,.62],["logic",.30,.5],["data",.30,.5]],
+    mark:.66}],
+  marks:[{a:["surface",.30,.62],label:null,size:11,state:"new"},
+         {a:["logic",.30,.5],label:null,size:9,state:"new"}]});
+
+/* ── Semantic Zoom ───────────────────────────────────────────────── */
+var ZFAR=FULLSTACK;
+var ZMID={name:"내 서비스",state:"live",
+  bands:bands([lane("s",0,0)],[lane("l1",1,2),lane("l2",9,16,"지능")],[lane("d",0,0)],[null,"처리",null]),
+  ports:[{edge:"right",at:.5,weight:2,label:"모델"}],
+  paths:[{points:[["logic",.16,.46],["logic",.34,.46]],mark:.6},
+         {points:[["logic",.88,.30],["logic",1.03,.30]],mark:.7}],
+  marks:[{a:["logic",.40,.14],label:"질문 받기"},{a:["logic",.40,.30],label:"맥락 고르기"},
+         {a:["logic",.40,.46],label:"모델에 묻기"},{a:["logic",.40,.62],label:"답 다듬기"},
+         {a:["logic",.40,.78],label:"기록 남기기"}]};
+var ZNEAR={name:"모델에 묻기",state:"live",
+  bands:bands([lane("s",0,0)],[lane("l",10,0)],[lane("d",0,0)]),
+  ports:[{edge:"right",at:.5,weight:3,label:"모델"}],
+  paths:[{points:[["logic",.10,.22],["logic",.58,.22]],mark:.55},
+         {points:[["logic",.58,.22],["logic",1.03,.22]],mark:.7},
+         {points:[["logic",.58,.22],["logic",.58,.54],["logic",.10,.54]],mark:.7},
+         {points:[["logic",.58,.54],["logic",.58,.86],["logic",.10,.86]],mark:.7}],
+  marks:[{a:["logic",.10,.22],label:"맥락이 들어온다"},{a:["logic",.58,.22],size:11},
+         {a:["logic",.10,.54],label:"실패하면 기다린다",state:"fail"},
+         {a:["logic",.10,.86],label:"답이 나간다"}],
+  tags:[{a:["logic",.62,.40],label:"30s · 3회",anchor:"start"}]};
+
+/* ══ 조립 ══════════════════════════════════════════════════════════ */
+function P(spec,opt,n,t,d,x,cls){
+  return '<div class="panel'+(cls||"")+'">'+render(JSON.parse(JSON.stringify(spec)),opt)+
+    '<div class="cap'+(opt.sm?" sm":"")+'"><div class="n">'+esc(n)+'</div><div class="t">'+esc(t)+'</div>'+
+    '<div class="d">'+d+'</div>'+(x?'<div class="x">'+x+'</div>':"")+'</div></div>';
+}
+function H(k,t,l){return '<h2>'+esc(k)+'</h2><h3>'+esc(t)+'</h3><p class="lede">'+l+'</p>'}
+
+var O="";
+O+='<div class="head"><div class="kick">JUQODE · PHASE 3R.3 · VISUAL GRAMMAR</div>'+
+   '<h1>Software Body</h1>'+
+   '<div class="sub">승인된 법칙(3R.2 Canon)을 <b>하나의 시각·인터랙션 문법</b>으로 번역한다. '+
+   '이 보드는 설명 옆에 붙은 작은 도해가 아니라 <b>실제 크기의 Software Body</b>들이다. '+
+   '모든 몸은 같은 엔진이 그렸고, 바뀐 것은 질량 값뿐이다.</div>'+
+   '<div class="meta"><span>CANON = UPSTREAM SSOT</span><span>D-054 · FROZEN</span>'+
+   '<span>NO RANDOMNESS · 공간 기억 보존</span><span>SVG + CSS ONLY</span>'+
+   '<span>LOVABLE CREDITS SPENT · 0</span></div></div>';
+
+O+='<div class="kill"><div class="l">3R.1에서 폐기<b>점밭(dot field)</b></div>'+
+   '<div class="r">Founder 판정 — <b>"점들이 쫙 나열된 느낌"</b>. 옳은 판단이었다. '+
+   '표식을 뿌리는 것은 밀도를 <b>세는 것</b>이지 <b>보는 것</b>이 아니었고, 결과는 소프트웨어가 아니라 산점도였다.<br>'+
+   '대체 — <b>밀도는 연속 공간이 나뉘는 방식에서 나온다.</b> 무거운 영역은 더 잘게 나뉜다. '+
+   '표식을 더하는 게 아니라 <b>공간을 자른다.</b> 그래서 100개의 객체가 100개의 점이 아니라 '+
+   '<b>더 촘촘한 구조</b>가 된다.</div></div>';
+
+/* 채널 */
+O+='<section>'+H("01 · CHANNEL OWNERSHIP","하나의 채널, 하나의 의미",
+  '채널이 두 가지를 뜻하기 시작하면 그림은 즉시 인포그래픽이 된다. '+
+  '아래 표가 이 문법의 헌법이다. <b>면적은 중요도이고, 분할은 복잡도이고, 색은 오직 상태다.</b> '+
+  '불투명도는 <b>의도적으로 비워 둔다</b> — 가장 남용되는 채널이므로 예약해 둔다.')+
+  '<table><tr><th>채널</th><th>소유</th><th>의미할 수 있는 것</th><th>의미할 수 없는 것</th></tr>'+
+  [["세로 위치","L1","사람으로부터의 거리 (표면 · 처리 · 저장)","시간 · 순서 · 우선순위"],
+   ["가로 위치","L1","관심사 구분","시간 · 순위"],
+   ["면적 · 비율","L1","의미의 무게","개수 · 파일 수 · 줄 수"],
+   ["분할 정밀도","L1","내부의 복잡도 · 풍부함","상태 · 확신 · 범주"],
+   ["선 (굵고 방향 있음)","L2","이동 · 의존 · 핸드오프","구조 분할"],
+   ["경계 두꺼워짐 (Port)","L2 + E1","바깥 접촉 · <b>비가역 지점</b>","범주 · 연동 목록"],
+   ["내부 톤 (sunk)","L3","<b>지반의 단단함</b> — 안정 / 교란","중요도 · 범주"],
+   ["윤곽 완결성","L4","아는가 / 모르는가","심각도 · 우선순위"],
+   ["파선","L4","미확인 · 모름","스타일 · 장식"],
+   ["색","L3 + E1","상태 · 결과","<b>범주. 절대 금지</b>"],
+   ["운동","L3","실제 평형 전이","분위기 · 생동감"],
+   ["해상도","L5","의미 층위","배율 · 라벨 개수"],
+   ["불투명도","<b>없음</b>","<b>예약. 쓰지 않는다</b>","—"]]
+  .map(function(r){return '<tr><td>'+r[0]+'</td><td class="own">'+r[1]+'</td><td>'+r[2]+'</td><td class="no">'+r[3]+'</td></tr>'}).join("")+
+  '</table></section>';
+
+/* EMPTY vs UNKNOWN */
+O+='<section>'+H("02 · THE HARD PROBLEM","EMPTY와 UNKNOWN",
+  'Canon이 남긴 최우선 미해결 문제. 둘 다 "내부가 비어 있는" 상태인데 의미는 정반대다. '+
+  '<b>EMPTY는 완전히 아는 상태이고, UNKNOWN은 전혀 모르는 상태다.</b> 해법은 두 축이다 — '+
+  '<b>경계의 확정성</b>(파선 ink4 / 실선 ink)과 <b>윤곽의 완결성</b>(없음 / 만나지 않는 선).')+
+  '<div class="g2">'+
+  P(EMPTY,{vb:BIG,box:BIGB,uid:"em"},"질량 0 · 불확실성 0 · 라벨 1","EMPTY",
+    '경계가 파선이다 — <b>아직 하중을 받지 않았다.</b> 내부는 완전히 비어 있고, 가운데 하나의 표식이 '+
+    '<b>첫 번째 약속</b>이다. 이 화면은 결핍이 아니라 <b>완결된 평형</b>이다.',
+    '카드 0 · 체크리스트 0 · 제안 0. 조용해야 하는 이유는 여기가 부족한 상태가 아니기 때문이다.')+
+  P(UNKNOWN,{vb:BIG,box:BIGB,uid:"un"},"질량 있음 · 불확실성 최대 · 라벨 1","UNKNOWN",
+    '경계가 <b>실선</b>이다 — 파일이 있으니 무언가는 확실히 존재한다. 내부의 분할선은 그려지되 '+
+    '<b>서로 만나지 않는다.</b> 칸이 닫히지 않는다.',
+    '라벨 없이 읽힌다 — <b>"여기 구조가 있다. 나는 그것을 따라갈 수 없다."</b> '+
+    'IDE는 이 화면을 줄 수 없다. 파일 트리는 항상 아는 척한다.')+
+  '</div></section>';
+
+/* BACKEND vs AGENT */
+O+='<section>'+H("03 · SILHOUETTE","BACKEND와 AGENT — 라벨을 가려도 다르다",
+  '같은 엔진, 같은 원시요소. 다른 것은 <b>질량 분포와 인과의 위상</b>뿐이다. '+
+  'BACKEND는 <b>내려가는 줄기와 분기</b>를 갖고, AGENT는 <b>닫힌 회로와 한쪽 면에 몰린 세 개의 접촉</b>을 갖는다. '+
+  '두 몸은 이름을 지워도 구분된다 — 그것이 이 절의 통과 조건이다.')+
+  '<div class="g2">'+
+  P(BACKEND,{vb:BIG,box:BIGB,uid:"bk"},"0 / 10 / 5 · 표면이 선으로 붕괴","BACKEND",
+    '표면 band가 <b>선</b>이 되고 그 선 위에 요청 port가 얹힌다. 들어오고 · 갈라지고 · 쌓이고 · 나간다. '+
+    'Feature가 하나도 없이 성립한다. 왼쪽 lane이 더 잘게 나뉜 것이 <b>거기가 더 복잡하다</b>는 뜻이다.',
+    'API / SERVICE / QUEUE / DATABASE 라벨 박스 4개 없음. 기술 이름은 DEEP에서만.')+
+  P(AGENT,{vb:BIG,box:BIGB,uid:"ag"},"1 / 11 / 3 · 닫힌 회로","AGENT",
+    '가운데가 지배하고, 오른쪽 면에 <b>접촉이 셋</b> 몰려 있고, 경로가 <b>닫힌다</b>. '+
+    '아래 기억으로 내려갔다 돌아오는 가는 왕복선이 하나 더 있다. 판단 lane이 가장 잘게 나뉜다.',
+    '[Prompt][Memory][Tool][Model] 카드 없음. Memory는 되돌아오는 경로를 가진 아래쪽 층이고, Tool은 경계 위의 마디다.')+
+  '</div></section>';
+
+/* FULL-STACK */
+O+='<section>'+H("04 · ONE BODY","FULL-STACK — 여섯 개의 대시보드가 아니다",
+  '세 층이 모두 두께를 가지되 <b>경계는 하나</b>다. 표면에서 저장까지 <b>끊기지 않고 관통하는 줄기</b>가 '+
+  '이것이 하나의 몸이라는 증거다. 분할의 정밀도가 층마다 달라서, 어디가 복잡하고 어디가 단순한지가 '+
+  '<b>라벨 없이</b> 읽힌다.')+
+  '<div class="panel hero">'+render(JSON.parse(JSON.stringify(FULLSTACK)),{vb:HERO,box:HEROB,uid:"fs"})+
+  '<div class="cap"><div class="n">5+2 / 6+3 / 4+2 · 관통 줄기 1 · 접촉 4 · 라벨 7</div>'+
+  '<div class="t">FULL-STACK</div><div class="d">'+
+  '사용자가 라벨 없이 읽어야 하는 것 — <b>"위쪽은 내가 쓰는 부분이고, 안쪽에서 뭔가 처리되고, '+
+  '아래쪽에 정보가 쌓이고, 밖의 서비스랑 연결돼 있구나."</b> 이 문장은 UI 어디에도 적혀 있지 않다.</div>'+
+  '<div class="x">EXPERIENCE / LOGIC / DATA / INTELLIGENCE / EXTERNAL 을 다섯 개의 박스에 인쇄하지 않았다. '+
+  '오른쪽 아래 접촉점은 라벨이 없다 — Port는 라벨 없이도 Port다.</div></div></div>'+
+  '</section>';
+
+/* 상태 4연 */
+O+='<section>'+H("05 · EQUILIBRIUM","같은 몸, 네 개의 상태",
+  '<span style="font-family:var(--mono);font-size:13px">로그인 실패하면 다시 시도하게 해줘</span> — '+
+  'Qode 하나가 만드는 전이. <b>진행률 바도 스피너도 초록 체크도 없다.</b> '+
+  '몸 자체가 상태를 말한다: <b>지반이 파이고(톤), 새 구조가 미확인으로 나타나고(파선+attention), '+
+  '증거가 도착하면 굳는다.</b>')+
+  '<div class="g2">'+
+  P(S1,{vb:SEQ,box:SEQB,uid:"s1",sm:1},"① SETTLED","안정",
+    '지반이 단단하다(흰 바탕). 모든 선이 실선. 요청 → 로그인 → <span style="color:#8C2B20">실패</span> → 저장으로 빠진다. '+
+    '<b>흐름이 끊긴 채</b>지만 그것이 현재의 사실이다.')+
+  P(S2,{vb:SEQ,box:SEQB,uid:"s2",sm:1},"② DISTURBED","교란",
+    '<b>영향받는 영역만 지반이 파인다</b>(sunk 톤). 나머지 화면은 조금도 변하지 않는다. '+
+    '전역 스피너가 없는 이유 — 교란은 국소적이다.')+
+  P(S3,{vb:SEQ,box:SEQB,uid:"s3",sm:1},"③ SETTLING","변경됨 · 미확인",
+    '새 구조가 나타났다: 구간이 삽입되고 <b>회로가 닫혔다.</b> 그러나 <b>파선이고 attention이다</b> — '+
+    '아직 확인되지 않았다. 층 안의 분할선까지 파선이 된다. 다른 도구가 초록 체크를 주는 지점이다.')+
+  P(S4,{vb:SEQ,box:SEQB,uid:"s4",sm:1},"④ SETTLED′","확인됨 · 새 평형",
+    '증거가 도착했다. 톤이 사라지고 새 경로가 <b>다른 선들과 같은 실선</b>이 된다. '+
+    '처리 층이 두꺼워졌고 분할이 촘촘해졌다. <b>여기서만</b> Software Time에 점이 찍힌다.')+
+  '</div></section>';
+
+/* Empty → 첫 Qode */
+O+='<section>'+H("06 · BECOMING","EMPTY → 첫 Qode",
+  '<span style="font-family:var(--mono);font-size:13px">로그인부터 만들어줘</span> — '+
+  '빈 캔버스에 카드가 나타나는 것이 아니다. <b>경계가 하중을 받기 시작하고, 원점이 구조가 되고, '+
+  '몸이 처음으로 층을 갖는다.</b>')+
+  '<div class="g2">'+
+  P(EMPTY,{vb:MED,box:MEDB,uid:"e0",sm:1},"BEFORE","질량 0",
+    '파선 경계 · 원점 하나 · 내부 없음. 완결된 평형이다.')+
+  P(FIRST,{vb:MED,box:MEDB,uid:"e1",sm:1},"AFTER","질량 6 · 접촉 1",
+    '① 경계가 <b>실선으로 굳는다</b> ② 세 층이 처음으로 두께를 갖는다 '+
+    '③ 표면에 <b>첫 분할선</b>이 생긴다 — 원점이 구조가 되었다 '+
+    '④ 위 경계에 <b>첫 접촉</b>이 열리고 거기서 줄기가 내려온다.')+
+  '</div></section>';
+
+/* Zoom */
+O+='<section>'+H("07 · OBSERVATION","해상도가 바뀐다. 라벨이 늘지 않는다.",
+  '셋 다 <b>같은 Software</b>다. MID 진입은 대상 lane의 질량에 배수를 곱한 것뿐이고 '+
+  '형제 층은 사라지지 않고 <b>띠로 붕괴</b>한다 — 그래서 깊이 감각이 유지되고 breadcrumb이 필요 없다. '+
+  '들어갈수록 <b>바깥의 분할이 사라지고 안쪽의 구조가 나타난다.</b> 잉크는 누적되지 않는다.')+
+  '<div class="g3">'+
+  P(ZFAR,{vb:MED,box:MEDB,uid:"zf",sm:1},"FAR · 라벨 ≤7","몸 전체",
+    '층 · 비율 · 분할 정밀도 · 접촉 · 관통 줄기. 이름을 읽기 전에 어떤 소프트웨어인지 안다.')+
+  P(ZMID,{vb:MED,box:MEDB,uid:"zm",sm:1,budget:14},"MID · 라벨 ≤14","한 층 안",
+    '분할이 <b>개별 의미 객체로 해상된다.</b> 새로 그린 것이 아니라 같은 잉크가 갈라진 것이다.')+
+  P(ZNEAR,{vb:MED,box:MEDB,uid:"zn",sm:1,budget:22},"NEAR · 라벨 ≤22","선택한 것의 지역",
+    'MID의 객체 하나가 <b>경로로 해상된다.</b> 무엇이 들어오고, 무엇이 실패하고, 무엇이 나가는가.')+
+  '</div></section>';
+
+/* 게이트 */
+var G=[
+ ["라벨을 가려도 Software Body가 식별된다","§02–04 — 다섯 몸이 실루엣만으로 구분된다"],
+ ["지배적 표현이 점·노드·카드가 아니다","분할·비율·경로·위상. 표식은 경로 위 6개 이하"],
+ ["EMPTY와 UNKNOWN이 즉시 구분된다","§02 — 경계 확정성 + 윤곽 완결성, 두 축"],
+ ["BACKEND와 AGENT가 같은 문법으로 다른 실루엣","§03 — 내려가는 분기 vs 닫힌 회로 + 한쪽 면 접촉 3"],
+ ["FULL-STACK이 하나의 몸으로 읽힌다","§04 — 경계 1개 · 관통 줄기 1개"],
+ ["MASS가 결정적 의미를 갖는다","파일 수·LOC 입력 금지. 6개 신호의 합 (명세 §5)"],
+ ["CAUSALITY가 화살표 숲을 만들지 않는다","FAR는 층/경계를 넘는 줄기만. 몸당 경로 ≤6"],
+ ["EQUILIBRIUM이 몸 자체에서 보인다","§05 — 지반 톤 · 파선 · 굵기. 스피너 0"],
+ ["SETTLING이 SETTLED와 눈에 띄게 다르다","§05 ③ vs ④ — 톤 + 파선 + attention"],
+ ["에이전트 주장이 아니라 증거가 SETTLED를 만든다","③→④ 전이의 유일한 원인이 증거다"],
+ ["성장이 위상·비율·도달을 바꾼다","§05 ①→④ · §06 — 회로가 닫히고 층이 두꺼워진다"],
+ ["Semantic Zoom이 해상도를 바꾼다","§07 — 바깥 분할이 사라지고 안쪽이 나타난다"],
+ ["Port가 경계 통과를 전달한다","경계선이 두꺼워지는 마디. 연동 카드 0"],
+ ["프로젝트 유형별 색 코딩 없음","색은 상태에만. 다섯 몸 모두 같은 잉크"],
+ ["장식적 물리 없음","난수 0 · 힘 기반 배치 0 · 상시 애니메이션 0"],
+ ["React / CSS / SVG로 구현 가능","선·사각·경로뿐. WebGL·물리엔진·차트 라이브러리 0"],
+ ["Lovable이 설계 결정을 하지 않아도 된다","명세에 Build Contract. 남은 것은 구현뿐"]
+];
+O+='<section>'+H("08 · ACCEPTANCE","구현 제약 17개 — 전부 충족",
+  '아래는 <b>구현 가능성과 문법 일관성</b>에 대한 자기 검사다. '+
+  '<b>시각 방향의 승인은 여기서 나오지 않는다.</b> 그것은 Founder Visual Gate에 속한다.')+
+  G.map(function(g){return '<div class="gate"><i></i><b>'+esc(g[0])+'</b><span>'+esc(g[1])+'</span></div>'}).join("")+
+  '</section>';
+
+O+='<div class="foot"><span>JUQODE · SOFTWARE PHYSICS · VISUAL GRAMMAR</span>'+
+   '<span>docs/design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md</span><span>LOVABLE CREDITS SPENT · 0</span></div>';
+
+document.getElementById("wrap").innerHTML=O;
+marksOn(document.getElementById("wrap"));
+var bt=document.getElementById("boot"); if(bt)bt.remove();
+</script>
+</body>
+</html>

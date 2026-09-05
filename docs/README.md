@@ -8,16 +8,22 @@
 
 | | |
 |---|---|
-| [`design/SOFTWARE_PHYSICS_CANON.md`](design/SOFTWARE_PHYSICS_CANON.md) | **법칙**(Phase 3R.2). 믿음 3 · 행동 5 · 통제 2. **상위 문서** |
+| [`design/SOFTWARE_PHYSICS_CANON.md`](design/SOFTWARE_PHYSICS_CANON.md) | **법칙**(3R.2). 믿음 3 · 행동 5 · 통제 2. **상위 SSOT** |
 | [`design/software-physics-canon.html`](design/software-physics-canon.html) | 위 법칙의 **참조 카드**. 제품 화면이 아니다 |
-| [`design/PRIMARY_WORKSPACE_V02.md`](design/PRIMARY_WORKSPACE_V02.md) | **Primary Workspace 설계 명세** (Phase 3R.1). Lovable Build Contract 포함 |
-| [`design/primary-workspace-v02.html`](design/primary-workspace-v02.html) | 위 명세의 **비주얼 보드**. 브라우저로 열면 된다. 의존성 0 |
+| [`design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`](design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md) | **시각 문법**(3R.3). 채널 소유표 + **Lovable 1차 Build Contract** |
+| [`design/software-physics-visual-grammar.html`](design/software-physics-visual-grammar.html) | 실제 크기 **Software Body** 다섯 + Qode 상태 4연. 의존성 0 |
+| [`design/PRIMARY_WORKSPACE_V02.md`](design/PRIMARY_WORKSPACE_V02.md) | 화면 명세(3R.1). **§3.3 폐기 · 6건 소급 정정됨** |
+| [`design/primary-workspace-v02.html`](design/primary-workspace-v02.html) | 위 명세의 보드. **점밭 표현은 폐기됨**(역사적 기록) |
 
-**읽는 순서: Canon → Workspace.** Canon이 *왜 그렇게 그리는가*를, Workspace가 *무엇을 그리는가*를 정한다.
-둘이 충돌하면 **Canon이 상위**다. (3R.1에 소급 적용될 개정 목록은 Canon §17.2에 있다.)
+**읽는 순서: Canon → Visual Grammar → Workspace.**
+Canon이 *왜*, Visual Grammar가 *어떻게 보이는가*, Workspace가 *화면 골격*을 정한다.
+충돌하면 **위에 있는 문서가 이긴다.**
 
-`primary-workspace-v02.html`은 보드이면서 동시에 **MASS LAYOUT 엔진의 참조 구현**이다.
-여섯 개의 소프트웨어 유형이 특별 케이스 코드 없이 **질량 값만 다른 같은 렌더러**로 그려진다.
+**다음 Lovable 호출은 `SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`의 LOVABLE BUILD CONTRACT 하나만 본다.**
+목표 5–8 크레딧. 표현 단계 총 상한 15. MVP 보호선 40.
+
+두 보드는 **엔진의 참조 구현**이기도 하다 — 모든 소프트웨어 유형이 특별 케이스 코드 없이
+**질량 값만 다른 같은 렌더러**로 그려진다. 난수가 없어 재렌더해도 그림이 흔들리지 않는다.
 
 ---
 
