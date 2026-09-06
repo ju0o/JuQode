@@ -5,8 +5,9 @@
 >
 > | | |
 > |---|---|
-> | **현재 Phase** | **S0 — SSOT Consolidation** |
-> | **Implementation** | **HOLD** — PM 원격 확인까지 · **Architecture Frozen: YES** |
+> | **A1 — Architecture Freeze** | ✅ **CLOSED / PASS** |
+> | **현재 Phase** | **D1 — Local Persistence / Artifact Store** |
+> | **Implementation** | **AUTHORIZED — D1 SCOPE ONLY** · **Architecture Frozen: YES** |
 > | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
 
 ---
@@ -85,8 +86,8 @@
 
 > ## ✅ **Architecture Frozen: YES** · Founder Approval: **APPROVED** (2026-09-06)
 >
-> **구현 착수는 PM 이 원격 A1c 커밋을 확인한 뒤에만 가능하다.**
-> **아키텍처가 동결된 것과 구현이 허가된 것은 다르다.**
+> **PM 이 원격 A1c 커밋을 확인했다. A1 = CLOSED · D1 = OPEN.**
+> **구현은 D1 범위만 허가되었다.** S1 · R1 · E1 · Q1 이후는 아직 열리지 않았다.
 >
 > 한 장 요약: `JuQode-Private/docs/current/15_ARCHITECTURE_FREEZE_V01.md`
 

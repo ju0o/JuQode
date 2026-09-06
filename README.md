@@ -55,11 +55,12 @@ Coding Agent가 **실제 변경**을 수행하고, JuQode가 그것을 **검증*
 |---|---|
 | **Version** | **v0.1 — First Real Qode Loop** |
 | **S0 — SSOT Consolidation** | ✅ **완료 / PASS** |
-| **현재 Phase** | **A1 — Architecture Freeze** ✅ **동결 완료 (A1c)** |
-| **현재 Gate** | **A1 Final Freeze Gate** — PM 원격 확인 |
+| **A1 — Architecture Freeze** | ✅ **CLOSED / PASS** |
+| **현재 Phase** | **D1 — Local Persistence / Artifact Store** |
+| **현재 Gate** | **D1 Implementation Gate** |
 | **Architecture Frozen** | **YES** · Founder **APPROVED** (2026-09-06) |
-| **Implementation** | **HOLD** — **PM 이 원격 A1c 커밋을 확인할 때까지.** 동결과 허가는 다르다 |
-| **다음** | **D1 — Local Persistence / Artifact Store** |
+| **Implementation** | **AUTHORIZED — D1 SCOPE ONLY.** S1/R1/E1/Q1 이후는 닫혀 있다 |
+| **다음** | **S1 — Real Project → Semantic Software Model** (D1 Gate 통과 후) |
 
 ```
 S0 → A1 → D1 → S1 → R1 → E1 → Q1 → Q2 → QA → v0.1
@@ -68,8 +69,8 @@ S0 → A1 → D1 → S1 → R1 → E1 → Q1 → Q2 → QA → v0.1
 | Phase | | |
 |---|---|---|
 | **S0** | SSOT Consolidation | **완료 / PASS** |
-| **A1** | Architecture Freeze | ✅ **동결 완료 — PM Gate 대기** |
-| **D1** | Local Persistence / Artifact Store | **PM Gate 이후 OPEN** |
+| **A1** | Architecture Freeze | ✅ **CLOSED / PASS** |
+| **D1** | Local Persistence / Artifact Store | ▶ **CURRENT / OPEN** |
 | **S1** | Real Project → Semantic Software Model | 대기 |
 | **R1** | Claude Code Runtime | 대기 |
 | **E1** | Evidence / Git Safety / UNKNOWN | 대기 |
