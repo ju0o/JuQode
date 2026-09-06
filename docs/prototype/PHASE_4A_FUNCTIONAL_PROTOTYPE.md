@@ -1,5 +1,21 @@
 # Phase 4A — Functional Prototype
 
+> ## ✅ CURRENT IMPLEMENTATION BASELINE
+>
+> | | |
+> |---|---|
+> | **Status** | **ACTIVE** |
+> | **Product Version** | v0.1 MVP |
+> | **설계 SSOT** | [`../design/MVP_DESIGN_CONVERGENCE.md`](../design/MVP_DESIGN_CONVERGENCE.md) |
+> | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
+> | **확인일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **이 문서의 위치** — **CURRENT IMPLEMENTATION BASELINE.** 물리 엔진 · 상태 기계 · 껍데기는 그대로 가져간다. **최종 프로덕션 아키텍처가 아니다** — 저장 · 실제 Agent · 실제 Git · 실제 Evidence는 아직 없다.
+>
+> **아직 만족하지 못하는 v0.1 MUST** — 실제 Local Project Open · 실제 Semantic Model · 실제 Coding Agent · 실제 Git Safety · **Local Persistence / Reload-safe state** · Whole-Software Say. 목록: `JuQode-Private/docs/current/12_IMPLEMENTATION_ROADMAP.md` §6
+
+---
+
 > **Status:** 동작하는 프로토타입. 완제품이 아니다.
 > **설계 SSOT:** [`../design/MVP_DESIGN_CONVERGENCE.md`](../design/MVP_DESIGN_CONVERGENCE.md) ·
 > [`../design/mvp-design-convergence.html`](../design/mvp-design-convergence.html)

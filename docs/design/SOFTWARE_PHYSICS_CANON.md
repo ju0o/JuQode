@@ -1,5 +1,22 @@
 # JuQode — Software Physics & Philosophy Canon
+
 ## 표상(Representation)보다 먼저 오는 법칙
+
+> ## ✅ CURRENT CANON
+>
+> | | |
+> |---|---|
+> | **Status** | **CANON** — 현재 설계 기준 |
+> | **읽는 순서** | **1 / 6** — 법칙 → 재료 → 자리 → 제품 → MVP 동결 → 수렴판 |
+> | **Product Version** | v0.1 MVP |
+> | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
+> | **확인일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **이 문서의 위치** — **법칙 — 시각 상위 SSOT.** 다른 설계 문서와 충돌하면 이 문서가 이긴다.
+>
+> **⚠ 문서 안의 낡은 참조** — §17.1의 다음 단계 표(`3R.3 Visual Grammar → 3R.4 Final Workspace → 3R.5 Lovable Build`)는 **실제 진행과 다르다.** 실제 계보는 `3R.3 Visual Grammar(시각형 기각) → 3R.4 Kinetic(장·결) → 3R.5 Semantic Place → 3R.6 Whole Product → MVP Wireframe → MVP Design Convergence → Phase 4A Functional Prototype`이고, **Lovable은 쓰이지 않았다(credits 0).** 법칙 본문은 그대로 유효하다.
+
+---
 
 > **Status:** Phase 3R.2 산출물. 이 문서는 화면을 정의하지 않는다.
 > **Precedes:** Visual Grammar → Final Workspace Design → Lovable Build.

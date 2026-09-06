@@ -1,5 +1,17 @@
 # PM Proxy Visual Review
 
+> ## ✅ CURRENT — 근거 기록
+>
+> | | |
+> |---|---|
+> | **Status** | **ACTIVE** — 판정 근거 |
+> | **Product Version** | v0.1 MVP |
+> | **확인일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **이 문서의 위치** — 3R.4 산출물의 **실제 렌더 검토 기록**. 근거 이미지 `evidence/kinetic/`.
+
+---
+
 > 대상: [`kinetic-software-study.html`](kinetic-software-study.html) · Chrome 152 · 1300×780 @2x
 > 방법: 실제 브라우저에서 다섯 장면을 **모션으로** 재생하고, 장면 4는 문턱을 **실제로 클릭**했다.
 > 근거 이미지는 전부 그 렌더 결과에서 잘라낸 것이다. 손으로 다시 그린 프레임은 없다.

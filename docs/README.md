@@ -1,94 +1,157 @@
 # JuQode — Code-side Documentation
 
-> **여기에는 설계 명세만 있다. 기술 명세는 아직 없다. 의도된 것이다.**
+> **네 층으로 갈라져 있다.**
+> **CURRENT CANON** · **CURRENT IMPLEMENTATION BASELINE** · **HISTORICAL STUDIES** · **FUTURE ARCHITECTURE**
+>
+> | | |
+> |---|---|
+> | **현재 Phase** | **S0 — SSOT Consolidation** |
+> | **Implementation** | **HOLD** — S0가 PM Gate를 통과할 때까지 |
+> | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
 
 ---
 
-## 지금 있는 것
+## 1. CURRENT CANON — 지금의 시각 기준
+
+**충돌하면 위에 있는 것이 이긴다.**
+
+| 순서 | | |
+|---|---|---|
+| 1 | [`design/SOFTWARE_PHYSICS_CANON.md`](design/SOFTWARE_PHYSICS_CANON.md) | **법칙 (상위 SSOT)**. 믿음 3 · 행동 5 · 통제 2. 채널 배타성. Qode 6-상태 기계 |
+| 2 | [`design/KINETIC_SOFTWARE_REPRESENTATION.md`](design/KINETIC_SOFTWARE_REPRESENTATION.md) | **재료 — 장(場)과 결.** 법칙이 어떤 재료 위에서 일어나는가 |
+| 3 | [`design/SEMANTIC_PLACE_CANON.md`](design/SEMANTIC_PLACE_CANON.md) | **의미의 자리.** 테두리 없이 집힌다. 의미는 결의 방향을 정한다 |
+| 4 | [`design/WHOLE_PRODUCT_INTERACTION.md`](design/WHOLE_PRODUCT_INTERACTION.md) | **제품 전체 상호작용.** `SEE → POINT → SAY` · OPEN/POINT/SAY/QODE/RUN/IMPORT/CONNECT |
+| 5 | [`design/MVP_WIREFRAME.md`](design/MVP_WIREFRAME.md) | **MVP 동결.** 문제 모듈 + 여덟 화면 + Realm 하나 |
+| 6 | [`design/MVP_DESIGN_CONVERGENCE.md`](design/MVP_DESIGN_CONVERGENCE.md) | **v0.1 화면 결정판 · 설계 SSOT.** 판은 언제나 하나 · 주어는 제품이 쓴다 |
+
+**대응 인터랙티브 보드 (의존성 0 · 더블클릭으로 열린다)**
 
 | | |
 |---|---|
-| [`design/KINETIC_SOFTWARE_REPRESENTATION.md`](design/KINETIC_SOFTWARE_REPRESENTATION.md) | **운동 표상 연구**(3R.4). 재료 = 장(場)과 결. **Founder 판단 대기** |
-| [`design/kinetic-software-study.html`](design/kinetic-software-study.html) | 위 연구의 **인터랙티브 모션 스터디** 5장면 + 정지 프레임. 의존성 0 |
-| [`design/MVP_WIREFRAME.md`](design/MVP_WIREFRAME.md) | **MVP 와이어프레임 동결**. 문제 모듈 + 8화면. **Founder 판단 대기** |
-| [`design/mvp-wireframe.html`](design/mvp-wireframe.html) | 위 동결안의 **8프레임 보드 + 와이어플로**. World는 실제 렌더러가 그린다 |
-| [`design/WHOLE_PRODUCT_INTERACTION.md`](design/WHOLE_PRODUCT_INTERACTION.md) | **제품 전체 상호작용**(3R.6). World → Focus → Instrument. **Founder 판단 대기** |
-| [`design/whole-product-board.html`](design/whole-product-board.html) | 위 명세의 **8프레임 제품 보드**. World는 실제 렌더러가 그린다 |
-| [`design/SEMANTIC_PLACE_CANON.md`](design/SEMANTIC_PLACE_CANON.md) | **의미의 자리 법칙**(3R.5). 의미 = 결의 방향. **Founder 판단 대기** |
-| [`design/semantic-place-study.html`](design/semantic-place-study.html) | 위 법칙의 **인터랙티브 연구** 4편 + 유형 스트립. 의존성 0 |
-| [`design/SEMANTIC_PLACE_PM_REVIEW.md`](design/SEMANTIC_PLACE_PM_REVIEW.md) | 위 산출물의 **실제 렌더 검토**. 근거 이미지 `design/evidence/semantic-place/` |
-| [`design/KINETIC_PM_VISUAL_GATE.md`](design/KINETIC_PM_VISUAL_GATE.md) | 위 산출물의 **실제 렌더 검토**(3R.4B). 근거 이미지 `design/evidence/kinetic/` |
-| [`design/SOFTWARE_PHYSICS_CANON.md`](design/SOFTWARE_PHYSICS_CANON.md) | **법칙**(3R.2). 믿음 3 · 행동 5 · 통제 2. **상위 SSOT** |
-| [`design/software-physics-canon.html`](design/software-physics-canon.html) | 위 법칙의 **참조 카드**. 제품 화면이 아니다 |
-| [`design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`](design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md) | **시각 문법**(3R.3). 채널 소유표 + **Lovable 1차 Build Contract** |
-| [`design/software-physics-visual-grammar.html`](design/software-physics-visual-grammar.html) | 실제 크기 **Software Body** 다섯 + Qode 상태 4연. 의존성 0 |
-| [`design/PRIMARY_WORKSPACE_V02.md`](design/PRIMARY_WORKSPACE_V02.md) | 화면 명세(3R.1). **§3.3 폐기 · 6건 소급 정정됨** |
-| [`design/primary-workspace-v02.html`](design/primary-workspace-v02.html) | 위 명세의 보드. **점밭 표현은 폐기됨**(역사적 기록) |
+| [`design/software-physics-canon.html`](design/software-physics-canon.html) | 법칙 참조 카드. 제품 화면이 아니다 |
+| [`design/kinetic-software-study.html`](design/kinetic-software-study.html) | 운동 표상 5장면 |
+| [`design/semantic-place-study.html`](design/semantic-place-study.html) | 의미의 자리 연구 4편 |
+| [`design/whole-product-board.html`](design/whole-product-board.html) | 8프레임 제품 보드 |
+| [`design/mvp-wireframe.html`](design/mvp-wireframe.html) | MVP 동결 8프레임 + 와이어플로 |
+| [`design/mvp-design-convergence.html`](design/mvp-design-convergence.html) | **수렴판 8프레임** |
 
-**읽는 순서: Canon → Kinetic Representation → Workspace.**
-Canon이 *왜*, Kinetic Representation이 *어떤 재료 위에서 일어나는가*, Workspace가 *화면 골격*을 정한다.
-충돌하면 **Canon이 이긴다.**
+**렌더 검토 기록 (실제 픽셀을 보고 쓴 것)**
 
-**3R.3 Visual Grammar의 시각형(점밭·구획)은 Founder가 기각했다.**
-문서는 추론 이력으로 남기되 **그 안의 LOVABLE BUILD CONTRACT는 보류**한다.
-3R.4가 그것을 대체하려는 연구이며, **Founder 승인 전까지 Lovable을 호출하지 않는다.**
-목표 5–8 크레딧. 표현 단계 총 상한 15. MVP 보호선 40.
+| | |
+|---|---|
+| [`design/SEMANTIC_PLACE_PM_REVIEW.md`](design/SEMANTIC_PLACE_PM_REVIEW.md) | 근거 이미지 `design/evidence/semantic-place/` |
+| [`design/KINETIC_PM_VISUAL_GATE.md`](design/KINETIC_PM_VISUAL_GATE.md) | 근거 이미지 `design/evidence/kinetic/` |
 
-두 보드는 **엔진의 참조 구현**이기도 하다 — 모든 소프트웨어 유형이 특별 케이스 코드 없이
-**질량 값만 다른 같은 렌더러**로 그려진다. 난수가 없어 재렌더해도 그림이 흔들리지 않는다.
+> **읽는 순서: 법칙 → 재료 → 자리 → 제품 → MVP 동결 → 수렴판.**
+> 법칙이 *왜*, 재료가 *무엇 위에서*, 자리가 *어디를 집는가*, 제품이 *무엇을 하는가*,
+> 동결과 수렴이 *v0.1 화면*을 정한다.
 
 ---
 
-## 왜 기술 명세가 없는가
+## 2. CURRENT IMPLEMENTATION BASELINE
 
-JuQode는 현재 **Phase 3 (Functional Prototype)** 단계다.
-첫 인터랙티브 코드는 [`prototype/`](../prototype/)에 있고, 그 문서는 그 안의 README다.
-아래 기술 명세들은 **Phase 4 (MVP Architecture Freeze)** 의 산출물이므로 아직 없다.
+| | |
+|---|---|
+| [`prototype/PHASE_4A_FUNCTIONAL_PROTOTYPE.md`](prototype/PHASE_4A_FUNCTIONAL_PROTOTYPE.md) | **동작하는 프로토타입의 문서.** 하나의 기계, 아홉 개의 상태 |
+| [`../prototype/`](../prototype/) | **실제 코드.** `index.html`을 열면 끝이다. 외부 요청 0건 |
+| `prototype/evidence/phase-4a/` | **실제 프로토타입을 눌러서 얻은 화면 15장 + 영상** |
 
-기획 문서(Strategy · PRD · UX · Roadmap)는 **JuQode-Private**에 있다.
-이 저장소에는 **코드와 함께 사는 문서만** 둔다.
+> **BASELINE이지 FINAL PRODUCTION ARCHITECTURE가 아니다.**
+> 물리 엔진 · 상태 기계 · 껍데기는 그대로 가져간다.
+> **그 아래(저장 · 실제 Agent · 실제 Git · 실제 Evidence)는 아직 없다.**
+>
+> **Lovable credits 사용 0.** 저장소 안에서 vanilla로 구현되었다.
 
 ---
 
-## 여기에 들어올 것
+## 3. HISTORICAL STUDIES — 보존한다. 현재 기준이 아니다
+
+| | | 왜 |
+|---|---|---|
+| [`design/PRIMARY_WORKSPACE_V02.md`](design/PRIMARY_WORKSPACE_V02.md) | 3R.1 화면 명세 | §3.3 폐기 · 6건 소급 정정. 이후 세대가 표상을 교체했다 |
+| [`design/primary-workspace-v02.html`](design/primary-workspace-v02.html) | 위 명세의 보드 | **점밭 표현은 폐기됨** |
+| [`design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md`](design/SOFTWARE_PHYSICS_VISUAL_GRAMMAR.md) | 3R.3 시각 문법 | **시각형(점밭 · 구획)은 Founder가 기각했다.** 그 안의 Build Contract는 실행되지 않았다 |
+| [`design/software-physics-visual-grammar.html`](design/software-physics-visual-grammar.html) | 위 문법의 보드 | 기각된 표현의 기록 |
+
+**JuQode-Private 쪽 역사 층** — `docs/00`~`27` · `docs/visual/` · `docs/design/`(C+A Hybrid) ·
+`docs/reviews/` · `docs/handoffs/`. 전부 상단에 상태 헤더가 붙어 있다.
+
+> **역사 문서는 왜 그렇게 결정했는지의 증거다. 삭제하지 않는다.**
+> 다만 **현재 구현 기준으로 쓰지 않는다.**
+
+---
+
+## 4. FUTURE ARCHITECTURE SPECS — 아직 없다. 의도된 것이다
+
+**A1(Architecture Freeze)의 산출물이므로 아직 존재하지 않는다.**
 
 | 후보 | 내용 | 언제 |
 |---|---|---|
-| Context Block Format Spec | Context를 파일로 내보내고 가져오는 형식 | Phase 4 |
-| Agent Event Schema | Agent 작업 이벤트의 구조화된 표현 | Phase 4 |
-| Evidence Schema | Test / Build / Screenshot / Git 검증 결과의 표현 | Phase 4 |
-| Architecture Notes | Agent 실행 / Evidence 파이프라인 / Context 저장 구조 | Phase 4 |
+| Context Block Format Spec | Context를 파일로 내보내고 가져오는 형식 | **A1** |
+| Agent Event Schema | Agent 작업 이벤트의 구조화된 표현 | **A1** |
+| Evidence Schema | Test / Build / Screenshot / Git 검증 결과의 표현 (`PASS`/`FAIL`/**`UNKNOWN`**) | **A1** |
+| Semantic Model Schema | 자리 · 질량 · 상태 · 관계 | **A1** |
+| Persistence Schema | Local-first 저장 구조 | **A1** (방향은 PROPOSED) |
+| Provider 추상 | Coding Agent Provider 경계 | **A1** (방향은 PROPOSED) |
 
-**Phase 4 = MVP Architecture Freeze.** 그 앞에 Canvas Wireflow(2) · Lovable Handoff(2.5) ·
-Lovable Functional Prototype(3)이 있고, 구현은 Phase 5~6이다.
+> **⚠ v0.1 아키텍처 방향은 `PROPOSED`이며 결정되지 않았다.**
+> Local-first · SQLite가 Product State · Repository가 Machine Truth · Git이 안전 Truth ·
+> 큰 아티팩트는 파일시스템 · 비밀은 OS Credential Storage · 첫 Provider = Claude Code.
+> **전부 `JuQode-Private/docs/current/12_IMPLEMENTATION_ROADMAP.md` §5에 PROPOSED로 기록되어 있다.**
+> **구현된 것이 아니다.** A1에서 확정한다.
 
-**Context Block Format을 사람이 읽을 수 있는 형식으로 유지하는 것**은
-이미 내려진 결정이다 (`JuQode-Private/docs/26_DECISIONS.md` D-024).
+**Context Block Format을 사람이 읽을 수 있는 형식으로 유지하는 것**은 이미 내려진 결정이다 (D-024).
 사용자가 자기 Context를 언제든 밖으로 가져갈 수 있어야 한다.
 
 ---
 
-## 구현 시 반드시 지켜야 할 구조 규칙
+## 5. 구현 시 반드시 지켜야 할 구조 규칙
 
-기능은 미룰 수 있지만 구조는 미루지 않는다.
-`JuQode-Private/docs/24_MVP_SCOPE.md` §5의 9개 Structural Rules를 MVP부터 적용한다.
+**기능은 미룰 수 있지만 구조는 미루지 않는다.**
 
 | 규칙 | 이유 |
 |---|---|
-| Context Block에 식별자 + 버전 | 나중에 History / Sync / Restore 가능 |
-| Context에 Scope 필드 | 나중에 Cloud / Team 경계 가능 |
-| Context에 Vault 플래그 | 공유 기능을 켤 때 사고 방지 |
+| Context Block에 `id` + `version` | History / Sync / Restore |
+| Context에 `scope` | Cloud / Team 경계 |
+| Context에 `origin` | 승인 UX와 신뢰 |
+| Context에 `portable` 플래그 | Cloud를 막지 않기 위한 최소 조건 |
+| Context에 Vault 플래그 | 공유를 켤 때 사고 방지 |
 | Export는 사람이 읽을 수 있는 형식 | Ownership 신뢰 + Import 기반 |
-| Quest와 Workspace를 분리 | 나중에 병렬 작업 가능 |
-| Agent Event를 구조화해서 저장 | Build World / No Fake Motion의 기반 |
-| Evidence에 `UNKNOWN` 상태 | 정직한 표시 (Evidence over Agent Claims) |
-| 모든 UI 요소가 Level 5 참조를 가짐 | 5 Level Depth 구조의 기반 |
+| **Qode와 Execution을 분리** | 병렬 · 재실행의 전제 |
+| **Agent Event를 구조화해서 저장** | No Fake Motion의 기반 |
+| Evidence에 **`UNKNOWN`** 상태 | 정직한 표시 |
+| 모든 UI 요소가 **Raw 참조**를 가짐 | 5 Level Depth의 기반 |
 | `CRITICAL`은 `text` 필수 | 중요한 것이 Discovery에 의존하지 않게 강제 |
+| 행동에 **`reversibility` 등급** 필드 | `reversible \| irreversible \| destructive` |
+| 자리 · 질량 · 상태 · 증거는 **Realm 독립** | 미래 Realm과 호환 |
+
+→ 전체: `JuQode-Private/docs/current/04_MVP_V01_SPEC.md` §6
 
 ---
 
-## Open
+## 6. 절대 되살리지 않는 것
+
+| | |
+|---|---|
+| C + A Hybrid를 Primary Interface 구조로 | 공간 문법 자체가 교체되었다 |
+| Feature Map을 Primary Workspace로 | Primary는 Software World다 |
+| Build World / Software City를 v0.1 Primary Surface로 | **대체물 제작도 금지** |
+| Construction / 정원 / 작업대 메타포 | 시각 정체성은 메타포가 아니라 재료의 법칙이다 |
+| 큰 Context 관리 페이지 | Context는 판 안의 접힌 한 줄이다 |
+| Raw Diff를 기본 결과 화면으로 | 기본은 Outcome |
+| Git graph · File Tree를 사용자 멘탈 모델로 | 사실은 남고 형태는 죽었다 |
+| 세로 레일 · 탭줄 · 트리 · 폴더 삼각형 | 하나라도 남으면 IDE로 읽힌다 |
+| 진행률 바 · 퍼센트 · 스피너 · Agent 아바타 | No Fake Motion |
+| gradient · glass · 큰 둥근 카드 · emoji | Visual Tone 동결 |
+
+→ 근거와 사유: `JuQode-Private/docs/current/10_DECISIONS.md` §3
+
+---
+
+## 7. Open
 
 - 라이선스 (아직 결정되지 않음)
 - Open Source 전환 시점
 - 외부 기여(Contribution) 수용 여부와 방식
+
+**제품 차원의 미결정 전체:** `JuQode-Private/docs/current/11_OPEN_DECISIONS.md`

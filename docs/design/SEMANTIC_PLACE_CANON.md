@@ -1,5 +1,19 @@
 # Semantic Place Canon
 
+> ## ✅ CURRENT CANON
+>
+> | | |
+> |---|---|
+> | **Status** | **CANON** — 현재 설계 기준 |
+> | **읽는 순서** | **3 / 6** — 법칙 → 재료 → 자리 → 제품 → MVP 동결 → 수렴판 |
+> | **Product Version** | v0.1 MVP |
+> | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
+> | **확인일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **이 문서의 위치** — **의미의 자리.** 테두리 없이 집힌다.
+
+---
+
 > **Status:** Phase 3R.5 산출물. [`semantic-place-study.html`](semantic-place-study.html) 이 이 문서의 증명이다.
 > **Relation:** 3R.4의 몸 · 결 · 질량 · 증거 법칙을 전부 유지한다. **하나를 더한다.**
 > **Lovable credits spent:** 0.

@@ -1,5 +1,20 @@
 # JuQode — Kinetic Software Representation
+
 ## 소프트웨어를 그리지 않는다. 반응하게 한다.
+
+> ## ✅ CURRENT CANON
+>
+> | | |
+> |---|---|
+> | **Status** | **CANON** — 현재 설계 기준 |
+> | **읽는 순서** | **2 / 6** — 법칙 → 재료 → 자리 → 제품 → MVP 동결 → 수렴판 |
+> | **Product Version** | v0.1 MVP |
+> | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
+> | **확인일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **이 문서의 위치** — **재료 — 장(場)과 결.** 법칙이 어떤 재료 위에서 일어나는가.
+
+---
 
 > **Status:** Phase 3R.4 산출물. **표상 연구**이며 Build Contract가 아니다.
 > **Artifact:** [`kinetic-software-study.html`](kinetic-software-study.html) — 의존성 0 · 더블클릭으로 열린다.

@@ -1,5 +1,19 @@
 # Whole Product Interaction
 
+> ## ✅ CURRENT CANON
+>
+> | | |
+> |---|---|
+> | **Status** | **CANON** — 현재 설계 기준 |
+> | **읽는 순서** | **4 / 6** — 법칙 → 재료 → 자리 → 제품 → MVP 동결 → 수렴판 |
+> | **Product Version** | v0.1 MVP |
+> | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
+> | **확인일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **이 문서의 위치** — **제품 전체 상호작용.** `SEE → POINT → SAY`.
+
+---
+
 > **Status:** Phase 3R.6 산출물. 표상(Realm)은 재설계하지 않는다 — 그 **주변 제품 전체**를 정한다.
 > **Board:** [`whole-product-board.html`](whole-product-board.html) · 근거 이미지 `evidence/whole-product/`
 > **Lovable credits spent:** 0. 구현하지 않는다.

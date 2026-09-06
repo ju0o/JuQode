@@ -1,5 +1,19 @@
 # MVP Design Convergence — 하나의 방향
 
+> ## ✅ CURRENT CANON
+>
+> | | |
+> |---|---|
+> | **Status** | **CANON** — 현재 설계 기준 |
+> | **읽는 순서** | **6 / 6** — 법칙 → 재료 → 자리 → 제품 → MVP 동결 → 수렴판 |
+> | **Product Version** | v0.1 MVP |
+> | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
+> | **확인일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **이 문서의 위치** — **v0.1 화면 결정판 · 설계 SSOT.** 구현은 이 문서를 따른다.
+
+---
+
 > **Status:** 설계 수렴. 제품 방향은 바꾸지 않았다. A/B/C 안은 없다.
 > **Board:** [`mvp-design-convergence.html`](mvp-design-convergence.html) · 근거 이미지 `evidence/mvp-design-convergence/`
 > **동결본 유지:** [`MVP_WIREFRAME.md`](MVP_WIREFRAME.md) · [`mvp-wireframe.html`](mvp-wireframe.html) 는 손대지 않았다.

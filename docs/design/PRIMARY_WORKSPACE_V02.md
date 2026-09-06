@@ -1,4 +1,23 @@
 # JuQode — Primary Workspace V02
+
+> ## ⚠ HISTORICAL STUDY — 현재 구현 기준이 아니다
+>
+> | | |
+> |---|---|
+> | **Status** | **SUPERSEDED** |
+> | **무엇** | 3R.1 화면 명세 |
+> | **Superseded By** | [`SOFTWARE_PHYSICS_CANON.md`](SOFTWARE_PHYSICS_CANON.md) · [`KINETIC_SOFTWARE_REPRESENTATION.md`](KINETIC_SOFTWARE_REPRESENTATION.md) · [`MVP_DESIGN_CONVERGENCE.md`](MVP_DESIGN_CONVERGENCE.md) |
+> | **Historical Value** | **YES** — 추론 이력으로 보존한다 |
+> | **현재 구현에 사용** | **하지 않는다** |
+> | **판정일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **왜 SUPERSEDED인가** — §3.3은 이미 폐기되었고 6건이 소급 정정되었다. 이후 3R.2 Canon이 스스로 **상위**임을 선언했고, 3R.4가 **점밭 · 노드 · 선 우선 · 구획 우선 · 박스 토폴로지를 최종 시각 표현에서 기각**했다.
+>
+> **여기서 살아남은 것** — MASS / BOUNDARY / PATH / PORT 등 원시요소의 *개념*은 Canon에 흡수되었다
+>
+> **아래 원문은 한 글자도 고치지 않았다.**
+
+---
 ## Adaptive Software Representation · FINAL DESIGN SPEC
 
 > **Status:** Phase 3R.1 산출물. 단일 후보. A/B/C 없음.

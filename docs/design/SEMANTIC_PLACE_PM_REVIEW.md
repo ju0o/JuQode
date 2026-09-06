@@ -1,5 +1,17 @@
 # Semantic Place PM Proxy Review
 
+> ## ✅ CURRENT — 근거 기록
+>
+> | | |
+> |---|---|
+> | **Status** | **ACTIVE** — 판정 근거 |
+> | **Product Version** | v0.1 MVP |
+> | **확인일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **이 문서의 위치** — 3R.5 산출물의 **실제 렌더 검토 기록**. 근거 이미지 `evidence/semantic-place/`.
+
+---
+
 > 대상: [`semantic-place-study.html`](semantic-place-study.html) · Chrome 152 · 1300×800 @2x
 > 방법: 실제 브라우저에서 네 연구를 재생하고, 좌표를 지정해 **직접 가리키고**, 문장 칩을 **직접 눌렀다.**
 > 근거 이미지는 전부 그 렌더 결과다. Lovable 호출 **0**.

@@ -1,5 +1,19 @@
 # MVP Wireframe — Freeze
 
+> ## ✅ CURRENT CANON
+>
+> | | |
+> |---|---|
+> | **Status** | **CANON** — 현재 설계 기준 |
+> | **읽는 순서** | **5 / 6** — 법칙 → 재료 → 자리 → 제품 → MVP 동결 → 수렴판 |
+> | **Product Version** | v0.1 MVP |
+> | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
+> | **확인일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **이 문서의 위치** — **MVP 동결.** 문제 모듈 + 여덟 화면 + Realm 하나.
+
+---
+
 > **Status:** 구현 직전 최종 제품 설계. 새 철학·표상·Realm을 만들지 않는다.
 > **Board:** [`mvp-wireframe.html`](mvp-wireframe.html) · 근거 이미지 `evidence/mvp-wireframe/`
 > **Lovable calls:** 0. 구현하지 않는다.

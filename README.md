@@ -2,11 +2,7 @@
 
 > ## Developers Code. Vibe Coders Qode.
 
-```
-Question  →  Quest  →  Queue  →  Quick  →  Qode
-```
-
-**JuQode is a Software Creation Interface, not an IDE.**
+**JuQode는 IDE가 아니다. AI Software Creation Interface다.**
 
 전통적인 개발자는 Code를 읽고, 이해하고, 직접 수정한다.
 바이브 코더는 Code를 읽기보다 AI에게 반복적으로 묻는다.
@@ -17,65 +13,98 @@ Question  →  Quest  →  Queue  →  Quick  →  Qode
 
 ---
 
-## What "Q" means
+## 사용자는 무엇을 하는가
 
-| Q | 의미 |
-|---|---|
-| **Question** | Qode는 질문에서 시작한다 |
-| **Quest** | 모든 개발은 해결해야 하는 문제와 목표다 |
-| **Queue** | 현재 Quest에 필요한 Context와 Skill만 compact하게 담는다 |
-| **Quick** | Quest를 빠르게 해결한다 |
-| **Qode** | 위 전체가 하나의 행위가 된다 |
+사용자는 Code나 File을 조작하지 않는다.
+**자기 Software를 보고, 중요한 곳을 가리키고, 원하는 것을 말한다.**
+
+```
+SEE  →  POINT  →  SAY
+```
+
+```
+OPEN → WORLD → OBSERVE → POINT(선택) → SAY → QODE → PREPARE → AGENT
+     → ACTUAL CHANGE → EVIDENCE → SETTLE → UNDERSTAND
+```
+
+**Qode란** — 사용자가 원하는 Software 변화를 말하면, JuQode가 필요한 Context / Skill / 대상을 준비하고,
+Coding Agent가 **실제 변경**을 수행하고, JuQode가 그것을 **검증**해서
+**사람이 이해할 수 있는 Software 상태**로 되돌려주는 하나의 작업 단위.
 
 ---
 
 ## 이 저장소의 역할
 
-**이 저장소는 JuQode의 Code 저장소다.**
+**이 저장소는 JuQode의 Code 저장소이며, 동시에 시각 Canon과 Prototype의 집이다.**
 
-| Repository | 현재 상태 | 담는 것 |
+| Repository | 담는 것 | 무엇의 Truth인가 |
 |---|---|---|
-| **JuQode** (이 repo) | 현재 Private | **Code / 구현**, 코드와 함께 사는 기술 명세 · Format Spec |
-| JuQode-Private | Private | **Markdown / 기획** — Strategy · PRD · UX · Roadmap |
+| **JuQode** (이 repo) | **Code / 구현** · 코드와 함께 사는 설계·기술 명세 · **시각 Canon** · **Prototype** | **Implementation & Design Truth** |
+| JuQode-Private | **기획** — Strategy · PRD · Canon · Scope · Decisions · Roadmap | **Product Truth** |
 
-분리 기준은 공개/비공개가 아니라 **Code vs 기획**이다.
-Product 정의 · UX 설계 · 사업 관련 문서는 이 저장소에 두지 않는다.
+분리 기준은 공개/비공개가 아니라 **`기획 vs 코드와 함께 사는 것`** 이다. (현재 두 저장소 모두 Private)
 
-향후 Open Source로 전환될 수 있으나, 그 시점의 점검 항목은
-`JuQode-Private/docs/00_PROJECT_CHARTER.md` §2에 정의되어 있다.
+> **Product SSOT의 입구는 `JuQode-Private/docs/current/00_MASTER_INDEX.md`다.**
+> 제품 정의 · Scope · 결정 이력을 알아야 한다면 거기서 시작한다.
 
 ---
 
 ## Status
 
-**현재: Phase 3 — Lovable Functional Prototype. 첫 인터랙티브 코드가 있다.**
+| | |
+|---|---|
+| **Version** | **v0.1 — First Real Qode Loop** |
+| **현재 Phase** | **S0 — SSOT Consolidation** |
+| **현재 Gate** | **S0 PM SSOT Gate** |
+| **Implementation** | **HOLD** — S0가 PM Gate를 통과할 때까지 제품 구현에 착수하지 않는다 |
+| **다음** | **A1 — Architecture Freeze** |
 
-Product Planning은 **동결(Planning Freeze)** 되었다.
+```
+S0 → A1 → D1 → S1 → R1 → E1 → Q1 → Q2 → QA → v0.1
+```
 
-| Phase | 내용 | 상태 |
+| Phase | | |
 |---|---|---|
-| 0 | Product SSOT | ✅ 완료 |
-| 1 | Visual Product Planning | ✅ 완료 |
-| 1.5 | **Planning Freeze** | ✅ 완료 |
-| 2 | Primary Interface Design | ✅ 완료 |
-| 2.5 | Lovable Handoff | ✅ 완료 |
-| **3** | **Lovable Functional Prototype** | **진행 중 → [`prototype/`](prototype/)** |
-| 4 | MVP Architecture Freeze | 대기 ← **기술 명세가 여기서 나온다** |
-| 5 | Supabase / Data Layer | 대기 |
-| 6 | First Qode Real Integration | 대기 ← **코드가 여기서 실제로 동작한다** |
-| 7 | QA / Dogfood | 대기 |
-| **v0.1** | **First Qode MVP Release** | — |
+| **S0** | SSOT Consolidation | **진행 중** |
+| **A1** | Architecture Freeze | 대기 — **기술 명세가 여기서 나온다** |
+| **D1** | Local Persistence / SQLite / Artifact Store | 대기 |
+| **S1** | Real Project → Semantic Software Model | 대기 |
+| **R1** | Claude Code Runtime | 대기 |
+| **E1** | Evidence / Git Safety / UNKNOWN | 대기 |
+| **Q1** | First Real Qode End-to-End | 대기 — **코드가 여기서 실제로 동작한다** |
+| **Q2** | RUN → Problem → Second Qode | 대기 |
+| **QA** | Founder Dogfood / Release Gates | 대기 |
+| **v0.1** | First Qode MVP Release | — |
 
-v0.1 이후의 V1 / V2 / Later는 별도 Roadmap으로 계속된다.
+**v0.1 이후의 V1 / Later는 `JuQode-Private/docs/current/05` · `06`에 방향으로만 있다.**
 
-**순서가 고정된 이유:** Design → 기능적 인터랙션 Prototype → Architecture Freeze
-→ Data Layer → 실제 Agent 통합 → QA → Release.
-Backend / Data Architecture가 UX를 끌고 가기 전에 실제 제품 인터랙션을 검증한다.
+> **구 Phase 0~7 번호 체계는 SUPERSEDED다.**
+> 근거: `JuQode-Private/docs/current/10_DECISIONS.md` §3 C-4.
 
-→ [prototype/README.md](prototype/README.md) · [docs/README.md](docs/README.md)
+---
 
-**`prototype/`** — 인터랙션 검증용 프론트엔드 프로토타입. 빌드 없이 `index.html`을 열면 된다.
-Backend · DB · Git · 실제 Coding Agent 없음. Working / Result는 시뮬레이션이다.
+## 지금 여기 있는 것
+
+### 현재 설계 Canon → [`docs/design/`](docs/design/)
+
+```
+SOFTWARE_PHYSICS_CANON.md            법칙 (상위)
+KINETIC_SOFTWARE_REPRESENTATION.md   재료 — 장(場)과 결
+SEMANTIC_PLACE_CANON.md              의미의 자리
+WHOLE_PRODUCT_INTERACTION.md         제품 전체 상호작용
+MVP_WIREFRAME.md                     MVP 동결
+MVP_DESIGN_CONVERGENCE.md            v0.1 화면 결정판 · 설계 SSOT
+```
+
+### 현재 구현 기준선 → [`prototype/`](prototype/) · [`docs/prototype/`](docs/prototype/)
+
+**빌드 없이 `prototype/index.html`을 열면 된다.** 외부 요청 0건.
+Qode Loop이 실제로 돈다 — 문제를 누르고, 자리가 집히고, "이거 고쳐줘"라고 치면 몸이 가라앉는다.
+
+> **Prototype은 IMPLEMENTATION BASELINE이지 최종 아키텍처가 아니다.**
+> Backend · DB · Git · 실제 Coding Agent는 아직 없다. Working / Result는 시뮬레이션이다.
+
+→ [docs/README.md](docs/README.md) · [prototype/README.md](prototype/README.md)
 
 ---
 
@@ -91,3 +120,16 @@ JuQode를 다음 중 하나로 축소하지 않는다.
 - Visual Diff Tool
 
 각각은 JuQode의 일부가 될 수 있지만, JuQode 자체는 아니다.
+
+### 되살리지 않는 것
+
+C + A Hybrid를 Primary Interface 구조로 · Feature Map을 Primary Workspace로 ·
+Build World를 v0.1 Primary Surface로 · Construction Metaphor · 큰 Context 관리 페이지 ·
+Raw Diff를 기본 결과 화면으로 · Git graph / File Tree를 사용자 멘탈 모델로.
+
+---
+
+<sub>**내부/역사 각주 —** 브랜드의 기원 서사에서 `Q`는 다섯 겹이었다:
+`Question → Quest → Queue → Quick → Qode`.
+이것은 **내부 어휘이며 제품 화면 · 온보딩 · 튜토리얼 용어로 쓰지 않는다.**
+현재의 주 작업 단위는 **`Qode` 하나**다. (`JuQode-Private/docs/current/10_DECISIONS.md` §3 C-3)</sub>

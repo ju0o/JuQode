@@ -1,4 +1,23 @@
 # JuQode — Software Physics · Visual Grammar
+
+> ## ⚠ HISTORICAL STUDY — 현재 구현 기준이 아니다
+>
+> | | |
+> |---|---|
+> | **Status** | **SUPERSEDED** |
+> | **무엇** | 3R.3 시각 문법 |
+> | **Superseded By** | [`SOFTWARE_PHYSICS_CANON.md`](SOFTWARE_PHYSICS_CANON.md) · [`KINETIC_SOFTWARE_REPRESENTATION.md`](KINETIC_SOFTWARE_REPRESENTATION.md) · [`MVP_DESIGN_CONVERGENCE.md`](MVP_DESIGN_CONVERGENCE.md) |
+> | **Historical Value** | **YES** — 추론 이력으로 보존한다 |
+> | **현재 구현에 사용** | **하지 않는다** |
+> | **판정일** | 2026-09-06 (S0 — SSOT Consolidation) |
+>
+> **왜 SUPERSEDED인가** — **시각형(점밭 · 구획)은 Founder가 기각했다.** 그 안의 LOVABLE BUILD CONTRACT는 **실행되지 않았다** — 이후 Phase 4A가 Lovable credits **0**으로 구현되었다.
+>
+> **여기서 살아남은 것** — 채널 소유표의 발상은 Canon §14로 이어졌다
+>
+> **아래 원문은 한 글자도 고치지 않았다.**
+
+---
 ## 승인된 법칙 → 하나의 시각·인터랙션 문법
 
 > **Status:** Phase 3R.3 산출물. 단일 후보.
