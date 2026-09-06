@@ -67,7 +67,7 @@ S0 → A1 → D1 → S1 → R1 → E1 → Q1 → Q2 → QA → v0.1
 |---|---|---|
 | **S0** | SSOT Consolidation | **진행 중** |
 | **A1** | Architecture Freeze | 대기 — **기술 명세가 여기서 나온다** |
-| **D1** | Local Persistence / SQLite / Artifact Store | 대기 |
+| **D1** | Local Persistence / Artifact Store | 대기 |
 | **S1** | Real Project → Semantic Software Model | 대기 |
 | **R1** | Claude Code Runtime | 대기 |
 | **E1** | Evidence / Git Safety / UNKNOWN | 대기 |

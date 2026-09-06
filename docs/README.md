@@ -92,11 +92,12 @@
 | Evidence Schema | Test / Build / Screenshot / Git 검증 결과의 표현 (`PASS`/`FAIL`/**`UNKNOWN`**) | **A1** |
 | Semantic Model Schema | 자리 · 질량 · 상태 · 관계 | **A1** |
 | Persistence Schema | Local-first 저장 구조 | **A1** (방향은 PROPOSED) |
-| Provider 추상 | Coding Agent Provider 경계 | **A1** (방향은 PROPOSED) |
+| Provider 경계 | Coding Agent Provider 경계 — **내부 추상을 둘지 포함** | **A1** (방향은 PROPOSED) |
 
 > **⚠ v0.1 아키텍처 방향은 `PROPOSED`이며 결정되지 않았다.**
 > Local-first · SQLite가 Product State · Repository가 Machine Truth · Git이 안전 Truth ·
-> 큰 아티팩트는 파일시스템 · 비밀은 OS Credential Storage · 첫 Provider = Claude Code.
+> 큰 아티팩트는 파일시스템 · 비밀은 OS Credential Storage · 첫 Provider = Claude Code ·
+> 내부 Provider 추상 · Qode와 Execution 분리.
 > **전부 `JuQode-Private/docs/current/12_IMPLEMENTATION_ROADMAP.md` §5에 PROPOSED로 기록되어 있다.**
 > **구현된 것이 아니다.** A1에서 확정한다.
 
@@ -117,13 +118,22 @@
 | Context에 `portable` 플래그 | Cloud를 막지 않기 위한 최소 조건 |
 | Context에 Vault 플래그 | 공유를 켤 때 사고 방지 |
 | Export는 사람이 읽을 수 있는 형식 | Ownership 신뢰 + Import 기반 |
-| **Qode와 Execution을 분리** | 병렬 · 재실행의 전제 |
 | **Agent Event를 구조화해서 저장** | No Fake Motion의 기반 |
 | Evidence에 **`UNKNOWN`** 상태 | 정직한 표시 |
 | 모든 UI 요소가 **Raw 참조**를 가짐 | 5 Level Depth의 기반 |
 | `CRITICAL`은 `text` 필수 | 중요한 것이 Discovery에 의존하지 않게 강제 |
 | 행동에 **`reversibility` 등급** 필드 | `reversible \| irreversible \| destructive` |
 | 자리 · 질량 · 상태 · 증거는 **Realm 독립** | 미래 Realm과 호환 |
+
+> **이 표에 들어 있지 않은 것 — 아직 결정되지 않았다**
+>
+> | 방향 | 상태 |
+> |---|---|
+> | **Qode와 Execution을 별개 구현 엔티티로 분리** | **PROPOSED** — D-061 · **A1에서 결정.** 구현 필수 구조 규칙이 아니다 |
+> | **내부 Provider 추상** | **PROPOSED** — D-059 · **A1에서 결정.** v0.1이 약속하는 것은 **Coding Agent Provider 하나**까지다 |
+>
+> **`Software Time` 점이 검증된 `SETTLED`에서만 생긴다**는 규칙은 위와 별개로 **이미 CANON**이며
+> (Software Physics L3 / E2) 제안 대상이 아니다.
 
 → 전체: `JuQode-Private/docs/current/04_MVP_V01_SPEC.md` §6
 
