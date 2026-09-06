@@ -54,10 +54,12 @@ Coding Agent가 **실제 변경**을 수행하고, JuQode가 그것을 **검증*
 | | |
 |---|---|
 | **Version** | **v0.1 — First Real Qode Loop** |
-| **현재 Phase** | **S0 — SSOT Consolidation** |
-| **현재 Gate** | **S0 PM SSOT Gate** |
-| **Implementation** | **HOLD** — S0가 PM Gate를 통과할 때까지 제품 구현에 착수하지 않는다 |
-| **다음** | **A1 — Architecture Freeze** |
+| **S0 — SSOT Consolidation** | ✅ **완료 / PASS** |
+| **현재 Phase** | **A1 — Architecture Freeze** (A1a Decision Packet) |
+| **현재 Gate** | **A1a PM Decision Gate** |
+| **Architecture Frozen** | **NO** |
+| **Implementation** | **HOLD** — A1이 아키텍처를 동결할 때까지 제품 구현에 착수하지 않는다 |
+| **다음** | **D1 — Local Persistence / Artifact Store** |
 
 ```
 S0 → A1 → D1 → S1 → R1 → E1 → Q1 → Q2 → QA → v0.1
@@ -65,8 +67,8 @@ S0 → A1 → D1 → S1 → R1 → E1 → Q1 → Q2 → QA → v0.1
 
 | Phase | | |
 |---|---|---|
-| **S0** | SSOT Consolidation | **진행 중** |
-| **A1** | Architecture Freeze | 대기 — **기술 명세가 여기서 나온다** |
+| **S0** | SSOT Consolidation | **완료 / PASS** |
+| **A1** | Architecture Freeze | **진행 중 — A1a Decision Packet** · 기술 명세가 여기서 나온다 |
 | **D1** | Local Persistence / Artifact Store | 대기 |
 | **S1** | Real Project → Semantic Software Model | 대기 |
 | **R1** | Claude Code Runtime | 대기 |
