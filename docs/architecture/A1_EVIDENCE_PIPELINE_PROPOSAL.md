@@ -1,12 +1,25 @@
 # A1 · Evidence Pipeline — PROPOSED
 
+> ## 📜 SUPERSEDED / HISTORICAL
+>
+> | | |
+> |---|---|
+> | **Status** | **SUPERSEDED / HISTORICAL** |
+> | **Superseded By** | [`EVIDENCE_PIPELINE.md`](EVIDENCE_PIPELINE.md) — **현재 기준은 그쪽이다** |
+> | **왜 남기는가** | **왜 그렇게 정했는가**의 이력. 선택지 · 비용 · **반증된 주장** · 실측 근거 |
+> | **확인일** | 2026-09-06 (A1c) |
+>
+> **이 문서를 현재 기준으로 읽지 마라.** 본문의 `PROPOSED` · `PENDING` 표기는
+> **당시 상태를 그대로 보존한 것**이며 A1c 에서 동결된 결정으로 대체되었다.
+> 최종 판정: `JuQode-Private/docs/current/15_ARCHITECTURE_FREEZE_V01.md`
+
 > ## ⚠️ PROPOSED — 결정이 아니다
 >
 > | | |
 > |---|---|
-> | **Status** | **PROPOSED** |
-> | **Architecture Frozen** | **NO** |
-> | **Implementation Authorized** | **NO** |
+> | **Status** | **SUPERSEDED / HISTORICAL** |
+> | **Architecture Frozen** | **YES** (A1c) |
+> | **Implementation Authorized** | **NO** — PM 원격 확인 이후 |
 > | **Phase** | A1a — Architecture Decision Packet |
 > | **Product Version** | v0.1 MVP |
 > | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |

@@ -1,13 +1,16 @@
 # `experiments/a1/` — 버리는 코드
 
-> ## ⚠️ DISPOSABLE. 제품 코드가 아니다.
+> ## 📜 HISTORICAL ARCHITECTURE EVIDENCE — 아직 지우지 않는다
+>
+> **A1c 아키텍처 동결의 근거다. PM 이 동결을 확인할 때까지 보관한다.**
+> 확인 후 삭제/이동할 수 있다. **제품 코드가 아니다.**
 >
 > | | |
 > |---|---|
 > | **Status** | **DISPOSABLE** — A1a 아키텍처 비교를 위한 일회용 검증 |
 > | **Architecture Frozen** | **NO** |
 > | **Implementation Authorized** | **NO** |
-> | **수명** | A1 Architecture Freeze 가 끝나면 **삭제한다** |
+> | **수명** | **PM 이 A1c 동결을 확인한 뒤** 삭제/이동 가능 |
 
 여기 있는 것은 **아키텍처 선택지를 비교하기 위해서만** 존재한다.
 제품이 되지 않는다. 여기서 잘 동작한 코드를 그대로 제품에 옮기지 않는다.

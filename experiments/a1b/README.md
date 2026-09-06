@@ -1,13 +1,16 @@
 # `experiments/a1b/` — 버리는 코드
 
-> ## ⚠️ DISPOSABLE. 제품 코드가 아니다.
+> ## 📜 HISTORICAL ARCHITECTURE EVIDENCE — 아직 지우지 않는다
+>
+> **A1c 아키텍처 동결의 근거다. PM 이 동결을 확인할 때까지 보관한다.**
+> 확인 후 삭제/이동할 수 있다. **제품 코드가 아니다.**
 >
 > | | |
 > |---|---|
 > | **Status** | **DISPOSABLE** — A1b / A1b.1 표적 검증용 일회용 실험 |
 > | **Architecture Frozen** | **NO** |
 > | **Implementation Authorized** | **NO** |
-> | **수명** | A1 Architecture Freeze 가 끝나면 **삭제한다** |
+> | **수명** | **PM 이 A1c 동결을 확인한 뒤** 삭제/이동 가능 |
 >
 > **두 데스크톱 셸은 벤치마크 실험일 뿐 제품이 아니다.**
 > **`prototype/` 을 한 글자도 건드리지 않았다** — 동결본(sha256 `c535bd10…`)을 **읽기만** 했다.

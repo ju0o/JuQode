@@ -6,7 +6,7 @@
 > | | |
 > |---|---|
 > | **현재 Phase** | **S0 — SSOT Consolidation** |
-> | **Implementation** | **HOLD** — A1이 아키텍처를 동결할 때까지 · **Architecture Frozen: NO** |
+> | **Implementation** | **HOLD** — PM 원격 확인까지 · **Architecture Frozen: YES** |
 > | **Product SSOT** | `JuQode-Private/docs/current/00_MASTER_INDEX.md` |
 
 ---
@@ -81,49 +81,38 @@
 
 ---
 
-## 4. ARCHITECTURE PROPOSALS — A1b 개정판. 전부 `PROPOSED`
+## 4. ARCHITECTURE — **CANON. 동결되었다**
 
-> ## ⚠️ **Architecture Frozen: NO · Implementation Authorized: NO**
+> ## ✅ **Architecture Frozen: YES** · Founder Approval: **APPROVED** (2026-09-06)
 >
-> **A1a 는 PASS 했고, 아래는 PM 판정을 반영한 A1b 개정판이다. 여전히 결정이 아니다.**
+> **구현 착수는 PM 이 원격 A1c 커밋을 확인한 뒤에만 가능하다.**
+> **아키텍처가 동결된 것과 구현이 허가된 것은 다르다.**
 >
-> **A1b 실측이 A1a 의 주장 셋을 뒤집었고, A1b.1 이 다시 A1b 의 주장 둘을 뒤집었다.**
-> 각 문서의 `⚠ A1b 정정` · `⚠ A1b.1 정정` 절이 무엇이 틀렸는지 적는다.
->
-> **A1b.1:** 런타임 = **Electron 44.x** · 기준 OS = **Linux x86_64** (PM 방향 · Founder 확인 대기).
-> **유휴 0 프레임 주장은 철회**했고 TRUE IDLE 로 다시 확인했다.
-> **`node:sqlite` 는 Electron 44 에 있다** — 네이티브 애드온 불필요.
-> 선택지 · 비용 · 반대 근거 · Worker 권고는 전부
-> `JuQode-Private/docs/current/14_A1_ARCHITECTURE_DECISION_PACKET.md` 에 있고,
-> **PM 판정 · Founder 판정은 전부 `PENDING`** 이다.
+> 한 장 요약: `JuQode-Private/docs/current/15_ARCHITECTURE_FREEZE_V01.md`
 
-| 문서 | 무엇을 제안하는가 |
+| 문서 | 무엇을 정했는가 |
 |---|---|
-| [`architecture/A1_SYSTEM_ARCHITECTURE_PROPOSAL.md`](architecture/A1_SYSTEM_ARCHITECTURE_PROPOSAL.md) | 네 개의 층 · 무엇이 어디의 진실인가 · 데스크톱 런타임 (**미결**) |
-| [`architecture/A1_PROJECT_UNDERSTANDING_PROPOSAL.md`](architecture/A1_PROJECT_UNDERSTANDING_PROPOSAL.md) | 로컬 사실 → AI 의미 → 사람 정정. 로컬/AI 경계 |
-| [`architecture/A1_SEMANTIC_MODEL_PROPOSAL.md`](architecture/A1_SEMANTIC_MODEL_PROPOSAL.md) | 자리는 어떻게 나오는가 · **"개체가 아니다" ↔ "저장해야 한다" 의 긴장** |
-| [`architecture/A1_QODE_RUNTIME_PROPOSAL.md`](architecture/A1_QODE_RUNTIME_PROPOSAL.md) | Qode ↔ Execution · 실행 경계 · Provider 이음매 · 되묻기 조건 |
-| [`architecture/A1_EVIDENCE_PIPELINE_PROPOSAL.md`](architecture/A1_EVIDENCE_PIPELINE_PROPOSAL.md) | Observation / Problem / Evidence 세 층 · **정직한 지원 계약** |
-| [`architecture/A1_GIT_SAFETY_PROPOSAL.md`](architecture/A1_GIT_SAFETY_PROPOSAL.md) | 되돌리기 · 더러운 저장소 · Git 없는 프로젝트 (**실측 근거 최다**) |
-| [`data/A1_DATA_MODEL_PROPOSAL.md`](data/A1_DATA_MODEL_PROPOSAL.md) | ER 논리 모델 — 엔티티마다 왜 존재하고 어디가 진실인가 |
-| [`data/A1_PERSISTENCE_PROPOSAL.md`](data/A1_PERSISTENCE_PROPOSAL.md) | 저장 후보 비교 · **논리 SQL (실행 금지)** · 마이그레이션 전략 |
-| [`contracts/A1_CONTEXT_BLOCK_PROPOSAL.md`](contracts/A1_CONTEXT_BLOCK_PROPOSAL.md) | 필수 5필드 · 사람이 읽는 Export 형식 |
-| [`contracts/A1_AGENT_EVENT_PROPOSAL.md`](contracts/A1_AGENT_EVENT_PROPOSAL.md) | No Fake Motion 을 데이터로 강제하는 봉투 |
-| [`contracts/A1_EVIDENCE_SCHEMA_PROPOSAL.md`](contracts/A1_EVIDENCE_SCHEMA_PROPOSAL.md) | `PASS/FAIL/UNKNOWN` · **Canon 을 CHECK 제약으로 올린다** |
-| [`security/A1_LOCAL_SECURITY_PROPOSAL.md`](security/A1_LOCAL_SECURITY_PROPOSAL.md) | 위협 11개 · 경계 · **못 막는 것을 정직하게 말한다** |
+| [`architecture/SYSTEM_ARCHITECTURE.md`](architecture/SYSTEM_ARCHITECTURE.md) | **Electron 44.x** · 기준 OS **Linux x86_64** · 프로세스 경계 · 무엇이 어디의 진실인가 |
+| [`architecture/PROJECT_UNDERSTANDING.md`](architecture/PROJECT_UNDERSTANDING.md) | 로컬 사실 → AI 의미 → 사람 정정. **열기가 AI 에 의존하지 않는다** |
+| [`architecture/SEMANTIC_SOFTWARE_MODEL.md`](architecture/SEMANTIC_SOFTWARE_MODEL.md) | 안정된 자리 동일성 · 지문은 재식별 신호 · **5~7 은 렌더링 예산** |
+| [`architecture/QODE_RUNTIME.md`](architecture/QODE_RUNTIME.md) | Qode ≠ Execution · 어댑터 둘 · 되묻기 세 조건 |
+| [`architecture/EVIDENCE_PIPELINE.md`](architecture/EVIDENCE_PIPELINE.md) | Observation → Problem → Evidence · **지원 계약** |
+| [`architecture/GIT_SAFETY.md`](architecture/GIT_SAFETY.md) | 트리 둘 안전 모델 · 미지원 상태 · **무시 파일 DENY** |
+| [`data/DATA_MODEL.md`](data/DATA_MODEL.md) | ER 논리 모델 |
+| [`data/PERSISTENCE.md`](data/PERSISTENCE.md) | **번들 `node:sqlite`** · 논리 SQL · 마이그레이션 |
+| [`contracts/CONTEXT_BLOCK_FORMAT.md`](contracts/CONTEXT_BLOCK_FORMAT.md) | 필수 5필드 · 사람이 읽는 Export |
+| [`contracts/AGENT_EVENT_SCHEMA.md`](contracts/AGENT_EVENT_SCHEMA.md) | No Fake Motion 을 데이터로 강제 |
+| [`contracts/EVIDENCE_SCHEMA.md`](contracts/EVIDENCE_SCHEMA.md) | **AgentClaim ≠ Evidence** · `UNKNOWN` 은 행동 가능 |
+| [`security/LOCAL_SECURITY.md`](security/LOCAL_SECURITY.md) | **DEFAULT DENY** · **샌드박스 필수** · 못 막는 것을 말한다 |
+
+### 역사 — 왜 그렇게 정했는가
+
+`A1_*_PROPOSAL.md` 12개는 **SUPERSEDED / HISTORICAL** 로 남는다.
+선택지 · 비용 · **반증된 주장** · 실측 근거가 거기 있다. **현재 기준으로 읽지 마라.**
 
 **버리는 코드:** [`../experiments/a1/`](../experiments/a1/) · [`../experiments/a1b/`](../experiments/a1b/)
-— 아키텍처 비교용 일회용 검증. **DISPOSABLE 로 표시했고 `prototype/` 을 한 글자도 건드리지 않았다.**
+— **Historical Architecture Evidence.** `prototype/` 을 한 글자도 건드리지 않았고,
 **실제 유료 코딩 에이전트를 호출하지 않았다.**
-
-> **⚠ v0.1 아키텍처 방향은 전부 `PROPOSED`이며 결정되지 않았다.**
-> Local-first · SQLite가 Product State · Repository가 Machine Truth · Git이 안전 Truth ·
-> 큰 아티팩트는 파일시스템 · 비밀은 OS Credential Storage · 첫 Provider = Claude Code ·
-> 내부 Provider 추상 · Qode와 Execution 분리 · 데스크톱 런타임.
-> **구현된 것이 아니다.** A1에서 확정한다.
-
-**Context Block Format을 사람이 읽을 수 있는 형식으로 유지하는 것**은 이미 내려진 결정이다 (D-024).
-사용자가 자기 Context를 언제든 밖으로 가져갈 수 있어야 한다.
 
 ---
 
