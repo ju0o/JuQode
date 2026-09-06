@@ -1,0 +1,8 @@
+{
+  "name": "juqode-a1b-electron-bench",
+  "private": true,
+  "version": "0.0.0",
+  "description": "DISPOSABLE A1b benchmark shell. Not a product.",
+  "main": "main.js",
+  "devDependencies": { "electron": "^33.0.0" }
+}

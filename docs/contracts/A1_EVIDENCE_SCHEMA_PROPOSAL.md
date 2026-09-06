@@ -16,6 +16,12 @@
 > **이 문서는 초안이다.** 여기 있는 어떤 문장도 Canon 이 아니고, 구현 지시가 아니다.
 > 선택지 · 비용 · 반대 근거는 위의 판정 대장에 있다. **결정은 PM 과 Founder 가 한다.**
 
+
+> ## 🔄 A1b 개정 — PM 판정 반영
+>
+> A1a 는 **PASS** 했다. 이 문서는 그 뒤 PM 이 지시한 정정을 반영한 판이다.
+> **여전히 `PROPOSED` 이며 아무것도 동결되지 않았다.**
+
 ---
 
 ## 1. 세 상태. 둘이 아니다
@@ -35,16 +41,35 @@ UNKNOWN   →  아직 확인 못함
 
 ## 2. 봉투 (PROPOSED)
 
+> ### ⚠ A1b 정정 — Agent 의 말은 이 테이블에 들어올 수 없다
+>
+> A1a 는 `claim_source ∈ {AGENT_CLAIM, MEASURED}` 컬럼으로 **한 테이블 안에서** 구분했다.
+> **PM 이 이것을 기각했다.** 같은 테이블에 있으면 언젠가 `UPDATE` 한 줄로 섞인다.
+>
+> ```
+> AgentEvent / AgentClaim   에이전트가 '말한 것'.   검증 진실이 아니다
+> Evidence                  JuQode 가 '측정한 것'.  PASS / FAIL / UNKNOWN
+> ```
+
 ```
-Evidence
+AgentClaim
+├─ id
+├─ execution_id       →  실행에서 나온다
+├─ text               →  설명의 재료. 검증 진실이 아니다
+└─ artifact_id        →  원본 발화
+
+Evidence                    ← 측정된 것만 들어온다
 ├─ id
 ├─ execution_id       →  실행에서 나온다
 ├─ kind               →  TEST | BUILD | GIT | RUNTIME | SCREENSHOT
 ├─ status             →  PASS | FAIL | UNKNOWN
-├─ claim_source       →  AGENT_CLAIM | MEASURED
 ├─ what_would_verify  →  UNKNOWN 이면 필수
+├─ measured_at
 └─ artifact_id        →  Raw 원본 참조
 ```
+
+> **`claim_source` 컬럼을 삭제했다.** 에이전트의 발화가 들어갈 자리가 **아예 없다.**
+> 주장을 Evidence 로 승격하려면 **행을 새로 써야 하고, 그러려면 측정이 있어야 한다.**
 
 ---
 
@@ -52,12 +77,20 @@ Evidence
 
 | 제약 | 무엇을 강제하는가 |
 |---|---|
-| `CHECK (status <> 'UNKNOWN' OR what_would_verify IS NOT NULL)` | **`UNKNOWN` 은 반드시 행동 가능하다** — "무엇이 있으면 확인되는가"를 언제나 함께 말한다 |
-| `CHECK (claim_source <> 'AGENT_CLAIM' OR status <> 'PASS')` | **주장은 사실이 아니다.** 에이전트의 말만으로 `확인됨` 이 될 수 없다 |
+| `CHECK (status <> 'UNKNOWN' OR length(trim(what_would_verify)) > 0)` | **`UNKNOWN` 은 반드시 행동 가능하다.** 빈 문자열도 막는다 |
+| **Evidence 에 에이전트 발화 컬럼이 없다** | **주장은 사실이 아니다** — 구조로 분리했다 |
 | `CHECK (level <> 'CRITICAL' OR text IS NOT NULL)` | 중요한 것이 **Discovery 에 의존하지 않는다** |
 
 > 이것이 이 스키마의 핵심 논지다 — **원칙 7과 P3 를 코드의 성실성이 아니라 저장소의 성질로 만든다.**
-> 규칙을 어기려면 **행을 삽입할 수 없어야** 한다.
+
+### ⚠ 다만 스키마가 못 하는 것도 적는다 (A1b)
+
+| | 무엇이 강제하는가 |
+|---|---|
+| 모든 Problem 에 Observation 이 최소 하나 | **스키마 아님.** 트랜잭션 불변식 + 고아 점검 |
+| 자리 정정이 리팩터를 견딘다 | **스키마 아님.** 재식별 확신도 로직 |
+
+> **"스키마가 막아준다"고 쓰지 않는다. 무엇이 막는지 이름을 댄다.**
 
 ---
 
@@ -70,7 +103,10 @@ Evidence
 | **Test** | ✅ 있으면 수집 · 없으면 `UNKNOWN` |
 | **Build** | ✅ 있으면 수집 · 없으면 `UNKNOWN` |
 | **Runtime Observation (RUN)** | ✅ 최소 — 새 문제를 몸에 넣는 경로 |
-| **Screenshot** | ⚠ 프로젝트 종류에 따름 — 지원 계약 참조 |
+| **Screenshot** | ⚠ 계단식 — 기술적으로 얻을 수 있으면 모으고, 아니면 `UNKNOWN` + `what_would_verify` |
+
+> **v0.1 활성 Observation 출처는 `RUNTIME` · `TEST` · `BUILD` 셋이다.**
+> **`STATIC` 분석은 꺼져 있다** — 스키마에 자리는 있으나 v0.1 에서 켜지 않는다.
 
 ---
 

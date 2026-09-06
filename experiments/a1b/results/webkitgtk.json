@@ -1,0 +1,144 @@
+{
+  "runtime": "tauri-equivalent webkitgtk 2.52.6",
+  "states": {
+    "idle": {
+      "app_requested_frames": 1,
+      "app_fps": 0.3,
+      "draw_ms_p50": 70,
+      "draw_ms_p95": 70,
+      "draw_ms_p99": 70,
+      "draw_ms_max": 70,
+      "headroom_pct_p95": -319.2,
+      "frame_gap_p50": null,
+      "frame_gap_p99": null,
+      "late_frames_over_25ms": 0,
+      "late_pct": 0,
+      "window_ms": 3000,
+      "canon_check": "⚠ 유휴에 1 프레임을 요청했다"
+    },
+    "focus_transition": {
+      "app_requested_frames": 20,
+      "app_fps": 6.7,
+      "draw_ms_p50": 55,
+      "draw_ms_p95": 394,
+      "draw_ms_p99": 394,
+      "draw_ms_max": 394,
+      "headroom_pct_p95": -2259.3,
+      "frame_gap_p50": 75,
+      "frame_gap_p99": 502,
+      "late_frames_over_25ms": 19,
+      "late_pct": 100,
+      "window_ms": 3000
+    },
+    "working_disturbed": {
+      "app_requested_frames": 40,
+      "app_fps": 13.3,
+      "draw_ms_p50": 37,
+      "draw_ms_p95": 96,
+      "draw_ms_p99": 101,
+      "draw_ms_max": 101,
+      "headroom_pct_p95": -474.9,
+      "frame_gap_p50": 60,
+      "frame_gap_p99": 331,
+      "late_frames_over_25ms": 39,
+      "late_pct": 100,
+      "window_ms": 3000
+    },
+    "settling": {
+      "app_requested_frames": 85,
+      "app_fps": 28.3,
+      "draw_ms_p50": 22,
+      "draw_ms_p95": 34,
+      "draw_ms_p99": 40,
+      "draw_ms_max": 40,
+      "headroom_pct_p95": -103.6,
+      "frame_gap_p50": 36,
+      "frame_gap_p99": 64,
+      "late_frames_over_25ms": 70,
+      "late_pct": 83.3,
+      "window_ms": 3000
+    },
+    "deep_view": {
+      "app_requested_frames": 71,
+      "app_fps": 23.7,
+      "draw_ms_p50": 27,
+      "draw_ms_p95": 50,
+      "draw_ms_p99": 132,
+      "draw_ms_max": 132,
+      "headroom_pct_p95": -199.4,
+      "frame_gap_p50": 38,
+      "frame_gap_p99": 156,
+      "late_frames_over_25ms": 58,
+      "late_pct": 82.9,
+      "window_ms": 3000
+    },
+    "running_observe": {
+      "app_requested_frames": 51,
+      "app_fps": 17,
+      "draw_ms_p50": 35,
+      "draw_ms_p95": 51,
+      "draw_ms_p99": 54,
+      "draw_ms_max": 54,
+      "headroom_pct_p95": -205.4,
+      "frame_gap_p50": 58,
+      "frame_gap_p99": 263,
+      "late_frames_over_25ms": 49,
+      "late_pct": 98,
+      "window_ms": 3000
+    }
+  },
+  "viewport": {
+    "w": 1469,
+    "h": 795,
+    "dpr": 2
+  },
+  "all_canvases": [
+    {
+      "id": "mini-order",
+      "css_w": 0,
+      "css_h": 0,
+      "buf_w": 1728,
+      "buf_h": 940
+    },
+    {
+      "id": "mini-dash",
+      "css_w": 0,
+      "css_h": 0,
+      "buf_w": 1728,
+      "buf_h": 940
+    },
+    {
+      "id": "mini-pipe",
+      "css_w": 0,
+      "css_h": 0,
+      "buf_w": 1728,
+      "buf_h": 940
+    },
+    {
+      "id": "cv",
+      "css_w": 1331,
+      "css_h": 724,
+      "buf_w": 1728,
+      "buf_h": 940
+    }
+  ],
+  "world_canvas": {
+    "css_w": 1331,
+    "css_h": 724,
+    "buf_w": 1728,
+    "buf_h": 940,
+    "painted_px": 1624320
+  },
+  "ua": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+  "chrome_only_render": {
+    "n": 200,
+    "p50": 0,
+    "p95": 4,
+    "note": "DOM 껍데기만. 캔버스 비용 아님 — 엔진 비교에 쓰지 말 것"
+  },
+  "startup": {
+    "page_loaded_ms": 7889
+  },
+  "host_note": "WebKitGTK 를 직접 띄워 잰 값이다. Tauri 가 Linux 에서 쓰는 바로 그 엔진이지만, Tauri 의 IPC/권한/번들 계층은 포함되지 않는다.",
+  "process_rss_mb": 206.0
+}

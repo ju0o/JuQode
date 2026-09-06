@@ -1,0 +1,184 @@
+{
+  "runtime": "electron 33.4.11 / chromium 130.0.6723.191",
+  "states": {
+    "idle": {
+      "app_requested_frames": 96,
+      "app_fps": 32,
+      "draw_ms_p50": 2.8,
+      "draw_ms_p95": 7.3,
+      "draw_ms_p99": 10,
+      "draw_ms_max": 10,
+      "headroom_pct_p95": 56.3,
+      "frame_gap_p50": 16.7,
+      "frame_gap_p99": 521.73,
+      "late_frames_over_25ms": 5,
+      "late_pct": 5.3,
+      "window_ms": 3000,
+      "canon_check": "⚠ 유휴에 96 프레임을 요청했다"
+    },
+    "focus_transition": {
+      "app_requested_frames": 178,
+      "app_fps": 59.3,
+      "draw_ms_p50": 3.1,
+      "draw_ms_p95": 5.8,
+      "draw_ms_p99": 8.3,
+      "draw_ms_max": 9.2,
+      "headroom_pct_p95": 65.3,
+      "frame_gap_p50": 16.7,
+      "frame_gap_p99": 33.3,
+      "late_frames_over_25ms": 2,
+      "late_pct": 1.1,
+      "window_ms": 3000
+    },
+    "working_disturbed": {
+      "app_requested_frames": 178,
+      "app_fps": 59.3,
+      "draw_ms_p50": 2.8,
+      "draw_ms_p95": 5.4,
+      "draw_ms_p99": 6.4,
+      "draw_ms_max": 6.7,
+      "headroom_pct_p95": 67.7,
+      "frame_gap_p50": 16.7,
+      "frame_gap_p99": 29.7,
+      "late_frames_over_25ms": 2,
+      "late_pct": 1.1,
+      "window_ms": 3000
+    },
+    "settling": {
+      "app_requested_frames": 179,
+      "app_fps": 59.7,
+      "draw_ms_p50": 4.4,
+      "draw_ms_p95": 6.1,
+      "draw_ms_p99": 8.1,
+      "draw_ms_max": 8.3,
+      "headroom_pct_p95": 63.5,
+      "frame_gap_p50": 16.7,
+      "frame_gap_p99": 19.5,
+      "late_frames_over_25ms": 1,
+      "late_pct": 0.6,
+      "window_ms": 3000
+    },
+    "deep_view": {
+      "app_requested_frames": 179,
+      "app_fps": 59.7,
+      "draw_ms_p50": 4,
+      "draw_ms_p95": 6.4,
+      "draw_ms_p99": 8.3,
+      "draw_ms_max": 8.7,
+      "headroom_pct_p95": 61.7,
+      "frame_gap_p50": 16.7,
+      "frame_gap_p99": 18.3,
+      "late_frames_over_25ms": 1,
+      "late_pct": 0.6,
+      "window_ms": 3000
+    },
+    "running_observe": {
+      "app_requested_frames": 180,
+      "app_fps": 60,
+      "draw_ms_p50": 4.4,
+      "draw_ms_p95": 5.8,
+      "draw_ms_p99": 8.3,
+      "draw_ms_max": 8.6,
+      "headroom_pct_p95": 65.3,
+      "frame_gap_p50": 16.7,
+      "frame_gap_p99": 17.4,
+      "late_frames_over_25ms": 0,
+      "late_pct": 0,
+      "window_ms": 3000
+    }
+  },
+  "viewport": {
+    "w": 1440,
+    "h": 766,
+    "dpr": 2
+  },
+  "all_canvases": [
+    {
+      "id": "mini-order",
+      "css_w": 0,
+      "css_h": 0,
+      "buf_w": 1728,
+      "buf_h": 940
+    },
+    {
+      "id": "mini-dash",
+      "css_w": 0,
+      "css_h": 0,
+      "buf_w": 1728,
+      "buf_h": 940
+    },
+    {
+      "id": "mini-pipe",
+      "css_w": 0,
+      "css_h": 0,
+      "buf_w": 1728,
+      "buf_h": 940
+    },
+    {
+      "id": "cv",
+      "css_w": 1263,
+      "css_h": 687,
+      "buf_w": 1728,
+      "buf_h": 940
+    }
+  ],
+  "world_canvas": {
+    "css_w": 1263,
+    "css_h": 687,
+    "buf_w": 1728,
+    "buf_h": 940,
+    "painted_px": 1624320
+  },
+  "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) juqode-a1b-electron-bench/0.0.0 Chrome/130.0.6723.191 Electron/33.4.11 Safari/537.36",
+  "chrome_only_render": {
+    "n": 200,
+    "p50": 0,
+    "p95": 0.1,
+    "note": "DOM 껍데기만. 캔버스 비용 아님 — 엔진 비교에 쓰지 말 것"
+  },
+  "js_heap_mb": 9.5,
+  "renderer_world_leak": {
+    "process": "undefined",
+    "require": "undefined",
+    "module": "undefined",
+    "Buffer": "undefined",
+    "bridge": "object"
+  },
+  "preload_world_leak": {
+    "process": "object",
+    "require": "function",
+    "module": "object",
+    "Buffer": "function"
+  },
+  "ipc_roundtrip_ms_avg": 0.28,
+  "probe": {
+    "versions": {
+      "electron": "33.4.11",
+      "chrome": "130.0.6723.191",
+      "node": "20.18.3",
+      "v8": "13.0.245.25-electron.0"
+    },
+    "node_sqlite": {
+      "available": false,
+      "error": "No such built-in module: node:sqlite"
+    },
+    "fs_read": {
+      "bytes": 70448,
+      "ms": 0.27
+    },
+    "child_spawn": {
+      "ok": true,
+      "ms": 89.99
+    },
+    "rss_mb": 155.7,
+    "startup": {
+      "app_ready_ms": 75,
+      "page_loaded_ms": 396
+    }
+  },
+  "process_rss_mb": 155.7,
+  "startup": {
+    "app_ready_ms": 75,
+    "page_loaded_ms": 396
+  }
+}

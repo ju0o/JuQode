@@ -21,6 +21,12 @@
 > 아래 SQL 은 **논리 모델**이다. 제품에 적용되지 않았고 적용해서도 안 된다.
 > 목적은 오직 하나 — **테이블 · PK · FK · 인덱스 · 상태값 · 버전 · 마이그레이션 전략에 답하는 것.**
 
+
+> ## 🔄 A1b 개정 — PM 판정 반영
+>
+> A1a 는 **PASS** 했다. 논리 저장 구조는 채택되었고, **바인딩은 여전히 A1-14 에 묶여 있다.**
+> **여전히 `PROPOSED` 이며 아무것도 동결되지 않았다.**
+
 ---
 
 ## 1. 후보 비교
@@ -41,18 +47,29 @@
 
 ## 2. 실측 — 무엇이 실제로 되는가
 
-| 항목 | 결과 |
-|---|---|
-| SQLite | 3.46.1 |
-| WAL / 외래키 | ✔ / ✔ |
-| JSON1 · **JSON 값에 생성컬럼 인덱스** | ✔ / ✔ |
-| FTS5 (Context 본문 검색) | ✔ |
-| \`integrity_check\` | ✔ |
-| 네이티브 모듈 설치 | **0건** (Node 내장) |
-| ⚠ | Node 는 내장 SQLite 를 **experimental** 로 표시한다 |
+### ⚠ A1b 정정 — A1a 는 잘못된 런타임에서 쟀다
 
-> **바인딩 선택은 데스크톱 런타임 선택에 묶여 있다.** 따로 결정할 수 없다.
-> Electron → 네이티브 리빌드 또는 실험적 내장 / Tauri → \`rusqlite\` (성숙 · 리빌드 없음)
+**PM 지시:** *"`node:sqlite` 가 experimental 이라는 것을 보편적 현재 사실처럼 반복하지 마라.
+후보 Electron 런타임 안에서 직접 확인하라."*
+
+| 항목 | 시스템 Node 22.22 (A1a) | **Electron 33 안 (A1b 실측)** |
+|---|---|---|
+| Node 버전 | 22.22.1 | **20.18.3** (Electron 이 번들한 것) |
+| `node:sqlite` | 있음 (experimental) | **`No such built-in module` — 아예 없다** |
+| WAL · FK · JSON1 · 생성컬럼 인덱스 · FTS5 | 전부 ✔ | **해당 없음** |
+
+> **A1a 의 "네이티브 모듈 설치 0건"은 Worker 머신의 시스템 Node 결과였다. 후보 런타임의 사실이 아니었다.**
+
+| 런타임 | SQLite 경로 | 리빌드 | 성숙도 |
+|---|---|---|---|
+| **Electron 33** | `better-sqlite3` (네이티브) | **필요** | 성숙 |
+| **Tauri v2** | `rusqlite` (Rust · 정적 링크) | 불필요 | 성숙 |
+| (참고) 최신 Node 단독 | `node:sqlite` | 불필요 | **experimental** |
+
+**SQLite 자체의 능력**(WAL · FK · JSON1 · JSON 값 생성컬럼 인덱스 · FTS5 · `integrity_check`)은
+시스템 Node 에서 전부 확인되었다. **문제는 능력이 아니라 어떤 바인딩으로 닿느냐다.**
+
+> **바인딩 선택은 A1-14 에 묶여 있다. 따로 결정할 수 없다.**
 
 ---
 
@@ -90,22 +107,36 @@ CREATE TABLE software_boundary (
   inferred_at   INTEGER NOT NULL
 );
 
+-- A1b: 안정된 동일성. 지문에서 파생하지 않는다
 CREATE TABLE semantic_place (
-  id            TEXT PRIMARY KEY,   -- 내부 전용. 사용자에게 개체로 노출되지 않는다
-  boundary_id   TEXT NOT NULL REFERENCES software_boundary(id) ON DELETE CASCADE,
-  mapping_sig   TEXT NOT NULL,      -- 재스캔에도 정정이 살아남게 하는 서명
-  mass          REAL NOT NULL,
-  direction     REAL NOT NULL,      -- 의미의 방향 (Realm 독립 값)
-  confidence    TEXT NOT NULL CHECK (confidence IN ('KNOWN','UNKNOWN'))
+  id                  TEXT PRIMARY KEY,   -- 영구. 내부 전용. 사용자에게 개체로 노출되지 않는다
+  boundary_id         TEXT NOT NULL REFERENCES software_boundary(id) ON DELETE CASCADE,
+  current_revision_id TEXT,               -- → semantic_place_revision
+  mass                REAL NOT NULL,
+  direction           REAL NOT NULL,      -- 의미의 방향 (Realm 독립 값)
+  -- confidence 는 '뜻을 아는가' 다. '지금 그리는가' 가 아니다.
+  -- 렌더링 예산(5~7) 밖이라는 이유로 UNKNOWN 을 쓰지 않는다
+  confidence          TEXT NOT NULL CHECK (confidence IN ('KNOWN','UNKNOWN'))
 );
-CREATE INDEX place_sig ON semantic_place(mapping_sig);
 
--- 겹침은 분할이 아니다 → N:N
+-- A1b 신설: 매핑의 변화를 동일성과 분리한다
+CREATE TABLE semantic_place_revision (
+  id                  TEXT PRIMARY KEY,
+  place_id            TEXT NOT NULL REFERENCES semantic_place(id) ON DELETE CASCADE,
+  mapping_fingerprint TEXT NOT NULL,      -- 재식별 '신호'. 영구 동일성이 아니다
+  model_version       INTEGER NOT NULL,
+  reidentified_conf   REAL,               -- 이 revision 을 같은 자리로 본 확신도
+  created_at          INTEGER NOT NULL
+);
+CREATE INDEX rev_by_place ON semantic_place_revision(place_id);
+CREATE INDEX rev_by_fp    ON semantic_place_revision(mapping_fingerprint);
+
+-- 겹침은 분할이 아니다 → N:N. revision 에 매달린다
 CREATE TABLE semantic_source_mapping (
-  place_id      TEXT NOT NULL REFERENCES semantic_place(id) ON DELETE CASCADE,
+  revision_id   TEXT NOT NULL REFERENCES semantic_place_revision(id) ON DELETE CASCADE,
   source_path   TEXT NOT NULL,
   weight        REAL NOT NULL,
-  PRIMARY KEY (place_id, source_path)
+  PRIMARY KEY (revision_id, source_path)
 );
 CREATE INDEX mapping_by_path ON semantic_source_mapping(source_path);
 
@@ -116,15 +147,18 @@ CREATE TABLE semantic_relation (
   PRIMARY KEY (from_place, to_place, kind)
 );
 
--- 이름은 자리보다 오래 산다. 그래서 별도 테이블이다
+-- A1b 정정: 지문이 아니라 '자리'에 묶는다. 지문에 묶으면 리팩터 한 번에 정정이 증발한다
 CREATE TABLE place_naming (
   id            TEXT PRIMARY KEY,
-  mapping_sig   TEXT NOT NULL,      -- place_id 가 아니다 — 재스캔을 견디는 쪽에 묶는다
+  place_id      TEXT NOT NULL REFERENCES semantic_place(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
-  origin        TEXT NOT NULL CHECK (origin IN ('USER','AI','LOCAL_FALLBACK')),
-  created_at    INTEGER NOT NULL
+  -- A1b: 세 출처. USER_CORRECTION 은 인용을 요구하지 않는다
+  origin        TEXT NOT NULL CHECK (origin IN ('LOCAL_FACT','AI_INFERENCE','USER_CORRECTION')),
+  cites         TEXT,               -- AI_INFERENCE 면 로컬 사실 인용(JSON). 없으면 저장하지 않는다
+  created_at    INTEGER NOT NULL,
+  CHECK (origin <> 'AI_INFERENCE' OR cites IS NOT NULL)
 );
-CREATE INDEX naming_by_sig ON place_naming(mapping_sig);
+CREATE INDEX naming_by_place ON place_naming(place_id);
 
 CREATE TABLE context_block (
   id            TEXT PRIMARY KEY,                                  -- ★ 필수 5
@@ -136,10 +170,12 @@ CREATE TABLE context_block (
   vault         INTEGER NOT NULL DEFAULT 0,
   name          TEXT NOT NULL,
   summary       TEXT,
-  body          TEXT NOT NULL,
+  -- A1b 정정: body 를 여기 두지 않는다. "현재 본문"의 주인이 둘이면 반드시 갈라진다
+  current_version INTEGER NOT NULL,
   approved      INTEGER NOT NULL DEFAULT 0,   -- 자동 생성분은 승인 전 활성화 금지
   active        INTEGER NOT NULL DEFAULT 1
 );
+-- 본문은 오직 여기에만 산다
 CREATE TABLE context_version (
   block_id      TEXT NOT NULL REFERENCES context_block(id) ON DELETE CASCADE,
   version       INTEGER NOT NULL,
@@ -177,6 +213,16 @@ CREATE TABLE execution (
 );
 CREATE INDEX exec_by_qode ON execution(qode_id);
 
+-- A1b 신설: 에이전트가 '말한 것'. Evidence 가 아니다
+CREATE TABLE agent_claim (
+  id            TEXT PRIMARY KEY,
+  execution_id  TEXT NOT NULL REFERENCES execution(id) ON DELETE CASCADE,
+  text          TEXT NOT NULL,       -- 설명의 재료. 검증 진실이 아니다
+  about_place   TEXT REFERENCES semantic_place(id),
+  artifact_id   TEXT,                -- 원본 발화
+  created_at    INTEGER NOT NULL
+);
+
 CREATE TABLE agent_event (
   id            TEXT PRIMARY KEY,
   execution_id  TEXT NOT NULL REFERENCES execution(id) ON DELETE CASCADE,
@@ -198,19 +244,19 @@ CREATE TABLE artifact (
   created_at    INTEGER NOT NULL
 );
 
+-- A1b 정정: 이 테이블은 '측정한 것'만 담는다.
+-- claim_source 를 삭제했다 — 에이전트의 발화가 들어갈 컬럼이 아예 없다
 CREATE TABLE evidence (
   id                TEXT PRIMARY KEY,
   execution_id      TEXT NOT NULL REFERENCES execution(id) ON DELETE CASCADE,
   kind              TEXT NOT NULL CHECK (kind IN
                       ('TEST','BUILD','GIT','RUNTIME','SCREENSHOT')),
   status            TEXT NOT NULL CHECK (status IN ('PASS','FAIL','UNKNOWN')),
-  claim_source      TEXT NOT NULL CHECK (claim_source IN ('AGENT_CLAIM','MEASURED')),
   what_would_verify TEXT,
   artifact_id       TEXT REFERENCES artifact(id),
-  -- UNKNOWN 은 반드시 행동 가능해야 한다. UI 관례가 아니라 스키마의 일이다
-  CHECK (status <> 'UNKNOWN' OR what_would_verify IS NOT NULL),
-  -- 주장은 사실이 아니다: 에이전트의 주장만으로 PASS 를 만들 수 없다
-  CHECK (claim_source <> 'AGENT_CLAIM' OR status <> 'PASS')
+  measured_at       INTEGER NOT NULL,
+  -- UNKNOWN 은 반드시 행동 가능해야 한다. 빈 문자열도 막는다
+  CHECK (status <> 'UNKNOWN' OR (what_would_verify IS NOT NULL AND length(trim(what_would_verify)) > 0))
 );
 CREATE INDEX evidence_unresolved ON evidence(status) WHERE status <> 'PASS';
 
@@ -218,14 +264,22 @@ CREATE TABLE observation (
   id            TEXT PRIMARY KEY,
   execution_id  TEXT REFERENCES execution(id) ON DELETE SET NULL,
   place_id      TEXT REFERENCES semantic_place(id),
+  -- v0.1 활성: RUNTIME · TEST · BUILD. STATIC / USER 는 자리만 두고 켜지 않는다
   source        TEXT NOT NULL CHECK (source IN
                   ('RUNTIME','TEST','BUILD','STATIC','AGENT','USER')),
   signature     TEXT NOT NULL,        -- 같은 실패를 묶는 키
   artifact_id   TEXT REFERENCES artifact(id),
-  observed_at   INTEGER NOT NULL,
-  problem_id    TEXT REFERENCES problem(id) ON DELETE SET NULL
+  observed_at   INTEGER NOT NULL
 );
 CREATE INDEX obs_dedupe ON observation(place_id, signature);
+
+-- A1b 정정: nullable FK 는 "모든 Problem 에 Observation 이 있다" 를 증명하지 못한다.
+-- 관계를 1급으로 만들고, 불변식은 트랜잭션과 점검이 강제한다
+CREATE TABLE problem_observation (
+  problem_id     TEXT NOT NULL REFERENCES problem(id) ON DELETE CASCADE,
+  observation_id TEXT NOT NULL REFERENCES observation(id) ON DELETE CASCADE,
+  PRIMARY KEY (problem_id, observation_id)
+);
 
 CREATE TABLE problem (
   id            TEXT PRIMARY KEY,
@@ -251,11 +305,14 @@ CREATE TABLE attention_item (
   CHECK (level <> 'CRITICAL' OR text IS NOT NULL)
 );
 
+-- A1b 정정: 트리 둘. 워킹트리 하나만 찍으면 복원이 사용자 스테이징을 파괴한다
 CREATE TABLE safety_record (
   id              TEXT PRIMARY KEY,
   execution_id    TEXT NOT NULL REFERENCES execution(id) ON DELETE CASCADE,
   kind            TEXT NOT NULL CHECK (kind IN ('PRE_QODE','DISCARDED')),
-  git_ref         TEXT NOT NULL,      -- refs/juqode/... 진실은 Git 에 있다
+  work_ref        TEXT NOT NULL,      -- refs/juqode/safety/<exec>/work  (미추적 포함)
+  index_ref       TEXT NOT NULL,      -- refs/juqode/safety/<exec>/index (사용자 스테이징)
+  git_ref         TEXT NOT NULL,      -- 대표 ref. 진실은 Git 에 있다
   reversibility   TEXT NOT NULL CHECK (reversibility IN
                     ('reversible','irreversible','destructive')),
   created_at      INTEGER NOT NULL
@@ -268,10 +325,39 @@ CREATE TABLE software_time_point (
   human_text    TEXT NOT NULL,        -- "Google 로그인 추가"
   settled_at    INTEGER NOT NULL      -- 확인된 평형만 점이 된다
 );
+
+-- A1b 신설: 실행 중 저장소가 변했는데 Agent Event 로 설명되지 않으면 소유권은 UNKNOWN 이다.
+-- 그런 상태는 화해되기 전까지 SETTLED 가 될 수 없다 → 시간축에 점이 찍히지 않는다
+CREATE TABLE repo_delta_attribution (
+  id            TEXT PRIMARY KEY,
+  execution_id  TEXT NOT NULL REFERENCES execution(id) ON DELETE CASCADE,
+  path          TEXT NOT NULL,
+  ownership     TEXT NOT NULL CHECK (ownership IN ('AGENT','USER','UNKNOWN')),
+  evidence_ref  TEXT,                 -- AGENT 면 이것을 설명하는 agent_event
+  reconciled_at INTEGER,
+  CHECK (ownership <> 'AGENT' OR evidence_ref IS NOT NULL)
+);
 CREATE INDEX time_desc ON software_time_point(settled_at DESC);  -- 최신이 위다
 
-CREATE VIRTUAL TABLE context_fts USING fts5(body, content='context_block', content_rowid='rowid');
+CREATE VIRTUAL TABLE context_fts USING fts5(body, content='context_version', content_rowid='rowid');
 ```
+
+---
+
+## 3.1 스키마가 강제하는 것과 강제하지 못하는 것 — A1b 정직성 표
+
+| 규칙 | 무엇이 강제하는가 |
+|---|---|
+| `UNKNOWN` 은 `what_would_verify` 없이 저장 불가 | **CHECK 제약** ✔ |
+| 에이전트 발화가 Evidence 가 되는 것 | **테이블 분리** ✔ — 컬럼 자체가 없다 |
+| `CRITICAL` 은 `text` 필수 | **CHECK 제약** ✔ |
+| RUN 은 `qode_id` 를 가질 수 없다 | **CHECK 제약** ✔ |
+| `AI_INFERENCE` 는 인용 필수 | **CHECK 제약** ✔ |
+| **모든 Problem 에 Observation 이 최소 하나** | **✘ 스키마가 못 한다.** 트랜잭션 불변식 + 고아 점검 |
+| **자리 정정이 리팩터를 견딘다** | **✘ 스키마가 못 한다.** 재식별 확신도 로직 |
+| **에이전트가 루트 밖에 못 쓴다** | **✘ 스키마 밖이다.** Provider 권한 계층 |
+
+> **"스키마가 막아준다"고 쓰지 않는다. 무엇이 막는지 이름을 댄다.**
 
 ---
 
@@ -279,7 +365,7 @@ CREATE VIRTUAL TABLE context_fts USING fts5(body, content='context_block', conte
 
 | | |
 |---|---|
-| 버전 훅 | \`PRAGMA user_version\` (실측 동작 확인) |
+| 버전 훅 | `PRAGMA user_version` (실측 동작 확인) |
 | 방향 | **전진만.** 다운 마이그레이션을 만들지 않는다 |
 | 실패 시 | 롤백하고 **이전 버전으로 계속 동작**한다. 열기가 실패하지 않는다 |
 | **최후 수단** | **DB 를 버리고 재구성한다** |

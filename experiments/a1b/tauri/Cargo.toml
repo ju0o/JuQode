@@ -1,0 +1,15 @@
+[package]
+name = "juqode-a1b-tauri-bench"
+version = "0.0.0"
+edition = "2021"
+description = "DISPOSABLE A1b benchmark shell. Not a product."
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 2

@@ -81,11 +81,14 @@
 
 ---
 
-## 4. ARCHITECTURE PROPOSALS — A1a 초안. 전부 `PROPOSED`
+## 4. ARCHITECTURE PROPOSALS — A1b 개정판. 전부 `PROPOSED`
 
 > ## ⚠️ **Architecture Frozen: NO · Implementation Authorized: NO**
 >
-> 아래는 **A1a(Architecture Decision Packet)의 초안**이다. **결정이 아니다.**
+> **A1a 는 PASS 했고, 아래는 PM 판정을 반영한 A1b 개정판이다. 여전히 결정이 아니다.**
+>
+> **A1b 실측이 A1a 의 주장 셋을 뒤집었다** — 에이전트 격리 · 되돌리기의 상태 보존 · Electron 의 `node:sqlite`.
+> 각 문서의 `⚠ A1b 정정` 절이 무엇이 틀렸는지 적는다.
 > 선택지 · 비용 · 반대 근거 · Worker 권고는 전부
 > `JuQode-Private/docs/current/14_A1_ARCHITECTURE_DECISION_PACKET.md` 에 있고,
 > **PM 판정 · Founder 판정은 전부 `PENDING`** 이다.
@@ -105,8 +108,9 @@
 | [`contracts/A1_EVIDENCE_SCHEMA_PROPOSAL.md`](contracts/A1_EVIDENCE_SCHEMA_PROPOSAL.md) | `PASS/FAIL/UNKNOWN` · **Canon 을 CHECK 제약으로 올린다** |
 | [`security/A1_LOCAL_SECURITY_PROPOSAL.md`](security/A1_LOCAL_SECURITY_PROPOSAL.md) | 위협 11개 · 경계 · **못 막는 것을 정직하게 말한다** |
 
-**버리는 코드:** [`../experiments/a1/`](../experiments/a1/) — 아키텍처 비교용 일회용 검증.
-**DISPOSABLE 로 표시했고 `prototype/` 을 한 글자도 건드리지 않았다.**
+**버리는 코드:** [`../experiments/a1/`](../experiments/a1/) · [`../experiments/a1b/`](../experiments/a1b/)
+— 아키텍처 비교용 일회용 검증. **DISPOSABLE 로 표시했고 `prototype/` 을 한 글자도 건드리지 않았다.**
+**실제 유료 코딩 에이전트를 호출하지 않았다.**
 
 > **⚠ v0.1 아키텍처 방향은 전부 `PROPOSED`이며 결정되지 않았다.**
 > Local-first · SQLite가 Product State · Repository가 Machine Truth · Git이 안전 Truth ·

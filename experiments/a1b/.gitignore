@@ -1,0 +1,9 @@
+# 빌드 산출물은 커밋하지 않는다. 실험 자체가 DISPOSABLE 이다.
+electron/node_modules/
+electron/package-lock.json
+tauri/target/
+tauri/Cargo.lock
+tauri/dist/index.html
+tauri/icons/
+results/tauri-stage.log
+tauri/gen/

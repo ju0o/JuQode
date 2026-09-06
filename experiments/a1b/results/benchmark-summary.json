@@ -1,0 +1,153 @@
+{
+  "measured_on": "Linux x86_64 · Wayland · DPR 2 · World canvas 1728x940 buffer (1.62 Mpx)",
+  "electron_runtime": "electron 33.4.11 / chromium 130.0.6723.191",
+  "webkit_runtime": "tauri-equivalent webkitgtk 2.52.6",
+  "per_state": [
+    {
+      "state": "idle",
+      "electron": {
+        "app_fps": 32,
+        "draw_p50": 2.8,
+        "draw_p95": 7.3,
+        "draw_p99": 10,
+        "late_pct": 5.3
+      },
+      "webkitgtk": {
+        "app_fps": 0.3,
+        "draw_p50": 70,
+        "draw_p95": 70,
+        "draw_p99": 70,
+        "late_pct": 0
+      }
+    },
+    {
+      "state": "focus_transition",
+      "electron": {
+        "app_fps": 59.3,
+        "draw_p50": 3.1,
+        "draw_p95": 5.8,
+        "draw_p99": 8.3,
+        "late_pct": 1.1
+      },
+      "webkitgtk": {
+        "app_fps": 6.7,
+        "draw_p50": 55,
+        "draw_p95": 394,
+        "draw_p99": 394,
+        "late_pct": 100
+      }
+    },
+    {
+      "state": "working_disturbed",
+      "electron": {
+        "app_fps": 59.3,
+        "draw_p50": 2.8,
+        "draw_p95": 5.4,
+        "draw_p99": 6.4,
+        "late_pct": 1.1
+      },
+      "webkitgtk": {
+        "app_fps": 13.3,
+        "draw_p50": 37,
+        "draw_p95": 96,
+        "draw_p99": 101,
+        "late_pct": 100
+      }
+    },
+    {
+      "state": "settling",
+      "electron": {
+        "app_fps": 59.7,
+        "draw_p50": 4.4,
+        "draw_p95": 6.1,
+        "draw_p99": 8.1,
+        "late_pct": 0.6
+      },
+      "webkitgtk": {
+        "app_fps": 28.3,
+        "draw_p50": 22,
+        "draw_p95": 34,
+        "draw_p99": 40,
+        "late_pct": 83.3
+      }
+    },
+    {
+      "state": "deep_view",
+      "electron": {
+        "app_fps": 59.7,
+        "draw_p50": 4,
+        "draw_p95": 6.4,
+        "draw_p99": 8.3,
+        "late_pct": 0.6
+      },
+      "webkitgtk": {
+        "app_fps": 23.7,
+        "draw_p50": 27,
+        "draw_p95": 50,
+        "draw_p99": 132,
+        "late_pct": 82.9
+      }
+    },
+    {
+      "state": "running_observe",
+      "electron": {
+        "app_fps": 60,
+        "draw_p50": 4.4,
+        "draw_p95": 5.8,
+        "draw_p99": 8.3,
+        "late_pct": 0
+      },
+      "webkitgtk": {
+        "app_fps": 17,
+        "draw_p50": 35,
+        "draw_p95": 51,
+        "draw_p99": 54,
+        "late_pct": 98
+      }
+    }
+  ],
+  "startup_ms": {
+    "electron_page_loaded": 396,
+    "webkitgtk_page_loaded": 7889
+  },
+  "rss_mb": {
+    "electron": 155.7,
+    "webkitgtk": 206.0
+  },
+  "ipc_roundtrip_ms": {
+    "electron": 0.28,
+    "webkitgtk": "해당 없음(순수 웹뷰 호스트)"
+  },
+  "electron_renderer_world_leak": {
+    "process": "undefined",
+    "require": "undefined",
+    "module": "undefined",
+    "Buffer": "undefined",
+    "bridge": "object"
+  },
+  "electron_node_sqlite": {
+    "available": false,
+    "error": "No such built-in module: node:sqlite"
+  },
+  "electron_versions": {
+    "electron": "33.4.11",
+    "chrome": "130.0.6723.191",
+    "node": "20.18.3",
+    "v8": "13.0.245.25-electron.0"
+  },
+  "electron_child_spawn_ms": {
+    "ok": true,
+    "ms": 89.99
+  },
+  "electron_fs_read": {
+    "bytes": 70448,
+    "ms": 0.27
+  },
+  "limits": [
+    "macOS(WKWebView) · Windows(WebView2) 는 측정하지 않았다. 추정하지 않는다.",
+    "Windows 의 Tauri 는 WebView2(Chromium 계열)를 쓴다 — 이 Linux 결과를 그대로 옮기면 안 된다.",
+    "Tauri 셸은 빌드·실행되지만 내부 계측이 결과를 돌려주지 못했다. WebKitGTK 값은 Tauri 가 Linux 에서 쓰는 그 엔진을 직접 띄워 잰 것이다.",
+    "WebKitGTK 의 performance.now() 해상도가 거칠다(정수 ms). 차이가 해상도보다 훨씬 커서 결론은 유지된다.",
+    "draw_ms 는 rAF 콜백 안의 JS 시간이다. Chromium 은 Canvas 래스터를 비동기로 넘길 수 있어 과소 보고 가능 — 그래서 app_fps 와 late_pct 를 함께 본다."
+  ]
+}

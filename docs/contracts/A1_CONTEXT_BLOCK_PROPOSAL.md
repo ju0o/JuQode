@@ -16,6 +16,12 @@
 > **이 문서는 초안이다.** 여기 있는 어떤 문장도 Canon 이 아니고, 구현 지시가 아니다.
 > 선택지 · 비용 · 반대 근거는 위의 판정 대장에 있다. **결정은 PM 과 Founder 가 한다.**
 
+
+> ## 🔄 A1b 개정 — PM 판정 반영
+>
+> A1a 는 **PASS** 했다. 이 문서는 그 뒤 PM 이 지시한 정정을 반영한 판이다.
+> **여전히 `PROPOSED` 이며 아무것도 동결되지 않았다.**
+
 ---
 
 ## 1. Context 는 Core Product Primitive 다
@@ -65,6 +71,14 @@ Supabase Auth 를 쓴다. Google OAuth 를 쓰고 Callback 은 /auth/cb 다.
 | frontmatter + 본문 | 필수 5필드는 기계가 읽고 본문은 사람이 읽는다 |
 | Markdown | 사용자가 이미 아는 형식. 새로 가르치지 않는다 |
 | 한 블록 = 한 파일 | Import/Export 가 파일 복사만큼 단순하다 |
+
+> ### ⚠ A1b 정정 — "현재 본문"의 주인은 하나여야 한다
+>
+> A1a 의 스키마는 `context_block.body` 와 `context_version.body` 를 **둘 다** 두었다.
+> **주인이 둘인 현재 본문은 반드시 갈라진다.**
+>
+> **본문은 오직 `ContextVersion` 에만 산다.** `ContextBlock` 은 `current_version` 으로 가리킬 뿐이다.
+> 전문 검색(FTS)도 **버전 테이블**에 붙는다.
 
 > **⚠ 주의 — 이것이 저장 형식이라는 뜻이 아니다.**
 > 저장은 관계 질의가 필요하다. 이것은 **경계에서의 형식**이다.
