@@ -1,153 +1,142 @@
 {
-  "measured_on": "Linux x86_64 · Wayland · DPR 2 · World canvas 1728x940 buffer (1.62 Mpx)",
-  "electron_runtime": "electron 33.4.11 / chromium 130.0.6723.191",
-  "webkit_runtime": "tauri-equivalent webkitgtk 2.52.6",
+  "phase": "A1b.1 — Final Current-Runtime Correction",
+  "measured_on": "Linux x86_64 · Wayland · World canvas 1728x940 buffer (1,624,320 px) — 양쪽 동일",
+  "electron": "electron 44.2.0 / chromium 152.0.7977.76",
+  "electron_versions": {
+    "electron": "44.2.0",
+    "chrome": "152.0.7977.76",
+    "node": "24.20.0",
+    "v8": "15.2.124.19-electron.0",
+    "modules": "149"
+  },
+  "webkit": "tauri-equivalent webkitgtk 2.52.6",
+  "note_on_electron_33": "A1b 의 Electron 33 측정치는 폐기했다. 현재 생산 후보가 아니다.",
+  "validity_rule": "활성 상태 4개가 전부 40fps 초과인 런만 채택했다. 창이 가려지면 Chromium 이 rAF 를 억제해 전부 0 이 된다",
   "per_state": [
     {
-      "state": "idle",
-      "electron": {
-        "app_fps": 32,
-        "draw_p50": 2.8,
-        "draw_p95": 7.3,
-        "draw_p99": 10,
-        "late_pct": 5.3
-      },
-      "webkitgtk": {
-        "app_fps": 0.3,
-        "draw_p50": 70,
-        "draw_p95": 70,
-        "draw_p99": 70,
-        "late_pct": 0
-      }
-    },
-    {
       "state": "focus_transition",
-      "electron": {
-        "app_fps": 59.3,
-        "draw_p50": 3.1,
-        "draw_p95": 5.8,
-        "draw_p99": 8.3,
-        "late_pct": 1.1
+      "electron44": {
+        "fps": 47,
+        "draw_p50": 2.6,
+        "draw_p95": 3.3,
+        "late_pct": 2.1
       },
       "webkitgtk": {
-        "app_fps": 6.7,
+        "fps": 6.7,
         "draw_p50": 55,
         "draw_p95": 394,
-        "draw_p99": 394,
         "late_pct": 100
       }
     },
     {
       "state": "working_disturbed",
-      "electron": {
-        "app_fps": 59.3,
-        "draw_p50": 2.8,
-        "draw_p95": 5.4,
-        "draw_p99": 6.4,
-        "late_pct": 1.1
+      "electron44": {
+        "fps": 60,
+        "draw_p50": 2.5,
+        "draw_p95": 3.3,
+        "late_pct": 0
       },
       "webkitgtk": {
-        "app_fps": 13.3,
+        "fps": 13.3,
         "draw_p50": 37,
         "draw_p95": 96,
-        "draw_p99": 101,
         "late_pct": 100
       }
     },
     {
       "state": "settling",
-      "electron": {
-        "app_fps": 59.7,
-        "draw_p50": 4.4,
-        "draw_p95": 6.1,
-        "draw_p99": 8.1,
-        "late_pct": 0.6
+      "electron44": {
+        "fps": 60.3,
+        "draw_p50": 2.2,
+        "draw_p95": 3.3,
+        "late_pct": 0
       },
       "webkitgtk": {
-        "app_fps": 28.3,
+        "fps": 28.3,
         "draw_p50": 22,
         "draw_p95": 34,
-        "draw_p99": 40,
         "late_pct": 83.3
       }
     },
     {
       "state": "deep_view",
-      "electron": {
-        "app_fps": 59.7,
-        "draw_p50": 4,
-        "draw_p95": 6.4,
-        "draw_p99": 8.3,
-        "late_pct": 0.6
+      "electron44": {
+        "fps": 59,
+        "draw_p50": 2.6,
+        "draw_p95": 3.2,
+        "late_pct": 1.7
       },
       "webkitgtk": {
-        "app_fps": 23.7,
+        "fps": 23.7,
         "draw_p50": 27,
         "draw_p95": 50,
-        "draw_p99": 132,
         "late_pct": 82.9
       }
     },
     {
       "state": "running_observe",
-      "electron": {
-        "app_fps": 60,
-        "draw_p50": 4.4,
-        "draw_p95": 5.8,
-        "draw_p99": 8.3,
+      "electron44": {
+        "fps": 60,
+        "draw_p50": 2.5,
+        "draw_p95": 3.4,
         "late_pct": 0
       },
       "webkitgtk": {
-        "app_fps": 17,
+        "fps": 17,
         "draw_p50": 35,
         "draw_p95": 51,
-        "draw_p99": 54,
         "late_pct": 98
       }
     }
   ],
+  "true_idle": {
+    "idle_frames_9s_window": 0,
+    "idle_after_settled_frames_6s_window": 0,
+    "a1b_method_reproduction_frames": 90,
+    "a1b_committed_value": 96,
+    "verdict": "A — TRUE IDLE 은 0 에 도달한다. A1b 의 96 은 측정 방법 오류였고 90 프레임으로 재현됐다"
+  },
   "startup_ms": {
-    "electron_page_loaded": 396,
+    "electron44_page_loaded": 526,
     "webkitgtk_page_loaded": 7889
   },
   "rss_mb": {
-    "electron": 155.7,
+    "electron44": 476.7,
     "webkitgtk": 206.0
   },
-  "ipc_roundtrip_ms": {
-    "electron": 0.28,
-    "webkitgtk": "해당 없음(순수 웹뷰 호스트)"
+  "ipc_roundtrip_ms": 0.21,
+  "fs_read": {
+    "bytes": 70448,
+    "ms": 0.09
   },
-  "electron_renderer_world_leak": {
+  "child_spawn": {
+    "ok": true,
+    "ms": 156.24
+  },
+  "renderer_world_leak": {
     "process": "undefined",
     "require": "undefined",
     "module": "undefined",
     "Buffer": "undefined",
     "bridge": "object"
   },
-  "electron_node_sqlite": {
-    "available": false,
-    "error": "No such built-in module: node:sqlite"
-  },
-  "electron_versions": {
-    "electron": "33.4.11",
-    "chrome": "130.0.6723.191",
-    "node": "20.18.3",
-    "v8": "13.0.245.25-electron.0"
-  },
-  "electron_child_spawn_ms": {
-    "ok": true,
-    "ms": 89.99
-  },
-  "electron_fs_read": {
-    "bytes": 70448,
-    "ms": 0.27
+  "node_sqlite_inside_electron44": {
+    "available": true,
+    "version": "3.53.4",
+    "wal": "wal",
+    "json1": 1,
+    "generated_column_index": "ok",
+    "fts5": true,
+    "user_version": 1,
+    "integrity_check": "ok",
+    "warnings": [],
+    "experimental_warning": null
   },
   "limits": [
-    "macOS(WKWebView) · Windows(WebView2) 는 측정하지 않았다. 추정하지 않는다.",
-    "Windows 의 Tauri 는 WebView2(Chromium 계열)를 쓴다 — 이 Linux 결과를 그대로 옮기면 안 된다.",
-    "Tauri 셸은 빌드·실행되지만 내부 계측이 결과를 돌려주지 못했다. WebKitGTK 값은 Tauri 가 Linux 에서 쓰는 그 엔진을 직접 띄워 잰 것이다.",
-    "WebKitGTK 의 performance.now() 해상도가 거칠다(정수 ms). 차이가 해상도보다 훨씬 커서 결론은 유지된다.",
-    "draw_ms 는 rAF 콜백 안의 JS 시간이다. Chromium 은 Canvas 래스터를 비동기로 넘길 수 있어 과소 보고 가능 — 그래서 app_fps 와 late_pct 를 함께 본다."
+    "macOS · Windows 는 측정하지 않았다. PM 지시에 따라 A1c 를 기다리지 않는다.",
+    "WebKitGTK 값은 A1b 측정치를 그대로 쓴다(Linux 엔진 비교 근거로 유효). Tauri 재탐색은 하지 않았다.",
+    "WebKitGTK 의 performance.now() 해상도가 거칠다(정수 ms).",
+    "Electron 벤치는 chrome-sandbox SUID 미설정으로 --no-sandbox 로 돌렸다. 배포 시 정상 설정 필요.",
+    "RSS 는 Electron 33 대비 크게 늘었다. 측정 조건이 달라 단순 비교는 주의."
   ]
 }

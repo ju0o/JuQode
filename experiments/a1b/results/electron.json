@@ -1,96 +1,128 @@
 {
-  "runtime": "electron 33.4.11 / chromium 130.0.6723.191",
+  "runtime": "electron 44.2.0 / chromium 152.0.7977.76",
   "states": {
     "idle": {
-      "app_requested_frames": 96,
-      "app_fps": 32,
-      "draw_ms_p50": 2.8,
-      "draw_ms_p95": 7.3,
-      "draw_ms_p99": 10,
-      "draw_ms_max": 10,
-      "headroom_pct_p95": 56.3,
-      "frame_gap_p50": 16.7,
-      "frame_gap_p99": 521.73,
-      "late_frames_over_25ms": 5,
-      "late_pct": 5.3,
-      "window_ms": 3000,
-      "canon_check": "⚠ 유휴에 96 프레임을 요청했다"
+      "app_requested_frames": 0,
+      "app_fps": 0,
+      "draw_ms_p50": null,
+      "draw_ms_p95": null,
+      "draw_ms_p99": null,
+      "draw_ms_max": null,
+      "headroom_pct_p95": null,
+      "frame_gap_p50": null,
+      "frame_gap_p99": null,
+      "late_frames_over_25ms": 0,
+      "late_pct": 0,
+      "window_ms": 9000,
+      "definition": "TRUE IDLE — 연속 1000ms 무프레임을 확인한 뒤 잰 창",
+      "canon_check": "✔ 실제 사건이 없으면 렌더링이 정지한다"
     },
     "focus_transition": {
-      "app_requested_frames": 178,
-      "app_fps": 59.3,
-      "draw_ms_p50": 3.1,
-      "draw_ms_p95": 5.8,
-      "draw_ms_p99": 8.3,
-      "draw_ms_max": 9.2,
-      "headroom_pct_p95": 65.3,
+      "app_requested_frames": 141,
+      "app_fps": 47,
+      "draw_ms_p50": 2.6,
+      "draw_ms_p95": 3.3,
+      "draw_ms_p99": 3.9,
+      "draw_ms_max": 4.2,
+      "headroom_pct_p95": 80.2,
       "frame_gap_p50": 16.7,
       "frame_gap_p99": 33.3,
-      "late_frames_over_25ms": 2,
-      "late_pct": 1.1,
+      "late_frames_over_25ms": 3,
+      "late_pct": 2.1,
       "window_ms": 3000
     },
     "working_disturbed": {
-      "app_requested_frames": 178,
-      "app_fps": 59.3,
-      "draw_ms_p50": 2.8,
-      "draw_ms_p95": 5.4,
-      "draw_ms_p99": 6.4,
-      "draw_ms_max": 6.7,
-      "headroom_pct_p95": 67.7,
+      "app_requested_frames": 180,
+      "app_fps": 60,
+      "draw_ms_p50": 2.5,
+      "draw_ms_p95": 3.3,
+      "draw_ms_p99": 4.3,
+      "draw_ms_max": 5.1,
+      "headroom_pct_p95": 80.2,
       "frame_gap_p50": 16.7,
-      "frame_gap_p99": 29.7,
-      "late_frames_over_25ms": 2,
-      "late_pct": 1.1,
+      "frame_gap_p99": 16.8,
+      "late_frames_over_25ms": 0,
+      "late_pct": 0,
       "window_ms": 3000
     },
     "settling": {
-      "app_requested_frames": 179,
-      "app_fps": 59.7,
-      "draw_ms_p50": 4.4,
-      "draw_ms_p95": 6.1,
-      "draw_ms_p99": 8.1,
-      "draw_ms_max": 8.3,
-      "headroom_pct_p95": 63.5,
+      "app_requested_frames": 181,
+      "app_fps": 60.3,
+      "draw_ms_p50": 2.2,
+      "draw_ms_p95": 3.3,
+      "draw_ms_p99": 4.5,
+      "draw_ms_max": 5.3,
+      "headroom_pct_p95": 80.2,
       "frame_gap_p50": 16.7,
-      "frame_gap_p99": 19.5,
-      "late_frames_over_25ms": 1,
-      "late_pct": 0.6,
+      "frame_gap_p99": 16.8,
+      "late_frames_over_25ms": 0,
+      "late_pct": 0,
       "window_ms": 3000
     },
     "deep_view": {
-      "app_requested_frames": 179,
-      "app_fps": 59.7,
-      "draw_ms_p50": 4,
-      "draw_ms_p95": 6.4,
-      "draw_ms_p99": 8.3,
-      "draw_ms_max": 8.7,
-      "headroom_pct_p95": 61.7,
+      "app_requested_frames": 177,
+      "app_fps": 59,
+      "draw_ms_p50": 2.6,
+      "draw_ms_p95": 3.2,
+      "draw_ms_p99": 3.8,
+      "draw_ms_max": 4.1,
+      "headroom_pct_p95": 80.8,
       "frame_gap_p50": 16.7,
-      "frame_gap_p99": 18.3,
-      "late_frames_over_25ms": 1,
-      "late_pct": 0.6,
+      "frame_gap_p99": 33.4,
+      "late_frames_over_25ms": 3,
+      "late_pct": 1.7,
       "window_ms": 3000
     },
     "running_observe": {
       "app_requested_frames": 180,
       "app_fps": 60,
-      "draw_ms_p50": 4.4,
-      "draw_ms_p95": 5.8,
-      "draw_ms_p99": 8.3,
-      "draw_ms_max": 8.6,
-      "headroom_pct_p95": 65.3,
+      "draw_ms_p50": 2.5,
+      "draw_ms_p95": 3.4,
+      "draw_ms_p99": 4.3,
+      "draw_ms_max": 4.4,
+      "headroom_pct_p95": 79.6,
       "frame_gap_p50": 16.7,
-      "frame_gap_p99": 17.4,
+      "frame_gap_p99": 16.8,
       "late_frames_over_25ms": 0,
       "late_pct": 0,
       "window_ms": 3000
+    },
+    "idle_a1b_method": {
+      "app_requested_frames": 90,
+      "app_fps": 30,
+      "draw_ms_p50": 2.3,
+      "draw_ms_p95": 3.5,
+      "draw_ms_p99": 5.6,
+      "draw_ms_max": 5.6,
+      "headroom_pct_p95": 79,
+      "frame_gap_p50": 16.7,
+      "frame_gap_p99": 16.8,
+      "late_frames_over_25ms": 0,
+      "late_pct": 0,
+      "window_ms": 3000,
+      "definition": "A1b 재현 — 전이 직후 고정 1500ms 대기 후 잰 창 (진짜 유휴가 아니다)",
+      "verdict": "⚠ 90 프레임 — 가라앉는 중인데 유휴로 집계됐다"
+    },
+    "idle_after_settled": {
+      "app_requested_frames": 0,
+      "app_fps": 0,
+      "draw_ms_p50": null,
+      "draw_ms_p95": null,
+      "draw_ms_p99": null,
+      "draw_ms_max": null,
+      "headroom_pct_p95": null,
+      "frame_gap_p50": null,
+      "frame_gap_p99": null,
+      "late_frames_over_25ms": 0,
+      "late_pct": 0,
+      "window_ms": 6000,
+      "canon_check": "✔ 결과 이후에도 렌더링이 정지한다"
     }
   },
   "viewport": {
-    "w": 1440,
-    "h": 766,
-    "dpr": 2
+    "w": 735,
+    "h": 350,
+    "dpr": 2.5
   },
   "all_canvases": [
     {
@@ -116,20 +148,32 @@
     },
     {
       "id": "cv",
-      "css_w": 1263,
-      "css_h": 687,
+      "css_w": 449,
+      "css_h": 244,
       "buf_w": 1728,
       "buf_h": 940
     }
   ],
   "world_canvas": {
-    "css_w": 1263,
-    "css_h": 687,
+    "css_w": 449,
+    "css_h": 244,
     "buf_w": 1728,
     "buf_h": 940,
     "painted_px": 1624320
   },
-  "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) juqode-a1b-electron-bench/0.0.0 Chrome/130.0.6723.191 Electron/33.4.11 Safari/537.36",
+  "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) juqode-a1b-electron-bench/0.0.0 Chrome/152.0.7977.76 Electron/44.2.0 Safari/537.36",
+  "true_idle_settle": {
+    "reached": true,
+    "time_to_idle_ms": 0,
+    "frames_while_settling": 0,
+    "quiet_window_ms": 1000
+  },
+  "true_idle_after_settled": {
+    "reached": true,
+    "time_to_idle_ms": 0,
+    "frames_while_settling": 0,
+    "quiet_window_ms": 1000
+  },
   "chrome_only_render": {
     "n": 200,
     "p50": 0,
@@ -150,35 +194,44 @@
     "module": "object",
     "Buffer": "function"
   },
-  "ipc_roundtrip_ms_avg": 0.28,
+  "ipc_roundtrip_ms_avg": 0.21,
   "probe": {
     "versions": {
-      "electron": "33.4.11",
-      "chrome": "130.0.6723.191",
-      "node": "20.18.3",
-      "v8": "13.0.245.25-electron.0"
+      "electron": "44.2.0",
+      "chrome": "152.0.7977.76",
+      "node": "24.20.0",
+      "v8": "15.2.124.19-electron.0",
+      "modules": "149"
     },
     "node_sqlite": {
-      "available": false,
-      "error": "No such built-in module: node:sqlite"
+      "available": true,
+      "version": "3.53.4",
+      "wal": "wal",
+      "json1": 1,
+      "generated_column_index": "ok",
+      "fts5": true,
+      "user_version": 1,
+      "integrity_check": "ok",
+      "warnings": [],
+      "experimental_warning": null
     },
     "fs_read": {
       "bytes": 70448,
-      "ms": 0.27
+      "ms": 0.09
     },
     "child_spawn": {
       "ok": true,
-      "ms": 89.99
+      "ms": 156.24
     },
-    "rss_mb": 155.7,
+    "rss_mb": 477.2,
     "startup": {
-      "app_ready_ms": 75,
-      "page_loaded_ms": 396
+      "app_ready_ms": 94,
+      "page_loaded_ms": 526
     }
   },
-  "process_rss_mb": 155.7,
+  "process_rss_mb": 476.7,
   "startup": {
-    "app_ready_ms": 75,
-    "page_loaded_ms": 396
+    "app_ready_ms": 94,
+    "page_loaded_ms": 526
   }
 }

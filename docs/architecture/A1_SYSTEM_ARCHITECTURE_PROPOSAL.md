@@ -86,38 +86,43 @@ Phase 4A 프로토타입은 `S` 객체 하나가 전부인 상태 기계다. **�
 
 ---
 
-## 4. 데스크톱 런타임 — 미결
+## 4. 데스크톱 런타임 — **PM 방향: Electron 44.x**
 
-**Electron 과 Tauri 가 서로 다른 축에서 이긴다.** 이 문서는 어느 쪽도 선택하지 않는다.
+> **Worker 의 선택이 아니다. PM 이 정했고 Founder 최종 확인이 남아 있다.**
+> 현재 런타임 스모크에서 **차단 회귀가 나오지 않았다.**
 
 | | Electron | Tauri v2 |
 |---|---|---|
 | 렌더링 일관성 | **모든 OS 에서 같은 Chromium** | OS 마다 다른 웹뷰 (Linux = WebKitGTK) |
 | 권한 경계 | 규율로 지켜야 한다 | **기본값이 안전하다** |
 | 번들 | 큼 | 작음 |
-| 저장 계층 | **`node:sqlite` 없음(실측)** → 네이티브 바인딩 + 리빌드 | `rusqlite` 성숙 · 리빌드 없음 |
+| 저장 계층 | **Electron 44 엔 `node:sqlite` 있음(실측)** → 네이티브 애드온 불필요 | `rusqlite` 성숙 |
 | 권한 경계 실측 | 부모 프로세스는 **경계가 아니다** — 강제는 Provider 권한 계층 | 동일 |
 
-### A1b — 측정했다 (Linux 한정)
+### A1b.1 — 현재 안정 런타임으로 다시 쟀다
 
-동결 렌더러를 그대로 두 엔진에 올려 실제 GUI 에서 쟀다. 같은 뷰포트 · DPR 2 · 1.62 Mpx 캔버스.
+**A1b 의 Electron 33 측정치는 폐기했다.** 현재 생산 후보는 **Electron 44.2.0** 이다.
+칠하는 픽셀 수를 **1,728×940 = 1,624,320 px** 로 양쪽 동일하게 고정했다.
 
-| 상태 | Chromium 130 fps / draw p50 | WebKitGTK 2.52.6 fps / draw p50 |
+| 상태 | Electron 44.2.0 / Chromium 152 | WebKitGTK 2.52.6 |
 |---|---|---|
-| focus transition | **59.3 / 3.1 ms** | **6.7 / 55 ms** |
-| working · disturbed | **59.3 / 2.8 ms** | **13.3 / 37 ms** |
-| settling | **59.7 / 4.4 ms** | **28.3 / 22 ms** |
-| running (관측) | **60.0 / 4.4 ms** | **17.0 / 35 ms** |
-| 지연 프레임 | 0 ~ 1.1% | **83 ~ 100%** |
-| 페이지 로드 | **396 ms** | **7,889 ms** |
+| focus transition | **47.0 fps / 2.6 ms** | 6.7 fps / 55 ms |
+| working · disturbed | **60.0 fps / 2.5 ms** | 13.3 fps / 37 ms |
+| settling | **60.3 fps / 2.2 ms** | 28.3 fps / 22 ms |
+| deep view | **59.0 fps / 2.6 ms** | 23.7 fps / 27 ms |
+| running (관측) | **60.0 fps / 2.5 ms** | 17.0 fps / 35 ms |
+| 지연 프레임 | **0 ~ 0.7%** | **83 ~ 100%** |
+| 페이지 로드 | **526 ms** | 7,889 ms |
+| RSS | 476.7 MB | 206.0 MB |
+| **TRUE IDLE** | **0 프레임** | — |
 
-**그리고 동결 렌더러는 Canon 을 지킨다** — `idle` 에서 앱이 요청한 프레임은 **0** 이었다.
-*"실제 사건이 없으면 화면은 완전히 고요하다"* 가 구현으로 실증되었다.
+> ### ⚠ A1b 의 "유휴 0 프레임" 주장은 틀렸다
+> A1b 의 커밋된 원본은 **96 프레임**이었다. **TRUE IDLE 을 재정의해 다시 재니 0 이 맞았고,
+> A1b 의 방법을 재현하니 90 프레임이 잡혔다** — 원인은 고정 1,500ms 대기였다.
 
-> **이 측정이 런타임을 결정하지 않는다.**
-> macOS(WKWebView) · Windows(WebView2) 는 **재지 않았고 추정하지 않는다.**
-> **Windows 의 Tauri 는 WebView2(Chromium 계열)** 이므로 이 Linux 결과를 옮기면 틀린다.
-> → 판정 대장 A1-14 는 **STILL OPEN** 이다.
+**PM 방향 (A1b.1): 런타임 = Electron 44.x · 기준 OS = Linux x86_64.**
+Windows 는 릴리스 후보(QA 필요), **macOS 는 v0.1 출시 약속이 아니다.**
+**macOS · Windows 렌더러 벤치 때문에 A1c 를 미루지 않는다.**
 
 ---
 

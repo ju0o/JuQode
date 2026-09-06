@@ -46,6 +46,34 @@
     };
   }
   var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+
+  /* ── TRUE IDLE ──────────────────────────────────────────────────────────
+     A1b 의 오류: open() 뒤 1500ms 만 기다리고 잰 뒤 "유휴"라고 불렀다.
+     스프링 감쇠가 그보다 오래 살아 있으면 그 프레임이 유휴로 잘못 집계된다.
+
+     TRUE IDLE = 정당한 전이/가라앉음이 전부 끝났고 새 제품 사건이 없는 상태.
+     그래서 시간을 정해놓고 재지 않고 '정지할 때까지 기다린 뒤' 잰다.        */
+  function waitQuiet(quietMs, timeoutMs) {
+    return new Promise(function (res) {
+      var t0 = performance.now(), lastFrame = performance.now(), n = 0, seen = 0;
+      rec.on = true; rec.cb = []; rec.gaps = []; rec.last = 0; rec.count = 0;
+      var iv = setInterval(function () {
+        if (rec.count !== n) { n = rec.count; seen = n; lastFrame = performance.now(); }
+        var quietFor = performance.now() - lastFrame;
+        var elapsed  = performance.now() - t0;
+        if (quietFor >= quietMs) {
+          clearInterval(iv); rec.on = false;
+          res({ reached: true, time_to_idle_ms: Math.round(elapsed - quietFor),
+                frames_while_settling: seen, quiet_window_ms: quietMs });
+        } else if (elapsed > timeoutMs) {
+          clearInterval(iv); rec.on = false;
+          res({ reached: false, gave_up_after_ms: Math.round(elapsed),
+                frames_while_settling: seen, quiet_window_ms: quietMs });
+        }
+      }, 50);
+    });
+  }
+
   function measure(ms, poke) {
     start();
     var t0 = performance.now(), iv = null;
@@ -79,12 +107,15 @@
         OUT.ua = navigator.userAgent;
       })
 
-      /* ① IDLE — 앱이 스스로 프레임을 요청하는가. 0 이어야 Canon 에 맞는다 */
-      .then(function () { return measure(W); })
+      /* ① TRUE IDLE — 고정 대기가 아니라 '정지할 때까지' 기다린 뒤 길게 잰다 */
+      .then(function () { return waitQuiet(1000, 30000); })
+      .then(function (q) { OUT.true_idle_settle = q; })
+      .then(function () { return measure(W * 3); })   // 충분히 긴 창
       .then(function (s) { OUT.states.idle = s;
+        s.definition = 'TRUE IDLE — 연속 1000ms 무프레임을 확인한 뒤 잰 창';
         s.canon_check = s.app_requested_frames === 0
           ? '✔ 실제 사건이 없으면 렌더링이 정지한다'
-          : '⚠ 유휴에 ' + s.app_requested_frames + ' 프레임을 요청했다'; })
+          : '⚠ 유휴에 ' + s.app_requested_frames + ' 프레임을 요청했다 — 프로토타입 회귀'; })
 
       /* ② FOCUS TRANSITION */
       .then(function () { var i = 0, ids = ['pay','store','session','auth','intake'];
@@ -114,6 +145,25 @@
       /* ⑦ 참고 — render() 는 DOM 껍데기만 갱신한다. 캔버스 페인트는 rAF 안의 draw() 다.
             따라서 엔진 비교의 기준값은 위의 draw_ms(rAF 콜백 실측)이지 이 값이 아니다 */
       .then(function () { D.focus('store'); return wait(300); })
+      /* ⑦ 진단 — A1b 의 방법(고정 1500ms 대기)을 그대로 재현해서 96 프레임의 원인을 확인한다.
+            전이를 일으킨 직후 1500ms 만 기다리고 '유휴'라고 부르면 무슨 일이 생기는가 */
+      .then(function () { D.focus('auth'); return wait(1500); })   // A1b 와 같은 대기
+      .then(function () { return measure(W); })
+      .then(function (s) { OUT.states.idle_a1b_method = s;
+        s.definition = 'A1b 재현 — 전이 직후 고정 1500ms 대기 후 잰 창 (진짜 유휴가 아니다)';
+        s.verdict = s.app_requested_frames > 0
+          ? '⚠ ' + s.app_requested_frames + ' 프레임 — 가라앉는 중인데 유휴로 집계됐다'
+          : '0 프레임 — 이번엔 1500ms 안에 가라앉았다'; })
+
+      /* ⑧ 두 번째 TRUE IDLE — Qode 가 끝나고 판이 가라앉은 뒤에도 정지하는가 */
+      .then(function () { return waitQuiet(1000, 30000); })
+      .then(function (q) { OUT.true_idle_after_settled = q; })
+      .then(function () { return measure(W * 2); })
+      .then(function (s) { OUT.states.idle_after_settled = s;
+        s.canon_check = s.app_requested_frames === 0
+          ? '✔ 결과 이후에도 렌더링이 정지한다'
+          : '⚠ 결과 이후 유휴에 ' + s.app_requested_frames + ' 프레임'; })
+
       .then(function () {
         var N = 200, t = [];
         for (var i = 0; i < N; i++) { var a = performance.now(); D.render(); t.push(performance.now() - a); }

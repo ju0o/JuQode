@@ -1,6 +1,9 @@
 /* A1b Electron 벤치 셸 — DISPOSABLE. 제품이 아니다.
  * 동결된 Phase 4A 렌더러를 그대로 로드해서 실제 GUI 프레임 시간을 잰다. */
 const { app, BrowserWindow, ipcMain } = require('electron');
+// 벤치 공정성: 화면 배율을 고정한다. DPR 이 다르면 칠하는 픽셀 수가 달라져 비교가 무의미해진다
+app.commandLine.appendSwitch('force-device-scale-factor',
+  process.env.BENCH_DPR || '2');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
@@ -24,7 +27,11 @@ ipcMain.handle('bench:probe', () => {
     chrome: process.versions.chrome,
     node: process.versions.node,
     v8: process.versions.v8,
+    modules: process.versions.modules,
   };
+  // node:sqlite 가 experimental 경고를 내는지 실제로 잡는다
+  const warnings = [];
+  process.on('warning', (w) => warnings.push(`${w.name}: ${w.message}`));
 
   // ① PM 지시: Electron 이 번들한 Node 안에서 node:sqlite 를 직접 확인한다
   //    (Worker 머신의 시스템 Node 결과를 그대로 옮기지 않는다)
@@ -39,7 +46,6 @@ ipcMain.handle('bench:probe', () => {
       version: g('SELECT sqlite_version() AS v').v,
       wal: db.prepare('PRAGMA journal_mode=WAL').get().journal_mode,
       json1: g(`SELECT json_extract('{"a":1}','$.a') AS v`).v,
-      experimental_warning_emitted: null, // 아래에서 채운다
     };
     try {
       db.exec(`CREATE TABLE t(id INTEGER PRIMARY KEY, p TEXT,
@@ -50,9 +56,18 @@ ipcMain.handle('bench:probe', () => {
     } catch (e) { out.node_sqlite.generated_column_index = 'FAIL: ' + e.message; }
     try {
       db.exec('CREATE VIRTUAL TABLE f USING fts5(b)');
-      out.node_sqlite.fts5 = true;
+      db.prepare('INSERT INTO f(b) VALUES(?)').run('Supabase Auth 콜백은 /auth/cb 이다');
+      out.node_sqlite.fts5 = g(`SELECT count(*) AS v FROM f WHERE f MATCH 'Supabase'`).v === 1;
     } catch (e) { out.node_sqlite.fts5 = 'FAIL: ' + e.message; }
+    try {
+      db.exec('PRAGMA user_version=1');
+      out.node_sqlite.user_version = g('PRAGMA user_version').user_version;
+      out.node_sqlite.integrity_check = g('PRAGMA integrity_check').integrity_check;
+    } catch (e) { out.node_sqlite.integrity = 'FAIL: ' + e.message; }
     db.close();
+    out.node_sqlite.warnings = warnings.slice();
+    out.node_sqlite.experimental_warning =
+      warnings.some(w => /experimental/i.test(w)) ? warnings.find(w => /experimental/i.test(w)) : null;
   } catch (e) {
     out.node_sqlite = { available: false, error: String(e && e.message || e) };
   }
@@ -90,12 +105,15 @@ ipcMain.handle('bench:report', (_e, data) => {
 app.whenReady().then(() => {
   t_ready = Date.now();
   const win = new BrowserWindow({
-    width: 1440, height: 900, show: !process.env.BENCH_HIDDEN,
+    width: 1440, height: 900, show: true, alwaysOnTop: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,     // 렌더러는 Node 에 닿지 못한다
       nodeIntegration: false,
       sandbox: false,             // preload 에서 require 를 쓰기 위해서만
+      // 창이 가려지면 Chromium 이 rAF 를 통째로 억제한다 → 측정이 전부 0 이 된다.
+      // 벤치의 유효성을 위해서만 끈다. 제품 설정이 아니다
+      backgroundThrottling: false,
     },
   });
   win.loadFile(FROZEN);           // 동결본을 그대로 연다. 복사도 수정도 하지 않는다
