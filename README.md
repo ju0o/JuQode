@@ -26,9 +26,9 @@ JuQode 는 비개발자가 소프트웨어 프로젝트를 이해하고, Claude 
 | | |
 |---|---|
 | **Product Version** | v0.1 MVP — Reset Generation |
-| **현재 Phase** | **R0 — Repository Context Reset** |
-| **다음 Phase** | **P1 — PRD / MVP Product Plan / MVP Work Spec** |
-| **Implementation** | **NONE.** 이 저장소에는 현재 구현이 없다 |
+| **현재 Phase** | **P1 — Product Planning** |
+| **다음 Phase** | **F1 — Feature Planning** |
+| **Implementation** | **NONE / HOLD.** 이 저장소에는 현재 구현이 없다 |
 | **구현 착수 조건** | **Final Planning Gate 통과.** 그 전까지 프로덕션 구현 금지 |
 
 ---
