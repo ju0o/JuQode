@@ -177,6 +177,14 @@ function routeCard(api, state, repaint) {
 
   /* 인식됨 — 이해한 것 · 실행할 명령 · 하는 일, then 실행 · 취소. `19` §C4: 항상 설명 후 확인. */
   card.appendChild(field3(C.qc.understood, C.gap.qcUnderstood[id]));
+  /* The two rules whose action is FIXED have no command string — `19` §C4 names them as fixed
+   * actions, not scripts — so their 실행할 명령 line is the action itself. Without this the
+   * stop card asked the user to confirm a blank. */
+  if (id === 'qc.dev.stop' && r.data?.pid) {
+    card.appendChild(field3(C.qc.action, C.gap.qcAction['qc.dev.stop'](r.data.pid, r.data.commandStarted)));
+  } else if (id === 'qc.terminal.open') {
+    card.appendChild(field3(C.qc.action, C.gap.qcAction['qc.terminal.open'](r.data?.cwd ?? '')));
+  }
   if (r.data?.command) {
     card.appendChild(field3(C.qc.action, r.data.command, 'mono'));
     /* The script's OWN body, because `19` §C4 says which script was chosen is reported — a user
@@ -282,10 +290,20 @@ function runCard(api, state, repaint) {
 
   const acts = el('div', 'row-acts');
   if (!r.ended) {
-    /* `15` TD-01: 멈추기 is ink-outlined, never recovery-green and never red. */
+    /* `15` TD-01 · F-C4-05: 멈추기 is ink-outlined, and it OPENS THE EXPLAIN CARD for the
+     * stopping Quick Command — 이해한 것 · 수행할 동작 · 뜻 — and only `진행` stops it. Stopping
+     * is a Quick Command like any other, so it goes through the same Intent→Explain→Confirm
+     * path rather than acting on the first click. */
     acts.appendChild(btn('btn sm', C.qc.stop, async () => {
-      await api.qcStop(state.project.id);
-      state.qcRun = { ...state.qcRun, state: 'stopped-requested' };
+      const listed = await api.qcList(state.project.id);
+      const stop = listed.rules?.find((x) => x.id === 'qc.dev.stop');
+      if (!stop) return;
+      state.qcCard = { ok: true, route: { kind: 'qc', id: 'qc.dev.stop' },
+                       rule: { id: 'qc.dev.stop', kind: stop.kind },
+                       available: stop.available, reason: stop.reason, data: stop.data };
+      /* The run card steps aside while the confirmation is up — one card at a time, and the
+       * one on screen is the one being decided. */
+      state.qcRun = null;
       repaint();
     }));
     if (r.kind === 'long_running') {

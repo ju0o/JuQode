@@ -389,6 +389,13 @@ export const C = {
       'qc.git.status':    '지금 어떤 파일이 바뀌었는지 Git 상태를 보여 달라는 요청으로 이해했어요.',
       'qc.terminal.open': '터미널을 열어 달라는 요청으로 이해했어요.',
     },
+    /* 실행할 명령 for the two rules whose action is FIXED rather than a package.json script.
+     * Same source as the sentences above — q02 §1's table. A card that showed nothing on this
+     * line for the stop rule would be asking the user to confirm a blank. */
+    qcAction: {
+      'qc.dev.stop':      (pid, cmd) => `JuQode 가 켠 개발 서버 프로세스(pid ${pid}${cmd ? `, ${cmd}` : ''})에 종료 신호(SIGTERM)를 보내요. 5초 안에 안 꺼지면 강제 종료(SIGKILL)해요.`,
+      'qc.terminal.open': (cwd) => `화면 아래에 터미널 창을 열어요. 셸은 ${cwd} 에서 시작하고, 아무 명령도 자동으로 실행하지 않아요.`,
+    },
     qcMeaning: {
       'qc.dev.start':     '프로젝트를 브라우저에서 볼 수 있게 로컬 서버를 띄워요. 끄기 전까지 계속 돌아요.',
       'qc.dev.stop':      '브라우저에서 보던 로컬 서버가 멈춰요. 파일은 바뀌지 않아요. 다시 켤 수 있어요.',

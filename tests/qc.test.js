@@ -1007,3 +1007,24 @@ test('the two routers share ONE filler list', () => {
   const { FILLERS: qcFillers } = require(path.join(R, 'app/main/qc/rules.js'));
   assert.strictEqual(routerFillers, qcFillers, 'the routers have two filler lists again');
 });
+
+test('every rule the drawer can explain has all three sentences', () => {
+  /* `19` §C4 requires the card to show 이해한 것 · 실행할 명령 · 하는 일 before it runs. A rule
+   * missing any one of them would ask the user to confirm a blank — which the stop card did:
+   * its action is a SIGNAL, not a package.json script, so it had no command string at all. */
+  const { RULES } = require(path.join(R, 'app/main/qc/rules.js'));
+  const copy = fs.readFileSync(path.join(R, 'app/renderer/copy.js'), 'utf8');
+  for (const rule of RULES) {
+    for (const table of ['qcUnderstood', 'qcMeaning']) {
+      const block = copy.slice(copy.indexOf(`${table}: {`));
+      const body = block.slice(0, block.indexOf('\n    },'));
+      assert.ok(body.includes(`'${rule.id}'`), `${table} has no sentence for ${rule.id}`);
+    }
+  }
+  /* …and the two FIXED actions have an action line, because they have no command to show. */
+  const actions = copy.slice(copy.indexOf('qcAction: {'));
+  for (const id of ['qc.dev.stop', 'qc.terminal.open']) {
+    assert.ok(actions.slice(0, actions.indexOf('\n    },')).includes(`'${id}'`),
+      `${id} has no 실행할 명령 line, so its card asks the user to confirm a blank`);
+  }
+});
