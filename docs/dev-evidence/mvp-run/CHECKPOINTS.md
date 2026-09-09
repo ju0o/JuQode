@@ -339,3 +339,40 @@ arguments and measures that neither happens.
 
 Next eligible: an independent QA pass over batches 07–12 · the SC-04 evidence-gap and
 per-block work listed in BATCH-06 · DV-11's decision.
+
+## Batch 12 QA + WBS-23 · WBS-24 · WBS-30 · WBS-31
+
+Reports: `BATCH-12-QA.md`. Canon findings raised: CF-18. Deferred: DV-11.
+
+| Package | State |
+|---|---|
+| WBS-23 Quick Command execution & result | IMPLEMENTED |
+| WBS-24 Long-running Quick Command | IMPLEMENTED |
+| WBS-30 Security boundaries | IMPLEMENTED |
+| WBS-31 Testing harness | IMPLEMENTED |
+
+Two independent QA passes (product, technical/security) ran over batches 10–12.
+
+**The central safety claim was attacked and held.** The security review traced `phrase` end to
+end (three destinations, none of them the spawn), COUNTED the reachable argv space (13), and
+threw zero-width characters, RTL marks, homoglyphs, NFC/NFD variants, negations and multi-clause
+sentences at the matcher. Nothing with dangerous content reached residue zero. It also verified
+that no state, reason key or error path can produce a drawer panel without the `19` §S banner.
+
+What it found instead: a card confirmed in one project could RUN in another (the drawer lives
+outside `#root`, so navigation did not clear it, and `실행` reads the project at click time);
+output truncation deleted the MIDDLE of a log and spliced the ends; the mask deleted the file
+and line from build errors; a dev server outlived the app while `reconcileQcRuns` was written,
+tested and called nowhere; and two of the six rules dead-ended because their action is FIXED
+rather than a script — the product explained `터미널 열어줘` and then said it was not one of its
+commands.
+
+The product review found the D-134 card still saying the terminal did not exist, and that the
+batch-11 grammar measurement examined synthetic chips rather than the surfaces the app renders —
+the 오래됨 band was plain card furniture while every chip assertion passed.
+
+444 tests, three e2e files. A Quick Command is now actually EXECUTED in the e2e, so the run-card
+states have rendered evidence for the first time.
+
+Next eligible: WBS-35 (Agent Presence) · WBS-36/37/38 (theme, screen differentiation, 다음 행동)
+· DV-11's pty decision · WBS-32/33 (need humans and Windows).
