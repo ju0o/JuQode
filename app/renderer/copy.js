@@ -262,6 +262,17 @@ export const C = {
     altQc:           '▸ Quick Command 출력으로 확인',
     altRaw:          '▸ Raw Diff로 확인',
     mock:            'JuQode mock shell — 실제 셸이 아니에요.',
+    /* The drawer's own labels. `18` gives the Quick Command panel its OWN title, subtitle,
+     * placeholder and send button, all distinct from SC-02's request field — D-134 keeps the
+     * two apart on purpose, and reusing SC-02's placeholder invited exactly the sentences this
+     * engine refuses. */
+    safetyTag:       '안전 안내',
+    out:             '터미널 출력',
+    qcTitle:         'Quick Command',
+    qcHint:          '말로 적으면 정해진 규칙에 있는 명령만 실행해요',
+    qcPh:            '예: "개발 서버 켜줘" · "테스트 돌려줘" · "빌드해줘" · "Git 상태 보여줘"',
+    qcSend:          '보내기',
+    qcEmpty:         '아직 실행한 Quick Command가 없어요. 위 칸에 말로 적어 보세요.',
   },
 
   qc: {
@@ -389,9 +400,24 @@ export const C = {
       placeholder_script: 'package.json 의 test 스크립트가 npm 기본 자리표시자예요 — 실제 테스트가 없어요.',
       not_git:           '이 프로젝트 폴더는 Git 저장소가 아니에요.',
       unknown_rule:      '정해진 Quick Command 가 아니에요.',
+      /* The handler's OWN refusals, which are hyphenated where `availability()`'s are
+       * underscored. Falling through to `unknown_rule` made the product say "정해진 Quick
+       * Command 가 아니에요" about a command it had just explained as one of the six. */
+      'already-running':  '이 동작은 지금 돌고 있어요. 끝나면 다시 할 수 있어요.',
+      'unknown-rule':     '정해진 Quick Command 가 아니에요.',
+      'not-executable':   '이 동작을 실행할 방법을 찾지 못했어요.',
+      'no-project':       '열려 있는 프로젝트가 없어요.',
     },
     /* Two readings, and the second is always a Work. `15` TD-01 has no key for the sentence. */
     qcAmbiguous:   '두 가지로 읽을 수 있어서 실행하지 않았어요. 어느 쪽인지 골라 주세요.',
+    /* `19` §C4 requires the PRODUCT to say this, not only the source: 「가림은 화면 노출을 줄이는
+     * 것이지 누락 방지가 아니며 완전하지 않다」. Seeing `***` without it reads as "JuQode
+     * protected me", which is the false confidence q02 §5.7 exists to prevent. `18` has no key
+     * for the sentence, so it is marked. */
+    qcMaskNote:    '토큰처럼 보이는 값은 화면에서만 가려요. 전부 걸러내지는 못하고, 원래 내용은 터미널과 로그에 그대로 있어요.',
+    /* `19` §C4: `npm run <script>` also runs `pre<script>` and `post<script>`. The card shows
+     * what will run, and a body that is a strict subset of what executes is not that. */
+    qcAlsoRuns:    '이 스크립트 앞뒤로 함께 실행되는 것',
     qcAsWork:      '▸ Claude Code 작업으로 보내기',
     qcRunningFor:  (cmd) => `실행 중 · ${cmd}`,
     /* `15` TD-01 groups the discoverability list (`실행 · 빌드/테스트 · 확인 · 터미널`). Those

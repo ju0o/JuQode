@@ -13,12 +13,16 @@
  *      so "it exited" is never read as "it worked" — the code is reported as the code.
  *   4. A process handle `{pid, startedAt}` is kept, because a long-running command has to be
  *      stoppable and a pid alone is reusable (`07` §8.5).
- *   5. env VALUES are never printed. The display layer masks token-shaped text, and `19` §C4 is
- *      explicit that the masking is UNMEASURED — see `mask()`.
+ *   5. The display layer masks token-shaped text before it reaches a card. It cannot promise
+ *      that env VALUES never appear: with no shell wrapper JuQode does not control what a
+ *      script prints, so masking is the only mechanism available and `19` §C4 is explicit that
+ *      its effect is UNMEASURED. The product says so on screen, not only here — see `mask()`.
  */
 const { spawn } = require('node:child_process');
 
-/** `20` `quick_command_run.output_ref`: the head that goes on screen, in BYTES. */
+/** `20` `quick_command_run.output_head`: the bounded head that goes on screen, in BYTES.
+ *  (`output_ref` is the blob reference for the full output. Nothing writes one yet — see the
+ *  note on `truncated` in `take()`: what is kept is a genuine PREFIX, and the rest is gone.) */
 const OUTPUT_LIMIT = 64 * 1024;
 
 /** `15` TD-01: the running card shows a live tail of the last three lines. */
@@ -33,11 +37,24 @@ const TAIL_LINES = 3;
  * treats this as a containment boundary is wrong. */
 const TOKENISH = [
   /\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{16,}/g,
-  /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bsk[-_](?:live|test)?[-_]?[A-Za-z0-9_-]{16,}/g,
   /\bxox[abposr]-[A-Za-z0-9-]{8,}/g,
   /\bAKIA[0-9A-Z]{12,}/g,
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
-  /\b[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY)[A-Za-z0-9_]*\s*[=:]\s*\S+/gi,
+  /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{16,}/g,
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]+@/g,          // scheme://user:password@host
+  /* An ENV-VAR-SHAPED name and its value, on ONE line.
+   *
+   * MEASURED before this was narrowed: case-insensitive matching plus `\s*` after the separator
+   * turned `SyntaxError: Unexpected token: '}' at line 12` into `Unexpected *** at line 12`,
+   * and — because `\s*` crosses newlines — deleted the `src/app.ts:14:2` line that FOLLOWED an
+   * `Unexpected token:`. `qc.build` and `qc.test` exist to show a user why something failed, and
+   * this was removing the file and line from the failure.
+   *
+   * So: the NAME must look like an environment variable (upper-case, digits, underscores — it
+   * is one), and the value must be on the same line. `password:` in an English sentence is not
+   * an environment variable and is left alone. */
+  /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*\S+/g,
 ];
 
 /** Replace token-shaped runs. See TOKENISH: this is a reduction, never a guarantee. */
@@ -89,11 +106,31 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
   }
 
   const take = (chunk) => {
-    /* Bounded, and the BOUND IS SAID. `20` keeps a head and the rest goes to the log — silently
-     * dropping the tail would make "출력 보기" show a complete-looking output that is not. */
+    /* Bounded, and the BOUND IS SAID.
+     *
+     * MEASURED before this: an oversized chunk was skipped and LATER, smaller chunks were still
+     * appended — so the middle of the log vanished and the two ends were spliced together with
+     * nothing to say so. A build that printed 60 KB of warnings, then a 20 KB error block, then
+     * `Build failed with 1 error` showed the warnings and the final line, reading as a complete
+     * log with exactly the error missing.
+     *
+     * Once the head is full it is FULL: the cut sets `bytes` to the limit, so every later chunk
+     * takes the branch below and appends nothing. What is on screen is a genuine PREFIX of what
+     * the command printed, and `truncated` says there is more. */
     const s = String(chunk);
     const size = Buffer.byteLength(s, 'utf8');
-    if (bytes + size > OUTPUT_LIMIT) { truncated = true; return; }
+    if (bytes + size > OUTPUT_LIMIT) {
+      /* Keep the part that fits, so the cut lands mid-stream rather than discarding a whole
+       * chunk that might be the only interesting one. */
+      const room = OUTPUT_LIMIT - bytes;
+      if (room > 0) {
+        out += Buffer.from(s, 'utf8').subarray(0, room).toString('utf8').replace(/\uFFFD$/, '');
+        bytes = OUTPUT_LIMIT;
+      }
+      truncated = true;
+      onUpdate({ state: 'running', pid: child.pid, startedAt, tail: tail(mask(out)), truncated });
+      return;
+    }
     bytes += size;
     out += s;
     onUpdate({ state: 'running', pid: child.pid, startedAt, tail: tail(mask(out)) });
@@ -168,7 +205,13 @@ const DRAIN_MS = 250;
 function stopGroup(child) {
   const pid = child?.pid;
   if (!pid) return;
+  /* `07` §8.5: a pid is REUSABLE. Both signals are guarded, not only the SIGKILL — the SIGTERM
+   * used to fire unconditionally, and pressing 멈추기 in the window between a child's exit and
+   * its handle being dropped signalled a process group id that no longer belonged to us. */
+  const gone = () => child.exitCode !== null || child.signalCode !== null;
+  if (gone()) return;
   const signal = (sig) => {
+    if (gone()) return;
     try { process.kill(-pid, sig); }              // the group
     catch { try { child.kill(sig); } catch { /* already gone */ } }
   };
@@ -176,7 +219,7 @@ function stopGroup(child) {
   const timer = setTimeout(() => {
     /* Still there after the grace period. `07` §8.5: a pid is reusable, so this only fires
      * while the handle we started is still the process we are holding. */
-    if (child.exitCode === null && child.signalCode === null) signal('SIGKILL');
+    signal('SIGKILL');
   }, STOP_GRACE_MS);
   /* Never hold the app open just to wait for a kill that may not be needed. */
   timer.unref?.();

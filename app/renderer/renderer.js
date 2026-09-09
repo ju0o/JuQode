@@ -27,7 +27,29 @@ const state = { project: null, interpretation: null, recent: [], store: { ok: fa
                 /* TD-01 · the drawer and its Quick Command card. It lives OUTSIDE `#root`, so
                  * its state survives every screen render — `15`: 닫으면 화면 상태가 보존된다. */
                 drawerOpen: false, qcPhrase: '', qcCard: null, qcRun: null,
-                qcDiscover: null, qcOutputOpen: false, toWork: null };
+                qcDiscover: null, qcOutputOpen: false, toWork: null, drawerProject: null };
+
+/* The drawer lives OUTSIDE `#root`, so navigation does not redraw it — which means its state
+ * survives a project switch unless something clears it. A Quick Command card explains a command
+ * built from ONE project's package.json, and `실행` reads `state.project.id` at CLICK time: a
+ * card confirmed in project A would run project A's command string against project B's scripts.
+ * `19` §C4's whole mechanism is 항상 설명 후 확인, and that is only worth anything if the thing
+ * confirmed is the thing that runs. */
+/* Assigned below, after the first render. `nav.toPicker()` runs before the drawer is mounted,
+ * so this is a `let` rather than a const the router closes over too early. */
+let drawer = null;
+
+function clearDrawerState() {
+  state.qcPhrase = '';
+  state.qcCard = null;
+  state.qcRun = null;
+  state.qcDiscover = null;
+  state.qcOutputOpen = false;
+  state.toWork = null;
+  /* …and the drawer closes with the project, because a drawer left open over SC-01 has no cwd
+   * to act in and every control in it would fail on a null project. */
+  state.drawerOpen = false;
+}
 
 const nav = {
   /* `opts.intent` prefills the request field — WBS-19's correction path arrives that way. It is
@@ -41,6 +63,9 @@ const nav = {
     state.briefFolded = Boolean(interpretation);
     state.stale = null;
     state.refreshFailed = null;
+    /* A different project means a different set of scripts — see `clearDrawerState`. */
+    if (state.drawerProject && state.drawerProject !== project?.id) clearDrawerState();
+    state.drawerProject = project?.id ?? null;
     state.workSnapshot = null;
     state.reader = null; state.readerGroup = 0; state.readerRaw = false;
     state.prefill = opts.intent ?? null;
@@ -63,6 +88,9 @@ const nav = {
   },
   async toPicker() {
     state.project = null;
+    clearDrawerState();
+    state.drawerProject = null;
+    drawer?.paint();
     state.interpretation = null;
     state.workSnapshot = null;
     state.screen = 'SC-01';
@@ -79,7 +107,7 @@ await nav.toPicker();
 /* TD-01 · mounted ONCE, over whatever screen is up. `15`: the drawer covers the bottom of the
  * current screen and closing it preserves what is underneath — so it cannot be a child of
  * `#root`, which every screen render clears. */
-const drawer = mountDrawer(api, state, () => {
+drawer = mountDrawer(api, state, () => {
   /* A card can hand a phrase back to the Work path (미인식 · 모호함 → Claude Code 작업). That
    * is a NAVIGATION, and it belongs to the router rather than to the drawer. */
   if (state.toWork && state.project) {
@@ -108,6 +136,17 @@ window.addEventListener('keydown', (e) => {
 });
 
 /* The top-bar toggle each screen draws calls this. */
+/* D-134 · `15` SC-02: opening the drawer FROM the request field carries the user's sentence into
+ * the Quick Command box, so they do not retype what they already said. */
+window.__openDrawerWith = (phrase) => {
+  if (!state.project) return;
+  state.qcPhrase = String(phrase ?? '');
+  state.qcCard = null;
+  state.qcRun = null;
+  state.drawerOpen = true;
+  drawer.paint();
+};
+
 window.__toggleDrawer = () => {
   if (!state.project) return;
   state.drawerOpen = !state.drawerOpen;

@@ -80,3 +80,7 @@
 .td01-rule .grow { flex: 1; }
 .td01-why { padding-left: 2px; }
 .td01-discover { align-self: flex-start; }
+
+/* A script body is judged line by line, so it keeps its lines. Collapsing them reflows the
+   thing the user is being asked to approve into a shape it does not have in the file. */
+.td01-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }

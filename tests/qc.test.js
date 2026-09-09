@@ -670,19 +670,28 @@ test('a run that fails says so, with the code — never as success', async () =>
   assert.strictEqual(row.exit_code, 2);
 });
 
-test('two Quick Commands cannot run at once in one project', async () => {
+test('a running dev server does not block a different Quick Command', async () => {
+  /* `19` §C6 REC-010: long-running Quick Commands run in their OWN child processes **so the
+   * drawer stays usable**. A blanket one-at-a-time rule meant a running dev server stopped the
+   * user asking for `git status` — and stopped the 개발 서버 끄기 rule from reaching its own
+   * handler at all. What is refused is the SAME rule twice. */
   const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setTimeout(()=>{},5000)"', test: 'node -e "1"' }) });
   const first = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.start', '서버 켜줘');
   assert.strictEqual(first.ok, true);
   assert.strictEqual(first.kind, 'long_running');
 
-  const second = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
-  assert.strictEqual(second.ok, false);
-  assert.strictEqual(second.reason, 'already-running');
+  const other = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
+  assert.strictEqual(other.ok, true, 'a dev server blocked an unrelated Quick Command');
+
+  const second = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.start', '서버 켜줘');
+  assert.strictEqual(second.ok, false, 'the same rule started twice');
+  assert.ok(['already-running', 'unavailable'].includes(second.reason));
 
   /* `20` `qc_status` separates `running` from `long_running`, and `15` TD-01 shows 계속 실행 중
    * for the second — never 완료. The ROW is what a restart reads, so the row has to carry it. */
-  assert.strictEqual(repo.qcRunning(b.db, b.project.id).status, 'long_running',
+  /* Two runs are live now, so the row is named rather than taken as "the running one". */
+  const devRow = repo.qcRunsFor(b.db, b.project.id).find((x) => x.rule_id === 'qc.dev.start');
+  assert.strictEqual(devRow.status, 'long_running',
     'a long-running command was recorded as an ordinary one');
 
   b.h['juqode:qc-stop'](null, b.project.id);
@@ -763,4 +772,202 @@ test('a running TEST is not a dev server', async () => {
   await new Promise((res) => {
     const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
   });
+});
+
+/* ───────── the two rules that spawn NOTHING — `19` §C4's fixed actions ───────── */
+
+test('터미널 열어줘 actually does something when 실행 is pressed', async () => {
+  /* MEASURED by the batch-12 product review, and it is the "test that cannot fail" pattern
+   * again: the earlier test asserted `available === true` and never pressed 실행. Both of the
+   * rules whose action is FIXED rather than a package.json script returned `available: true`
+   * with no argv, and the run handler refused them as `not-executable` — so the product
+   * explained `터미널 열어줘` as one of its six commands and then said, on the next click,
+   * "정해진 Quick Command 가 아니에요". Two of six rules dead-ended. */
+  const b = qcBench({});                     // no package.json, no .git — the terminal needs neither
+  const routed = b.h['juqode:qc-route'](null, b.project.id, '터미널 열어줘');
+  assert.strictEqual(routed.route.id, 'qc.terminal.open');
+  assert.strictEqual(routed.available, true);
+
+  const run = await b.h['juqode:qc-run'](null, b.project.id, 'qc.terminal.open', '터미널 열어줘');
+  assert.strictEqual(run.ok, true, `실행 was refused: ${run.reason}/${run.detail}`);
+  assert.strictEqual(run.action, 'open-drawer');
+  /* `20` F-12: nothing was spawned, so there is no row — the same rule a Work that never
+   * started obeys. */
+  assert.deepStrictEqual(repo.qcRunsFor(b.db, b.project.id), []);
+});
+
+test('개발 서버 꺼줘 signals the server JuQode started', async () => {
+  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setTimeout(()=>{},5000)"' }) });
+
+  /* With nothing running it is 사용 불가 — and pressing 실행 says the SAME reason, not a
+   * different one from a different vocabulary. */
+  const refused = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.stop', '서버 꺼줘');
+  assert.strictEqual(refused.ok, false);
+  assert.strictEqual(refused.detail, 'not_running',
+    'the run handler answered with a reason the card cannot render');
+
+  const started = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.start', '서버 켜줘');
+  assert.strictEqual(started.ok, true);
+
+  const stop = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.stop', '서버 꺼줘');
+  assert.strictEqual(stop.ok, true, `stopping was refused: ${stop.reason}/${stop.detail}`);
+  assert.strictEqual(stop.action, 'stop');
+  assert.strictEqual(stop.stoppingRunId, started.runId, 'the stop did not name the run it stops');
+
+  await new Promise((res) => {
+    const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
+  });
+  const [row] = repo.qcRunsFor(b.db, b.project.id);
+  assert.strictEqual(row.status, 'stopped', 'a stopped server was recorded as finished');
+  assert.ok(row.stopped_at, '`20` keeps stopped_at for a run that was signalled');
+});
+
+test('every refusal the run handler can give has a sentence', () => {
+  /* The card looks the reason up in `18`/gap. `availability()` uses underscores and the handler
+   * uses hyphens, so a handler reason fell through to `unknown_rule` — "정해진 Quick Command 가
+   * 아니에요" about a command the product had just explained. Every reason either side can
+   * produce must resolve to something true. */
+  const copy = fs.readFileSync(path.join(R, 'app/renderer/copy.js'), 'utf8');
+  const HANDLER = ['already-running', 'unknown-rule', 'not-executable', 'no-project'];
+  const AVAIL = ['no_script', 'no_package_json', 'already_running', 'not_running',
+                 'placeholder_script', 'not_git', 'unknown_rule'];
+  for (const r of [...HANDLER, ...AVAIL]) {
+    assert.ok(new RegExp(`['"]?${r}['"]?\\s*:`).test(copy),
+      `the card has no sentence for the refusal "${r}"`);
+  }
+});
+
+/* ───────── batch-12 security review · what the fixes have to keep true ───────── */
+
+test('a full output is a genuine PREFIX, never a spliced-together middle', async () => {
+  /* MEASURED by the review: an oversized chunk was skipped and LATER, smaller chunks were still
+   * appended, so the middle of the log vanished and the ends were spliced with nothing to say
+   * so. A build printing 60 KB of warnings, then a 20 KB error block, then a final "failed"
+   * line showed the warnings and the final line — a complete-looking log missing the error. */
+  const dir = project({});
+  const big = run.OUTPUT_LIMIT;
+  const out = await run.start({
+    argv: ['sh', '-c', `head -c ${big} /dev/zero | tr '\\0' 'A'; head -c 2000 /dev/zero | tr '\\0' 'B'; echo ZZZ-END`],
+    cwd: dir,
+  }).done;
+
+  assert.strictEqual(out.truncated, true, 'the fixture did not exceed the limit');
+  assert.ok(!out.output.includes('ZZZ-END'),
+    'the tail was spliced onto the head — the log reads as complete and is not');
+  assert.ok(!out.output.includes('B'), 'content from after the cut survived the cut');
+  assert.ok(Buffer.byteLength(out.output, 'utf8') <= run.OUTPUT_LIMIT);
+  /* …and what IS kept is exactly a prefix of what was printed. */
+  assert.ok(/^A+$/.test(out.output), 'the kept head is not a contiguous prefix');
+});
+
+test('masking does not eat a build error, its file, or its line', () => {
+  /* MEASURED: case-insensitive matching plus `\s*` after the separator turned
+   * `SyntaxError: Unexpected token: '}' at line 12` into `Unexpected *** at line 12`, and —
+   * because `\s*` crosses newlines — deleted the `src/app.ts:14:2` line FOLLOWING an
+   * `Unexpected token:`. These two rules exist to show a user why something failed. */
+  const keep = [
+    "SyntaxError: Unexpected token: '}' at line 12",
+    '  ok 4 - token: identifier',
+    'PASS  parses password: field of the login form',
+    'Unexpected token:\nsrc/app.ts:14:2\n  const x = 1',
+    'const tokenPath = resolve(dir)',
+    'error TS2345: Argument of type secret: string is not assignable',
+  ];
+  for (const t of keep) {
+    assert.strictEqual(run.mask(t), t, `masking destroyed ordinary output: ${JSON.stringify(t)}`);
+  }
+});
+
+test('masking still catches the shapes it is for', () => {
+  /* The counterpart — a mask narrowed until it matches nothing would pass the test above. */
+  const mask = [
+    ['GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyz', 'ghp_'],
+    ['API_KEY: 0123456789abcdef', '0123456789'],
+    ['DB_PASSWORD=hunter2', 'hunter2'],
+    ['authorization: Bearer FAKEabcdefghij0123456789', 'FAKEabcdefghij'],
+    ['postgres://admin:FAKEpassword123@db.internal:5432/app', 'FAKEpassword123'],
+    ['sk_live_FAKEabcdefghij0123', 'FAKEabcdefghij'],
+    ['AWS_ACCESS_KEY_ID=AKIA0123456789ABCDEF', 'AKIA0123456789'],
+  ];
+  for (const [text, secret] of mask) {
+    const m = run.mask(text);
+    assert.ok(m.includes('***'), `nothing was masked in ${text.split(/[=:]/)[0]}`);
+    assert.ok(!m.includes(secret), `the value survived masking in ${text.split(/[=:]/)[0]}`);
+  }
+});
+
+test('stopping a child that already exited signals nothing', () => {
+  /* `07` §8.5: a pid is REUSABLE. The SIGKILL was guarded and the SIGTERM was not, so pressing
+   * 멈추기 in the window between a child's exit and its handle being dropped signalled a group
+   * id that no longer belonged to us.
+   *
+   * `assert.doesNotThrow` cannot see this — signalling a dead group raises ESRCH, which the
+   * code catches. What the test has to observe is that NO SIGNAL WAS SENT, so `process.kill`
+   * is recorded for the length of the call. */
+  const dir = project({});
+  const r = run.start({ argv: ['sh', '-c', 'exit 0'], cwd: dir });
+  return r.done.then(() => {
+    const real = process.kill;
+    const sent = [];
+    process.kill = (pid, sig) => { sent.push([pid, sig]); return real.call(process, pid, sig); };
+    try {
+      r.stop();
+      r.stop();
+    } finally {
+      process.kill = real;
+    }
+    assert.deepStrictEqual(sent, [],
+      `a signal was sent to a reaped process group: ${JSON.stringify(sent)}`);
+  });
+});
+
+test('stopping a child that IS running does signal it', () => {
+  /* The counterpart. A guard that never signals would pass the test above and make 멈추기 a
+   * button that does nothing. */
+  const dir = project({});
+  const r = run.start({ argv: ['sh', '-c', 'sleep 30'], cwd: dir, kind: 'long_running' });
+  return new Promise((res) => setTimeout(res, 120)).then(() => {
+    const real = process.kill;
+    const sent = [];
+    process.kill = (pid, sig) => { sent.push([pid, sig]); return real.call(process, pid, sig); };
+    try { r.stop(); } finally { process.kill = real; }
+    assert.ok(sent.length >= 1, '멈추기 sent no signal to a running child');
+    assert.strictEqual(sent[0][1], 'SIGTERM', '`19` §C4: SIGTERM first, then SIGKILL after 5 s');
+    assert.ok(sent[0][0] < 0, '`07` §8.2: the whole process GROUP, not just the parent');
+    return r.done;
+  });
+});
+
+test('a script\'s pre/post hooks are disclosed, because they also run', () => {
+  /* VERIFIED against npm 9.2.0: `npm run build` runs `prebuild` and `postbuild` too. Showing
+   * only the named script made the card display a strict SUBSET of what 실행 executes — and
+   * JuQode's own Work path lets Claude Code write package.json. */
+  const root = project({ 'package.json': pkg({
+    prebuild: 'node ./tools/generate.js', build: 'vite build', postbuild: 'node ./tools/ship.js',
+    test: 'node --test',
+  }) });
+  const a = availability('qc.build', { root });
+  assert.strictEqual(a.available, true);
+  assert.deepStrictEqual(a.data.hooks.map((h) => h.script), ['prebuild', 'postbuild']);
+  assert.strictEqual(a.data.hooks[0].body, 'node ./tools/generate.js');
+
+  /* …and a script with no hooks reports none, rather than an empty section on the card. */
+  assert.deepStrictEqual(availability('qc.test', { root }).data.hooks, []);
+});
+
+test('the filler list is Canon\'s six and nothing more', () => {
+  /* Every extra filler WIDENS the path to a spawn: `서버 얼른 켜줘` ran, where Canon's list
+   * leaves it 미인식 and sends it to a Work. `19` §C4 writes all six out, so there is nothing
+   * to reconstruct here, and the corpus is 87/87 against exactly these. */
+  const { FILLERS } = require(path.join(R, 'app/main/qc/rules.js'));
+  assert.deepStrictEqual([...FILLERS].sort(), ['그냥', '빨리', '제발', '좀', '지금', '한번'].sort());
+
+  for (const phrase of ['서버 얼른 켜줘', '빌드 일단 돌려줘', '테스트 혹시 실행해줘', '서버 부탁 켜줘']) {
+    assert.strictEqual(match(phrase).kind, 'unrecognized',
+      `"${phrase}" reached a rule — Canon's stance is 정밀도 우선`);
+  }
+  /* …and Canon's own six still work. */
+  for (const phrase of ['서버 좀 켜줘', '서버 제발 켜줘', '빌드 한번 해줘', '테스트 그냥 돌려줘']) {
+    assert.strictEqual(match(phrase).kind, 'qc', `"${phrase}" stopped working`);
+  }
 });

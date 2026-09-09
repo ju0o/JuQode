@@ -123,6 +123,22 @@ if (!app.requestSingleInstanceLock()) {
        * `interpreted` — the answers it had are kept, and none are invented to fill the gap. */
       const stalled = repo.reconcileInterpretations(db);
       if (stalled.length) trace('interpretation.reconciled', { count: stalled.length });
+
+      /* …and a Quick Command. `20`: a run still `running`/`long_running` whose process is gone
+       * becomes `unknown`, with the exit code left null because nobody observed one.
+       *
+       * This function existed and was tested and was CALLED NOWHERE, so a dev server that
+       * outlived a quit left its row `long_running` forever: the History said it was still
+       * going, 개발 서버 꺼줘 said `not_running` because the handle was gone with the process
+       * that held it, and 켜줘 happily started a second one onto the same port. */
+      const qcLost = repo.reconcileQcRuns(db, (row) => {
+        if (!row.started_at) return false;
+        /* There is no pid column (`20` has none), so a run from a previous launch cannot be
+         * asked about at all — this process did not start it and holds no handle. Anything
+         * still open at boot belongs to a JuQode that is no longer running. */
+        return false;
+      });
+      if (qcLost.length) trace('qc.reconciled', { count: qcLost.length });
     }
 
     /* Anything we started is ours to stop. Without this, quitting mid-Work leaves the CLI
@@ -131,6 +147,10 @@ if (!app.requestSingleInstanceLock()) {
       for (const [, entry] of supervisor.live) {
         if (entry.child) { try { require('./claude/session').stop(entry.child); } catch { /* gone */ } }
       }
+      /* Quick Commands too. A `qc.dev.start` child is spawned detached and MEASURABLY outlives
+       * its parent — quitting left vite holding the port, with JuQode unable to stop the server
+       * it had started because the handle went with the process that held it. */
+      try { handlers.__stopAllQc?.(); } catch { /* nothing running */ }
     });
 
     /* The quiet states are defined by the absence of a signal, so only a clock can deliver

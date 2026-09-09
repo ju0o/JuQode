@@ -56,6 +56,23 @@ function readPackage(root) {
  *   `reason` is a key from `19` §C4's table: no_script · no_package_json · already_running ·
  *   not_running · placeholder_script · not_git.
  */
+/**
+ * `npm run <script>` ALSO runs `pre<script>` and `post<script>` — verified against npm 9.2.0.
+ * So the body of the named script is a strict SUBSET of what a confirmation actually confirms,
+ * and `19` §C4's reason for showing it ("a user whose `start` does something else entirely needs
+ * to see that before it runs") is defeated unless the hooks are shown too. JuQode's own Work path
+ * lets Claude Code write `package.json`, which makes this the one real bridge from a sentence to
+ * arbitrary shell — and the card is where it has to be disclosed.
+ */
+function hooksFor(scripts, name) {
+  const out = [];
+  for (const [prefix, hook] of [['pre', `pre${name}`], ['post', `post${name}`]]) {
+    const body = scripts[hook];
+    if (typeof body === 'string' && body.trim()) out.push({ when: prefix, script: hook, body });
+  }
+  return out;
+}
+
 function availability(ruleId, { root, devServer = null } = {}) {
   const no = (reason, data = {}) => ({ available: false, reason, data });
   const yes = (data = {}) => ({ available: true, reason: null, data });
@@ -97,13 +114,14 @@ function availability(ruleId, { root, devServer = null } = {}) {
      * useful thing. A server already running is otherwise the first answer forever. */
     if (devServer) return no('already_running', { pid: devServer.pid, startedAt: devServer.startedAt });
     return yes({ command: `${pm} run ${script}`, argv: [pm, 'run', script],
-                 script, scriptBody: scripts[script], cwd: root, pm });
+                 script, scriptBody: scripts[script], hooks: hooksFor(scripts, script), cwd: root, pm });
   }
 
   if (ruleId === 'qc.build') {
     if (typeof scripts.build !== 'string' || !scripts.build.trim()) return no('no_script');
     return yes({ command: `${pm} run build`, argv: [pm, 'run', 'build'],
-                 script: 'build', scriptBody: scripts.build, cwd: root, pm });
+                 script: 'build', scriptBody: scripts.build, hooks: hooksFor(scripts, 'build'),
+                 cwd: root, pm });
   }
 
   if (ruleId === 'qc.test') {
@@ -113,7 +131,8 @@ function availability(ruleId, { root, devServer = null } = {}) {
      * user is entitled to see what is actually in their file. */
     if (PLACEHOLDER_TEST.test(scripts.test)) return no('placeholder_script', { scriptBody: scripts.test });
     return yes({ command: `${pm} run test`, argv: [pm, 'run', 'test'],
-                 script: 'test', scriptBody: scripts.test, cwd: root, pm });
+                 script: 'test', scriptBody: scripts.test, hooks: hooksFor(scripts, 'test'),
+                 cwd: root, pm });
   }
 
   /* An id that is not one of the six. The rule set is CLOSED (`20`.quick_command_rule), so this

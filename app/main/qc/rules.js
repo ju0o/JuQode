@@ -32,8 +32,14 @@
 /* ── normalization (§2) — deterministic string work only.
  * No morphological analysis, no spell correction, no similarity score, no model call. */
 
-const FILLERS = ['좀만', '좀', '제발', '빨리', '한번', '지금', '그냥', '얼른', '일단', '우선',
-                 '잠깐', '혹시', '부탁'];
+/* `19` §C4's list, and ONLY it: 좀 · 제발 · 빨리 · 한번 · 지금 · 그냥.
+ *
+ * Seven more were added here (얼른 · 일단 · 우선 · 잠깐 · 혹시 · 부탁 · 좀만) and each one WIDENS
+ * the path to a spawn: `서버 얼른 켜줘` ran, where Canon's list leaves it 미인식 and sends it to
+ * a Work. Canon's stance is 정밀도 우선 and its corpus is 87/87 against these six. The rest of
+ * this file reconstructs lists Canon elides; this one Canon writes out in full, so there is
+ * nothing to reconstruct. */
+const FILLERS = ['좀', '제발', '빨리', '한번', '지금', '그냥'];
 const TAIL_PUNCT = /[.!?~…,;:'"”’)\]】」』]+$/u;
 const TAIL_EMOTE = /(?:ㅋ+|ㅎ+|ㅠ+|ㅜ+)+$/u;
 

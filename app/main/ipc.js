@@ -61,8 +61,8 @@ function makeHandlers(deps) {
   /* The dev server JuQode ITSELF started, or null. `19` §C4: a server the user started in their
    * own terminal has no handle here and is never signalled. */
   const devServerOf = (projectId) => {
-    const live = qcLive.get(projectId);
-    if (!live || live.ruleId !== 'qc.dev.start') return null;
+    const live = [...qcLive.values()].find((e) => e.projectId === projectId && e.ruleId === 'qc.dev.start');
+    if (!live) return null;
     return { pid: live.handle.pid, startedAt: live.handle.startedAt, command: live.command };
   };
   const needDb = () => (db() ? null : { ok: false, reason: 'no-store', detail: deps.dbFault?.() ?? null });
@@ -76,13 +76,18 @@ function makeHandlers(deps) {
   let detecting = null;
   /* Projects with an explanation pass in flight — see `juqode:work-explain`. */
   const explaining = new Set();
-  /* WBS-22 · live Quick Command handles, by project. `19` §C4 keeps {pid, started_at} because a
-   * long-running command has to be stoppable, and `07` §8.5 makes a pid alone insufficient. */
+  /* WBS-22 · live Quick Command handles, keyed by RUN. `19` §C4 keeps {pid, started_at} because
+   * a long-running command has to be stoppable, and `07` §8.5 makes a pid alone insufficient.
+   *
+   * Keyed by run, not by project, because `19` §C6 REC-010 says long-running Quick Commands run
+   * in their OWN child processes **so the drawer stays usable** — a dev server must not stop the
+   * user from asking for `git status`. What is refused is a second run of the SAME rule. */
   const qcLive = new Map();
+  const liveFor = (projectId) => [...qcLive.values()].filter((e) => e.projectId === projectId);
   /* …and with a narrative pass in flight (`19` §C1 ⑦). Both spawn a Claude Code child. */
   const narrating = new Set();
 
-  return {
+  const handlers = {
     'juqode:versions': () => deps.versions?.() ?? {},
 
     'juqode:boot': () => ({
@@ -244,13 +249,39 @@ function makeHandlers(deps) {
       /* The id must be one of the SIX. A renderer that could name any string could ask for a
        * rule the table does not have, and `20`'s foreign key would be the only thing left. */
       if (!qcRules.ruleById(ruleId)) return { ok: false, reason: 'unknown-rule' };
-      if (qcLive.has(projectId)) return { ok: false, reason: 'already-running' };
+      /* The SAME rule twice is refused; two DIFFERENT rules are not. `19` §C6 REC-010. */
+      if (liveFor(projectId).some((e) => e.ruleId === ruleId)) {
+        return { ok: false, reason: 'already-running' };
+      }
 
       const rule = qcRules.ruleById(ruleId);
       const avail = qcAvail.availability(ruleId, { root: row.path, devServer: devServerOf(projectId) });
       /* Availability is re-checked HERE, not trusted from the card: the project can change
        * between the explanation and the confirmation, and the card is a snapshot. */
       if (!avail.available) return { ok: false, reason: 'unavailable', detail: avail.reason, data: avail.data };
+
+      /* `19` §C4 names THREE kinds of action, not one: a package.json script, and two FIXED
+       * actions that spawn nothing — opening the drawer, and SIGTERM→5 s→SIGKILL to a pid
+       * JuQode started. Treating "no argv" as "not executable" made the product explain
+       * `터미널 열어줘` and `개발 서버 꺼줘` as commands it understood and then refuse them as
+       * commands it did not have. Two of the six rules dead-ended. */
+      if (ruleId === 'qc.terminal.open') {
+        /* JuQode's own action. Nothing is spawned, so `20` F-12 gives it no row — the same rule
+         * a Work that never started obeys. */
+        return { ok: true, action: 'open-drawer', kind: rule.kind };
+      }
+
+      if (ruleId === 'qc.dev.stop') {
+        /* The stop signal goes to the handle JuQode is holding. `19` §C4: a server started
+         * outside JuQode has no handle here and is never signalled — `availability()` already
+         * refused with `not_running` if there is none. */
+        const live = liveFor(projectId).find((e) => e.ruleId === 'qc.dev.start');
+        if (!live) return { ok: false, reason: 'unavailable', detail: 'not_running', data: {} };
+        live.handle.stop();
+        return { ok: true, action: 'stop', stoppingRunId: live.runId, pid: live.handle.pid,
+                 command: live.command, kind: rule.kind };
+      }
+
       if (!avail.data.argv) return { ok: false, reason: 'not-executable' };
 
       const status = rule.kind === 'long_running' ? 'long_running' : 'running';
@@ -262,10 +293,10 @@ function makeHandlers(deps) {
         argv: avail.data.argv, cwd: row.path, kind: rule.kind,
         onUpdate: (u) => deps.pushQc?.({ runId, projectId, ruleId, ...u }),
       });
-      qcLive.set(projectId, { runId, ruleId, handle, command: avail.data.command });
+      qcLive.set(runId, { runId, projectId, ruleId, handle, command: avail.data.command });
 
       handle.done.then((res) => {
-        qcLive.delete(projectId);
+        qcLive.delete(runId);
         repo.endQcRun(db(), runId, {
           /* `20` `qc_status`: success · failed · stopped · unknown. `07` §8.1 — a signalled
            * child is `stopped`, never `success`, whatever code it carried. */
@@ -274,7 +305,11 @@ function makeHandlers(deps) {
           endedAt: res.endedAt, stoppedAt: res.signal ? res.endedAt : null,
         });
         deps.pushQc?.({ runId, projectId, ruleId, ...res, ended: true });
-      });
+      /* The store can be closed before a child settles (quit races the last exit), and an
+       * unhandled rejection in the main process is a crash. The row is left un-ended, which
+       * boot reconciliation turns into `확인 불가` — the honest outcome for a run nobody saw
+       * finish. */
+      }).catch(() => { qcLive.delete(runId); });
 
       return { ok: true, runId, pid: handle.pid, startedAt: handle.startedAt,
                command: avail.data.command, kind: rule.kind };
@@ -282,10 +317,15 @@ function makeHandlers(deps) {
 
     /* WBS-22 · stop the one JuQode started. `19` §C4: JuQode 밖에서 켠 서버는 끄지 않는다 —
      * there is no handle for one, so there is nothing here that could. */
-    'juqode:qc-stop': (_e, projectId) => {
+    'juqode:qc-stop': (_e, projectId, runId = null) => {
       const gate = needDb();
       if (gate) return gate;
-      const live = qcLive.get(projectId);
+      const running = liveFor(projectId);
+      /* A named run, else the dev server, else the only thing going. `19` §C4: only a process
+       * JuQode itself started can be signalled, and every entry here is one. */
+      const live = (runId && qcLive.get(runId)?.projectId === projectId ? qcLive.get(runId) : null)
+        ?? running.find((e) => e.ruleId === 'qc.dev.start')
+        ?? (running.length === 1 ? running[0] : null);
       if (!live) return { ok: false, reason: 'not-running' };
       live.handle.stop();
       return { ok: true, runId: live.runId };
@@ -435,6 +475,26 @@ function makeHandlers(deps) {
         .map((s) => ({ seq: s.seq, source: s.source, kind: s.kind, payload: s.payload, at: s.observed_at })) };
     },
   };
+
+  /* Everything JuQode started, stopped. Called from `before-quit` — NOT an IPC channel, so it
+   * is defined off the enumerable surface: the preload/main channel lists must match exactly,
+   * and an internal hook in that map would be a channel the renderer could name.
+   *
+   * A Quick Command child is detached and MEASURABLY outlives its parent, so quitting without
+   * this leaves a dev server holding a port the next launch cannot free — the handle goes with
+   * the process that held it. */
+  Object.defineProperty(handlers, '__stopAllQc', {
+    enumerable: false,
+    value: () => {
+      const n = qcLive.size;
+      for (const entry of qcLive.values()) {
+        try { entry.handle.stop(); } catch { /* already gone */ }
+      }
+      return n;
+    },
+  });
+
+  return handlers;
 }
 
 module.exports = { makeHandlers };

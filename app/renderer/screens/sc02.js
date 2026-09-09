@@ -167,8 +167,11 @@ export function renderSC02(root, api, nav, state) {
       const route = routed?.route?.route ?? 'work';
 
       /* Not a failure and not red — a place, not a refusal (D-134). */
-      if (route === 'terminal') { consequence.appendChild(terminalCard()); return; }
-      if (route === 'ambiguous') { consequence.appendChild(ambiguousCard(routed.route, () => startWork(text))); return; }
+      if (route === 'terminal') { consequence.appendChild(terminalCard(text, () => startWork(text))); return; }
+      if (route === 'ambiguous') {
+        consequence.appendChild(ambiguousCard({ ...routed.route, phrase: text }, () => startWork(text)));
+        return;
+      }
       if (route === 'unrecognized') { consequence.appendChild(line(C.intent.routeUnrec)); return; }
       await startWork(text);
     } finally { submit.disabled = false; }
@@ -295,15 +298,19 @@ const line = (t) => el('div', 'sm routeline', t);
 
 /* D-134: a technical execution request is not run and is not an error. Neutral, never red.
  *
- * The drawer this would open is WBS-25. Until it exists the card says so in a sentence rather
- * than offering a disabled `터미널 열기` — `12` 원칙 4 asks every node for a next action, and a
- * control that cannot act is a dead end with extra steps, not an action. */
-function terminalCard() {
+ * `15` SC-02 · D-134: the card says the terminal is where that lives AND opens the drawer with
+ * the user's own sentence already in the Quick Command field. It used to end on a line saying
+ * the terminal did not exist yet — true when it was written, and false from the moment TD-01
+ * shipped, with the 터미널 button visible in the same top bar. */
+function terminalCard(phrase, toWork) {
   const n = el('div', 'panel grey');
   n.setAttribute('data-el', 'to-terminal');
   n.appendChild(el('div', 'sm t', C.intent.routeQc));
   n.appendChild(el('div', 'xs mut', C.intent.toTermHint));
-  n.appendChild(el('div', 'xs mut2', C.gap.notBuiltTerminal));
+  const acts = el('div', 'row-acts');
+  acts.appendChild(btn('btn sm', C.intent.openTerm, () => window.__openDrawerWith?.(phrase)));
+  acts.appendChild(btn('btn sm ghost', C.intent.toWork, toWork));
+  n.appendChild(acts);
   return n;
 }
 
@@ -321,8 +328,12 @@ function ambiguousCard(routed, toWork) {
   /* Both readings are named in words even where only one is choosable yet — the copy promises
    * "어느 쪽인지 골라 주세요. JuQode가 대신 정하지 않아요", and a disabled control on one side
    * would mean JuQode had in fact chosen. */
-  const other = (routed.options ?? []).filter((o) => o !== 'work');
-  if (other.length) n.appendChild(el('div', 'xs mut2', `${C.intent.toTermHint} ${C.gap.notBuiltTerminal}`));
+  /* Both readings are choosable now that the drawer exists — a named reading with no control
+   * behind it would have meant JuQode had in fact chosen. */
+  for (const opt of (routed.options ?? []).filter((o) => o !== 'work')) {
+    if (opt !== 'terminal' && !String(opt).startsWith('qc')) continue;
+    acts.appendChild(btn('btn sm', C.intent.openTerm, () => window.__openDrawerWith?.(routed.phrase ?? '')));
+  }
   if (!offeredWork) acts.appendChild(btn('btn sm', C.intent.toWork, toWork));
   n.appendChild(acts);
   return n;
