@@ -248,14 +248,18 @@ test('capability containment: each privileged capability lives in exactly one mo
     'showOpenDialog': ['app/main/project.js'],
     'node:sqlite':    ['app/main/db/db.js'],
     'DatabaseSync':   ['app/main/db/db.js'],
-    /* Three modules spawn a process, and each spawns exactly one thing:
+    /* FOUR modules spawn a process, and each spawns exactly one kind of thing:
          claude-detect  — `claude --version` / `auth status`, constant arguments
          claude/session — the headless Claude Code session, constant flags + stdin
          evidence/git   — `git`, never a shell. The arguments are NOT all constant: staged
-                          paths and tree oids flow in, always after `--` or as 40-hex ids */
-    'child_process':  ['app/main/claude-detect.js', 'app/main/claude/session.js', 'app/main/evidence/git.js'],
+                          paths and tree oids flow in, always after `--` or as 40-hex ids
+         qc/run         — WBS-22's Quick Command, from `qc/availability`'s argv: `<pm> run
+                          <script>` with the script name from a closed list, or a fixed vector.
+                          Never a shell, and never anything the user typed (`19` §C4) */
+    'child_process':  ['app/main/claude-detect.js', 'app/main/claude/session.js',
+                       'app/main/evidence/git.js', 'app/main/qc/run.js'],
     'execFile':       ['app/main/claude-detect.js', 'app/main/evidence/git.js'],
-    'spawn(':         ['app/main/claude/session.js'],
+    'spawn(':         ['app/main/claude/session.js', 'app/main/qc/run.js'],
   };
   // never, anywhere: nothing in the built packages needs these, and each is a real hazard
   const NEVER = [

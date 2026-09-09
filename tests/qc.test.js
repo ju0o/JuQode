@@ -397,3 +397,178 @@ test('every command that exists comes from the project or is fixed', () => {
     assert.ok(allowed.has(a.data.command), `${rule.id} produced an unexpected command: ${a.data.command}`);
   }
 });
+
+/* ───────── execution — `19` §C4's safety contract (Q-03) ───────── */
+
+const run = require(path.join(R, 'app/main/qc/run.js'));
+
+test('there is no shell — a metacharacter is argument text, not syntax', async () => {
+  /* The whole safety argument ends here. Recognition already refuses anything with residue, but
+   * this is the last line: `spawn(program, args)` execs the program directly, so even if a
+   * command string somehow carried `&&` or `$(…)` there is no interpreter to interpret it. */
+  const dir = project({});
+  const canary = path.join(dir, 'CANARY');
+  const r = run.start({ argv: ['echo', `x && touch ${canary}`, '; rm -rf /', '$(id)', '`id`'], cwd: dir });
+  const out = await r.done;
+
+  assert.strictEqual(out.state, 'ok');
+  assert.ok(!fs.existsSync(canary), 'a metacharacter in an argument reached a shell');
+  assert.ok(out.output.includes('&&'), 'the argument was mangled instead of passed through');
+  assert.ok(!out.output.includes('uid='), '$(id) was expanded — something interpreted the argument');
+});
+
+test('the exit code is reported as the code, and stderr is not hidden', async () => {
+  /* `19` §C4: 종료 코드·stderr 숨기지 않음. `07` §8.1 measured a cancelled child exiting 0, so
+   * "it ended" is never read as "it worked". */
+  const dir = project({});
+  const out = await run.start({ argv: ['sh', '-c', 'echo to-stdout; echo to-stderr >&2; exit 7'], cwd: dir }).done;
+
+  assert.strictEqual(out.state, 'failed');
+  assert.strictEqual(out.code, 7);
+  assert.ok(out.output.includes('to-stdout'));
+  assert.ok(out.output.includes('to-stderr'), 'stderr was dropped — the user cannot see what failed');
+});
+
+test('a command that succeeds is `ok`, and one that is signalled is `stopped`', async () => {
+  const dir = project({});
+  assert.strictEqual((await run.start({ argv: ['sh', '-c', 'exit 0'], cwd: dir }).done).state, 'ok');
+
+  const r = run.start({ argv: ['sh', '-c', 'sleep 30'], cwd: dir, kind: 'long_running' });
+  await new Promise((res) => setTimeout(res, 120));
+  r.stop();
+  const out = await r.done;
+  assert.strictEqual(out.state, 'stopped', 'a stopped command was reported as finished');
+  assert.ok(out.signal, 'nothing recorded which signal ended it');
+});
+
+test('a program that does not exist fails without throwing', async () => {
+  const dir = project({});
+  const out = await run.start({ argv: ['juqode-no-such-program-xyz'], cwd: dir }).done;
+  assert.strictEqual(out.state, 'failed');
+  assert.ok(out.spawnError, 'the spawn failure was swallowed');
+  assert.strictEqual(out.code, null, 'a program that never ran has no exit code');
+});
+
+test('the command runs in the PROJECT root', async () => {
+  /* `19` §C4: cwd = 프로젝트 루트. A command that ran somewhere else would report another
+   * folder's state under this project's name. */
+  const dir = project({ 'marker.txt': 'here\n' });
+  const out = await run.start({ argv: ['pwd'], cwd: dir }).done;
+  assert.strictEqual(out.output.trim(), fs.realpathSync(dir));
+});
+
+test('the environment is the user\'s own, unchanged', async () => {
+  /* `19` §C4: env = 사용자 환경 그대로 · 격리 아님. The product does not pretend to sandbox. */
+  const dir = project({});
+  const out = await run.start({ argv: ['sh', '-c', 'echo "$JUQODE_QC_PROBE"'], cwd: dir,
+                                env: { ...process.env, JUQODE_QC_PROBE: 'passed-through' } }).done;
+  assert.strictEqual(out.output.trim(), 'passed-through');
+});
+
+test('a process handle is kept, with the time that makes the pid meaningful', async () => {
+  /* `07` §8.5: a pid is reusable, so a pid alone cannot identify a process later. */
+  const dir = project({});
+  const r = run.start({ argv: ['sh', '-c', 'sleep 5'], cwd: dir, kind: 'long_running' });
+  assert.ok(r.pid > 0);
+  assert.ok(Date.parse(r.startedAt) > 0, 'no start time was recorded with the pid');
+  r.stop();
+  await r.done;
+});
+
+test('output is bounded, and the bound is REPORTED', async () => {
+  const dir = project({});
+  const out = await run.start({ argv: ['sh', '-c', `yes juqode | head -c ${run.OUTPUT_LIMIT * 3}`], cwd: dir }).done;
+  assert.ok(Buffer.byteLength(out.output, 'utf8') <= run.OUTPUT_LIMIT,
+    `${Buffer.byteLength(out.output, 'utf8')} bytes were kept`);
+  assert.strictEqual(out.truncated, true,
+    'the output was cut and the card would have shown it as complete');
+});
+
+test('the live tail is the last few lines, so a long-running card can show progress', async () => {
+  const dir = project({});
+  const seen = [];
+  const r = run.start({ argv: ['sh', '-c', 'for i in 1 2 3 4 5; do echo line-$i; done'], cwd: dir,
+                        onUpdate: (u) => { if (u.state === 'running' && u.tail?.length) seen.push(u.tail); } });
+  await r.done;
+  const last = seen[seen.length - 1];
+  assert.ok(last.length <= run.TAIL_LINES, `the tail carried ${last.length} lines`);
+  assert.ok(last[last.length - 1].includes('line-5'), 'the tail is not the LAST lines');
+});
+
+/* ───────── masking: a reduction, and the product says so ───────── */
+
+test('token-shaped text is masked in what goes on screen', async () => {
+  /* `19` §C4: env 값은 절대 출력하지 않고 표시 계층에 토큰 패턴 가림. The fixture values below
+   * are synthetic. */
+  const cases = [
+    'GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyz',
+    'OPENAI_KEY=sk-0123456789abcdefghij',
+    'SLACK=xoxb-0123456789-abcdefghij',
+    'AWS_ACCESS_KEY_ID=AKIA0123456789ABCDEF',
+    'API_KEY: 0123456789abcdef',
+  ];
+  for (const c of cases) {
+    const masked = run.mask(c);
+    assert.ok(masked.includes('***'), `nothing was masked in: ${c.split('=')[0]}`);
+    assert.ok(!/0123456789/.test(masked), `the value survived masking: ${c.split('=')[0]}`);
+  }
+});
+
+test('masking is a REDUCTION and the code says so — it is not measured', () => {
+  /* q02 §5.6: 가림의 효과는 측정되지 않았다 — 정규식 초안뿐이고 오탐/미탐을 재지 않았다. The
+   * product must not treat this as a containment boundary, and a comment claiming it does is
+   * the kind of false claim this run keeps finding. This test pins the ADMISSION. */
+  const src = fs.readFileSync(path.join(R, 'app/main/qc/run.js'), 'utf8');
+  assert.ok(/not measured|UNMEASURED/i.test(src),
+    'run.js no longer admits that the masking is unmeasured');
+
+  /* …and it demonstrably does not catch everything, which is why the admission matters. */
+  assert.strictEqual(run.mask('the password is hunter2'), 'the password is hunter2');
+});
+
+test('masking never turns output into something that reads as clean', async () => {
+  const dir = project({});
+  const out = await run.start({ argv: ['sh', '-c', 'echo "TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyz"'], cwd: dir }).done;
+  assert.ok(out.output.includes('***'));
+  assert.ok(!out.output.includes('ghp_0123456789'), 'the token reached the card');
+});
+
+test('no rule ever hands a command to a shell', () => {
+  /* The rule table's argv is the last link in the chain that starts at recognition. Routing any
+   * of it through `sh -c` would put an interpreter back between the rule and the OS, and every
+   * other guarantee — residue-zero matching, a closed rule set, a fixed command — would then be
+   * protecting a string that is about to be parsed again anyway. */
+  const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish',
+                          'cmd', 'cmd.exe', 'powershell', 'powershell.exe', 'pwsh', 'pwsh.exe']);
+  const root = project({ 'package.json': pkg({ dev: 'vite', build: 'vite build', test: 'node --test' }),
+                         '.git/HEAD': 'ref: refs/heads/main\n' });
+
+  let checked = 0;
+  for (const rule of RULES) {
+    const a = availability(rule.id, { root });
+    if (!a.data.argv) continue;
+    checked += 1;
+    const [program, ...args] = a.data.argv;
+    assert.ok(!SHELLS.has(path.basename(program)),
+      `${rule.id} runs its command through ${program} — that is a shell`);
+    /* …and no ARGUMENT smuggles one in either (`-c "…"`). */
+    assert.ok(!args.includes('-c'), `${rule.id} passes -c, which is how a shell is handed a script`);
+    for (const arg of args) {
+      assert.ok(!/[;&|`$><]/.test(arg), `${rule.id} carries a shell metacharacter in an argument: ${arg}`);
+    }
+  }
+  assert.ok(checked >= 4, `only ${checked} rules produced a command — the check ran on almost nothing`);
+});
+
+test('the displayed command and the executed argv describe the same thing', () => {
+  /* Two representations of one command drift, and the one the user reads is not the one that
+   * runs. `19` §C4 requires the explanation to be true of what will happen. */
+  const root = project({ 'package.json': pkg({ dev: 'vite', build: 'vite build', test: 'node --test' }),
+                         '.git/HEAD': 'ref: refs/heads/main\n' });
+  for (const rule of RULES) {
+    const a = availability(rule.id, { root });
+    if (!a.data.argv) continue;
+    assert.strictEqual(a.data.argv.join(' '), a.data.command,
+      `${rule.id}: the card says "${a.data.command}" and the spawn runs "${a.data.argv.join(' ')}"`);
+  }
+});
