@@ -326,7 +326,9 @@ function finishResult(db, workId, project, store) {
   const { result, problems } = resultBuilder.buildChecked({
     state: { ...entry.state, outcome: work.outcome },
     changes: changes(db, workId, project, store),
-    signals: repo.signalsFor(db, workId),
+    /* Counted over the WHOLE history and over every block in it — see `countToolResults`. The
+     * capped `signalsFor` read was producing a 확인됨 number that undercounted. */
+    toolResults: repo.countToolResults(db, workId),
   });
   /* An invariant we broke is a fact about this Work, so it goes on the record rather than into
    * a log the user cannot see. `buildChecked` has already downgraded any sourceless 확인됨 to

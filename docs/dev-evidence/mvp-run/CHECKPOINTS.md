@@ -518,3 +518,31 @@ build's first run stay in `DEFERRED_VALIDATION.md`.
 WBS-25's shell command line (DV-11 — a product decision between node-pty, a TTY-less pipe shell,
 and the mock `18` already has copy for), WBS-32 (needs people), WBS-33 (needs Windows and a
 signing certificate).
+
+## Batch 18 QA · Work loop core (WBS-18 · D-114)
+
+Report: `BATCH-18-QA.md`. No new Canon findings. 2 HIGH · 0 BLOCKER. 496 tests.
+
+Both findings are `확인됨` chips that were not earning them.
+
+The observed-tools count on the result card was derived from `signals.filter(...).length` — so
+it counted MESSAGES, not blocks (one `user` message can carry several parallel `tool_result`
+blocks, which the reducer's own `toolsUsed` had already been fixed for), and it was read through
+a 500-row cap, which made a long Work's count depend on how much of its own history had been
+read. `build()` no longer takes the signal list at all: the count is the caller's measurement,
+and when nobody measured, no claim is made.
+
+**The first fix was wrong and the unit test could not tell.** `countToolResults` read the
+reducer's `all` shape, but the supervisor persists the RAW CLI LINE, where the blocks live in
+`message.content[]` — the unit test was putting in a shape it had invented and reading it back.
+The e2e cross-check against the app's own recorded signals caught it, and then that check turned
+out to have made the same mistake. Both now read the raw line, the recording carries a real
+parallel call, and the check asserts it CAN tell the bug from the fix before it asserts anything
+else.
+
+Second: a 부분 완료 card drew only 안 된 것 when the evidence pair could not tell what changed,
+which reads as "nothing was done". `verify()` had been reporting that all along and
+`buildChecked` could only write it to the record. The heading is now always drawn for a 부분
+outcome and says 확인 못함 when there is nothing measured to put under it.
+
+Next eligible: DV-11's pty decision · WBS-32/33 (need humans and Windows).

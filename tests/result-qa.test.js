@@ -35,6 +35,56 @@ function bench() {
   return { dir, db, project: repo.openProject(db, dir, path.basename(dir)), store: tempDir('juqode-store-') };
 }
 
+/* ── batch 18 QA · the observed-tools count wore a 확인됨 chip and was wrong twice ────────── */
+
+test('countToolResults counts BLOCKS, over the WHOLE history', () => {
+  /* Two measured ways the number came out low while the card called it 확인됨:
+   *
+   *   · one `user` message can carry SEVERAL `tool_result` blocks (parallel calls) and becomes
+   *     ONE signal. `result.js` counted signals, so it counted messages. The reducer's own
+   *     `toolsUsed` had already been fixed for exactly this and the result path had not.
+   *   · `signalsFor` reads at most 500 rows, so a long Work's count was capped by how much of
+   *     its own history happened to be read.
+   *
+   * A confirmed number that undercounts is worse than no number — the chip is an invitation to
+   * check it. */
+  const { db, project } = bench();
+  try {
+    const workId = repo.beginWork(db, project.id, 'x').work.id;
+    const add = (kind, payload) =>
+      repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), kind, payload });
+
+    /* TWO payload shapes, and both have to count. The supervisor persists the RAW CLI LINE, so
+     * production rows carry `message.content[]`; the reducer's own signal payload carries `all`.
+     * The first version of `countToolResults` read only `all` and therefore still counted every
+     * production row as one — the fix looked right in a unit test and changed nothing in the
+     * app. The e2e's cross-check against the app's own recorded signals is what caught it. */
+    add('tool_result', { message: { content: [
+      { type: 'tool_result', tool_use_id: 'a' },
+      { type: 'tool_result', tool_use_id: 'b' },
+      { type: 'tool_result', tool_use_id: 'c' }] } });
+    add('tool_result', { toolUseId: 'd', all: [{ toolUseId: 'd' }, { toolUseId: 'e' }] });
+    add('raw', null);
+    assert.strictEqual(repo.countToolResults(db, workId), 5,
+      'parallel tool results were counted as one');
+    /* A raw line whose message carries no tool_result block at all is still one observed
+     * signal — the row exists because the reducer classified it as one. */
+    add('tool_result', { message: { content: [{ type: 'text', text: 'x' }] } });
+    assert.strictEqual(repo.countToolResults(db, workId), 6);
+
+    /* A payload nobody can parse is still one observed block, not zero. */
+    add('tool_result', '{not json');
+    assert.strictEqual(repo.countToolResults(db, workId), 7);
+
+    /* …and past the 500-row read cap, which is where the second bug lived. */
+    for (let i = 0; i < 600; i++) add('tool_result', { toolUseId: `t${i}` });
+    assert.strictEqual(repo.countToolResults(db, workId), 607,
+      'the count is capped by signalsFor\'s read limit');
+    assert.strictEqual(repo.signalsFor(db, workId).length, 500,
+      'the read cap this test exists for is gone — check whether the count still needs its own query');
+  } finally { db.close(); }
+});
+
 /* ───────────────────── HIGH 8 · a written result is never erased ───────────────────── */
 
 test('a second finishResult cannot replace a result built from live state', () => {

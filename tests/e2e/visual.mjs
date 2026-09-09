@@ -143,8 +143,16 @@ if (resumed) {
 }
 const out = resumed ? [
   { type: 'system', subtype: 'init', session_id: 's', cwd: '/p', claude_code_version: '9.9.9' },
-  { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_2', name: 'Edit', input: { file_path: 'README.md' } }] } },
-  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_2', is_error: false }] } },
+  /* TWO tool_use blocks in ONE message, and two tool_results in one reply — a parallel call,
+   * which is what the real CLI emits when it edits two files at once. This is the shape that
+   * made the 확인됨 tool count report 1 for 2 (batch 18 QA); without it in the recording the
+   * cross-check below cannot tell the bug from the fix. */
+  { type: 'assistant', message: { content: [
+    { type: 'tool_use', id: 'tu_2', name: 'Edit', input: { file_path: 'README.md' } },
+    { type: 'tool_use', id: 'tu_3', name: 'Edit', input: { file_path: 'src/index.js' } }] } },
+  { type: 'user', message: { content: [
+    { type: 'tool_result', tool_use_id: 'tu_2', is_error: false },
+    { type: 'tool_result', tool_use_id: 'tu_3', is_error: false }] } },
   { type: 'result', subtype: 'success', is_error: false, result: 'README.md 와 src/index.js 를 고쳤어요', permission_denials: [] },
 ] : [
   { type: 'system', subtype: 'init', session_id: 's', cwd: '/p', claude_code_version: '9.9.9' },
@@ -654,6 +662,32 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.includes('허용하고'))?.click()`);
   await sleep(2500);
   out.afterAllow = await evalJs('JSON.stringify(window.__work())');
+
+  /* WBS-18 · the 확인됨 tool count, cross-checked against the app's OWN recorded signals.
+   *
+   * The number on the card wore a 확인됨 chip while being derived from a capped, block-blind
+   * read (batch 18 QA). A test that only asserted "there is a number" would have passed
+   * throughout, so this asks the app for its signals and counts them independently — parallel
+   * `tool_result` blocks included. */
+  out.toolClaim = await evalJs(`(async () => {
+    const w = window.__work();
+    const s = await window.juqode.workSignals(w.id);
+    const rows = (s?.signals ?? []).filter(x => x.kind === 'tool_result');
+    /* Counted from the RAW CLI line, which is what the supervisor persists — a counter that
+     * read the reducer's \`all\` shape would repeat the very mistake it is checking for, and
+     * did, on the first attempt. */
+    let blocks = 0;
+    for (const r of rows) {
+      let p = null;
+      try { p = JSON.parse(r.payload ?? 'null'); } catch { blocks += 1; continue; }
+      const content = p?.message?.content;
+      blocks += Array.isArray(content)
+        ? (content.filter(b => b?.type === 'tool_result').length || 1)
+        : (Array.isArray(p?.all) && p.all.length ? p.all.length : 1);
+    }
+    const row = document.querySelector('[data-claim="tools-observed"]');
+    return JSON.stringify({ blocks, rows: rows.length,
+                            shown: row ? row.innerText : null }); })()`);
 
   /* ── WBS-38 · 다음 행동 ≠ NEXT, measured on the one screen that shows BOTH ─────────────────
    * `17`'s absolute rule is about VISUAL TREATMENT, so it can only be checked against the real
@@ -1528,6 +1562,19 @@ assert.strictEqual(results.workReds, 0, 'SC-03 renders red for a refusal, which 
     assert.ok(slot.text.includes('아직 다음 단계를 보내지 않았어요'),
       `${theme}: the empty NEXT slot says something else: ${slot.text}`);
   }
+}
+
+/* WBS-18 · the 확인됨 tool count, against the app's own signals. */
+{
+  const t = JSON.parse(results.toolClaim);
+  assert.ok(t.shown, 'the result card has no observed-tools claim');
+  assert.ok(t.blocks > t.rows,
+    `the recording has no parallel tool_result (${t.rows} messages, ${t.blocks} blocks) — this `
+    + 'check cannot tell the counted-messages bug from the fix');
+  assert.ok(t.shown.includes(String(t.blocks)),
+    `the card says "${t.shown.replace(/\n/g, ' / ')}" but the app recorded ${t.blocks} tool_result blocks`);
+  assert.ok(t.shown.includes('확인됨') && t.shown.includes('signals:tool_result'),
+    'the count is 확인됨 without naming what it rests on');
 }
 
 assert.strictEqual(results.screenReader, 'SC-04', `변경 읽기 did not reach SC-04 (${results.screenReader})`);

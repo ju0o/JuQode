@@ -127,6 +127,44 @@ function addSignal(db, workId, { seq, source = 'claude', kind, payload, observed
 const signalsFor = (db, workId, limit = 500) =>
   db.prepare('select * from work_signal where work_id = ? order by seq limit ?').all(workId, limit);
 
+/**
+ * How many `tool_result` blocks one persisted signal carries.
+ *
+ * TWO SHAPES, and this is the whole reason the function exists rather than one `?.all`:
+ * the supervisor persists the RAW CLI LINE (`payload: line`), so the blocks are in
+ * `message.content[]`; the reducer's own signal payload carries them in `all`. A version of
+ * this that read only `all` counted every raw row as one — which is the bug it was written to
+ * fix, still present, and the e2e's cross-check against the app's own signals is what caught it.
+ *
+ * A row nobody can parse is ONE observed block, not zero: we saw a tool_result signal.
+ */
+function blocksIn(payload) {
+  let p = null;
+  try { p = JSON.parse(payload ?? 'null'); } catch { return 1; }
+  if (Array.isArray(p?.message?.content)) {
+    const n = p.message.content.filter((b) => b?.type === 'tool_result').length;
+    return n || 1;
+  }
+  return Array.isArray(p?.all) && p.all.length ? p.all.length : 1;
+}
+
+/**
+ * How many `tool_result` BLOCKS this Work produced, over its whole history.
+ *
+ * Not `signalsFor(...).filter(...)`: that read is capped at 500 rows, and one signal can carry
+ * several blocks (parallel tool calls — see the reducer's `payload.all`). WBS-18 puts this
+ * number on the screen with a 확인됨 chip, so it has to be the real one.
+ */
+function countToolResults(db, workId) {
+  const rows = db.prepare("select payload from work_signal where work_id = ? and kind = 'tool_result'")
+    .all(workId);
+  let n = 0;
+  for (const r of rows) {
+    n += blocksIn(r.payload);
+  }
+  return n;
+}
+
 const nextSeq = (db, workId) =>
   (db.prepare('select max(seq) m from work_signal where work_id = ?').get(workId).m ?? -1) + 1;
 
@@ -479,7 +517,7 @@ module.exports = {
   openProject, recentProjects,
   saveInterpretation, currentInterpretation,
   activeWork, beginWork, getWork, worksFor, setWorkState,
-  addSignal, signalsFor, nextSeq,
+  addSignal, signalsFor, countToolResults, nextSeq,
   saveBasis, basisFor,
   upsertStep, stepsFor,
   saveResult, resultFor,

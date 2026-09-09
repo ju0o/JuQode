@@ -413,11 +413,24 @@ function resultCard(snap, api, nav, state) {
     }
     card.appendChild(box);
   }
-  if (done.length && notDone.length) {
+  /* `15` 부분 완료 needs BOTH lists, and this is where that used to quietly become one.
+   *
+   * The 된 것 list came only from the evidence pair. When the pair could not tell, the heading
+   * was dropped — and a 부분 완료 card showing only 안 된 것 reads as "nothing was done", which
+   * is a claim nobody made. D-114: silence is 확인 못함, never a fact.
+   *
+   * So the heading is drawn whenever the outcome is a 부분 one, and when there is nothing
+   * measured to put under it, it says so in `18`'s own word. */
+  const isPartial = snap.outcome === 'partial' || snap.outcome === 'cancelled_partial';
+  if (done.length || (isPartial && notDone.length)) {
     const box = el('div', 'itemlist');
     box.setAttribute('data-el', 'done');
     box.appendChild(el('div', 'xs mut2', C.work.done));
-    box.appendChild(el('div', 'sm mono', (done[0].data?.files ?? []).join(' · ')));
+    if (done.length) {
+      box.appendChild(el('div', 'sm mono', (done[0].data?.files ?? []).join(' · ')));
+    } else {
+      box.appendChild(el('span', 'chip unk', C.brief.chips.no));
+    }
     card.appendChild(box);
   }
 

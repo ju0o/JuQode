@@ -13,7 +13,6 @@
  * denied still reports success. Every judgement below comes from signals and from the evidence
  * pair, never from how the process ended.
  */
-const { KIND } = require('./reducer');
 
 /** `20` `work_outcome`. Five reach the screen; `ended_unknown` is the sixth (D-124, A-15). */
 const OUTCOMES = ['complete', 'partial', 'failed', 'cancelled_partial', 'cancelled_nochange', 'ended_unknown'];
@@ -24,7 +23,8 @@ const OUTCOMES = ['complete', 'partial', 'failed', 'cancelled_partial', 'cancell
  * @param {object} o
  * @param {object} o.state         the reducer's final state
  * @param {{known:boolean, files:string[]}} o.changes  the evidence pair's answer
- * @param {object[]} o.signals     every persisted signal, in order
+ * @param {number|null} o.toolResults  how many tool_result blocks were observed, counted over
+ *   the WHOLE history by the caller. `null` means nobody counted, and then no claim is made.
  * Neither a claim nor an item carries a SENTENCE — they carry a `kind` and a structured
  * `data`, and the renderer composes the Korean so `18` stays the single copy source (CF-6).
  *
@@ -33,7 +33,7 @@ const OUTCOMES = ['complete', 'partial', 'failed', 'cancelled_partial', 'cancell
  *                    confidence:'confirmed'|'expected'|'unconfirmed', sourceRef:string|null}[],
  *            items:{kind:'done'|'not_done', data:object|null, confidence:string}[]}}
  */
-function build({ state, changes, signals = [] }) {
+function build({ state, changes, toolResults = null }) {
   const claims = [];
   const items = [];
 
@@ -58,9 +58,20 @@ function build({ state, changes, signals = [] }) {
   if (text) claims.push({ kind: 'agent-report', data: { text }, confidence: 'expected', sourceRef: 'claude:result' });
 
   /* ③ Tools JuQode watched run and finish. An observed tool_result is a fact about what
-   * happened, independent of what the report says about it. */
-  const toolResults = signals.filter((s) => s.kind === KIND.TOOL_RESULT).length;
-  if (toolResults > 0) {
+   * happened, independent of what the report says about it.
+   *
+   * The COUNT is supplied by the caller and is not derived here, and that is the whole point.
+   * Two measured ways this number came out wrong while wearing a 확인됨 chip:
+   *
+   *   · one `user` message can carry SEVERAL `tool_result` blocks (parallel calls), and one
+   *     signal is written for it. Counting signals counted the message, not the tools — the
+   *     reducer's own `toolsUsed` already adds `payload.all.length` for exactly this reason.
+   *   · `repo.signalsFor` reads at most 500 rows. A long Work's count was therefore capped by
+   *     how much of its own history happened to be read.
+   *
+   * A confirmed number that undercounts is worse than no number: the chip invites the user to
+   * check it. So if the caller did not measure it, the claim is not made. */
+  if (typeof toolResults === 'number' && toolResults > 0) {
     claims.push({ kind: 'tools-observed', data: { count: toolResults }, confidence: 'confirmed', sourceRef: 'signals:tool_result' });
   }
 

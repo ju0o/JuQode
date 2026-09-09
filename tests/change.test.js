@@ -334,7 +334,7 @@ test('only a measured fact can be 확인됨, and it names what it rests on', () 
   const r = result.build({
     state: finished(),
     changes: { known: true, files: ['a.ts', 'b.ts'] },
-    signals: [{ kind: KIND.TOOL_RESULT }, { kind: KIND.TOOL_RESULT }],
+    toolResults: 2,
   });
   const confirmed = r.claims.filter((c) => c.confidence === 'confirmed');
   assert.ok(confirmed.length >= 2);
@@ -343,7 +343,7 @@ test('only a measured fact can be 확인됨, and it names what it rests on', () 
 });
 
 test("Claude Code's own report is 예상됨 — nothing measured it", () => {
-  const r = result.build({ state: finished(), changes: { known: true, files: [] }, signals: [] });
+  const r = result.build({ state: finished(), changes: { known: true, files: [] } });
   const report = r.claims.find((c) => c.kind === 'agent-report');
   assert.strictEqual(report.confidence, 'expected',
     'the model said it, so D-114 says 예상됨 — 확인됨 would be a claim about evidence that does not exist');
@@ -351,7 +351,7 @@ test("Claude Code's own report is 예상됨 — nothing measured it", () => {
 });
 
 test('a basis we could not compare is 확인 못함, never "nothing changed"', () => {
-  const r = result.build({ state: finished(), changes: { known: false, files: [] }, signals: [] });
+  const r = result.build({ state: finished(), changes: { known: false, files: [] } });
   const c = r.claims.find((x) => x.kind === 'changes-unknown');
   assert.ok(c, 'an uncomparable basis produced no claim at all');
   assert.strictEqual(c.confidence, 'unconfirmed');
@@ -363,7 +363,6 @@ test('a 부분 result carries BOTH lists — 된 것 and 안 된 것', () => {
   const r = result.build({
     state: finished({ outcome: 'partial', denials: [{ tool: 'Edit', resolved: false, input: { file_path: 'x.ts' } }] }),
     changes: { known: true, files: ['a.ts'] },
-    signals: [],
   });
   assert.deepStrictEqual(result.verify(r), [], '`21` WBS-18: a partial result must have both lists');
   assert.ok(r.items.some((i) => i.kind === 'done'));
@@ -377,13 +376,13 @@ test('each acceptance rule is checked on its own, not only all at once', () => {
    * and deleting any ONE of the three used to pass the whole suite. */
   const noDone = result.build({
     state: finished({ outcome: 'partial', denials: [{ tool: 'Edit', resolved: false, input: {} }] }),
-    changes: { known: true, files: [] }, signals: [],
+    changes: { known: true, files: [] },
   });
   assert.deepStrictEqual(result.verify(noDone), ['partial result has no 된 것 list']);
 
   const noNotDone = result.build({
     state: finished({ outcome: 'partial', denials: [] }),
-    changes: { known: true, files: ['a.ts'] }, signals: [],
+    changes: { known: true, files: ['a.ts'] },
   });
   assert.deepStrictEqual(result.verify(noNotDone), ['partial result has no 안 된 것 list']);
 
@@ -396,12 +395,12 @@ test('a claim that cannot name its evidence is DOWNGRADED, not shipped as 확인
   /* `verify` was called only by the tests, so it guarded nothing in the product: an
    * unsupported 확인됨 would have reached the screen, and the chip is a promise. */
   const { result: out, problems } = result.buildChecked({
-    state: finished(), changes: { known: true, files: ['a.ts'] }, signals: [],
+    state: finished(), changes: { known: true, files: ['a.ts'] },
   });
   assert.deepStrictEqual(problems, [], 'the ordinary path must not report a problem');
 
   const broken = result.buildChecked({
-    state: finished(), changes: { known: true, files: ['a.ts'] }, signals: [],
+    state: finished(), changes: { known: true, files: ['a.ts'] },
   });
   broken.result.claims.push({ kind: 'invented', confidence: 'confirmed', sourceRef: null, data: null });
   const rechecked = result.verify(broken.result);
@@ -413,17 +412,74 @@ test('a failure says which terminal signal it was, and invents nothing else', ()
   const r = result.build({
     state: finished({ outcome: 'failed', finish: { subtype: 'error_max_turns', isError: false, terminalReason: null } }),
     changes: { known: true, files: [] },
-    signals: [],
   });
   assert.strictEqual(r.whatFailed.subtype, 'error_max_turns');
   assert.strictEqual(r.outcome, 'failed');
+});
+
+test('the observed-tools count is the caller\'s measurement, never derived from a capped read', () => {
+  /* MEASURED wrong twice, and both times it wore a 확인됨 chip:
+   *
+   *   · one `user` message can carry SEVERAL `tool_result` blocks (parallel calls) and becomes
+   *     ONE signal. Counting signals counted messages.
+   *   · `repo.signalsFor` reads at most 500 rows, so a long Work's count was capped by how much
+   *     of its own history was read.
+   *
+   * The claim is now made only from a number the caller measured over the whole history. A
+   * confirmed number that undercounts is worse than no number — the chip invites checking. */
+  const tools = (r) => r.claims.find((c) => c.kind === 'tools-observed');
+  assert.strictEqual(tools(result.build({ state: finished(), changes: { known: true, files: [] } })), undefined,
+    'a tool count was invented when nobody measured one');
+  assert.strictEqual(tools(result.build({ state: finished(), changes: { known: true, files: [] }, toolResults: 0 })), undefined,
+    'zero tools produced a claim');
+  const r = result.build({ state: finished(), changes: { known: true, files: [] }, toolResults: 7 });
+  assert.strictEqual(tools(r).data.count, 7);
+  assert.strictEqual(tools(r).confidence, 'confirmed');
+  assert.ok(tools(r).sourceRef, 'the count is 확인됨 with no source');
+  /* …and `build` has no way to derive one for itself any more: the signal list is not a
+   * parameter, so there is nothing capped or bundled for it to miscount. (`sourceRef` still
+   * NAMES `signals:tool_result` — that is where the number came from, and saying so is the
+   * point of a source ref.) */
+  const src = fs.readFileSync(path.join(R, 'app/main/work/result.js'), 'utf8');
+  const sig = /function build\(\{([^}]*)\}\)/.exec(src);
+  assert.ok(sig, 'build is gone');
+  assert.ok(!/signals/.test(sig[1]), `build still takes the signal list: ${sig[1].trim()}`);
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+  assert.ok(!/signals\s*\./.test(code) && !/signals\.filter/.test(code),
+    'result.js still reads a signal list');
+});
+
+test('a 부분 result draws BOTH lists, and the unmeasurable one says 확인 못함', () => {
+  /* `15` 부분 완료 needs 된 것 AND 안 된 것. The 된 것 list came only from the evidence pair,
+   * and the renderer drew it only when both lists had content — so when the pair could not tell
+   * what changed, the card showed 안 된 것 alone. That reads as "nothing was done", which is a
+   * claim nobody made; D-114 says silence is 확인 못함, never a fact.
+   *
+   * `verify()` had been reporting this all along and `buildChecked` could only write it to the
+   * record — the screen went on drawing one list. */
+  const src = fs.readFileSync(path.join(R, 'app/renderer/screens/sc03.js'), 'utf8');
+  assert.ok(/const isPartial = snap\.outcome === 'partial' \|\| snap\.outcome === 'cancelled_partial';/.test(src),
+    'the result card does not know what a 부분 outcome is');
+  assert.ok(/if \(done\.length \|\| \(isPartial && notDone\.length\)\) \{/.test(src),
+    'the 된 것 heading is still conditional on the other list having content');
+  assert.ok(/box\.appendChild\(el\('span', 'chip unk', C\.brief\.chips\.no\)\);/.test(src),
+    'the empty 된 것 list does not say 확인 못함');
+
+  /* …and the builder still reports it, so the record carries the fact that the pair could not
+   * answer even though the screen now says so too. */
+  const r = result.build({
+    state: finished({ outcome: 'partial', denials: [{ tool: 'Edit', resolved: false, input: { file_path: 'x.ts' } }] }),
+    changes: { known: false, files: [] },
+  });
+  assert.deepStrictEqual(result.verify(r), ['partial result has no 된 것 list']);
+  assert.ok(r.claims.some((c) => c.kind === 'changes-unknown' && c.confidence === 'unconfirmed'),
+    'the result does not record that the evidence pair could not tell');
 });
 
 test('a resolved refusal is not carried into 안 된 것', () => {
   const r = result.build({
     state: finished({ denials: [{ tool: 'Edit', resolved: true, input: { file_path: 'x.ts' } }] }),
     changes: { known: true, files: ['x.ts'] },
-    signals: [],
   });
   assert.ok(!r.items.some((i) => i.kind === 'not_done'),
     'a refusal the user allowed was reported as something that was not done');
