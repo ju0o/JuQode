@@ -767,6 +767,21 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.qcAmbigKind = await evalJs(`document.querySelector('[data-el="qc-card"]')?.getAttribute('data-kind') ?? null`);
   out.qcAmbig     = await evalJs(`document.querySelector('[data-el="qc-card"]')?.innerText ?? null`);
 
+  /* Actually RUN one. `qc.git.status` is the fixed, read-only vector — no npm, no network — so
+   * the run card's states get rendered evidence without the e2e depending on a build toolchain.
+   * Until this existed, 실행 중 · 끝났어요 · 출력 had never been drawn anywhere in the suite. */
+  await evalJs(`(() => { const f = document.querySelector('[data-el="qc-input"]'); f.value = '깃상태'; })()`);
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
+  await sleep(600);
+  out.qcGitCard = await evalJs(`document.querySelector('[data-el="qc-card"]')?.innerText ?? null`);
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '실행')?.click()`);
+  await sleep(2500);
+  out.qcRunState  = await evalJs('JSON.stringify(window.__drawer())');
+  out.qcRunCard   = await evalJs(`document.querySelector('[data-el="qc-run"]')?.innerText ?? null`);
+  out.qcRunAttr   = await evalJs(`document.querySelector('[data-el="qc-run"]')?.getAttribute('data-state') ?? null`);
+  out.qcRunReds   = await evalJs(RED_COUNT('[data-el="qc-run"], [data-el="qc-run"] *'));
+  out.qcOutput    = await evalJs(`document.querySelector('.td01-output')?.innerText ?? null`);
+
   /* 할 수 있는 것 보기 — every rule, and why each one cannot run. */
   await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.includes('할 수 있는 것'))?.click()`);
   await sleep(600);
@@ -805,6 +820,22 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(300);
   out.staleAfterKeep = await evalJs(`document.querySelector('[data-card="brief"] .staleband')?.innerText ?? null`);
   out.staleAnswersAfterKeep = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
+
+  /* `15` SC-02 갱신 중: the OLD Brief stays visible and the header says a re-read is under way.
+   * Nothing on screen moved for the seconds the narrative pass takes, and the button stayed
+   * pressable. Captured immediately after the click, before the pass can finish. */
+  await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '다시 읽기')?.click()`);
+  await sleep(150);
+  out.rereadingHead    = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.innerText ?? ''`);
+  /* The Brief is legitimately FOLDED here (D-132 folds it on return), so what proves it did not
+   * vanish is its header — the title and the 읽은 시점 it was read at, both still present. */
+  out.rereadingKept = await evalJs(`(() => {
+    const h = document.querySelector('[data-card="brief"] .chead');
+    return Boolean(h) && h.innerText.includes('읽은 시점'); })()`);
+  await sleep(5000);
+  out.afterReread      = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.innerText ?? ''`);
+  out.afterRereadState = await evalJs('JSON.stringify(window.__brief())');
+
 
   step('back to picker');
   // 다른 프로젝트 열기 goes back to SC-01, and the project it just opened is now remembered
@@ -1000,6 +1031,21 @@ assert.ok(!/위험|감지|차단/.test(results.qcUnrec),
 assert.strictEqual(results.qcAmbigKind, 'ambiguous');
 assert.ok(results.qcAmbig.includes('골라'), 'the ambiguity does not ask the user to choose');
 
+/* A Quick Command was actually RUN. Until this existed, 실행 중 · 끝났어요 · 출력 had never been
+ * rendered anywhere in the suite, and the batch document claimed every card state was in. */
+assert.ok(results.qcGitCard?.includes('git status --porcelain=v1 --branch'),
+  'the card does not show the fixed command it would run');
+assert.strictEqual(results.qcRunAttr, 'ok', `the run did not succeed: ${results.qcRunAttr}`);
+assert.ok(results.qcRunCard.includes('끝났어요'), 'the finished run does not say it finished');
+/* `19` §C4: 종료 코드·stderr 숨기지 않음. */
+assert.ok(results.qcRunCard.includes('종료 코드 0'), 'the exit code is not shown');
+/* The card contains the ACTUAL output — `15` TD-01: the QC card contains the real output. */
+assert.ok(results.qcOutput, 'the run produced no visible output');
+assert.ok(/README\.md|src\/index\.js/.test(results.qcOutput),
+  `the output is not this project's git status: ${results.qcOutput}`);
+assert.strictEqual(results.qcRunReds, 0, 'a successful run was painted as a failure');
+assert.strictEqual(JSON.parse(results.qcRunState).run.state, 'ok');
+
 /* 할 수 있는 것 보기 — the closed set, with a reason on every one that cannot run. */
 assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not the closed six');
 
@@ -1110,6 +1156,17 @@ assert.strictEqual(results.staleReds, 0, 'an aged Brief was painted as a failure
 /* …and it did NOT re-read: the Brief is still the one that was folded on the way in. */
 assert.strictEqual(JSON.parse(results.staleState).folded, true,
   'something re-read the project without being asked — D-132 forbids it');
+/* `15` SC-02 갱신 중 — F-C1-03: the old interpretation stays visible until it is replaced. */
+assert.ok(results.rereadingHead.includes('다시 읽는 중'),
+  `the Brief said nothing while re-reading: ${results.rereadingHead}`);
+assert.ok(!results.rereadingHead.includes('다시 읽기'),
+  'the 다시 읽기 button stayed pressable during its own re-read');
+assert.strictEqual(results.rereadingKept, true,
+  'the old Brief vanished during the re-read — F-C1-03 keeps it until it is replaced');
+assert.ok(!results.afterReread.includes('다시 읽는 중'), 'the re-read never finished');
+assert.strictEqual(JSON.parse(results.afterRereadState).stale, null,
+  'a completed re-read left the 오래됨 verdict standing');
+
 assert.strictEqual(results.staleAfterKeep, null, '이대로 계속 left the announcement on screen');
 assert.strictEqual(results.staleAnswersAfterKeep, results.staleAnswers,
   '이대로 계속 changed the Brief instead of only dismissing the notice');

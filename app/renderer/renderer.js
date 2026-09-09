@@ -24,6 +24,7 @@ const state = { project: null, interpretation: null, recent: [], store: { ok: fa
                  * project is REOPENED with an interpretation already there — D-132: 다시 열기 →
                  * Brief 접힌 채로. */
                 stale: null, briefFolded: false, refreshFailed: null, narrative: null,
+                rereading: false,
                 /* TD-01 · the drawer and its Quick Command card. It lives OUTSIDE `#root`, so
                  * its state survives every screen render — `15`: 닫으면 화면 상태가 보존된다. */
                 drawerOpen: false, qcPhrase: '', qcCard: null, qcRun: null,

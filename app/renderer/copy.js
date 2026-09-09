@@ -361,6 +361,10 @@ export const C = {
      * `brief.failNote` for a project that never read, and nothing for the case where an OLD
      * Brief is still on screen underneath — which is the whole point of the state. */
     briefRefreshKept: '아래는 지난번에 읽은 내용이에요. 그대로 남겨 두었어요.',
+    /* `15` SC-02 갱신 중: the old interpretation stays visible until it is replaced (F-C1-03),
+     * and the header says a re-read is happening. `18` has `brief.interpreting` for a FIRST
+     * read and nothing for a re-read over a Brief that is still on screen. */
+    briefRereading:   '다시 읽는 중…',
     /* `18` brief.stale is written as `3일 전에 읽은 내용이에요…` — it presumes the read is a day
      * or more old. Staleness is really about the HASH, not the age, so a project can change
      * minutes after it was read; "0일 전에 읽은 내용이에요" is not Korean anyone writes. This

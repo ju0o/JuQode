@@ -56,7 +56,12 @@ export function renderBrief(card, interp, opts = {}) {
    * automatic re-read, so this button is the only thing that starts one. */
   /* …but not twice. When the 오래됨 band is up it carries 다시 읽기 as its own call to action,
    * and two identical buttons in one card make the reader choose between the same thing. */
-  if (interp && opts.onReread && !opts.stale?.changed) {
+  if (interp && opts.rereading) {
+    /* `15` SC-02 갱신 중: the OLD interpretation stays visible (F-C1-03) and the header says a
+     * re-read is under way. Nothing moved on screen for the seconds the narrative pass takes,
+     * and the button stayed pressable — so it could be pressed again and again. */
+    head.appendChild(el('span', 'xs mut2 rereading', C.gap.briefRereading));
+  } else if (interp && opts.onReread && !opts.stale?.changed) {
     head.appendChild(btn('btn sm ghost', C.brief.reread, opts.onReread));
   }
   if (interp && opts.onFold) {
@@ -89,7 +94,8 @@ export function renderBrief(card, interp, opts = {}) {
     const band = el('div', 'staleband');
     band.appendChild(el('div', 'sm', staleLine(opts.stale.days)));
     const acts = el('div', 'row-acts');
-    if (opts.onReread) acts.appendChild(btn('btn sm', C.brief.reread, opts.onReread));
+    if (opts.rereading) acts.appendChild(el('span', 'xs mut', C.gap.briefRereading));
+    else if (opts.onReread) acts.appendChild(btn('btn sm', C.brief.reread, opts.onReread));
     /* Dismissing the notice must not take 다시 읽기 with it. `band.remove()` left the state set,
      * so the header kept suppressing its own button and SC-02 had no 다시 읽기 control at all
      * until the user left the screen and came back. `15` lists it unconditionally. */

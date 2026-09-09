@@ -79,18 +79,24 @@ export function renderSC02(root, api, nav, state) {
     /* 이대로 계속 dismisses the ANNOUNCEMENT. Clearing the verdict is what brings 다시 읽기 back
      * to the header, so the user is never left on SC-02 with no way to re-read. */
     onKeepStale: () => { state.stale = null; paint(); },
+    rereading: state.rereading,
     onReread: () => {
       /* `19` §C1 ⑤ · D-132: the ONLY thing that starts a re-read. It is not automatic, and the
-       * old Brief stays on screen while the new one is being taken. */
+       * old Brief stays on screen while the new one is being taken (`15` 갱신 중, F-C1-03). */
+      if (state.rereading) return;                 // pressing it again starts nothing
       state.refreshFailed = null;
+      state.rereading = true;
+      paint();
       api.interpret(p.id).then((r) => {
+        state.rereading = false;
         if (r?.ok) {
           state.interpretation = r.interpretation;
           state.narrative = r.narrative ?? null;
           state.refreshFailed = r.refreshFailed ?? null;
-          /* A re-read that succeeded is not stale by definition; one that failed did not move
-           * the hash either, so the verdict is dropped in both cases and re-asked on next open. */
-          state.stale = null;
+          /* A re-read that SUCCEEDED is not stale by definition. One that FAILED did not read
+           * anything, so the hash it was stale against has not moved and the verdict still
+           * stands — dropping it there stopped the product saying what it still knew. */
+          if (!state.refreshFailed) state.stale = null;
           state.briefFolded = false;
         }
         paint();

@@ -251,11 +251,9 @@ function runCard(api, state, repaint) {
   };
   const [cls, title] = RESULT[r.state] ?? RESULT.unknown;
   const head = el('div', 'td01-runhead');
-  head.appendChild(el('span', 'ct', title));
-  /* `15` §F: a state chip carries its state as TEXT, never as colour alone — so every state gets
-   * one, including the ones with no colour of their own. It used to print the same sentence
-   * twice for the states that had a class and nothing at all for 실행 중. */
-  head.appendChild(el('span', `chip ${cls || 'unavail'}`, r.ended ? C.qc.exit : C.qc.running));
+  /* ONE chip, carrying the state as TEXT (`15` §F) — not a heading and a chip saying the same
+   * sentence twice, and not a state with no chip at all, which is what 실행 중 had. */
+  head.appendChild(el('span', `chip ${cls || 'unavail'}`, title));
   card.appendChild(head);
   /* `15` TD-01: 계속 실행 중 — 개발 서버 · 시작 4분 전. The start time is what makes a
    * long-running card readable; `run.js` keeps it and the card never showed it. */
