@@ -1,12 +1,17 @@
 'use strict';
-/* JuQode desktop shell — WBS-01.
+/* JuQode desktop shell.
  *
- * Scope: boot, one window, SC-01 project-less state, light/dark foundation.
- * Nothing from WBS-02+ is implemented here, and nothing pretends to be.
+ * WBS-01 boot · one window · SC-01. WBS-21 persistence. WBS-02 project open.
+ * WBS-09 Claude Code detection. Nothing beyond that is implemented here, and
+ * nothing pretends to be.
  */
+const path = require('node:path');
 const { app, BrowserWindow, ipcMain, session } = require('electron');
 const { createWindow } = require('./window');
 const { enforceLocalOnly } = require('./security');
+const { openDb } = require('./db/db');
+const project = require('./project');
+const claude = require('./claude-detect');
 
 /* One instance. A second launch focuses the existing window rather than opening a second one. */
 if (!app.requestSingleInstanceLock()) {
@@ -26,22 +31,90 @@ if (!app.requestSingleInstanceLock()) {
     if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
   });
 
-  ipcMain.handle('juqode:versions', () => ({
+  const versions = () => ({
     app: app.getVersion(),
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
     platform: process.platform,
     arch: process.arch,
+  });
+
+  /* WBS-21 · one local SQLite file per user. Opened once, at boot.
+   * A DB we cannot understand is REFUSED, not replaced (`21` WBS-21). The app still boots:
+   * losing the store is not a reason to show the user nothing. */
+  let db = null;
+  let dbFault = null;
+  function openStore() {
+    const file = process.env.JUQODE_DB || path.join(app.getPath('userData'), 'juqode.db');
+    try {
+      db = openDb(file);
+    } catch (e) {
+      dbFault = e.code || 'db-unreadable';
+      trace('db.refused', { reason: dbFault });
+    }
+  }
+
+  /* Every path the renderer can name. `openPath` is deliberately NOT "open any folder":
+   * it accepts a folder we already gave the renderer — a recent row, or the last pick being
+   * retried — so a compromised renderer cannot use it to walk the disk. */
+  let lastPick = null;
+
+  const needDb = () => (db ? null : { ok: false, reason: 'no-store', detail: dbFault });
+
+  /* A handler that THROWS rejects the invoke, and the renderer's boot is a top-level await —
+   * one rejection there leaves a blank window with no message and no way out. Every handler
+   * therefore answers, always, even when the answer is that something went wrong. */
+  const handle = (channel, fn) => ipcMain.handle(channel, async (e, ...args) => {
+    /* Defence in depth: there are no frames and navigation is locked, but a handler should
+     * still refuse a sender that is not the window we made. */
+    if (e.senderFrame && e.senderFrame.parent) return { ok: false, reason: 'bad-sender' };
+    try {
+      return await fn(e, ...args);
+    } catch (err) {
+      trace('ipc.failed', { channel, code: err?.code || null });
+      return { ok: false, reason: 'internal', detail: err?.code || null };
+    }
+  });
+
+  handle('juqode:versions', versions);
+
+  handle('juqode:boot', () => ({
+    store: db ? { ok: true } : { ok: false, reason: dbFault },
+    recent: db ? project.recent(db) : [],
   }));
 
-  /* WBS-02 owns this. Saying "not built yet" is the honest answer; a fake dialog is not. */
-  /* Internal result only — never rendered verbatim. The renderer picks its own approved
-     copy, so this carries a machine reason rather than a user-facing sentence. */
-  ipcMain.handle('juqode:open-project', () => ({ ok: false, reason: 'not-implemented' }));
+  handle('juqode:open-project', async (e) => {
+    const gate = needDb();
+    if (gate) return gate;
+    const win = BrowserWindow.fromWebContents(e.sender);
+    return project.pick(db, win, (p) => { lastPick = p; });
+  });
+
+  handle('juqode:open-path', (_e, target) => {
+    const gate = needDb();
+    if (gate) return gate;
+    /* `lastPick` starts as null, so `target === lastPick` used to admit `openPath(null)` —
+     * and `realpathSync` coerces a non-string, so `null` resolved to a "null" folder under
+     * cwd and was opened as a project the user never chose. The type check is the gate's
+     * first clause now, not an assumption about what a renderer would send. */
+    if (typeof target !== 'string' || target === '') return { ok: false, reason: 'not-offered' };
+    const known = target === lastPick || project.recent(db).some((p) => p.path === target);
+    if (!known) return { ok: false, reason: 'not-offered' };
+    return project.openPath(db, target);
+  });
+
+  /* One probe at a time. Each call spawns up to two `claude` processes held for up to 8 s;
+   * without this, anything that calls it in a loop spawns them without bound. */
+  let detecting = null;
+  handle('juqode:claude-detect', () => {
+    if (!detecting) detecting = claude.detect().finally(() => { detecting = null; });
+    return detecting;
+  });
 
   app.whenReady().then(() => {
     readExternalAttempts = enforceLocalOnly(session.defaultSession);
+    openStore();
     trace('app.ready', { versions: process.versions.electron });
 
     const win = createWindow({
@@ -74,5 +147,8 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== 'darwin') app.quit();
   });
 
-  app.on('quit', (_e, exitCode) => trace('quit', { exitCode }));
+  app.on('quit', (_e, exitCode) => {
+    trace('quit', { exitCode });
+    try { db?.close(); } catch { /* closing a store we are about to lose anyway */ }
+  });
 }

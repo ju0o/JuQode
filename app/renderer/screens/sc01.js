@@ -1,22 +1,23 @@
-/* SC-01 · Project Open — the only screen WBS-01 builds.
- * 15 SC-01: one product statement, one primary action, an optional recent list.
+/* SC-01 · Project Open — WBS-02.
+ * 15 SC-01: one product statement, one primary action, an optional recent list (A-8).
  * Explicitly NOT included (15): project creation · templates · clone · remote ·
  * workspace management · login · settings. */
 import { C } from '../copy.js';
+import { el, btn } from '../dom.js';
 import { mountThemeToggle } from '../design/theme.js';
 
-function el(tag, cls, text) {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text != null) n.textContent = text;
-  return n;
-}
+/* Machine reason → approved words. Main never sends a sentence; this is the only place
+ * a reason becomes Korean, so `18` stays the single copy source. */
+const REASON = {
+  unreadable:    C.sc01.failReason,
+  missing:       C.gap.failMissing,
+  'not-a-folder': C.gap.failNotFolder,
+};
 
-export function renderSC01(root, api) {
+export function renderSC01(root, api, nav, state) {
   root.innerHTML = '';
 
   const shell = el('div', 'shell');
-
   const bar = el('div', 'topbar');
   bar.appendChild(el('span', 'brand', C.app.name));
   bar.appendChild(el('span', 'grow'));
@@ -31,58 +32,110 @@ export function renderSC01(root, api) {
   hero.appendChild(el('p', 'lead', C.sc01.lead));
 
   const actions = el('div', 'actions');
-  const openBtn = el('button', 'btn pri', C.sc01.open);
-  openBtn.type = 'button';
+  const openBtn = btn('btn pri', C.sc01.open, () => run(() => api.openProject(), false));
   openBtn.setAttribute('data-act', 'open-project');
   actions.appendChild(openBtn);
   actions.appendChild(el('span', 'xs mut', C.sc01.openHint));
   hero.appendChild(actions);
   main.appendChild(hero);
 
-  /* Recent list — A-8 (Founder-pending, removable). Empty state is the honest default:
-   * WBS-01 has no persistence yet, so there is nothing to remember. 15 SC-01 Empty State. */
+  /* The store is what remembers projects. If it was refused we say so instead of
+   * offering a button whose result cannot be kept. 21 WBS-21: refuse, never replace. */
+  if (!state.store?.ok) {
+    openBtn.disabled = true;
+    main.appendChild(storeCard(state.store?.reason));
+  }
+
+  /* Recent list — A-8 (Founder-pending, removable). SC-01 is complete without it. */
   const recent = el('section', 'recent');
   recent.setAttribute('data-el', 'recent');
   recent.appendChild(el('h2', null, C.sc01.recent));
-  recent.appendChild(el('div', 'empty', C.sc01.noHistory));
+  if (state.recent.length === 0) {
+    recent.appendChild(el('div', 'empty', C.sc01.noHistory));
+  } else {
+    const list = el('div', 'rows');
+    for (const p of state.recent) list.appendChild(recentRow(p, () => run(() => api.openPath(p.path))));
+    recent.appendChild(list);
+  }
   recent.appendChild(el('span', 'footnote', C.sc01.recentNote));
   main.appendChild(recent);
 
   shell.appendChild(main);
   root.appendChild(shell);
 
-  /* Opening a folder is WBS-02, not WBS-01. The button exists because the screen is
-   * defined by it, but it must not pretend to work. It reports the truth instead. */
-  openBtn.addEventListener('click', async () => {
+  /* `reading` says whether a folder is actually being read. The folder BUTTON opens a native
+   * dialog first and blocks until the user picks or cancels — saying `폴더를 읽고 있어요…`
+   * during that would be a claim about a folder that has not been chosen. A recent row names
+   * its folder up front, so there the sentence is true. */
+  async function run(call, reading = true) {
     openBtn.disabled = true;
-    const prev = openBtn.textContent;
-    openBtn.textContent = C.sc01.opening;
+    const label = openBtn.textContent;
+    if (reading) openBtn.textContent = C.sc01.opening;
+    let res;
     try {
-      const res = await api.openProject();
-      if (!res || res.ok !== true) showNotYet(main, res);
+      res = await call();
     } finally {
-      openBtn.disabled = false;
-      openBtn.textContent = prev;
+      openBtn.disabled = !state.store?.ok;
+      openBtn.textContent = label;
     }
-  });
+    main.querySelector('[data-el="fail"]')?.remove();
+    if (res?.ok) return nav.toWorkbench(res.project);
+    if (res?.reason === 'cancelled') return;            // 15: cancelling shows nothing
+    main.appendChild(failCard(res, () => run(() => api.openPath(res.path)), () => run(() => api.openProject(), false)));
+  }
 
   return { shell, main, openBtn };
 }
 
-/* Not a failure card — folder-open is not implemented yet, and saying "실패" would be a lie.
- * Neutral grey, the 지금 안 됨 · 실패 아님 grammar (12 §16). */
-function showNotYet(main, res) {
-  let n = main.querySelector('[data-el="notyet"]');
-  if (!n) {
-    n = el('div', 'card');
-    n.setAttribute('data-el', 'notyet');
-    n.style.cssText = 'max-width:560px;width:100%;padding:14px 16px;background:var(--grey);display:flex;flex-direction:column;gap:6px';
-    main.appendChild(n);
+/* 열 수 없음 — the one red on this screen (15 SC-01 Failure State):
+ * title + reason in plain words + 2 recovery actions + technical detail behind a disclosure. */
+function failCard(res, onRetry, onOther) {
+  const n = el('div', 'failcard');
+  n.setAttribute('data-el', 'fail');
+  n.appendChild(el('div', 't', C.sc01.failTitle));
+  n.appendChild(el('div', 'sm', REASON[res?.reason] ?? C.gap.failUnknown));
+
+  const acts = el('div', 'row-acts');
+  if (res?.path) acts.appendChild(btn('btn sm', C.sc01.retry, onRetry));
+  acts.appendChild(btn('btn sm', C.sc01.other, onOther));
+  n.appendChild(acts);
+
+  if (res?.detail) {
+    const d = el('details');
+    d.appendChild(el('summary', 'xs mut', C.sc01.tech));
+    d.appendChild(el('div', 'xs mono mut', res.detail));
+    n.appendChild(d);
   }
-  n.innerHTML = '';
-  const head = el('div', null);
-  head.style.cssText = 'display:flex;align-items:center;gap:8px';
-  head.appendChild(el('span', 'sm', C.dev.notReadyTitle));
-  head.appendChild(el('span', 'chip unavail', C.dev.notReadyChip));
+  return n;
+}
+
+/* Store refusal is not a folder failure — neutral grey, the 지금 안 됨 grammar (12 §16).
+ * It says the existing file was left alone, because that is what actually happened. */
+function storeCard(reason) {
+  const n = el('div', 'card storecard');
+  n.setAttribute('data-el', 'store');
+  const head = el('div', 'head');
+  head.appendChild(el('span', 'sm', C.gap.storeTitle));
+  head.appendChild(el('span', 'chip unavail', C.unavailable.chip));
   n.appendChild(head);
+  n.appendChild(el('div', 'sm mut', C.gap.storeBody));
+  /* The machine reason is technical output, so it goes behind the same disclosure the
+   * folder failure uses — never loose on the card as if it were a sentence. */
+  if (reason) {
+    const d = el('details');
+    d.appendChild(el('summary', 'xs mut', C.sc01.tech));
+    d.appendChild(el('div', 'xs mono mut', reason));
+    n.appendChild(d);
+  }
+  return n;
+}
+
+function recentRow(p, onOpen) {
+  const row = el('button', 'recentrow');
+  row.type = 'button';
+  row.setAttribute('data-el', 'recent-row');
+  row.addEventListener('click', onOpen);
+  row.appendChild(el('span', 'nm', p.name));
+  row.appendChild(el('span', 'xs mut path', p.path));
+  return row;
 }

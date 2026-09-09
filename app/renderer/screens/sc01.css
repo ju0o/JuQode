@@ -2,20 +2,6 @@
  * Composition per 17: "진입 · 조용하고 가운데로 모인 성긴 화면 — 카드가 적고 여백이 많다".
  * This is deliberately NOT the SC-02 card grid. The screens must be recognisable apart. */
 
-.shell { height: 100%; display: flex; flex-direction: column; }
-
-.topbar {
-  flex: 0 0 auto;
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 18px;
-  border-bottom: 1px solid var(--line);
-  background: var(--card);
-  -webkit-app-region: drag;                 /* frameless-ready; harmless when framed */
-}
-.topbar .brand { font-weight: 700; letter-spacing: .04em; font-size: 14px; }
-.topbar .grow { flex: 1; }
-.topbar .themetog { -webkit-app-region: no-drag; display: flex; gap: 2px; }
-
 .sc01 {
   flex: 1 1 auto;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -59,3 +45,24 @@
 .sc01 .failcard .t { font-weight: 600; color: var(--fail); }
 
 .sc01 .footnote { font-size: 12px; color: var(--mut2); }
+
+/* recent rows — A-8. Quiet: they must not compete with the primary button. */
+.sc01 .recent .rows { display: flex; flex-direction: column; gap: 6px; }
+.sc01 .recentrow {
+  font: inherit; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  padding: 10px 14px;
+  color: var(--ink); background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--r-inner);
+}
+.sc01 .recentrow:hover { border-color: var(--line3); background: var(--card2); }
+.sc01 .recentrow .nm { font-weight: 600; }
+.sc01 .recentrow .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* store refused — not a folder failure, so not red (12 §16) */
+.sc01 .storecard {
+  width: 100%; max-width: 560px;
+  padding: 14px 16px; background: var(--grey);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.sc01 .storecard .head { display: flex; align-items: center; gap: 8px; }

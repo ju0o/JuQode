@@ -8,6 +8,11 @@ import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert';
+import fs from 'node:fs';
+import os from 'node:os';
+
+/* Isolated store per run: a test must never touch the user's real juqode.db. */
+const DB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-e2e-')), 'juqode.db');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ELECTRON = path.join(ROOT, 'node_modules', '.bin', 'electron');
@@ -15,14 +20,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const alive = () => {
   try {
-    return execSync(`pgrep -f "JuQod[e]/node_modules/electron" | wc -l`, { encoding: 'utf8' }).trim();
+    return execSync(`pgrep -f "${ROOT}/node_module[s]/electron" | wc -l`, { encoding: 'utf8' }).trim();
   } catch { return '0'; }
 };
 
 function run(env = {}, args = []) {
   return new Promise((resolve) => {
     const p = spawn('xvfb-run', ['-a', ELECTRON, '.', '--no-sandbox', ...args],
-      { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', ...env }, detached: true });
+      { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, ...env }, detached: true });
+    p.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
     let out = '';
     p.stdout.on('data', (d) => { out += d; });
     const t = setTimeout(() => { try { process.kill(-p.pid, 'SIGKILL'); } catch {} }, 30000);
@@ -54,7 +60,7 @@ results.reducedMotionBoot = { exit: rm.code };
 assert.strictEqual(alive(), '0', `orphans left before shutdown test: ${alive()}`);
 
 const term = spawn('xvfb-run', ['-a', ELECTRON, '.', '--no-sandbox'],
-  { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1' }, detached: true });
+  { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB }, detached: true });
 await sleep(6000);
 const before = alive();
 process.kill(-term.pid, 'SIGTERM');

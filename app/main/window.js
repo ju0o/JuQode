@@ -1,5 +1,6 @@
 'use strict';
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { BrowserWindow } = require('electron');
 const { WEB_PREFERENCES, lockNavigation } = require('./security');
 
@@ -26,7 +27,10 @@ function createWindow({ onShown } = {}) {
     },
   });
 
-  lockNavigation(win.webContents, `file://${RENDERER}`);
+  /* `file://${RENDERER}` is not the URL the browser reports: on Windows it keeps backslashes
+   * and a single slash, and any space in the install path stays unescaped. The comparison
+   * could then never match, so the allowlist silently degraded to deny-all. */
+  lockNavigation(win.webContents, pathToFileURL(RENDERER).href);
 
   let shown = false;
   const show = (via) => {

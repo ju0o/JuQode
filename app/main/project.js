@@ -1,0 +1,89 @@
+'use strict';
+/* WBS-02 · Project open — pick a folder, make it the work context.
+ *
+ * `15` SC-01: the only inputs are a native folder pick and (A-8) a recent row. There is no
+ * project creation, no template, no clone. A folder we cannot read is a FAILURE (the one red
+ * on SC-01) and it names the reason.
+ *
+ * This module returns machine reasons only. The renderer chooses the approved Korean words —
+ * main never ships a user-facing sentence, so `18` stays the single copy source.
+ */
+const { dialog } = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
+const { openProject, recentProjects } = require('./db/repo');
+
+/* Only ENOENT means the folder is not there. ELOOP, ENAMETOOLONG, EIO, EMFILE and friends
+ * are different facts, and reporting them as `폴더가 없어요` about a folder that plainly
+ * exists is a false statement — `unknown` says what is true: we could not find out. */
+function errnoReason(e) {
+  switch (e.code) {
+    case 'ENOENT':  return 'missing';
+    case 'ENOTDIR': return 'not-a-folder';
+    case 'EACCES':
+    case 'EPERM':   return 'unreadable';
+    default:        return 'unknown';
+  }
+}
+
+/** Turn a chosen folder into an openable project, or say exactly why not. */
+function inspect(target) {
+  /* A path the renderer names is data, not a path. Everything downstream is fs work. */
+  if (typeof target !== 'string' || target === '') {
+    return { ok: false, reason: 'unknown', detail: `invalid target: ${typeof target}` };
+  }
+
+  let real;
+  try {
+    /* `.native` (uv → GetFinalPathNameByHandleW), NOT the JS implementation: only the native
+     * one canonicalises CASE. On NTFS `C:\Users\Bob\Proj` and `c:\users\bob\proj` are the
+     * same folder, and the JS version would hand back two strings — two rows past
+     * `project.path`'s unique key. "One folder, one row" is only true with this call. */
+    real = fs.realpathSync.native(target);
+  } catch (e) {
+    return { ok: false, reason: errnoReason(e), detail: `${e.code} ${target}` };
+  }
+
+  let st;
+  try {
+    st = fs.statSync(real);
+  } catch (e) {
+    return { ok: false, reason: errnoReason(e), detail: `${e.code} ${real}` };
+  }
+  if (!st.isDirectory()) return { ok: false, reason: 'not-a-folder', detail: real };
+
+  try {
+    /* The read itself is the test. `fs.accessSync(R_OK | X_OK)` used to run first, but on
+     * Windows `X_OK` is documented as behaving like `F_OK` and `access` reflects only the
+     * read-only attribute — it answers nothing on the target OS. One call, one behaviour. */
+    fs.readdirSync(real);
+  } catch (e) {
+    return { ok: false, reason: errnoReason(e), detail: `${e.code} ${real}` };
+  }
+
+  return { ok: true, path: real, name: path.basename(real) || real };
+}
+
+/** Open a folder the user already named (recent row, or a retry of the same folder). */
+function openPath(db, target) {
+  const seen = inspect(target);
+  /* Carry the folder back on failure too. `15` SC-01 gives the failure card TWO recovery
+   * actions, and `▸ 같은 폴더 다시 시도` has nothing to retry without it. */
+  if (!seen.ok) return { ...seen, path: target };
+  return { ok: true, project: openProject(db, seen.path, seen.name) };
+}
+
+/** Native folder pick → project. Cancelling is not a failure and shows no card. */
+async function pick(db, win, remember = () => {}) {
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
+  if (r.canceled || r.filePaths.length === 0) return { ok: false, reason: 'cancelled' };
+  const chosen = r.filePaths[0];
+  /* Remember it even when it fails to open: `▸ 같은 폴더 다시 시도` needs the folder the user
+   * actually chose, and that retry must not become a way to name an arbitrary path. */
+  remember(chosen);
+  return openPath(db, chosen);
+}
+
+const recent = (db) => recentProjects(db);
+
+module.exports = { inspect, openPath, pick, recent };

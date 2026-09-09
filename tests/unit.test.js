@@ -99,7 +99,9 @@ test('base css: partial(fill) and waiting(outline) are visually distinct', () =>
 
 test('no fabricated progress anywhere in the renderer', () => {
   const files = ['app/renderer/screens/sc01.js', 'app/renderer/screens/sc01.css',
-                 'app/renderer/design/base.css', 'app/renderer/copy.js', 'app/renderer/index.html'];
+                 'app/renderer/screens/sc02.js', 'app/renderer/screens/sc02.css',
+                 'app/renderer/design/base.css', 'app/renderer/copy.js', 'app/renderer/index.html',
+                 'app/renderer/renderer.js', 'app/renderer/dom.js'];
   for (const f of files) {
     // strip comments first: a comment that FORBIDS these words is exactly what we want to see
     const s = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/<!--[\s\S]*?-->/g, '');
@@ -111,7 +113,7 @@ test('no fabricated progress anywhere in the renderer', () => {
   }
 });
 
-test('every Korean string is either Canon 18 verbatim or explicitly marked DEV-ONLY', () => {
+test('every Korean string is either Canon 18 verbatim or a marked Canon gap', () => {
   const canon = process.env.JUQODE_CANON ||
     '/home/skkse12/Desktop/Projects/Team/JuQode-Private/docs/current/18_KOREAN_UX_COPY.md';
   let dict;
@@ -125,17 +127,41 @@ test('every Korean string is either Canon 18 verbatim or explicitly marked DEV-O
   const hangul = /['"`]([^'"`]*[\uAC00-\uD7A3][^'"`]*)['"`]/g;
   const found = new Map();
   for (const f of ['app/renderer/copy.js', 'app/renderer/screens/sc01.js',
-                   'app/renderer/renderer.js', 'app/main/main.js']) {
+                   'app/renderer/screens/sc02.js', 'app/renderer/dom.js',
+                   'app/renderer/renderer.js', 'app/main/main.js', 'app/main/project.js',
+                   'app/main/claude-detect.js', 'app/main/db/db.js', 'app/main/db/repo.js']) {
     const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     for (const m of src.matchAll(hangul)) found.set(m[1], f);
   }
   assert.ok(found.size >= 10, `expected to find the SC-01 copy, found ${found.size} strings`);
 
-  // Strings under copy.js `dev:` are allowed to be absent from Canon; everything else is not.
-  const devBlock = read('app/renderer/copy.js').split('dev: {')[1]?.split('},')[0] ?? '';
+  // ONE block in copy.js may hold strings Canon 18 does not carry: `gap:`, a state 18 has
+  // no key for. A `dev:` block used to be allowed too; it shipped unapproved copy onto SC-02
+  // under a comment claiming it never would, so DEV-ONLY product copy is now banned outright.
+  const copySrc = read('app/renderer/copy.js');
+  const block = (name) => copySrc.split(`${name}: {`)[1]?.split('},')[0] ?? '';
+  const gapBlock = block('gap');
+  assert.ok(gapBlock, 'copy.js lost its gap: marker — the exemption must stay explicit');
+  assert.ok(!/\bdev:\s*\{/.test(copySrc),
+    'copy.js has a dev: block again — DEV-ONLY copy on a real screen is how unapproved words shipped');
+
   for (const [s, f] of found) {
-    if (devBlock.includes(s)) continue;             // explicitly marked DEV-ONLY
-    assert.ok(dict.includes(s), `"${s}" (${f}) is not in Canon 18 and is not marked DEV-ONLY`);
+    if (gapBlock.includes(s)) continue;
+    assert.ok(dict.includes(s), `"${s}" (${f}) is not in Canon 18 and is not a marked Canon gap`);
+  }
+
+  // The gap block must not become a dumping ground: if Canon 18 DOES carry the string, the
+  // approved key should have been used instead.
+  for (const m of gapBlock.matchAll(/['"]([^'"]*[\uAC00-\uD7A3][^'"]*)['"]/g)) {
+    assert.ok(!dict.includes(m[1]),
+      `"${m[1]}" is in Canon 18 — move it out of copy.js gap: and use the approved key`);
+  }
+
+  // Main never ships a user-facing sentence: reasons cross IPC as machine codes.
+  for (const f of ['app/main/project.js', 'app/main/main.js']) {
+    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(!/[\uAC00-\uD7A3]/.test(src),
+      `${f} contains Korean in code — the renderer owns copy, main sends machine reasons`);
   }
 });
 
@@ -146,8 +172,8 @@ test('index.html: CSP forbids remote content', () => {
   assert.doesNotMatch(html, /https?:\/\//);   // no external asset of any kind
 });
 
-test('scope containment: no WBS-02+ capability is implemented, anywhere under app/', () => {
-  // Walk the WHOLE tree. Reading one file let WBS-02+ code hide in any other.
+test('capability containment: each privileged capability lives in exactly one module', () => {
+  // Walk the WHOLE tree. Reading one file lets a capability hide in any other.
   const files = [];
   (function walk(dir) {
     for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
@@ -156,21 +182,45 @@ test('scope containment: no WBS-02+ capability is implemented, anywhere under ap
       else if (/\.(js|mjs|cjs|html)$/.test(e.name)) files.push(rel);
     }
   })('app');
-  assert.ok(files.length >= 6, `expected to scan the app tree, found ${files.length} files`);
+  assert.ok(files.length >= 10, `expected to scan the app tree, found ${files.length} files`);
 
-  const banned = [
-    'showOpenDialog', 'dialog.show', 'child_process', 'node-pty', 'spawn(', 'execSync',
-    'better-sqlite3', 'sqlite', 'fs.readFile', 'fs.writeFile', 'writeFileSync',
+  // token -> the single file allowed to contain it
+  const OWNER = {
+    'showOpenDialog':  'app/main/project.js',
+    'child_process':   'app/main/claude-detect.js',
+    'execFile':        'app/main/claude-detect.js',
+    'node:sqlite':     'app/main/db/db.js',
+    'DatabaseSync':    'app/main/db/db.js',
+  };
+  // never, anywhere: nothing in the built packages needs these, and each is a real hazard
+  const NEVER = [
+    'node-pty', 'openExternal', 'execSync', 'eval(', 'new Function',
+    'better-sqlite3', 'nodeIntegration: true', 'webSecurity: false',
   ];
+
   for (const f of files) {
-    // strip comments — a comment that says "WBS-02 does this" is documentation, not code
+    // strip comments — a comment naming a capability is documentation, not code
     const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    for (const b of banned) {
-      assert.ok(!src.includes(b), `${f} reaches into WBS-02+ territory: ${b}`);
+    for (const b of NEVER) assert.ok(!src.includes(b), `${f} uses a forbidden capability: ${b}`);
+    for (const [tok, owner] of Object.entries(OWNER)) {
+      if (src.includes(tok)) assert.strictEqual(f, owner, `${tok} appears in ${f}; only ${owner} may have it`);
     }
   }
-  // and the folder-open IPC must still refuse
-  assert.match(read('app/main/main.js'), /ok:\s*false/);
+
+  // The renderer is not privileged: no node built-in reaches it, and it never touches ipcRenderer.
+  for (const f of files.filter((f) => f.startsWith(path.join('app', 'renderer')))) {
+    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const b of ['require(', 'ipcRenderer', 'process.', "node:"]) {
+      assert.ok(!src.includes(b), `renderer file ${f} reaches outside its sandbox: ${b}`);
+    }
+  }
+
+  // Packages NOT yet built must not have a half-implementation hiding in the tree.
+  const all = files.map((f) => read(f)).join('\n');
+  for (const notYet of ['work_signal', 'evidence_basis', 'change_group', '--allowedTools', '--resume']) {
+    const inCode = all.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(!inCode.includes(notYet), `a later WBS package leaked into app/: ${notYet}`);
+  }
 });
 
 test('visual test writes to an untracked path unless goldens are explicitly updated', () => {
@@ -178,6 +228,7 @@ test('visual test writes to an untracked path unless goldens are explicitly upda
   // default output must not be the tracked evidence directory
   assert.match(src, /const UPDATE = /);
   assert.match(src, /UPDATE \? GOLDEN : path\.join\(ROOT, 'tmp-visual'\)/);
+  assert.match(src, /const GOLDEN = path\.join\(ROOT, 'docs', 'dev-evidence', 'screens'\)/);
   // and the untracked path must actually be ignored
   const ignore = read('.gitignore');
   assert.match(ignore, /^tmp-visual\/$/m, 'tmp-visual/ is not gitignored — test output would be committed');

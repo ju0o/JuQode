@@ -39,17 +39,23 @@ function lockNavigation(contents, allowedUrl) {
  */
 function enforceLocalOnly(session) {
   const attempts = [];
+  let blocked = 0;
   session.webRequest.onBeforeRequest((details, callback) => {
     const url = details.url || '';
     const local = url.startsWith('file:') || url.startsWith('devtools:') ||
                   url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('about:');
     if (!local) {
-      attempts.push(url);
+      /* Bounded: a renderer can trigger this, and an unbounded array in the main process is
+       * an allocation it controls. The count is what the test asserts, so keep counting. */
+      if (attempts.length < 100) attempts.push(url);
+      blocked += 1;
       return callback({ cancel: true });
     }
     callback({ cancel: false });
   });
-  return () => attempts.slice();
+  const read = () => attempts.slice();
+  read.count = () => blocked;
+  return read;
 }
 
 module.exports = { WEB_PREFERENCES, lockNavigation, enforceLocalOnly };
