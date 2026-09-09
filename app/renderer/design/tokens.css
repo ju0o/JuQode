@@ -4,6 +4,18 @@
  * as implemented in docs/visual/visual-design.html. These values are TRANSCRIBED from the
  * approved Canon, not invented here. If Canon changes, change it there first.
  *
+ * FOUR VALUES DIVERGE, AND ON PURPOSE — CANON_FINDINGS CF-20.
+ *   light  --mut   #5d6672 → #4c545f
+ *   light  --mut2  #8a93a0 → #646d7a
+ *   light  --part · --wait  #b45309 → #ad4f08
+ *   dark   --mut2  #79838f → #8a94a1
+ * `16` §2.1's own table states the requirement — 보조 텍스트 대비 ≥ 4.5:1 — on the same line as
+ * values that do not meet it: light `--mut2` is 3.11:1 on a card and 2.72:1 on the board, which
+ * is below even the 3:1 floor for large text, and `--mut2` carries approved `18` sentences the
+ * product wants read. The requirement wins over the draft hex; the hue is untouched, and
+ * `--part` and `--wait` remain the SAME value because §2.1's fill-vs-outline grammar needs them
+ * to be. `tests/theme.test.js` measures every text token against every surface it can land on.
+ *
  * Theme contract (16 §2.1):
  *   1. complete light palette on bare :root
  *   2. dark values redefined ONLY as tokens, guarded :root:not([data-theme="light"])

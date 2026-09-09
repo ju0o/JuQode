@@ -25,6 +25,7 @@ import { mountThemeToggle } from '../design/theme.js';
  * a platform global fails silently and looks like data. */
 import { when } from './brief.js';
 import { nextActions } from '../nextaction.js';
+import { unwantedPanel } from './sc03.js';
 
 /* `16` §2.1: 부분 amber FILL · 실패 red (the only red) · 알 수 없음 dashed. A change that
  * could not be explained is 알 수 없음 — dashed — and never red: nothing failed. */
@@ -55,7 +56,9 @@ export function renderSC04(root, api, nav, state) {
   bar.appendChild(id);
   bar.appendChild(el('span', 'grow'));
   bar.appendChild(btn('btn sm ghost nodrag', C.reader.back, () => nav.toWork(snap)));
-  bar.appendChild(btn('btn sm ghost nodrag', C.reader.understood, () => nav.toWorkbench(p, state.interpretation)));
+  /* `이해했어요 · 다음 요청으로` is NOT a shared top-bar element — `15` §0 lists 작업으로
+   * 돌아가기 · 터미널 · 테마 there, and this is a screen action. `17` puts JuQode's offers in a
+   * 카드 아래 행동 줄, so it moved into the 다음 행동 block at the foot of the board (WBS-38). */
   /* `15` §0 · TD-01: the terminal toggle is on every screen's top bar. The drawer itself lives
    * outside `#root`, so this only flips a flag the router owns. */
   bar.appendChild(btn('btn sm ghost nodrag', C.term.title, () => window.__toggleDrawer?.()));
@@ -122,6 +125,23 @@ export function renderSC04(root, api, nav, state) {
    * first thing on a screen whose subject is the change itself. */
   const gap = evidenceGapCard(reader);
   if (gap) board.appendChild(gap);
+
+  /* WBS-38 · SC-04's own offers, labelled as JuQode's (`17` · D-136).
+   *
+   * `15` SC-04 Secondary Actions names four: 작업으로 돌아가기 · 이해했어요 · 다음 요청으로 ·
+   * 원하던 결과가 아니에요 · 터미널. Two are shared top-bar elements; the other two are this
+   * screen's, and 원하던 결과가 아니에요 was not built here at all — WBS-19 put it on SC-03 only,
+   * so a user who read the change and did not want it had no way to say so from the screen that
+   * had just shown them why. Found in the batch-16 QA pass. */
+  const acts = nextActions([
+    btn('btn sm pri', C.reader.understood, () => nav.toWorkbench(p, state.interpretation)),
+    btn('btn sm', C.work.unwanted, () => {
+      if (board.querySelector('[data-el="unwanted"]')) return;
+      /* No `먼저 변경 더 읽기`: that button goes to SC-04, and this IS SC-04. */
+      board.insertBefore(unwantedPanel(snap, nav, state, { readMore: false }), acts);
+    }),
+  ]);
+  board.appendChild(acts);
 
   shell.appendChild(board);
   root.appendChild(shell);

@@ -250,7 +250,10 @@ export function renderSC02(root, api, nav, state) {
 async function fillPresence(api, state) {
   const project = state.project;
   const r = await api.history(project.id);
-  const live = r?.ok ? r.works.find((w) => w.status !== 'ended') : null;
+  /* A read that FAILED says nothing about whether there is a Work. `idle` is `대기 중` — a
+   * claim that nothing is happening — and the store refusing to answer is not evidence for it. */
+  if (!r?.ok) { if (state.screen === 'SC-02' && state.project === project) setPresenceMode('unknown'); return; }
+  const live = r.works.find((w) => w.status !== 'ended');
   let mode = 'idle';
   if (live) {
     const snap = (await api.workGet(live.id))?.work;

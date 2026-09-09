@@ -708,6 +708,16 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.readerCols     = await evalJs(`document.querySelectorAll('.sc04-col').length`);
   out.readerRawShut  = await evalJs(`document.querySelectorAll('.sc04-patch').length`);
   out.readerText     = await evalJs(`document.querySelector('.sc04')?.innerText ?? null`);
+  /* WBS-38 · `15` SC-04 Secondary Actions. Two of the four are shared top-bar elements; these
+   * two are the screen's own, and 원하던 결과가 아니에요 was not built here at all until the
+   * batch-16 QA pass — a user who had just been shown why a change happened had no way to say
+   * it was not what they wanted from the screen that showed them. */
+  out.readerActs = await evalJs(`(() => {
+    const b = document.querySelector('.sc04 [data-el="next-actions"]');
+    return b ? JSON.stringify({ n: b.querySelectorAll('button').length, text: b.innerText }) : null; })()`);
+  await evalJs(`[...document.querySelectorAll('.sc04 [data-el="next-actions"] button')].find(b => b.textContent.includes('원하던 결과가'))?.click()`);
+  await sleep(400);
+  out.readerUnwanted = await evalJs(`document.querySelector('.sc04 [data-el="unwanted"]')?.innerText ?? null`);
 
   /* D-118's skip: the RAW text must be reachable from the group, without going through a block. */
   await evalJs(`document.querySelector('.sc04-group .sc04-rawbtn')?.click()`);
@@ -823,7 +833,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   /* WBS-37 · SC-04 → SC-02: 읽기면이 접히며 History 로 착지한다. `이해했어요` is SC-04's own
    * way out, so it is where the sentence is about. */
   out.morphToBench = await evalJs(MORPH(
-    `[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('이해했어요'))?.click()`,
+    `[...document.querySelectorAll('.sc04 [data-el="next-actions"] button')].find(b => b.textContent.includes('이해했어요'))?.click()`,
     '.sc02 [data-card="history"]'));
   await sleep(800);
   /* …and `결과 보기` → SC-03. */
@@ -1521,6 +1531,24 @@ assert.strictEqual(results.workReds, 0, 'SC-03 renders red for a refusal, which 
 }
 
 assert.strictEqual(results.screenReader, 'SC-04', `변경 읽기 did not reach SC-04 (${results.screenReader})`);
+
+/* WBS-38 · SC-04's own 다음 행동 block (`15` SC-04 Secondary Actions). */
+{
+  const a = JSON.parse(results.readerActs);
+  assert.ok(a, 'SC-04 has no 다음 행동 block on its populated state');
+  assert.strictEqual(a.n, 2, `SC-04's 다음 행동 offers ${a.n} actions, not two`);
+  assert.ok(a.text.includes('다음 행동'), 'the block is not labelled');
+  assert.ok(a.text.includes('이해했어요'), '이해했어요 · 다음 요청으로 is not offered on SC-04');
+  assert.ok(a.text.includes('원하던 결과가'), '원하던 결과가 아니에요 is not offered on SC-04');
+  /* D-115 · WBS-19: no undo button, and the panel says so before offering the only thing that
+   * exists — a NEW Work. */
+  assert.ok(results.readerUnwanted, '원하던 결과가 아니에요 opened nothing on SC-04');
+  assert.ok(results.readerUnwanted.includes('되돌리기 버튼은 없어요'),
+    'the SC-04 unwanted panel does not say there is no undo');
+  /* …and it does NOT offer 먼저 변경 더 읽기, which navigates to the screen we are already on. */
+  assert.ok(!results.readerUnwanted.includes('먼저 변경 더 읽기'),
+    'SC-04 offers a button that navigates to SC-04');
+}
 const reader = results.reader ? JSON.parse(results.reader) : null;
 assert.ok(reader, 'SC-04 rendered without a read model');
 assert.ok(reader.groups.length >= 1, 'the Work edited two files and the reader shows no group');

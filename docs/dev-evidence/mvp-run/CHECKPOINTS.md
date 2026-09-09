@@ -471,3 +471,31 @@ are two claims; only the first was being made. Both are now.
 
 Next eligible: DV-11's pty decision · an independent QA pass over batches 13–15 · WBS-32/33
 (need humans and Windows).
+
+## Batch 16 QA · batches 13–15
+
+Report: `BATCH-16-QA.md`. Canon findings raised: **CF-20**.
+
+3 HIGH · 2 MEDIUM · 0 BLOCKER. 493 tests, three e2e files.
+
+The worst of them was a comment that was not true: `presence.js` said "There is no timer in
+this file. Not one." while using `performance.now()` and `requestAnimationFrame`, and the test's
+banned-word list had been shaped to let that through. The claim is now stated precisely — there
+IS a clock, and what there is not is a clock that can reach a MODE — and the test asserts the
+clock's presence before checking that nothing schedules a callback and that `setMode` has
+exactly three callers, none of them the loop.
+
+Two false claims of the same family: SC-02 reported 대기 중 when the store refused to answer at
+all (the sibling of a bug already fixed for a missing snapshot), and `15` SC-04's
+`원하던 결과가 아니에요` had never been built on SC-04 — a user who had just been shown why a
+change happened could not say it was not what they wanted from the screen that showed them.
+
+CF-20: `16` §2.1 states 보조 텍스트 대비 ≥ 4.5:1 on the same line as values that measure
+3.11:1 and 2.72:1. The requirement wins over the draft hex, and `tokens.css` now says so rather
+than continuing to describe itself as a pure transcription.
+
+Two mutants in this run have now passed the unit suite and been killed only by the e2e, both
+because the check was reading source text. Recorded: a claim about the SCREEN is the e2e's;
+a source check earns its place only when it shows the structure makes the claim impossible.
+
+Next eligible: DV-11's pty decision · WBS-32/33 (need humans and Windows).

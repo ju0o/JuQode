@@ -453,7 +453,7 @@ function resultCard(snap, api, nav, state) {
  * The prefilled sentence quotes the user's OWN words. JuQode does not paraphrase the request it
  * is about to resend, and it does not promise the change will be restored — nothing can.
  */
-function unwantedPanel(snap, nav, state) {
+export function unwantedPanel(snap, nav, state, { readMore = true } = {}) {
   const panel = el('div', 'card c-wide unwanted');
   panel.setAttribute('data-el', 'unwanted');
   panel.appendChild(el('div', 'ct', C.work.unwantedTitle));
@@ -466,7 +466,9 @@ function unwantedPanel(snap, nav, state) {
       nav.toWorkbench(state.project, state.interpretation,
                       { intent: C.gap.correctionIntent(snap.work.intent) });
     }),
-    btn('btn sm ghost rec', C.work.readMore, () => nav.toReader(snap)),
+    /* `먼저 변경 더 읽기` goes to SC-04. On SC-04 itself that is a button that does nothing,
+     * and `15` DS §1 treats a control with no effect as not an action at all. */
+    ...(readMore ? [btn('btn sm ghost rec', C.work.readMore, () => nav.toReader(snap))] : []),
   ]));
   return panel;
 }

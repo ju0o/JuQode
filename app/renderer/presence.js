@@ -7,11 +7,18 @@
  *   1. **모드는 신호·사용자 행동으로만 바뀐다.** `setMode` is the ONLY writer of `this.mode`, and
  *      the only caller of `setMode` is a render driven by a snapshot. The draw loop reads the
  *      mode and never writes it.
- *   2. **타이머만으로 도달하는 모드가 없다.** There is no timer in this file. Not one. The two
- *      quiet modes (`nosignal`, `unknown`) come in already decided, from `livenessOf()` in the
- *      supervisor — which `17` exempts by name because it judges *process alive + last-signal
- *      timestamp*, not elapsed time on its own. A clock here would be a second, unaccountable
- *      one, and the acceptance is written to forbid exactly that.
+ *   2. **타이머만으로 도달하는 모드가 없다.** Stated precisely, because the loose version of it
+ *      is not true and this run has been burned by loose versions before: this file DOES read a
+ *      clock — `performance.now()` for the breath and the one settle, `requestAnimationFrame`
+ *      for the loop. What it does not have is a clock that can reach a MODE. Nothing schedules
+ *      a callback (`setTimeout`/`setInterval` appear nowhere), nothing reads a wall clock, and
+ *      the only writer of `this.mode` is `setMode`, which the loop never calls. Every clock
+ *      reading here ends up as a transform inside the mode it was already in.
+ *
+ *      The two quiet modes (`nosignal`, `unknown`) come in already decided, from `livenessOf()`
+ *      in the supervisor — which `17` exempts by name because it judges *process alive +
+ *      last-signal timestamp*, not elapsed time on its own. A second, unaccountable clock here
+ *      is what the acceptance is written to forbid.
  *   3. **모션 끔에서 모드별 정적 프레임.** `prefers-reduced-motion: reduce` draws one still frame
  *      per mode — the transition is jumped rather than eased, and rotation, breathing, jitter and
  *      flicker are all zero. The label is present in every mode, reduced or not, so the mode is

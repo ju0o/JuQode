@@ -171,12 +171,37 @@ test('the mapping is pure: same snapshot, same mode, no clock', async () => {
 
 /* ───────── 2 · no mode is reachable by a timer alone ───────── */
 
-test('the presence file contains no timer at all', () => {
-  /* The acceptance's hardest half. `livenessOf()` in the supervisor is the ONE clock allowed to
-   * reach a mode (`17` exempts it by name: process alive + last-signal timestamp), and it hands
-   * its verdict in through the snapshot. A second clock here would be one nothing accounts for. */
-  for (const banned of ['setInterval', 'setTimeout', 'Date.now', 'new Date', 'setImmediate']) {
-    assert.ok(!SRC.includes(banned), `presence.js contains ${banned} — a mode could move on a clock`);
+test('no clock in this file can reach a mode', () => {
+  /* The acceptance's hardest half, and the one it is easiest to write a test that cannot fail
+   * for. The file DOES read a clock — the breath and the settle are time-based, and the loop is
+   * `requestAnimationFrame`. A banned-word list that quietly left those two out would be shaped
+   * to let the claim through, so this states them and then checks the thing that actually
+   * matters: no clock reading can end up as a MODE.
+   *
+   * `livenessOf()` in the supervisor is the ONE clock allowed to reach a mode (`17` exempts it
+   * by name: process alive + last-signal timestamp), and it hands its verdict in through the
+   * snapshot. A second clock here would be one nothing accounts for. */
+  assert.ok(SRC.includes('performance.now()'), 'the breath and the settle are no longer time-based');
+  assert.ok(SRC.includes('requestAnimationFrame'), 'there is no draw loop any more');
+
+  /* Nothing SCHEDULES anything: a callback that fires later is the only way a clock could get
+   * from here to `setMode` without the draw loop. */
+  /* Comments stripped — the file NAMES the things it does not do, and must, or the claim is
+   * unreadable. (This bit the first draft: the doc comment saying `setInterval appears nowhere`
+   * made the scan report a setInterval.) */
+  const code = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+  for (const banned of ['setInterval', 'setTimeout', 'setImmediate', 'queueMicrotask',
+                        'Date.now', 'new Date']) {
+    assert.ok(!code.includes(banned), `presence.js contains ${banned} — a mode could move on a clock`);
+  }
+
+  /* …and `setMode` is called from exactly the three places that are a construction, a render
+   * and a render-driven correction. None of them is the loop. */
+  const calls = [...SRC.matchAll(/\.setMode\(/g)];
+  assert.strictEqual(calls.length, 3, `setMode is called from ${calls.length} places`);
+  for (const fn of ['constructor', 'presenceCard', 'setPresenceMode']) {
+    assert.ok(new RegExp(`${fn}[\\s\\S]{0,900}?\\.setMode\\(`).test(SRC),
+      `${fn} does not set the mode — one of the three callers has moved`);
   }
 });
 
@@ -317,6 +342,10 @@ test('SC-02 never guesses a mode from a History row', () => {
   /* …and a live Work whose snapshot could not be read is not called 대기 중. */
   assert.ok(/mode = snap \? modeFor\(snap\) : 'unknown'/.test(src),
     'a live Work with no snapshot is reported as idle');
+  /* …nor is a History read that FAILED. `idle` is `대기 중`, a claim that nothing is happening;
+   * the store refusing to answer is not evidence for it. */
+  assert.ok(/if \(!r\?\.ok\) \{[^}]*setPresenceMode\('unknown'\)/.test(src),
+    'a failed History read is reported as 대기 중');
 });
 
 test('SC-03 draws the presence from the very snapshot it is already drawing', () => {
