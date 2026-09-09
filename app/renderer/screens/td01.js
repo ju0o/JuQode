@@ -25,6 +25,7 @@
  */
 import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
+import { when } from './brief.js';
 
 /* `15` TD-01: the drawer covers the bottom 40% of the current screen. */
 export function mountDrawer(api, state, onChange) {
@@ -251,8 +252,14 @@ function runCard(api, state, repaint) {
   const [cls, title] = RESULT[r.state] ?? RESULT.unknown;
   const head = el('div', 'td01-runhead');
   head.appendChild(el('span', 'ct', title));
-  if (cls) head.appendChild(el('span', `chip ${cls}`, title));
+  /* `15` §F: a state chip carries its state as TEXT, never as colour alone — so every state gets
+   * one, including the ones with no colour of their own. It used to print the same sentence
+   * twice for the states that had a class and nothing at all for 실행 중. */
+  head.appendChild(el('span', `chip ${cls || 'unavail'}`, r.ended ? C.qc.exit : C.qc.running));
   card.appendChild(head);
+  /* `15` TD-01: 계속 실행 중 — 개발 서버 · 시작 4분 전. The start time is what makes a
+   * long-running card readable; `run.js` keeps it and the card never showed it. */
+  if (r.startedAt && !r.ended) card.appendChild(el('p', 'xs mut', when(r.startedAt)));
 
   if (r.command) card.appendChild(el('p', 'xs mut mono', r.command));
 

@@ -129,11 +129,22 @@
 /* WBS-05 · 오래됨 — a STATEMENT OF FACT, so it is neutral. `16` reserves red for failure and
    amber fill for 부분; an aged Brief is neither. Dashed 알 수 없음 would be wrong too: what
    changed is KNOWN, it is the answers that may no longer match. */
+/* `15` SC-02 Stale State: "오래됨 — amber line on Brief". `16` §2 assigns amber OUTLINE to a
+   state waiting on the user, and this band is exactly that — it offers 다시 읽기 and 이대로
+   계속 and does neither on its own. It was ordinary card furniture, so the one state that is
+   waiting for a decision looked like the ones that are not. */
 .sc02 .staleband {
-  border: 1px solid var(--line2); background: var(--card2);
+  border: 1px solid var(--wait); border-left-width: 3px; background: var(--card);
   border-radius: var(--r-inner); padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px;
 }
-/* A refresh that failed over a Brief that still works. The band says so; the answers below it
-   are the old ones and stay exactly as they were. */
-.sc02 .failband.soft { border-style: dashed; }
+/* A refresh that failed over a Brief that still WORKS. `16` §2 keeps red for a closed list of
+   failures, and this is not on it: nothing was lost, the previous reading is still on screen
+   underneath. So it is the neutral 사용 불가 grey — 지금 안 됨 · 실패 아님 (12 §16) — and not
+   red-and-dashed, which is not a combination the grammar defines at all. */
+.sc02 .failband.soft {
+  /* The same tokens as `.panel.grey` — 사용 불가 has one look, and a second grey that is nearly
+     the same is a sixth state nobody declared. */
+  border: 1px solid var(--line); background: var(--grey);
+}
+.sc02 .failband.soft .t { color: var(--ink2); }

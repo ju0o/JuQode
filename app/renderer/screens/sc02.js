@@ -76,6 +76,9 @@ export function renderSC02(root, api, nav, state) {
     folded: state.briefFolded,
     refreshFailed: state.refreshFailed,
     onFold: () => { state.briefFolded = !state.briefFolded; paint(); },
+    /* 이대로 계속 dismisses the ANNOUNCEMENT. Clearing the verdict is what brings 다시 읽기 back
+     * to the header, so the user is never left on SC-02 with no way to re-read. */
+    onKeepStale: () => { state.stale = null; paint(); },
     onReread: () => {
       /* `19` §C1 ⑤ · D-132: the ONLY thing that starts a re-read. It is not automatic, and the
        * old Brief stays on screen while the new one is being taken. */

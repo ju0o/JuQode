@@ -66,6 +66,9 @@ export function renderBrief(card, interp, opts = {}) {
 
   if (!interp) {                                     /* 해석 중 — facts only, no percent (원칙 6) */
     card.appendChild(el('div', 'sm mut', C.brief.interpreting));
+    /* `15` SC-02 Loading State: the intent field stays ENABLED and the Brief says so. `18` has
+     * the sentence and nothing was drawing it, so the screen looked like it was blocking. */
+    card.appendChild(el('div', 'xs mut2', C.brief.interpretingHint));
     return;
   }
   if (interp.status === 'failed') {
@@ -87,7 +90,13 @@ export function renderBrief(card, interp, opts = {}) {
     band.appendChild(el('div', 'sm', staleLine(opts.stale.days)));
     const acts = el('div', 'row-acts');
     if (opts.onReread) acts.appendChild(btn('btn sm', C.brief.reread, opts.onReread));
-    acts.appendChild(btn('btn sm ghost', C.brief.staleKeep, () => band.remove()));
+    /* Dismissing the notice must not take 다시 읽기 with it. `band.remove()` left the state set,
+     * so the header kept suppressing its own button and SC-02 had no 다시 읽기 control at all
+     * until the user left the screen and came back. `15` lists it unconditionally. */
+    acts.appendChild(btn('btn sm ghost', C.brief.staleKeep, () => {
+      if (opts.onKeepStale) opts.onKeepStale();
+      else band.remove();
+    }));
     band.appendChild(acts);
     card.appendChild(band);
   }

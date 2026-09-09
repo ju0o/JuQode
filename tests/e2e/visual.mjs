@@ -358,10 +358,45 @@ const results = await cdp(async ({ send, evalJs }) => {
     }
     document.body.appendChild(strip);
 
+    /* …and the SURFACES, not only the chips. The chip strip proves the TOKENS are distinct; it
+     * says nothing about whether the app applies them, and the review found exactly that gap —
+     * the 오래됨 band was ordinary card furniture while this test passed. Each of these is
+     * rendered inside the screen that owns it, so its real cascade applies. */
+    /* The rules are SCOPED (.sc02 .staleband), so the probe carries its own scope rather than
+     * hoping the right screen happens to be mounted. Appending to whatever was on screen gave
+     * every surface an unstyled border-style:none and the comparison compared nothing.
+     *
+     * Run once PER THEME, like the chips: a token redefined in only one theme block is a
+     * failure this codebase has already shipped. */
+    function surfaceProbe() {
+      const rows = [];
+      const host = document.createElement('div');
+      host.className = 'sc02';
+      document.body.appendChild(host);
+      for (const [name, cls] of [['stale', 'staleband'], ['softfail', 'failband soft'],
+                                 ['fail', 'failband'], ['partial', 'partial-line'],
+                                 ['wait', 'panel wait'], ['unavail', 'panel grey']]) {
+        const n = document.createElement('div');
+        n.className = cls;
+        n.textContent = name;
+        host.appendChild(n);
+        const st = getComputedStyle(n);
+        rows.push({ name,
+                    background: st.backgroundColor, borderColor: st.borderTopColor,
+                    borderStyle: st.borderTopStyle, borderLeft: st.borderLeftWidth,
+                    color: st.color });
+        n.remove();
+      }
+      host.remove();
+      return rows;
+    }
+
     const out = {};
+    const surfacesByTheme = {};
     for (const theme of ['light', 'dark']) {
       document.documentElement.setAttribute('data-theme', theme);
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      surfacesByTheme[theme] = surfaceProbe();
       out[theme] = KINDS.map((k, i) => {
         const el = strip.children[i];
         const s = getComputedStyle(el);
@@ -374,7 +409,7 @@ const results = await cdp(async ({ send, evalJs }) => {
       });
     }
     strip.remove();
-    return JSON.stringify(out);
+    return JSON.stringify({ chips: out, surfaces: surfacesByTheme });
   })()`);
 
   for (const theme of ['light', 'dark']) {
@@ -976,7 +1011,8 @@ assert.strictEqual(results.screenAfterDrawer, 'SC-02', 'closing the drawer chang
  * `16` §2.1 keeps these apart, and `12` §16 turns one pair into a product promise: 사용 불가 is
  * NOT 실패. The check runs in both themes, because a token redefined in only one theme block is
  * a failure this codebase has already shipped. */
-const grammar = JSON.parse(results.stateGrammar);
+const grammarAll = JSON.parse(results.stateGrammar);
+const grammar = grammarAll.chips;
 for (const theme of ['light', 'dark']) {
   const rows = grammar[theme];
   assert.strictEqual(rows.length, 6, `${theme}: expected six states`);
@@ -1034,6 +1070,28 @@ for (const theme of ['light', 'dark']) {
   const card = rows.find((r) => r.kind === 'wait').background;
   assert.strictEqual(wait.background, card);
   assert.notStrictEqual(part.background, wait.background, `${theme}: 부분 lost its fill`);
+}
+
+/* …and the SURFACES the app actually renders, not only the tokens. `21` WBS-29's risk column:
+ * "unavailable · unknown · partial · waiting 이 같은 토큰으로 렌더됨 → 실패". A chip strip
+ * cannot see that — the 오래됨 band was plain card furniture while every chip assertion passed. */
+for (const theme of ['light', 'dark']) {
+  const rows = grammarAll.surfaces[theme];
+  assert.ok(rows?.length >= 6, `${theme}: the surface probe rendered nothing`);
+  const surf = (n) => rows.find((s) => s.name === n);
+
+  /* 오래됨 waits for the user (다시 읽기 / 이대로 계속) and does neither on its own — `16` §2
+   * gives that amber OUTLINE, and `15` SC-02 says "amber line on Brief". */
+  assert.notStrictEqual(surf('stale').borderColor, surf('unavail').borderColor,
+    `${theme}: the 오래됨 band and the 사용 불가 panel are painted the same`);
+  assert.strictEqual(surf('stale').borderColor, surf('wait').borderColor,
+    `${theme}: 오래됨 is a state waiting on the user and is not painted as one`);
+
+  /* A refresh that failed over a Brief that still works is NOT on `16` §2's closed list of reds. */
+  assert.notStrictEqual(surf('softfail').borderColor, surf('fail').borderColor,
+    `${theme}: a failed refresh is painted with the failure colour while the old Brief is readable`);
+  assert.strictEqual(surf('softfail').borderColor, surf('unavail').borderColor,
+    `${theme}: a failed refresh is not painted as 사용 불가 — 지금 안 됨 · 실패 아님`);
 }
 
 /* ── WBS-05 · 오래됨 ──────────────────────────────────────────────────────────────────────

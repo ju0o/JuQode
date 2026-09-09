@@ -52,8 +52,6 @@ export const C = {
     failTitle: '프로젝트를 읽지 못했어요',
     failNote:  '요청과 Quick Command, 터미널은 그대로 쓸 수 있어요.',
     partial:  "여섯 가지 중 일부는 확인하지 못했어요. 나머지는 '확인 못함'으로 남겨 두었어요.",
-    failTitle: '프로젝트를 읽지 못했어요',
-    failNote:  '요청과 Quick Command, 터미널은 그대로 쓸 수 있어요.',
     q: ['하는 일', '주요 기능', '쓰인 기술', '폴더가 하는 일', '실행 방법', '확인 못한 것'],
     chips: { ok: '확인됨', exp: '예상됨', no: '확인 못함' },
   },
@@ -367,7 +365,11 @@ export const C = {
      * or more old. Staleness is really about the HASH, not the age, so a project can change
      * minutes after it was read; "0일 전에 읽은 내용이에요" is not Korean anyone writes. This
      * states the same fact for that case. CANON_FINDINGS CF-16. */
-    briefStaleToday:  '읽은 뒤로 프로젝트가 바뀌었어요.',
+    /* `12` §16, 오래됨 row: 최신이라고도 틀렸다고도 주장하지 않는다. `18` brief.stale and `15`
+     * both hedge — "바뀌었을 수 있어요" — and this dropped the hedge, asserting a change on the
+     * strength of a hash that covers only manifests and the tree shape (`19` §C1 ⑤): a
+     * reformatted package.json produced "the project changed". */
+    briefStaleToday:  '읽은 뒤로 프로젝트가 바뀌었을 수 있어요.',
 
     /* TD-01 · the SIX rules' explanation sentences — 이해한 것 · 실행할 명령 · 하는 일.
      *
@@ -439,16 +441,11 @@ export const C = {
     readerUnavailable: '이 변경을 지금 불러오지 못했어요.',
     /* The copy button's own feedback. `18` carries the label (`reader.copy`) and not the
      * result, and the result is a fact about what just happened on this machine. */
-    readerCopied:     '복사했어요',
-    readerCopyFailed: '복사하지 못했어요',
     /* `18` has `history.changes` for the BUTTON and no key for the count on a row. `15` writes
      * it as `변경 3개`, which is what SC-03's result card already says. */
-    historyChanged:   (n) => `변경 ${n}개`,
-    historyRunning:   '진행 중',
     /* The prefilled correction intent. `15` writes it as `"○○ 변경을 다시 수정해줘"`; `18` has
      * no key for the sentence itself, only for the button that produces it. The user's OWN words
      * are what is quoted — JuQode does not paraphrase the request it is about to resend. */
-    correctionIntent: (intent) => `${intent} — 이 작업의 결과가 원하던 것이 아니에요. 다시 고쳐 주세요.`,
 
     /* Brief ANSWER bodies. `18` is a dictionary of fixed UI strings; a Brief answer is
      * generated from what the scan found, so `18` cannot carry it and does not try. These are

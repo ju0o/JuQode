@@ -60,7 +60,11 @@
 /* 미인식 is NEUTRAL — `15` says so explicitly, and `19` §C4 explains why: the product recognises
    six things and declines the rest; it does not claim to have detected anything. */
 .td01-card[data-kind="unrecognized"] { border-color: var(--line2); }
-.td01-card[data-kind="ambiguous"]    { border-color: var(--unk); border-style: dashed; }
+/* 모호함 is not 알 수 없음. `16` §2 gives dashed BLUE-GREY to "we do not know" and dashed INK to
+   "a JuQode rule stopped this" — and this card says exactly that: 실행하지 않았어요. Painting it
+   as unknown claimed the product could not tell, when it could tell perfectly well and declined
+   to choose. */
+.td01-card[data-kind="ambiguous"]    { border-color: var(--line3); border-style: dashed; }
 
 .td01-field { display: flex; gap: 10px; align-items: baseline; }
 .td01-field .k { flex: 0 0 auto; min-width: 5.5em; }

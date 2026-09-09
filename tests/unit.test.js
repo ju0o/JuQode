@@ -324,6 +324,28 @@ test('visual test writes to an untracked path unless goldens are explicitly upda
   assert.match(ignore, /^tmp-visual\/$/m, 'tmp-visual/ is not gitignored — test output would be committed');
 });
 
+test('no copy block declares the same key twice', () => {
+  /* A duplicate key in an object literal is silent: the LAST one wins and the first is dead.
+   * Seven of these had accumulated — `brief.failTitle`, `gap.readerCopied` and five more — and
+   * they happened to hold identical values, so nothing was visibly wrong. The next one will not
+   * be identical, and the copy that loses is the one a reviewer read. */
+  const src = read('app/renderer/copy.js');
+  const blocks = [];
+  for (const m of src.matchAll(/^  ([A-Za-z_]\w*): \{/gm)) blocks.push({ name: m[1], start: m.index });
+  assert.ok(blocks.length >= 8, `expected the copy blocks, found ${blocks.length}`);
+  blocks.forEach((b, i) => { b.end = i + 1 < blocks.length ? blocks[i + 1].start : src.length; });
+
+  const dupes = [];
+  for (const b of blocks) {
+    const seen = new Set();
+    for (const m of src.slice(b.start, b.end).matchAll(/^    ([A-Za-z_]\w*)\s*:/gm)) {
+      if (seen.has(m[1])) dupes.push(`${b.name}.${m[1]}`);
+      seen.add(m[1]);
+    }
+  }
+  assert.deepStrictEqual(dupes, [], `a copy key is declared twice in one block: ${dupes.join(', ')}`);
+});
+
 test('every copy key the renderer NAMES actually exists', () => {
   /* The provenance test above checks that every Korean STRING came from Canon 18. It cannot see
    * the opposite failure: a screen naming a key `copy.js` does not have. That renders `undefined`
