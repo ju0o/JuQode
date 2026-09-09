@@ -1,4 +1,5 @@
-/* WBS-22 · Quick Command rules — `19` §C4, D-106.
+/* WBS-22 · Quick Command rules · WBS-23 execution & result · WBS-24 long-running —
+ * `19` §C4, D-106.
  *
  * The corpus below is Canon's, case by case, taken from
  * `JuQode-Private/docs/evidence/planning/q02-q03-quick-command-validation.md`. That document

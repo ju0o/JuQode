@@ -499,3 +499,22 @@ because the check was reading source text. Recorded: a claim about the SCREEN is
 a source check earns its place only when it shows the structure makes the claim impossible.
 
 Next eligible: DV-11's pty decision · WBS-32/33 (need humans and Windows).
+
+## Batch 17 · WBS ledger + traceability tags
+
+Report: `WBS-LEDGER.md`. No new Canon findings.
+
+All 39 packages accounted for in one table, with the code and the tests for each. Building it
+surfaced a traceability gap `22` cares about: **WBS-23, 24, 25, 29 and 30 could not be found by
+number** — their implementations carried no `WBS-NN` tag, so a reader following `21` §1 to the
+code hit nothing. Tagged: `qc/run.js` (23 · 24), `td01.js`/`td01.css` (25 · 23 · 24),
+`tokens.css`/`base.css` (29), `security.js`/`exclude.js` (30), and the corresponding test files.
+
+The ledger's state column means one thing and says so: the acceptance is in the code and a test
+exists that can actually fail on it. Windows behaviour, real users' understanding and a signed
+build's first run stay in `DEFERRED_VALIDATION.md`.
+
+**Three packages are not finished, and each for a reason that is not a scheduling one:**
+WBS-25's shell command line (DV-11 — a product decision between node-pty, a TTY-less pipe shell,
+and the mock `18` already has copy for), WBS-32 (needs people), WBS-33 (needs Windows and a
+signing certificate).

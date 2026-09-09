@@ -1,4 +1,4 @@
-/* TD-01 · Terminal Drawer.
+/* TD-01 · Terminal Drawer — WBS-25.
  *
  * `15`: 290 px, slides up over the current screen with a 12 % scrim; closing preserves the
  * screen beneath. The drawer is a sibling of `#root`, not a child — every screen render clears

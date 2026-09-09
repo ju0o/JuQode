@@ -1,5 +1,7 @@
-/* Base + primitives. Only what SC-01 needs and what the approved MVP obviously shares.
- * No speculative components — 21 WBS-01 says foundation, not a component library. */
+/* Base + primitives — WBS-01 foundation, and WBS-29's state colour grammar in its rendered
+ * form (the chips and panels; the tokens they read are in `tokens.css`).
+ * Only what the approved MVP obviously shares. No speculative components — 21 WBS-01 says
+ * foundation, not a component library. */
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }   /* #root too, or .shell's 100% resolves against auto */

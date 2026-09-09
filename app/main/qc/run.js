@@ -1,5 +1,7 @@
 'use strict';
-/* WBS-22 · Quick Command execution — `19` §C4's safety contract (Q-03), D-106.
+/* WBS-23 · Quick Command execution & result · WBS-24 · long-running — `19` §C4's safety
+ * contract (Q-03), D-106. The rules and the explanation those results belong to are WBS-22
+ * (`rules.js`, `availability.js`).
  *
  * The contract, in the order it matters:
  *

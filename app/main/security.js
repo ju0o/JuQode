@@ -1,5 +1,5 @@
 'use strict';
-/* Security posture for the renderer.
+/* WBS-30 · Security boundaries — security posture for the renderer.
  *
  * 19 §S and 07 §2: JuQode does NOT claim OS-level containment. What is enforced here is an
  * in-app boundary — the renderer cannot reach Node, cannot navigate away, and cannot open

@@ -1,5 +1,6 @@
 'use strict';
-/* JuQode's OWN secret-exclusion list, and the ledger that accounts for what it excludes.
+/* WBS-30 · Security boundaries — JuQode's OWN secret-exclusion list, and the ledger that
+ * accounts for what it excludes.
  *
  * D-126a: this list is JuQode's and does NOT come from `.gitignore`. A user who never
  * gitignored `.env` would otherwise get plaintext secrets in permanent evidence — that was

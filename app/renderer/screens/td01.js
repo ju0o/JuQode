@@ -1,4 +1,8 @@
-/* TD-01 · Terminal Drawer (터미널) — `15` TD-01, `19` §C4 · §S, D-134.
+/* TD-01 · Terminal Drawer (터미널) — WBS-25 · WBS-23 · WBS-24 · `15` TD-01, `19` §C4 · §S, D-134.
+ *
+ * WBS-25 is the drawer itself (PARTIAL — the shell command line is DV-11); WBS-23 is the Quick
+ * Command result cards; WBS-24 is 계속 실행 중, which is the same run reported without ever
+ * being called done.
  *
  * The drawer is the home of technical execution. Two things live in it, and `15` requires them
  * to be VISUALLY DISTINCT: a natural-language Quick Command field, and (later) the shell line.

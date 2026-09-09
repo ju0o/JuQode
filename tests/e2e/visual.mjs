@@ -905,7 +905,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   }
   await send('Emulation.setEmulatedMedia', { features: [] });
 
-  /* ── TD-01 · the terminal drawer and Quick Command ──────────────────────────────────────
+  /* ── TD-01 · the terminal drawer and Quick Command — WBS-25 · WBS-22 · WBS-23 · WBS-24 ──
    * `15`: the drawer opens over the current screen, its banner can never be closed, and typing
    * ROUTES rather than runs — `19` §C4's explain-then-confirm is two round trips by design. */
   step('TD-01');
