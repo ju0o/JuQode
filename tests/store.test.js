@@ -551,3 +551,231 @@ test('the main-process handler wrapper answers instead of rejecting, and refuses
   assert.match(body, /catch \(err\)/, 'a throwing handler would reject the invoke');
   assert.match(body, /ok: false, reason: 'internal'/);
 });
+
+test('an interpretation the app died inside becomes 실패, not 읽는 중 forever', () => {
+  /* WBS-34 · `20`: an interpretation still `interpreting` whose process is gone becomes
+   * `failed` with an `ended_at`. A Brief that says 읽는 중 about a read that stopped days ago
+   * is the same lie as a Work stuck at 진행 중 — and the whole app is ONE process, so a row in
+   * this state means that process is gone. There is no handle to ask about. */
+  const dir = tmp(), f = path.join(dir, 'i.db');
+  let db = openDb(f);
+  const project = repo.openProject(db, '/p/one', 'one');
+  repo.saveInterpretation(db, project.id, {
+    status: 'interpreting', sourceHash: 'h', skippedNote: null,
+    answers: [{ q: 1, text: '읽는 중', confidence: 'unconfirmed', sourceRef: null }],
+    readFiles: ['package.json'],
+  });
+  db.close();
+
+  db = openDb(f);
+  const ids = repo.reconcileInterpretations(db);
+  assert.strictEqual(ids.length, 1);
+
+  const row = db.prepare('select * from interpretation where id = ?').get(ids[0]);
+  assert.strictEqual(row.status, 'failed', 'a stalled read must not stay 읽는 중');
+  assert.ok(row.ended_at, 'it ended — the row has to say when');
+
+  /* The answers it DID have are kept. Nothing is invented to fill the gap. */
+  const answers = db.prepare('select * from interpretation_answer where interpretation_id = ?').all(ids[0]);
+  assert.strictEqual(answers.length, 1);
+  assert.strictEqual(answers[0].confidence, 'unconfirmed');
+  db.close();
+});
+
+test('a finished interpretation is left alone', () => {
+  /* The counterpart: a rule that rewrote every interpretation would pass the test above and
+   * destroy every Brief the product has ever produced. */
+  const dir = tmp(), f = path.join(dir, 'i2.db');
+  const db = openDb(f);
+  const project = repo.openProject(db, '/p/two', 'two');
+  repo.saveInterpretation(db, project.id, {
+    status: 'interpreted', sourceHash: 'h', skippedNote: null,
+    answers: [{ q: 1, text: 'Node.js 프로젝트예요.', confidence: 'confirmed', sourceRef: 'package.json' }],
+    readFiles: ['package.json'],
+  });
+  assert.deepStrictEqual(repo.reconcileInterpretations(db), []);
+  assert.strictEqual(repo.currentInterpretation(db, project.id).status, 'interpreted');
+  db.close();
+});
+
+test('the orientation sentence describes the LATEST Work, not any Work ever', async () => {
+  /* `21` WBS-20 / WBS-34: `확인 불가` is reserved for a Work whose process could not be found.
+   * The check was `works.some(w => w.outcome === 'ended_unknown')`, so ONE reconciled Work — a
+   * laptop closed mid-run, once — made SC-02 say `이전 작업이 지금 어떤 상태인지 확인할 수
+   * 없어요` for the rest of the project's life, with completed Works listed underneath it.
+   * `18` writes the sentence in the singular because it is about the one the user just left. */
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const repo = require(path.join(R, 'app/main/db/repo.js'));
+  const db = openDb(':memory:');
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
+  const dir = tempDir('juqode-orient-');
+  const project = repo.openProject(db, dir, 'p');
+
+  const endWork = (intent, outcome) => {
+    const w = repo.beginWork(db, project.id, intent).work;
+    repo.setWorkState(db, w.id, { status: 'ended', outcome });
+    return w;
+  };
+
+  /* An old Work whose process was lost, and a newer one that finished cleanly. */
+  endWork('오래된 작업', 'ended_unknown');
+  await new Promise((r) => setTimeout(r, 5));            // distinct started_at
+  endWork('최근 작업', 'complete');
+
+  const after = await h['juqode:history'](null, project.id);
+  assert.strictEqual(after.orientation, 'finished',
+    'a completed latest Work is described by its own outcome, not by an older Work\'s');
+
+  /* …and the reserved word IS used when the latest Work is the reconciled one. */
+  await new Promise((r) => setTimeout(r, 5));
+  endWork('마지막 작업', 'ended_unknown');
+  const unknown = await h['juqode:history'](null, project.id);
+  assert.strictEqual(unknown.orientation, 'unknown');
+
+  /* A Work still running outranks both — it is what the user is actually in. */
+  const running = repo.beginWork(db, project.id, '지금 도는 작업');
+  assert.strictEqual(running.ok, true);
+  assert.strictEqual((await h['juqode:history'](null, project.id)).orientation, 'running');
+});
+
+test('a project with no Works at all is idle, not unknown', async () => {
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const repo = require(path.join(R, 'app/main/db/repo.js'));
+  const db = openDb(':memory:');
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
+  const project = repo.openProject(db, tempDir('juqode-orient-'), 'p');
+  assert.strictEqual((await h['juqode:history'](null, project.id)).orientation, 'idle');
+});
+
+/* ───────────── WBS-20 · the History handler, driven through IPC ───────────── */
+
+function historyBench() {
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const db = openDb(':memory:');
+  const dir = tempDir('juqode-hist-');
+  const project = repo.openProject(db, dir, 'p');
+  const h = makeHandlers({ db: () => db, dbFault: () => null,
+                           evidenceStore: () => tempDir('juqode-hstore-'), push: () => {} });
+  return { db, project, h };
+}
+
+const endWork = (db, projectId, intent, outcome) => {
+  const w = repo.beginWork(db, projectId, intent).work;
+  repo.setWorkState(db, w.id, { status: 'ended', outcome });
+  return w;
+};
+
+test('History lists every Work, newest first, whatever its outcome', async () => {
+  /* `12` F-C2-04: History never disappears, and a failed or cancelled Work stays in it. */
+  const { db, project, h } = historyBench();
+  /* Deliberately inserted inside ONE millisecond, with no `tick()`. `started_at` is an ISO
+   * string, so four Works this close all carry the same timestamp — and History still has to
+   * come back in a defined order, because `orientationOf` reads `works[0]`. The `rowid`
+   * tiebreaker is what makes that true, and this is the fixture that would catch its removal. */
+  for (const o of ['complete', 'failed', 'cancelled_partial', 'cancelled_nochange']) {
+    endWork(db, project.id, `일 ${o}`, o);
+  }
+  const r = await h['juqode:history'](null, project.id);
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.works.length, 4, 'a Work went missing from History');
+  assert.deepStrictEqual(r.works.map((w) => w.outcome),
+    ['cancelled_nochange', 'cancelled_partial', 'failed', 'complete'], 'newest first');
+  db.close();
+});
+
+test('변경 n개 is a MEASURED number, or it is not shown at all', async () => {
+  /* The rule this handler exists to keep: `changes()` answers `known: false` when the evidence
+   * pair cannot tell, and that has to travel as `null`. Printing 0 in its place would be the
+   * product asserting a measurement nobody made — and a mutation doing exactly that survived
+   * the whole suite until this test existed. */
+  const { db, project, h } = historyBench();
+  endWork(db, project.id, '기준 없는 일', 'complete');      // no evidence basis was ever written
+
+  const r = await h['juqode:history'](null, project.id);
+  assert.strictEqual(r.works[0].changes, null,
+    'a Work with no evidence basis reported a change COUNT, which nobody measured');
+  db.close();
+});
+
+test('a Work still running reports no count either, and orients as 진행 중', async () => {
+  const { db, project, h } = historyBench();
+  repo.beginWork(db, project.id, '도는 일');
+  const r = await h['juqode:history'](null, project.id);
+  assert.strictEqual(r.works[0].changes, null, 'a running Work has no final count to report');
+  assert.strictEqual(r.orientation, 'running');
+  db.close();
+});
+
+test('the orientation sentence is the one that is true', async () => {
+  /* `18` orient.*, and `21` WBS-20 reserves `확인 불가` for a Work whose process could not be
+   * found. It is never a stand-in for "we have not looked". */
+  const empty = historyBench();
+  assert.strictEqual((await empty.h['juqode:history'](null, empty.project.id)).orientation, 'idle');
+  empty.db.close();
+
+  const done = historyBench();
+  endWork(done.db, done.project.id, '끝난 일', 'complete');
+  assert.strictEqual((await done.h['juqode:history'](null, done.project.id)).orientation, 'finished');
+
+  /* A Work that FAILED still states its outcome — failure is known, not unknown. */
+  const failed = historyBench();
+  endWork(failed.db, failed.project.id, '실패한 일', 'failed');
+  assert.strictEqual((await failed.h['juqode:history'](null, failed.project.id)).orientation, 'finished');
+  failed.db.close();
+
+  /* Only a reconciled Work — the one WBS-34 could not decide about — earns 확인 불가. */
+  const lost = historyBench();
+  endWork(lost.db, lost.project.id, '잃어버린 일', 'ended_unknown');
+  assert.strictEqual((await lost.h['juqode:history'](null, lost.project.id)).orientation, 'unknown');
+
+  /* …and it does not haunt the project forever: a later Work that ended normally is what the
+   * user just left, so that is what the sentence is about. */
+  endWork(lost.db, lost.project.id, '그 다음 일', 'complete');
+  assert.strictEqual((await lost.h['juqode:history'](null, lost.project.id)).orientation, 'finished',
+    'one reconciled Work made the sentence 확인 불가 for the rest of the project\'s life');
+  lost.db.close();
+  done.db.close();
+});
+
+test('History refuses a project id it does not know', async () => {
+  const { db, h } = historyBench();
+  assert.deepStrictEqual(await h['juqode:history'](null, 'no-such-project'), { ok: false, reason: 'no-project' });
+  db.close();
+});
+
+test('two Works begun in the SAME millisecond still come back newest first', () => {
+  /* `started_at` is an ISO string at millisecond resolution, so a tie is not exotic — it is what
+   * happens whenever two Works are created inside one millisecond, which is exactly what a test
+   * fixture and a fast retry both do. A tie left SQLite free to return either order, so History
+   * ordered itself at random and SC-02's orientation sentence (which reads `works[0]`) followed.
+   *
+   * The tie is FORCED here rather than raced for: the timestamps are made equal on purpose. */
+  const repo = require(path.join(R, 'app/main/db/repo.js'));
+  const db = openDb(':memory:');
+  const project = repo.openProject(db, tempDir('juqode-order-'), 'p');
+
+  const ids = [];
+  for (const intent of ['첫째', '둘째', '셋째']) {
+    const w = repo.beginWork(db, project.id, intent).work;
+    repo.setWorkState(db, w.id, { status: 'ended', outcome: 'complete' });
+    ids.push(w.id);
+  }
+  db.prepare('update work set started_at = ? where project_id = ?').run('2026-01-01T00:00:00.000Z', project.id);
+
+  const order = repo.worksFor(db, project.id).map((w) => w.intent);
+  assert.deepStrictEqual(order, ['셋째', '둘째', '첫째'],
+    `History is not newest-first when the timestamps tie: ${JSON.stringify(order)}`);
+
+  /* …and it is the same answer every time, not merely one plausible answer once. */
+  for (let i = 0; i < 20; i++) {
+    assert.deepStrictEqual(repo.worksFor(db, project.id).map((w) => w.intent), order);
+  }
+
+  /* The orientation sentence rides on that order, so it settles too. */
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
+  repo.setWorkState(db, ids[2], { status: 'ended', outcome: 'ended_unknown' });
+  const r = h['juqode:history'](null, project.id);
+  assert.strictEqual(r.orientation, 'unknown', 'the LATEST Work is the reconciled one');
+  assert.deepStrictEqual(r.works.map((w) => w.intent), ['셋째', '둘째', '첫째']);
+});

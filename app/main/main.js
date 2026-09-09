@@ -111,6 +111,11 @@ if (!app.requestSingleInstanceLock()) {
         catch (e) { return e.code === 'EPERM'; }          // EPERM: alive and not ours
       });
       if (lost.length) trace('work.reconciled', { count: lost.length });
+
+      /* …and an interpretation the app died in the middle of. `20`: it becomes `failed`, not
+       * `interpreted` — the answers it had are kept, and none are invented to fill the gap. */
+      const stalled = repo.reconcileInterpretations(db);
+      if (stalled.length) trace('interpretation.reconciled', { count: stalled.length });
     }
 
     /* Anything we started is ours to stop. Without this, quitting mid-Work leaves the CLI

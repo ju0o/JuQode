@@ -146,8 +146,16 @@ function setWorkState(db, workId, { status, outcome = null }) {
 
 const getWork = (db, id) => db.prepare('select * from work where id = ?').get(id) ?? null;
 
+/**
+ * `15` History: past Works NEWEST FIRST. `started_at` is an ISO string at millisecond
+ * resolution, so two Works begun in the same millisecond tie — and a tie leaves SQLite free to
+ * return them in any order, which made History's order and SC-02's orientation sentence
+ * (`orientationOf` reads `works[0]`) both non-deterministic. `rowid` is the insertion order and
+ * breaks the tie the same way every time.
+ */
 const worksFor = (db, projectId, limit = 20) =>
-  db.prepare('select * from work where project_id = ? order by started_at desc limit ?').all(projectId, limit);
+  db.prepare('select * from work where project_id = ? order by started_at desc, rowid desc limit ?')
+    .all(projectId, limit);
 
 /* ── WBS-08 · the basis a Work's diffs are computed against (D-121) ── */
 function saveBasis(db, workId, phase, { kind, ref, excluded, files }) {
@@ -392,6 +400,29 @@ function reconcileLostWorks(db, isAlive = () => false) {
   return stranded.map((w) => w.id);
 }
 
+/**
+ * WBS-34 · an interpretation the app was in the middle of when it died.
+ *
+ * `20` says it plainly: an interpretation still `interpreting` whose process is gone becomes
+ * `failed`, `ended_at = now()`. It does NOT become `interpreted` with invented answers, and it
+ * does not stay `interpreting` forever — a Brief that says 읽는 중 about a read that stopped
+ * days ago is the same lie as a Work stuck at 진행 중.
+ *
+ * The six answers are left exactly as they were. Whatever was confirmed before the app died is
+ * still confirmed; what was not is still 확인 못함. Nothing is filled in.
+ *
+ * The whole app runs in one process, so a row in this state means THAT process is gone — there
+ * is no handle to ask about, unlike a Work, which owns a child.
+ */
+function reconcileInterpretations(db) {
+  const stranded = db.prepare("select id from interpretation where status = 'interpreting'").all();
+  if (!stranded.length) return [];
+  const at = now();
+  const stmt = db.prepare("update interpretation set status = 'failed', ended_at = ? where id = ?");
+  for (const r of stranded) stmt.run(at, r.id);
+  return stranded.map((r) => r.id);
+}
+
 module.exports = {
   openProject, recentProjects,
   saveInterpretation, currentInterpretation,
@@ -402,5 +433,5 @@ module.exports = {
   saveResult, resultFor,
   saveDiff, diffsFor, pruneDiffs,
   saveChangeGroups, changeGroupsFor,
-  reconcileLostWorks, processFor,
+  reconcileLostWorks, reconcileInterpretations, processFor,
 };

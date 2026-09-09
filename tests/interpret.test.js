@@ -664,3 +664,35 @@ test('every non-ended status holds the guard, not just running', () => {
     db.close();
   }
 });
+
+test('an interpretation the app died inside becomes 실패, with its answers untouched', () => {
+  /* `21` WBS-34 / `20`: an interpretation still `interpreting` whose process is gone becomes
+   * `failed`. It does NOT become `interpreted` with invented answers, and it does not stay
+   * `interpreting` — a Brief that says 읽는 중 about a read that stopped days ago is the same
+   * lie as a Work stuck at 진행 중.
+   *
+   * The whole app is one process, so a row in this state means THAT process is gone. There is
+   * no handle to ask about, which is what makes this different from a Work. */
+  const repo = require(path.join(R, 'app/main/db/repo.js'));
+  const { openDb } = require(path.join(R, 'app/main/db/db.js'));
+  const db = openDb(':memory:');
+  const project = repo.openProject(db, tempDir('juqode-interp-'), 'p');
+
+  /* `20` numbers the six questions 1..6 — the kind rides inside `text`. */
+  const answers = [{ q: 1, kind: 'what', data: { name: 'p' }, confidence: 'confirmed', sourceRef: 'package.json' },
+                   { q: 5, kind: 'run', data: null, confidence: 'unconfirmed', sourceRef: null }];
+  repo.saveInterpretation(db, project.id, { status: 'interpreted', sourceHash: 'h', answers, readFiles: ['package.json'] });
+  db.prepare("update interpretation set status = 'interpreting', ended_at = null where project_id = ?").run(project.id);
+
+  const closed = repo.reconcileInterpretations(db);
+  assert.strictEqual(closed.length, 1, 'a stranded interpretation was left saying 읽는 중');
+
+  const back = repo.currentInterpretation(db, project.id);
+  assert.strictEqual(back.status, 'failed', 'a read that stopped is not a read that finished');
+  assert.deepStrictEqual(back.answers.map((a) => a.confidence), ['confirmed', 'unconfirmed'],
+    'the answers were rewritten — whatever was confirmed before the app died is still confirmed');
+  assert.strictEqual(back.answers[1].data, null, 'a missing answer was filled in');
+
+  /* …and a finished interpretation is never touched. */
+  assert.deepStrictEqual(repo.reconcileInterpretations(db), []);
+});

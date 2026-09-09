@@ -36,10 +36,13 @@ const { answers, statusOf } = require('./interpret/answers');
  * Anything that ended states its outcome, however it ended.
  */
 function orientationOf(works) {
-  if (works.some((w) => w.status !== 'ended')) return 'running';
-  if (works.some((w) => w.outcome === 'ended_unknown')) return 'unknown';
   if (!works.length) return 'idle';
-  return 'finished';
+  if (works.some((w) => w.status !== 'ended')) return 'running';
+  /* The LATEST Work, not any Work ever. `some` meant that one reconciled Work — a laptop closed
+   * mid-run, once — made SC-02 say `이전 작업이 지금 어떤 상태인지 확인할 수 없어요` for the
+   * rest of the project's life, with a dozen completed Works sitting under the sentence. `18`
+   * writes it in the singular because it is about the one the user just left. */
+  return works[0].outcome === 'ended_unknown' ? 'unknown' : 'finished';
 }
 
 function makeHandlers(deps) {
