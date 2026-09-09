@@ -22,3 +22,24 @@ Mutation testing: 9 of 21 mutants survived the first suite; after the fixes, 12 
 
 Next eligible set, read from `21` §1 `Deps`: WBS-03 (deps 02) · WBS-06 (deps 02) ·
 WBS-07 (deps 21) · WBS-25 (deps 00, 01) · WBS-20 (deps 21, 05 — blocked on 05).
+
+## Batch 02
+
+Report: `BATCH-02.md`. Canon proposals added: CF-6, CF-7. Measured findings filed to the
+Private repo as `07` §9 (branch `canon/mvp-run-implementation-findings`, `393472e`).
+
+| Package | State |
+|---|---|
+| WBS-03 interpretation facts layer | IMPLEMENTED_PENDING_VALIDATION — the SC-02 Brief is real |
+| WBS-06 intent routing | ENGINE IMPLEMENTED · UI deferred to the batch where a Work can start |
+| WBS-07 single active Work guard | ENGINE IMPLEMENTED · card deferred with the same trigger |
+
+124 unit tests, 3 e2e files, all passing from a clean checkout with no orphan processes.
+Three reviewers returned 2 BLOCKER + 12 HIGH; all fixed and re-tested. Mutation testing found
+21 killed / 25 survived — including **every** secret-exclusion mutant, because the test guarding
+that property could not fail. After the fixes, 21 of 21 killed.
+
+Next eligible: WBS-08 (deps 00, 21) · WBS-10 (deps 09, 21) · WBS-25 (deps 00, 01) ·
+WBS-04 (deps 03, 10) · WBS-05 (deps 03, 04, 21). The Work chain — 08 · 10 · 11 — is next,
+and it is what lets WBS-06's field, WBS-07's card and WBS-09's 사용 불가 card land with the
+triggers Canon specifies for them.

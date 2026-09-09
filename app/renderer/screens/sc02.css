@@ -27,6 +27,8 @@
   padding: 14px 16px;
   display: flex; flex-direction: column; gap: 8px;
   min-width: 0;                               /* long paths must wrap, not widen the column */
+  align-self: start;                          /* a tall card grows its row (16 §4); its
+                                                 neighbours must not stretch to match */
 }
 
 .sc02 .chead { display: flex; align-items: center; gap: 8px; }
@@ -49,3 +51,35 @@
   .sc02 .c-wide, .sc02 .c-wide2, .sc02 .c-m { grid-column: span 2; }
   .sc02 .c-wide2 { grid-row: span 1; }
 }
+
+/* Brief — the six answers. Each row is label + chip, then the answer, then the file the
+ * 확인됨 chip rests on. 16 §5: the card grows its row rather than clipping. */
+.sc02 [data-card="brief"] .answers { display: flex; flex-direction: column; gap: 10px; }
+.sc02 .ans { display: flex; flex-direction: column; gap: 3px; }
+.sc02 .ans .label { display: flex; align-items: center; gap: 6px; }
+.sc02 .ans .label .qn { font-size: 12px; font-weight: 600; color: var(--ink2); }
+.sc02 .ans .body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sc02 .ans .body > * { overflow-wrap: anywhere; }
+.sc02 .ans .src { font-family: var(--font-mono); font-size: 10px; }
+.sc02 .fieldrow { display: flex; gap: 8px; align-items: baseline; }
+.sc02 .fieldrow .k { color: var(--mut2); flex: 0 0 auto; }
+.sc02 .fieldrow .v { min-width: 0; overflow-wrap: anywhere; }
+.sc02 .readfiles { margin-top: 4px; }
+.sc02 .readfiles > div { overflow-wrap: anywhere; padding-top: 4px; }
+
+/* 부분 해석 — amber, per 16 §2's state grammar. It is a line, not a fill, because the
+   partial state describes the card and not any one answer. */
+.sc02 .partial-line {
+  color: var(--part);
+  border-left: 3px solid var(--part);
+  padding-left: 8px;
+}
+
+/* 해석 실패 — a band inside the card, not a red screen. The rest of SC-02 stays usable
+ * (11 F-C1-02: 해석 실패가 제품 전체의 정지가 아니다). */
+.sc02 .failband {
+  padding: 10px 12px; border-radius: var(--r-inner);
+  border: 1px solid var(--failline); background: var(--failbg);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sc02 .failband .t { font-weight: 600; color: var(--fail); }

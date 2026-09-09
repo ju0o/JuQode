@@ -34,10 +34,19 @@ export const C = {
   },
   brief: {
     title: '이 프로젝트가 하는 일',
+    at:    '읽은 시점',
+    interpreting: '프로젝트를 읽고 있어요',
+    interpretingHint: '읽는 동안에도 요청할 수 있어요.',
+    readFiles:    '지금 읽는 파일',
+    partial:  "여섯 가지 중 일부는 확인하지 못했어요. 나머지는 '확인 못함'으로 남겨 두었어요.",
+    failTitle: '프로젝트를 읽지 못했어요',
+    failNote:  '요청과 Quick Command, 터미널은 그대로 쓸 수 있어요.',
+    q: ['하는 일', '주요 기능', '쓰인 기술', '폴더가 하는 일', '실행 방법', '확인 못한 것'],
     chips: { ok: '확인됨', exp: '예상됨', no: '확인 못함' },
   },
   history: {
     title: '기록',
+    more:  '개 더',
     empty: '아직 끝난 작업이 없어요. 첫 작업을 보내면 여기에 남아요.',
     note:  '끝난 작업은 사라지지 않아요. 실패하거나 멈춘 작업도 남아요.',
   },
@@ -76,6 +85,36 @@ export const C = {
    *                        supplies only the 로그인 필요 sentence.
    */
   gap: {
+    /* Brief ANSWER bodies. `18` is a dictionary of fixed UI strings; a Brief answer is
+     * generated from what the scan found, so `18` cannot carry it and does not try. These are
+     * the smallest sentences that state a fact without adding a judgement. CF-6. */
+    briefTech:      '프로젝트예요.',
+    /* FIELD LABELS, not sentences — the same shape as Canon's own `brief.at` (읽은 시점) and
+     * `brief.readFiles` (지금 읽는 파일). `18` §0.1's `-요` rule governs sentences; a label
+     * that introduces a value is a label in Canon too.
+     * NOT the earlier wording: the dependency list is the first twelve ALPHABETICALLY, so
+     * calling it a 주요 list is a judgement the scan cannot support (`18` §0.2). */
+    briefPm:        '패키지 매니저',
+    briefDeps:      '의존성',
+    briefFolders:   '이 폴더들이 있어요.',
+    briefFolderRole:'각 폴더가 무슨 일을 하는지는 아직 읽지 않았어요.',
+    briefRun:       '이 프로젝트가 스스로 적어 둔 실행 방법이에요.',
+    briefNoManifest:'어떤 기술을 쓰는지 알려 주는 파일을 찾지 못했어요.',
+    briefNoFolders: '하위 폴더가 없어요.',
+    briefNoScripts: '실행 방법이 프로젝트에 적혀 있지 않아요.',
+    /* NOT "아직 읽지 않았어요" — the card's own disclosure says it read two files. What is
+     * missing is the reading that turns files into an explanation, not the reading itself. */
+    briefNarrative: '파일만으로는 답할 수 없는 질문이에요.',
+    briefUnknownQ:  '아직 답하지 못한 것',
+    briefSkipped:   '상한을 넘겨서 읽지 못한 파일',
+    briefUnreadDirs:'읽을 수 없던 폴더',
+    briefDeepDirs:  '더 깊이 들어가지 않은 폴더',
+    briefRoles:     '폴더가 각각 무슨 일을 하는지',
+    briefTechMeaning:'그 기술이 이 프로젝트에서 무슨 뜻인지',
+    briefFailNoAccess:'폴더를 읽을 권한이 없어요.',
+    briefFailGone:  '폴더가 없어졌어요.',
+    briefFailOther: '폴더를 읽는 중에 막혔어요.',
+
     failMissing:   '폴더가 없어요',
     failNotFolder: '폴더가 아니에요',
     failUnknown:   '이 폴더를 읽지 못했어요',

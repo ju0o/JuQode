@@ -77,7 +77,11 @@ body {
   background: var(--card); color: var(--mut);
   font-size: 11px; line-height: 1; white-space: nowrap;
 }
+/* Claim chips carry their marks — 16 §7 and 18 §0.9: ✓ 확인됨 · ~ 예상됨 · ? 확인 못함.
+ * The mark is what survives a greyscale print and a colour-blind reader; the hue is not. */
 .chip.ok   { border-color: var(--rec);  color: var(--rec);  background: var(--recbg); }
+.chip.ok::before { content: "✓"; font-size: 10px; }
+.chip.unk::before { content: "?"; font-size: 10px; }
 .chip.fail { border-color: var(--fail); color: var(--fail); background: var(--failbg); }
 .chip.part { border-color: var(--part); color: var(--part); background: var(--partbg); }
 .chip.part::before { content: "◧"; font-size: 10px; opacity: .85; }

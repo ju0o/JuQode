@@ -12,6 +12,9 @@ const { enforceLocalOnly } = require('./security');
 const { openDb } = require('./db/db');
 const project = require('./project');
 const claude = require('./claude-detect');
+const { scan } = require('./interpret/scan');
+const { answers, statusOf } = require('./interpret/answers');
+const repo = require('./db/repo');
 
 /* One instance. A second launch focuses the existing window rather than opening a second one. */
 if (!app.requestSingleInstanceLock()) {
@@ -102,6 +105,36 @@ if (!app.requestSingleInstanceLock()) {
     const known = target === lastPick || project.recent(db).some((p) => p.path === target);
     if (!known) return { ok: false, reason: 'not-offered' };
     return project.openPath(db, target);
+  });
+
+  /* WBS-03 — the deterministic facts layer. Runs only when the renderer asks, so SC-02 can
+   * show 해석 중 first; `11` F-C1-01 says a project that is already interpreted is NOT
+   * re-interpreted on reopen, which is why `open` hands back whatever is already stored and
+   * this is a separate call the renderer makes only when there is nothing. */
+  handle('juqode:interpret', async (_e, projectId) => {
+    /* Test affordance, in the same spirit as JUQODE_EXIT_AFTER_LOAD: the facts scan finishes
+     * in milliseconds, so 해석 중 cannot be photographed without holding it. Off unless asked
+     * for; never set in a shipped build. It delays the ANSWER, it does not fake one. */
+    const hold = Number(process.env.JUQODE_INTERPRET_DELAY_MS) || 0;
+    if (hold) await new Promise((r) => setTimeout(r, hold));
+    const gate = needDb();
+    if (gate) return gate;
+    const row = db.prepare('select * from project where id = ?').get(projectId);
+    if (!row) return { ok: false, reason: 'no-project' };
+
+    const scanned = scan(row.path);
+    const list = answers(scanned);
+    const note = scanned.skipped ? JSON.stringify(scanned.skipped) : null;
+    const saved = repo.saveInterpretation(db, projectId, {
+      status: statusOf(scanned, list),
+      sourceHash: scanned.sourceHash,
+      skippedNote: note,
+      answers: list,
+      readFiles: scanned.readFiles,
+    });
+    /* The errno travels with the result. `15` SC-02 Failure State asks for the REASON, and a
+     * fixed sentence in the renderer would state a cause that may not be the cause. */
+    return { ok: true, interpretation: { ...saved, failedCode: scanned.failed ?? null } };
   });
 
   /* One probe at a time. Each call spawns up to two `claude` processes held for up to 8 s;

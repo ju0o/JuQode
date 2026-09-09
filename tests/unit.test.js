@@ -138,11 +138,14 @@ test('every Korean string is either Canon 18 verbatim or a marked Canon gap', ()
   // ONE block in copy.js may hold strings Canon 18 does not carry: `gap:`, a state 18 has
   // no key for. A `dev:` block used to be allowed too; it shipped unapproved copy onto SC-02
   // under a comment claiming it never would, so DEV-ONLY product copy is now banned outright.
+  /* Comments are stripped first. A comment that QUOTES a Canon string in order to explain
+     why a nearby key departs from it is documentation, not a string the product renders. */
   const copySrc = read('app/renderer/copy.js');
-  const block = (name) => copySrc.split(`${name}: {`)[1]?.split('},')[0] ?? '';
+  const copyCode = copySrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const block = (name) => copyCode.split(`${name}: {`)[1]?.split('},')[0] ?? '';
   const gapBlock = block('gap');
   assert.ok(gapBlock, 'copy.js lost its gap: marker — the exemption must stay explicit');
-  assert.ok(!/\bdev:\s*\{/.test(copySrc),
+  assert.ok(!/\bdev:\s*\{/.test(copyCode),
     'copy.js has a dev: block again — DEV-ONLY copy on a real screen is how unapproved words shipped');
 
   for (const [s, f] of found) {

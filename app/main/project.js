@@ -11,7 +11,7 @@
 const { dialog } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const { openProject, recentProjects } = require('./db/repo');
+const { openProject, recentProjects, currentInterpretation } = require('./db/repo');
 
 /* Only ENOENT means the folder is not there. ELOOP, ENAMETOOLONG, EIO, EMFILE and friends
  * are different facts, and reporting them as `폴더가 없어요` about a folder that plainly
@@ -70,7 +70,16 @@ function openPath(db, target) {
   /* Carry the folder back on failure too. `15` SC-01 gives the failure card TWO recovery
    * actions, and `▸ 같은 폴더 다시 시도` has nothing to retry without it. */
   if (!seen.ok) return { ...seen, path: target };
-  return { ok: true, project: openProject(db, seen.path, seen.name) };
+  const row = openProject(db, seen.path, seen.name);
+  /* `11` F-C1-01: reopening an already-interpreted project does NOT re-interpret it. Handing
+   * the stored interpretation back with the project is what makes that true by construction.
+   *
+   * A stored FAILURE is the exception. `다시 읽기` is WBS-05, so returning a failed row here
+   * would strand the project on the failure band permanently, with no route out — and a scan
+   * fails for reasons that pass (a folder locked by another process, a full disk). It is kept
+   * in the store as history and simply not handed back as the current answer. */
+  const current = currentInterpretation(db, row.id);
+  return { ok: true, project: row, interpretation: current?.status === 'failed' ? null : current };
 }
 
 /** Native folder pick → project. Cancelling is not a failure and shows no card. */

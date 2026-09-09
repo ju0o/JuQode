@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('juqode', {
   /** WBS-02 — reopen a folder we already offered: a recent row, or a retry of the last pick. */
   openPath: (p) => ipcRenderer.invoke('juqode:open-path', p),
 
+  /** WBS-03 — read the project's deterministic facts. Only called when nothing is stored. */
+  interpret: (projectId) => ipcRenderer.invoke('juqode:interpret', projectId),
+
   /** WBS-09 — is Claude Code usable right now, and if not, why. Never carries credentials. */
   claudeStatus: () => ipcRenderer.invoke('juqode:claude-detect'),
 });

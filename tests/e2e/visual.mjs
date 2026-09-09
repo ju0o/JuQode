@@ -22,6 +22,21 @@ const DB_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-e2e-'));
 const DB = path.join(DB_DIR, 'juqode.db');
 const SEED = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-seed-')));
 
+/* A small but REAL project, so the Brief has something it can actually confirm. It also
+ * carries a `.env` and a `node_modules`, which must never be read: the exclusion list is
+ * JuQode's own and does not depend on .gitignore (19 §C1 ④). */
+fs.writeFileSync(path.join(SEED, 'package.json'), JSON.stringify({
+  name: 'seed-app', main: 'src/index.js',
+  scripts: { dev: 'vite', build: 'vite build', test: 'node --test' },
+  dependencies: { vite: '^5.0.0' },
+}, null, 2));
+fs.writeFileSync(path.join(SEED, 'package-lock.json'), '{"lockfileVersion":3}');
+fs.writeFileSync(path.join(SEED, 'README.md'), '# seed-app\n\n작은 예제 프로젝트예요.\n\n## 설치\n\nnpm i\n');
+fs.writeFileSync(path.join(SEED, '.env'), 'SECRET_TOKEN=juqode-synthetic-fixture-marker\n');
+for (const d of ['src', 'lib', 'node_modules']) fs.mkdirSync(path.join(SEED, d));
+fs.writeFileSync(path.join(SEED, 'src', 'index.js'), 'export const hi = 1;\n');
+fs.writeFileSync(path.join(SEED, 'node_modules', 'huge.js'), 'x'.repeat(1000));
+
 /* A fixture CLI, not the host's. Without this the WBS-09 assertions test a different code
  * path on every machine — and on a host with no Claude Code they pass carrying no information. */
 const FAKE_CLI = path.join(DB_DIR, 'claude');
@@ -119,7 +134,8 @@ for (const port of [PORT, PORT + 1]) {
 
 const app = spawn('xvfb-run', ['-a', path.join(ROOT, 'node_modules', '.bin', 'electron'), '.',
   '--no-sandbox', `--remote-debugging-port=${PORT}`],
-  { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_CLAUDE_BIN: FAKE_CLI } });
+  { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB,
+      JUQODE_CLAUDE_BIN: FAKE_CLI, JUQODE_INTERPRET_DELAY_MS: '2500' } });
 app.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
 const stopApp = () => { try { process.kill(-app.pid, 'SIGKILL'); } catch { /* already gone */ } };
 process.on('exit', stopApp);
@@ -217,11 +233,35 @@ const results = await cdp(async ({ send, evalJs }) => {
   /* the SECOND row — the older project — so the reorder on return is a real signal */
   await evalJs(`document.querySelectorAll('[data-el="recent-row"]')[1].click()`);
   await sleep(700);
+
+  /* 해석 중 — a required `15` state that had no rendered evidence. The scan finishes in
+   * milliseconds, so the app is asked to hold the answer rather than the state being faked. */
+  out.interpretingText = await evalJs(`document.querySelector('[data-card="brief"]')?.innerText ?? null`);
+  out.interpretingHasChips = await evalJs(`document.querySelectorAll('[data-card="brief"] .chip').length`);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc02-interpreting-light.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  await sleep(2200);
   out.screenAfterOpen = await evalJs('window.__screen()');
   out.openedProject  = await evalJs('JSON.stringify(window.__project())');
   /* SC-02 no longer probes on entry (the 사용 불가 card belongs to a start attempt — see
    * CANON_FINDINGS CF-3), so detection is exercised through the bridge it is exposed on. */
   out.claude         = await evalJs('(async () => JSON.stringify(await window.juqode.claudeStatus()))()');
+  await sleep(400);
+  out.interp         = await evalJs('JSON.stringify(window.__interp())');
+  out.briefRows      = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
+  out.briefChips     = await evalJs(`JSON.stringify([...document.querySelectorAll('[data-card="brief"] .ans')].map(n => n.querySelector('.chip').textContent))`);
+  out.briefConfirmedHaveSource = await evalJs(`[...document.querySelectorAll('[data-card="brief"] .ans')]
+    .filter(n => n.querySelector('.chip').textContent.includes('확인됨')
+              && !n.querySelector('.chip').textContent.includes('못함')
+              && !n.querySelector('.src')).length`);
+  out.briefStamp = await evalJs(`document.querySelector('[data-card="brief"] .chead .mut2')?.textContent ?? null`);
+  out.briefPartialAmber = await evalJs(`(() => {
+    const probe = document.createElement('span'); probe.style.color = 'var(--part)';
+    document.body.appendChild(probe); const amber = getComputedStyle(probe).color; probe.remove();
+    const line = document.querySelector('[data-card="brief"] .partial-line');
+    return line ? getComputedStyle(line).color === amber : null; })()`);
   out.sc02Cards      = await evalJs(`JSON.stringify([...document.querySelectorAll('[data-card]')].map(n => n.getAttribute('data-card')))`);
   /* The open-path gate, exercised THROUGH the bridge. Asserting that main.js contains the
    * string `not-offered` passes just as happily when the gate is `true || …`. */
@@ -290,7 +330,7 @@ await sleep(400);
 const bridge = JSON.parse(results.bridge);
 assert.strictEqual(results.ready, true, 'renderer did not initialise');
 assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.screen}`);
-assert.deepStrictEqual(bridge.keys.sort(), ['boot', 'claudeStatus', 'openPath', 'openProject', 'versions'],
+assert.deepStrictEqual(bridge.keys.sort(), ['boot', 'claudeStatus', 'interpret', 'openPath', 'openProject', 'versions'],
   'renderer API surface is not exactly the declared one');
 assert.strictEqual(bridge.require, 'undefined', 'require leaked into the renderer');
 assert.strictEqual(bridge.process, 'undefined', 'process leaked into the renderer');
@@ -309,8 +349,45 @@ assert.ok(Math.abs(results.centreOffset) <= 40,
 assert.strictEqual(results.recentRows, 2, 'the seeded projects did not reach SC-01 from the store');
 assert.strictEqual(results.screenAfterOpen, 'SC-02', `opening a project did not reach SC-02 (got ${results.screenAfterOpen})`);
 assert.strictEqual(JSON.parse(results.openedProject).path, SEED, 'SC-02 is showing a different project than the one opened');
-assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(), ['history', 'stream'],
+assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(), ['brief', 'history', 'stream'],
   'SC-02 board is not the cards this package builds — nothing a later package owns may be drawn');
+/* WBS-03 — the Brief is six answers, and a 확인됨 chip must name the file it rests on (D-114). */
+const interp = JSON.parse(results.interp);
+assert.ok(interp, 'the Brief never arrived — interpretation did not run on open');
+assert.strictEqual(results.briefRows, 6, `the Brief must render all six questions, found ${results.briefRows}`);
+assert.strictEqual(results.briefConfirmedHaveSource, 0,
+  'a 확인됨 answer is rendered without the source file it rests on');
+/* 15 SC-02 ① requires the 해석 시점 timestamp on the Brief. */
+/* 해석 중 says what it is doing and claims nothing: no chips, no answers, no percent. */
+assert.ok(results.interpretingText && results.interpretingText.includes('프로젝트를 읽고 있어요'),
+  `해석 중 did not render (got ${results.interpretingText})`);
+assert.strictEqual(results.interpretingHasChips, 0, '해석 중 rendered a confidence chip before it had an answer');
+assert.ok(!/\d+\s*%/.test(results.interpretingText), '해석 중 rendered a percentage');
+
+assert.ok(results.briefStamp && results.briefStamp.includes('읽은 시점'),
+  `the Brief has no 해석 시점 timestamp (got ${results.briefStamp})`);
+/* 16 §2: 부분 is amber. It is the state the user is always in until WBS-04. */
+assert.strictEqual(results.briefPartialAmber, true, '부분 해석 is not rendered in the amber it is assigned');
+/* The seeded project is an EMPTY folder: nothing about it can be confirmed except what the
+ * scan itself knows, so the Brief must not claim otherwise. */
+/* The seeded project has a manifest, folders and scripts, so the facts layer can confirm
+ * 쓰인 기술 · 폴더가 하는 일 · 실행 방법. It has no narrative layer yet, so 하는 일 and
+ * 주요 기능 stay 확인 못함 — partial, which `11` says is not a failure. */
+assert.strictEqual(interp.status, 'partial', `expected 부분 해석, got ${interp.status}`);
+const confirmed = interp.answers.filter((a) => a.confidence === 'confirmed').map((a) => a.q);
+/* q4 is 확인 못함 on purpose: the question is what the folders DO, and the scan established
+ * only that they exist. A 확인됨 chip there would certify an answer nothing has given. */
+assert.deepStrictEqual(confirmed, [3, 5, 6], `the facts layer confirmed q${confirmed}`);
+assert.deepStrictEqual(interp.answers.filter((a) => a.confidence === 'unconfirmed').map((a) => a.q), [1, 2, 4]);
+
+/* 19 §C1 ④ — a secret is excluded BY NAME, before anything opens it. */
+assert.ok(!interp.readFiles.includes('.env'), 'the scanner read a .env file');
+assert.ok(!JSON.stringify(interp).includes('SECRET_TOKEN'), 'a secret name reached the interpretation');
+assert.deepStrictEqual(interp.readFiles.sort(), ['README.md', 'package.json'],
+  'the facts layer read something other than the manifests and the README');
+assert.ok(interp.answers.every((a) => a.confidence !== 'confirmed' || a.sourceRef),
+  '20 requires a source_ref on every confirmed answer');
+
 assert.strictEqual(results.sc02Overflow, 0, `SC-02 horizontal overflow of ${results.sc02Overflow}px`);
 assert.strictEqual(results.sc02Clipped, 0, 'an SC-02 card is clipping its own content');
 assert.ok(results.sc02RedProbe > 0,

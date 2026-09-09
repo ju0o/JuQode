@@ -10,15 +10,17 @@ const root = document.getElementById('root');
 
 /* Two surfaces exist so far. Navigation is a re-render, not a framework: there is no
  * back stack in the MVP — `15` gives every screen an explicit entry action instead. */
-const state = { project: null, recent: [], store: { ok: false }, claude: null };
+const state = { project: null, interpretation: null, recent: [], store: { ok: false }, claude: null };
 
 const nav = {
-  toWorkbench(project) {
+  toWorkbench(project, interpretation = null) {
     state.project = project;
+    state.interpretation = interpretation;
     renderSC02(root, api, nav, state);
   },
   async toPicker() {
     state.project = null;
+    state.interpretation = null;
     /* Re-read: the recent list changed the moment a project was opened. */
     const b = await api.boot();
     state.store = b.store;
@@ -33,5 +35,10 @@ await nav.toPicker();
 window.__screen  = () => document.querySelector('[data-screen]')?.getAttribute('data-screen') ?? null;
 window.__theme   = () => document.documentElement.getAttribute('data-theme');
 window.__project = () => (state.project ? { name: state.project.name, path: state.project.path } : null);
+window.__interp  = () => (state.interpretation
+  ? { status: state.interpretation.status,
+      answers: state.interpretation.answers.map((a) => ({ q: a.q, kind: a.kind, confidence: a.confidence, sourceRef: a.sourceRef })),
+      readFiles: state.interpretation.readFiles }
+  : null);
 window.__claude  = () => state.claude;
 window.__ready   = true;

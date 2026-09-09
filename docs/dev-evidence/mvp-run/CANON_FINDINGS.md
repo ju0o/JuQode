@@ -62,3 +62,34 @@ constraint with it.
 process, and the **packaged** Linux binary creates a 26-table store from the Canon schema on
 first run. `19` §D1's native-module and ABI risk therefore does not apply to persistence.
 Windows packaging remains DV-3 / DV-4 in `DEFERRED_VALIDATION.md`.
+
+## CF-6 · A Brief answer is generated content, so `20`'s `text` column and `18`'s dictionary both need a word about it — DESIGN QUESTION
+
+`20` gives `interpretation_answer.text` as the answer, with "null = 확인 못함 with no text",
+which reads as prose. But the facts layer does not produce prose — it produces facts:
+*this manifest, these folders, these scripts, this source file*. A sentence is composed from
+them, and the composition has to happen where `18` lives, or the main process starts shipping
+Korean and `18` stops being the single source of copy.
+
+Implementation therefore stores the **structured payload as JSON** in that column and composes
+the Korean in the renderer. Two consequences Canon should confirm or overrule:
+
+1. `20`'s `text` column holds a payload, not a sentence, for facts-layer answers. The narrative
+   layer (WBS-04) will produce actual prose from Claude Code, so the column will hold both
+   shapes unless it is split.
+2. The composed sentences (`이 폴더들이 있어요.`, `이 프로젝트가 스스로 적어 둔 실행 방법이에요.`
+   and so on) are product copy that `18` does not carry, and cannot carry, because they wrap
+   values. They live in `copy.js` under the `gap:` block, marked, and a test fails if a string
+   is put there that `18` **does** carry.
+
+## CF-7 · `19` §C1's facts layer grounds 폴더가 하는 일, but the deterministic pass cannot answer it — SCOPE
+
+`19` §C1 ① lists `폴더가 하는 일` among the three questions the facts layer grounds. What the
+scan can actually establish is that the folders **exist** and what they are **named**. What
+`src/` is FOR is inference — exactly the kind of claim `확인됨` is supposed to exclude (D-114).
+
+Implementation confirms only what it measured (the folder list, with `tree:1` as the source
+ref) and says on the same card that the roles have not been read. The role sentence arrives
+with WBS-04 and will be 예상됨 when it does. If Canon intended the facts layer to name roles
+from a heuristic (`src` → 소스 코드, `tests` → 테스트), that heuristic needs to be written down
+and its answers must be **예상됨**, not 확인됨.

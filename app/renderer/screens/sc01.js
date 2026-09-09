@@ -79,7 +79,7 @@ export function renderSC01(root, api, nav, state) {
       openBtn.textContent = label;
     }
     main.querySelector('[data-el="fail"]')?.remove();
-    if (res?.ok) return nav.toWorkbench(res.project);
+    if (res?.ok) return nav.toWorkbench(res.project, res.interpretation ?? null);
     if (res?.reason === 'cancelled') return;            // 15: cancelling shows nothing
     main.appendChild(failCard(res, () => run(() => api.openPath(res.path)), () => run(() => api.openProject(), false)));
   }
