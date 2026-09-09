@@ -546,3 +546,26 @@ which reads as "nothing was done". `verify()` had been reporting that all along 
 outcome and says 확인 못함 when there is nothing measured to put under it.
 
 Next eligible: DV-11's pty decision · WBS-32/33 (need humans and Windows).
+
+## Batch 19 · DV-11 judgement material (WBS-00 spike)
+
+Report: `DV-11-PIPE-SHELL-SPIKE.md`. Script: `scripts/spikes/pipe-shell.mjs`.
+
+DV-11 is a product decision and stays one. What was missing was its cost, so the one option
+that needs no native module — a TTY-less pipe shell — was MEASURED on Linux instead of guessed
+at. `19` §C6 REC-010 marks itself unvalidated and asks for exactly this.
+
+The measurement that would change a decision: a pipe shell has no `/dev/tty`, so `sudo`, `ssh`
+and git credential prompts **cannot ask at all** — they fail, and to the user the command simply
+did not work. And a closed stdin is not a stall: `read` returns an empty value and the program
+carries on, so a wrong answer is delivered silently with nothing visibly wrong on screen.
+
+Against that: stopping already works (group signal — the mechanism WBS-23 measured), a program
+that reads stdin CAN be answered if the drawer's input line is wired to it, and batch-mode
+programs run. Colour is gone and stdout/stderr order becomes an approximation, which `19` §C4's
+"stderr is not hidden and not separated" can only meet approximately.
+
+**Windows was not measured and the document says so on every axis.** Neither was Electron's own
+main process, nor node-pty itself (the capability-containment test forbids it).
+
+Next eligible: WBS-32/33 (need humans and Windows) · the DV-11 decision itself.
