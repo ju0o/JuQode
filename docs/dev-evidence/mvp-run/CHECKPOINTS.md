@@ -207,3 +207,26 @@ WBS-19 은 이로써 IMPLEMENTED — 되돌리기 버튼은 없고(D-115), 본�
 
 Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs) · WBS-34 (21, 11) ·
 WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
+
+## Batch 08
+
+Report: `BATCH-08.md`.
+
+| Package | State |
+|---|---|
+| WBS-19 Unwanted result → correction Work | IMPLEMENTED |
+| WBS-34 Startup reconciliation | IMPLEMENTED (no QC rows to reconcile — WBS-22 has no executor) |
+
+D-115's "no undo button" is stated by the panel before it offers the only thing that exists, and
+the correction is prefilled but NOT sent — sending is the user's act, because `12` treats it as
+consent to change files. WBS-34 gained the half it was missing: an interpretation the app died
+inside becomes 실패, keeping whatever answers it had and inventing none.
+
+`orient.unknown` reads the LATEST Work, not any Work ever — `some()` would have made one
+reconciled Work say 확인할 수 없어요 for the rest of the project's life. That in turn requires
+History's order to be deterministic, so `worksFor` breaks millisecond ties on `rowid`.
+
+352 tests, three e2e files. 8 mutants, 8 killed.
+
+Next eligible: WBS-25 (TD-01 terminal drawer — WBS-22's card and `qc.terminal.open` need it) ·
+WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
