@@ -14,6 +14,23 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const R = path.resolve(__dirname, '..');
+
+/* Every fixture directory this file makes, removed when the file finishes. The suite leaked one
+ * per case and filled a 7.5 GB tmpfs mid-run — after which every later failure looked like a
+ * product bug rather than a full disk. */
+const juqodeTempDirs = [];
+const tempDir = (prefix) => {
+  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  juqodeTempDirs.push(d);
+  return d;
+};
+process.on('exit', () => {
+  for (const d of juqodeTempDirs) {
+    for (const target of [d, `${d}-cli`]) {
+      try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* already gone */ }
+    }
+  }
+});
 const G = require(path.join(R, 'app/main/evidence/git.js'));
 const M = require(path.join(R, 'app/main/evidence/manifest.js'));
 const { ledger, ledgerDiff, isSecretName, isExcludedPath, pathspec } = require(path.join(R, 'app/main/evidence/exclude.js'));
@@ -23,7 +40,7 @@ const { allowSpec, grantedSignal, run } = require(path.join(R, 'app/main/claude/
 const MARK = 'JUQODE_SYNTHETIC_SECRET';   // synthetic, clearly labelled; never a real credential
 
 function repo(files, { commit = true, gitignore = 'node_modules/\n*.log\n' } = {}) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-ev-')));
+  const dir = tempDir('juqode-ev-');
   for (const [rel, body] of Object.entries(files)) {
     const abs = path.join(dir, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -34,7 +51,7 @@ function repo(files, { commit = true, gitignore = 'node_modules/\n*.log\n' } = {
   g('init', '-q', '.');
   g('config', 'user.email', 't@t'); g('config', 'user.name', 't'); g('config', 'gc.auto', '0');
   if (commit) { g('add', '-A', '.'); g('commit', '-qm', 'baseline'); }
-  return { dir, git: g, store: fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-store-')) };
+  return { dir, git: g, store: tempDir('juqode-store-') };
 }
 
 /** Everything about the user's repository that a capture must not disturb.
@@ -319,7 +336,7 @@ test('the ledger reports additions and removals too', () => {
 });
 
 test('a change Work is refused when no honest basis can be built', () => {
-  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-nogit-'));
+  const plain = tempDir('juqode-nogit-');
   assert.strictEqual(G.refusal(plain)?.reason, G.REFUSE.NOT_GIT);
 
   const { dir } = repo({ 'a.ts': '1\n' });
@@ -362,7 +379,7 @@ test('the diff between two bases is the work that happened', () => {
 });
 
 test('non-Git projects get a basis too, with the same exclusions', () => {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-plain-')));
+  const dir = tempDir('juqode-plain-');
   fs.mkdirSync(path.join(dir, 'src'));
   fs.writeFileSync(path.join(dir, 'src/a.js'), '1\n');
   fs.writeFileSync(path.join(dir, '.env'), `${MARK}=x\n`);
@@ -674,7 +691,7 @@ test('a stream split mid-character is not corrupted', async () => {
   /* Real stdout arrives in pipe-sized chunks. Concatenating each Buffer as a string turned a
    * Korean character split across a boundary into U+FFFD — and `unparsed` stayed 0, because
    * corrupted text is still valid JSON, so nothing flagged it. */
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-utf8-'));
+  const dir = tempDir('juqode-utf8-');
   const bin = path.join(dir, 'claude');
   const line = JSON.stringify({ type: 'system', subtype: 'status', message: '변경 증거 기준을 세우는 중' });
   /* Written out seven bytes at a time, so multi-byte characters straddle the boundaries. */
@@ -692,7 +709,7 @@ test('an orphan that leaves the process group cannot pin the Work forever', asyn
   /* `07` §8.7 measured this orphan class. Resolution used to hang off `close`, which waits for
    * every inherited pipe — a `setsid` grandchild holds stdout open, so the promise never
    * settled, the Work stayed `running`, and D-117's single slot was never released. */
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-orphan-'));
+  const dir = tempDir('juqode-orphan-');
   const bin = path.join(dir, 'claude');
   /* The orphan sleeps only briefly and clears itself. It is NOT reaped with `pkill -f` here:
    * a pattern broad enough to match the fixture also matches the test runner's own command
@@ -710,7 +727,7 @@ sleep 6
 });
 
 test('a session that produces no event at all did not start', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-nostart-'));
+  const dir = tempDir('juqode-nostart-');
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, '#!/bin/sh\necho "boom" >&2\nexit 9\n', { mode: 0o755 });
   const seen = [];
@@ -721,7 +738,7 @@ test('a session that produces no event at all did not start', async () => {
 });
 
 test('every line reaches the record, including one we cannot parse', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-raw-'));
+  const dir = tempDir('juqode-raw-');
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, `#!/bin/sh
 echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
@@ -740,7 +757,7 @@ printf '{"type":"result","subtype":"success","is_error":false}'
 test('the prompt goes on stdin, so a variadic flag cannot swallow it', async () => {
   /* Measured: `--allowedTools <tools...>` is variadic, and a prompt passed as a positional
    * after it became a second tool grant. The retry silently never ran. */
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-args-'));
+  const dir = tempDir('juqode-args-');
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, `#!/bin/sh
 printf '%s' "$*" > "${dir}/argv.txt"
@@ -764,7 +781,7 @@ test('the child is its own process group, so stopping it cannot reach JuQode', a
   /* `07` §8.2, measured: `process.kill(-pgid)` on a group that contains JuQode kills JuQode —
    * the spike driver exited 143. `detached: true` is what keeps that from being possible, and
    * nothing tested it. */
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-pg-'));
+  const dir = tempDir('juqode-pg-');
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, `#!/bin/sh
 ps -o pgid= -p $$ | tr -d ' ' > "${dir}/pgid.txt"
@@ -778,7 +795,7 @@ echo '{"type":"result","subtype":"success","is_error":false}'
 });
 
 test('a resume asks for the same session and adds only the scoped grant', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-resume-'));
+  const dir = tempDir('juqode-resume-');
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, `#!/bin/sh
 printf '%s' "$*" > "${dir}/argv.txt"

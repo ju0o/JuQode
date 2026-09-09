@@ -8,6 +8,15 @@ const path = require('node:path');
 const R = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(R, p), 'utf8');
 
+/* Block comments, whole-line comments, AND trailing ones. Stripping only the first two let a
+   trailing `// …` carry Korean past the copy check — a comment explaining a rule was read as
+   product copy that broke it. `\s+//` cannot match a `://` inside a string literal. */
+const stripComments = (src) => String(src)
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/<!--[\s\S]*?-->/g, '')
+  .replace(/^\s*\/\/.*$/gm, '')
+  .replace(/\s+\/\/[^\n]*/g, '');
+
 test('security: renderer defaults are locked down', () => {
   const { WEB_PREFERENCES } = require('../app/main/security');
   assert.strictEqual(WEB_PREFERENCES.contextIsolation, true);
@@ -98,15 +107,26 @@ test('base css: partial(fill) and waiting(outline) are visually distinct', () =>
 });
 
 test('no fabricated progress anywhere in the renderer', () => {
-  const files = ['app/renderer/screens/sc01.js', 'app/renderer/screens/sc01.css',
-                 'app/renderer/screens/sc02.js', 'app/renderer/screens/sc02.css',
-                 'app/renderer/design/base.css', 'app/renderer/copy.js', 'app/renderer/index.html',
-                 'app/renderer/renderer.js', 'app/renderer/dom.js'];
+  /* Enumerated from the tree, not listed by hand: a hand-written list exempted `sc03.js` — the
+     screen with the liveness line, the one place a spinner or an ETA would ever appear — from
+     the check by construction, so the assertion could not fail for it. */
+  const files = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
+      const rel = path.join(dir, e.name);
+      if (e.isDirectory()) walk(rel);
+      else if (/\.(js|css|html)$/.test(e.name)) files.push(rel);
+    }
+  })(path.join('app', 'renderer'));
+  assert.ok(files.length >= 12, `expected the renderer tree, found ${files.length} files`);
   for (const f of files) {
     // strip comments first: a comment that FORBIDS these words is exactly what we want to see
-    const s = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/<!--[\s\S]*?-->/g, '');
+    const s = stripComments(read(f));
+    /* The `rules:` block states the PROHIBITION in Canon's own words, so it necessarily
+       contains the phrase it forbids. Everything outside that block must not. */
+    const outsideRules = s.replace(/rules:\s*\{[\s\S]*?\},/, '');
     for (const banned of ['progressbar', 'aria-valuenow', 'role="progress', '생각 중', 'ETA', '남은 시간', '거의 다', '곧 끝']) {
-      assert.ok(!s.includes(banned), `${f} contains banned progress affordance: ${banned}`);
+      assert.ok(!outsideRules.includes(banned), `${f} contains banned progress affordance: ${banned}`);
     }
     // a percentage may appear as a CSS length; it must never be rendered as text to the user
     assert.ok(!/[>'"`]\s*\d+\s*%/.test(s), `${f} appears to render a percentage to the user`);
@@ -126,11 +146,22 @@ test('every Korean string is either Canon 18 verbatim or a marked Canon gap', ()
   // Enumerate EVERY Korean string in the renderer, rather than whitelisting a few.
   const hangul = /['"`]([^'"`]*[\uAC00-\uD7A3][^'"`]*)['"`]/g;
   const found = new Map();
-  for (const f of ['app/renderer/copy.js', 'app/renderer/screens/sc01.js',
-                   'app/renderer/screens/sc02.js', 'app/renderer/dom.js',
-                   'app/renderer/renderer.js', 'app/main/main.js', 'app/main/project.js',
-                   'app/main/claude-detect.js', 'app/main/db/db.js', 'app/main/db/repo.js']) {
-    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  /* Every renderer file, enumerated — plus the main-process files, which must contain no
+     Korean at all. A hand-written list is a list that forgets the newest screen. */
+  const rendererFiles = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
+      const rel = path.join(dir, e.name);
+      if (e.isDirectory()) walk(rel);
+      else if (/\.js$/.test(e.name)) rendererFiles.push(rel);
+    }
+  })(path.join('app', 'renderer'));
+  assert.ok(rendererFiles.length >= 7, `expected the renderer tree, found ${rendererFiles.length}`);
+
+  for (const f of [...rendererFiles, 'app/main/main.js', 'app/main/ipc.js', 'app/main/project.js',
+                   'app/main/claude-detect.js', 'app/main/db/db.js', 'app/main/db/repo.js',
+                   'app/main/work/supervisor.js', 'app/main/work/reducer.js']) {
+    const src = stripComments(read(f));
     for (const m of src.matchAll(hangul)) found.set(m[1], f);
   }
   assert.ok(found.size >= 10, `expected to find the SC-01 copy, found ${found.size} strings`);
@@ -141,8 +172,19 @@ test('every Korean string is either Canon 18 verbatim or a marked Canon gap', ()
   /* Comments are stripped first. A comment that QUOTES a Canon string in order to explain
      why a nearby key departs from it is documentation, not a string the product renders. */
   const copySrc = read('app/renderer/copy.js');
-  const copyCode = copySrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  const block = (name) => copyCode.split(`${name}: {`)[1]?.split('},')[0] ?? '';
+  const copyCode = stripComments(copySrc);
+  /* Brace-matched, not split on the first `},`: a nested object inside the block truncated the
+     extraction and silently pushed every later entry OUT of the exemption. */
+  const block = (name) => {
+    const at = copyCode.indexOf(`${name}: {`);
+    if (at === -1) return '';
+    let depth = 0;
+    for (let i = copyCode.indexOf('{', at); i < copyCode.length; i++) {
+      if (copyCode[i] === '{') depth += 1;
+      else if (copyCode[i] === '}' && --depth === 0) return copyCode.slice(at, i + 1);
+    }
+    return '';
+  };
   const gapBlock = block('gap');
   assert.ok(gapBlock, 'copy.js lost its gap: marker — the exemption must stay explicit');
   assert.ok(!/\bdev:\s*\{/.test(copyCode),
@@ -153,16 +195,28 @@ test('every Korean string is either Canon 18 verbatim or a marked Canon gap', ()
     assert.ok(dict.includes(s), `"${s}" (${f}) is not in Canon 18 and is not a marked Canon gap`);
   }
 
-  // The gap block must not become a dumping ground: if Canon 18 DOES carry the string, the
-  // approved key should have been used instead.
+  /* The gap block must not become a dumping ground: if Canon 18 DOES carry the string, the
+     approved key should have been used instead.
+     Compared against Canon's ENTRIES, not against the file as text — a substring test flags a
+     short label like `바뀐 파일` because a different, longer Canon sentence happens to contain
+     it, which is a false positive that would push a real gap out of the block. */
+  const entries = new Set(
+    dict.split('\n')
+      .filter((l) => l.startsWith('| `'))
+      .map((l) => l.split('|')[2]?.trim())
+      .filter(Boolean)
+      .map((v) => v.replace(/\*\*/g, '')),
+  );
+  assert.ok(entries.size > 150, `expected Canon 18's entries, parsed ${entries.size}`);
   for (const m of gapBlock.matchAll(/['"]([^'"]*[\uAC00-\uD7A3][^'"]*)['"]/g)) {
-    assert.ok(!dict.includes(m[1]),
-      `"${m[1]}" is in Canon 18 — move it out of copy.js gap: and use the approved key`);
+    assert.ok(!entries.has(m[1]),
+      `"${m[1]}" is a Canon 18 entry — move it out of copy.js gap: and use the approved key`);
   }
 
   // Main never ships a user-facing sentence: reasons cross IPC as machine codes.
-  for (const f of ['app/main/project.js', 'app/main/main.js']) {
-    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  for (const f of ['app/main/project.js', 'app/main/main.js', 'app/main/ipc.js',
+                   'app/main/work/supervisor.js', 'app/main/work/reducer.js']) {
+    const src = stripComments(read(f));
     assert.ok(!/[\uAC00-\uD7A3]/.test(src),
       `${f} contains Korean in code — the renderer owns copy, main sends machine reasons`);
   }
@@ -211,7 +265,7 @@ test('capability containment: each privileged capability lives in exactly one mo
 
   for (const f of files) {
     // strip comments — a comment naming a capability is documentation, not code
-    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const src = stripComments(read(f));
     for (const b of NEVER) assert.ok(!src.includes(b), `${f} uses a forbidden capability: ${b}`);
     for (const [tok, owners] of Object.entries(OWNER)) {
       if (src.includes(tok)) {
@@ -222,7 +276,7 @@ test('capability containment: each privileged capability lives in exactly one mo
 
   // The renderer is not privileged: no node built-in reaches it, and it never touches ipcRenderer.
   for (const f of files.filter((f) => f.startsWith(path.join('app', 'renderer')))) {
-    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const src = stripComments(read(f));
     for (const b of ['require(', 'ipcRenderer', 'process.', "node:"]) {
       assert.ok(!src.includes(b), `renderer file ${f} reaches outside its sandbox: ${b}`);
     }

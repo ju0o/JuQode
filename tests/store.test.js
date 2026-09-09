@@ -12,12 +12,29 @@ const os = require('node:os');
 const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
+
+/* Every fixture directory this file makes, removed when the file finishes. The suite leaked one
+ * per case and filled a 7.5 GB tmpfs mid-run — after which every later failure looked like a
+ * product bug rather than a full disk. */
+const juqodeTempDirs = [];
+const tempDir = (prefix) => {
+  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  juqodeTempDirs.push(d);
+  return d;
+};
+process.on('exit', () => {
+  for (const d of juqodeTempDirs) {
+    for (const target of [d, `${d}-cli`]) {
+      try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* already gone */ }
+    }
+  }
+});
 const { openDb, DbError, LATEST } = require(path.join(R, 'app/main/db/db.js'));
 const repo = require(path.join(R, 'app/main/db/repo.js'));
 const project = require(path.join(R, 'app/main/project.js'));
 const claude = require(path.join(R, 'app/main/claude-detect.js'));
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-test-'));
+const tmp = () => tempDir('juqode-test-');
 const asRoot = process.getuid && process.getuid() === 0;
 
 /* ─────────────────────────── WBS-21 · store ─────────────────────────── */
@@ -427,22 +444,109 @@ test('preload exposes exactly the channels main handles — no more, no less', (
   const main = fs.readFileSync(path.join(R, 'app/main/main.js'), 'utf8');
 
   const used = [...pre.matchAll(/ipcRenderer\.invoke\('([^']+)'/g)].map((m) => m[1]).sort();
-  const handled = [...main.matchAll(/(?:ipcMain\.)?handle\('([^']+)'/g)].map((m) => m[1]).sort();
+  /* Read from the handler TABLE, not from the file's text: the handlers are registered in a
+     loop now, so a source grep would find none of them. */
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const handled = Object.keys(makeHandlers({ db: () => null })).sort();
   assert.deepStrictEqual(used, handled, 'the preload surface and the main handlers must match exactly');
+
+  /* One push channel, listened to on one side and sent on the other. A renderer that could
+     name the channel could listen to anything main ever sends. */
+  const listened = [...pre.matchAll(/ipcRenderer\.on\('([^']+)'/g)].map((m) => m[1]).sort();
+  const sent = [...main.matchAll(/webContents\.send\('([^']+)'/g)].map((m) => m[1]).sort();
+  assert.deepStrictEqual(listened, sent, 'the push channels must match exactly');
+  assert.ok(!/\(_event,\s*\.\.\.|\(event[,)]/.test(pre.split('onWorkUpdate')[1] ?? ''),
+    'the raw IpcRendererEvent must never reach the renderer — it carries `sender`');
 
   // channels are string literals: a computed channel name would make the surface unbounded
   assert.ok(!/invoke\(\s*[^'\s)]/.test(pre), 'preload must not build a channel name at runtime');
-  /* Every single mention of ipcRenderer must be a literal-channel invoke. A regex that only
-   * bans `invoke(ch)` walks straight past `raw: ipcRenderer.invoke.bind(ipcRenderer)`. */
+  /* Every mention of ipcRenderer must be one of three literal forms. Counting rather than
+   * pattern-banning is what catches an alias — `raw: ipcRenderer.invoke.bind(ipcRenderer)`
+   * matches no ban and would otherwise expose the whole bridge. */
   const body = pre.split('exposeInMainWorld')[1] ?? '';
-  assert.strictEqual((body.match(/ipcRenderer/g) || []).length,
-                     (body.match(/ipcRenderer\.invoke\('/g) || []).length,
-    'an ipcRenderer reference in the exposed object is not a literal-channel invoke');
+  const total = (body.match(/ipcRenderer/g) || []).length;
+  const allowed = (body.match(/ipcRenderer\.invoke\('/g) || []).length
+                + (body.match(/ipcRenderer\.on\('/g) || []).length
+                + (body.match(/ipcRenderer\.removeListener\(/g) || []).length;
+  assert.strictEqual(total, allowed,
+    `${total - allowed} ipcRenderer reference(s) in the exposed object are not a literal channel form`);
 });
 
-test('openPath refuses a folder that was never offered to the renderer', () => {
-  const main = fs.readFileSync(path.join(R, 'app/main/main.js'), 'utf8');
-  const body = main.split("handle('juqode:open-path'")[1].split("handle('")[0];
-  assert.match(body, /not-offered/, 'open-path must gate on what main already offered');
-  assert.match(body, /lastPick|project\.recent/, 'the gate must be against real offered paths');
+test('openPath refuses a folder that was never offered to the renderer', async () => {
+  /* Driven through the handler, not grepped out of the source. A string-shape assertion holds
+     while the behaviour is gone — every IPC mutation survived when this was a regex. */
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const db = openDb(':memory:');
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
+
+  for (const bad of ['/etc', '', null, 42, { path: '/etc' }]) {
+    const r = await h['juqode:open-path'](null, bad);
+    assert.strictEqual(r.ok, false, `openPath(${JSON.stringify(bad)}) was accepted`);
+    assert.strictEqual(r.reason, 'not-offered');
+  }
+  /* …and a folder that IS in the recent list opens. */
+  const dir = tempDir('juqode-ipc-');
+  repo.openProject(db, dir, 'p');
+  assert.strictEqual((await h['juqode:open-path'](null, dir)).ok, true);
+  db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('every Work channel refuses an id it was never given', async () => {
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const db = openDb(':memory:');
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
+
+  for (const ch of ['juqode:work-get', 'juqode:work-cancel', 'juqode:work-signals',
+                    'juqode:work-changes', 'juqode:work-allow', 'juqode:work-answer']) {
+    for (const id of ['no-such-work', '', null, 7, {}]) {
+      const r = await h[ch](null, id, 'x');
+      assert.strictEqual(r.ok, false, `${ch} accepted ${JSON.stringify(id)}`);
+      assert.strictEqual(r.reason, 'no-work', `${ch} answered ${r.reason}`);
+    }
+  }
+  /* a permission id must be a string when it is given at all */
+  const p = repo.openProject(db, '/p', 'p');
+  const w = repo.beginWork(db, p.id, 'x').work;
+  assert.strictEqual((await h['juqode:work-allow'](null, w.id, 99)).reason, 'bad-permission-id');
+  db.close();
+});
+
+test('every channel answers when the store was refused, and none of them throws', async () => {
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const h = makeHandlers({ db: () => null, dbFault: () => 'db-corrupt', evidenceStore: () => '/tmp/x', push: () => {} });
+  for (const [channel, fn] of Object.entries(h)) {
+    if (channel === 'juqode:versions' || channel === 'juqode:claude-detect') continue;
+    const r = await fn(null, 'anything', 'more');
+    assert.ok(r && typeof r === 'object', `${channel} answered nothing`);
+    if (channel === 'juqode:boot') { assert.strictEqual(r.store.ok, false); continue; }
+    if (channel === 'juqode:route-intent') { assert.strictEqual(r.ok, true); continue; }
+    assert.strictEqual(r.ok, false, `${channel} acted without a store`);
+    assert.strictEqual(r.reason, 'no-store', `${channel} answered ${r.reason}`);
+  }
+});
+
+test('a Work is not started for an unknown project, or for an empty request', async () => {
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const db = openDb(':memory:');
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
+  assert.strictEqual((await h['juqode:work-start'](null, 'no-such-project', 'x')).reason, 'no-project');
+  const p = repo.openProject(db, '/p', 'p');
+  for (const bad of ['', '   ', null, 42]) {
+    assert.strictEqual((await h['juqode:work-start'](null, p.id, bad)).reason, 'empty-intent',
+      `an empty request started a Work: ${JSON.stringify(bad)}`);
+  }
+  db.close();
+});
+
+test('the main-process handler wrapper answers instead of rejecting, and refuses a sub-frame', () => {
+  /* The wrapper stays in main.js because it needs ipcMain. What it must do is checked here:
+     a throwing handler becomes an ANSWER (a rejected invoke blanks the window, because the
+     renderer's boot is a top-level await), and a sub-frame is refused. */
+  const src = fs.readFileSync(path.join(R, 'app/main/main.js'), 'utf8');
+  const body = src.split('const handle = (channel, fn)')[1].slice(0, 900);
+  assert.match(body, /senderFrame && e\.senderFrame\.parent/, 'the sub-frame check is gone');
+  assert.match(body, /bad-sender/);
+  assert.match(body, /catch \(err\)/, 'a throwing handler would reject the invoke');
+  assert.match(body, /ok: false, reason: 'internal'/);
 });

@@ -73,10 +73,12 @@ function allowSpec(denial, cwd) {
  * @param {string[]} [o.allowedTools] narrowly-scoped grants for a retry
  * @param {boolean} [o.resume]
  * @param {(sig:object, raw:object, line:string)=>void} o.onSignal called for EVERY line
+ * @param {(child:import('node:child_process').ChildProcess)=>void} [o.onChild] the live handle,
+ *        so a caller can stop it. Cancellation cannot work without it.
  * @returns {Promise<{code:number|null, signal:string|null, sawEvent:boolean, stderr:string,
  *                    startFailed:boolean, unparsed:number}>}
  */
-function run({ cwd, sessionId, prompt, allowedTools = [], resume = false, onSignal, bin, timeoutMs = 0 }) {
+function run({ cwd, sessionId, prompt, allowedTools = [], resume = false, onSignal, onChild, bin, timeoutMs = 0 }) {
   const args = resume
     ? ['--resume', sessionId, '-p', '--output-format', 'stream-json', '--verbose']
     : baseArgs(sessionId);
@@ -99,6 +101,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], resume = false, onSign
        * makes this EPIPE, which is its choice and not an error on our side. */
       child.stdin.on('error', () => {});
       child.stdin.end(prompt ?? '');
+      onChild?.(child);
     } catch (e) {
       return resolve({ code: null, signal: null, sawEvent: false, stderr: String(e?.message ?? e), startFailed: true, unparsed: 0, seq: 0 });
     }

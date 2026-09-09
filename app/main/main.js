@@ -12,9 +12,9 @@ const { enforceLocalOnly } = require('./security');
 const { openDb } = require('./db/db');
 const project = require('./project');
 const claude = require('./claude-detect');
-const { scan } = require('./interpret/scan');
-const { answers, statusOf } = require('./interpret/answers');
 const repo = require('./db/repo');
+const supervisor = require('./work/supervisor');
+const { makeHandlers } = require('./ipc');
 
 /* One instance. A second launch focuses the existing window rather than opening a second one. */
 if (!app.requestSingleInstanceLock()) {
@@ -34,15 +34,6 @@ if (!app.requestSingleInstanceLock()) {
     if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
   });
 
-  const versions = () => ({
-    app: app.getVersion(),
-    electron: process.versions.electron,
-    chrome: process.versions.chrome,
-    node: process.versions.node,
-    platform: process.platform,
-    arch: process.arch,
-  });
-
   /* WBS-21 · one local SQLite file per user. Opened once, at boot.
    * A DB we cannot understand is REFUSED, not replaced (`21` WBS-21). The app still boots:
    * losing the store is not a reason to show the user nothing. */
@@ -58,19 +49,14 @@ if (!app.requestSingleInstanceLock()) {
     }
   }
 
-  /* Every path the renderer can name. `openPath` is deliberately NOT "open any folder":
-   * it accepts a folder we already gave the renderer — a recent row, or the last pick being
-   * retried — so a compromised renderer cannot use it to walk the disk. */
-  let lastPick = null;
-
-  const needDb = () => (db ? null : { ok: false, reason: 'no-store', detail: dbFault });
-
   /* A handler that THROWS rejects the invoke, and the renderer's boot is a top-level await —
    * one rejection there leaves a blank window with no message and no way out. Every handler
    * therefore answers, always, even when the answer is that something went wrong. */
   const handle = (channel, fn) => ipcMain.handle(channel, async (e, ...args) => {
     /* Defence in depth: there are no frames and navigation is locked, but a handler should
-     * still refuse a sender that is not the window we made. */
+     * still refuse a SUB-FRAME. It does not establish that the sender is our window — a
+     * destroyed frame reports null and reads as trusted here — so it is one layer, not the
+     * boundary. The boundary is the preload surface and the locked navigation. */
     if (e.senderFrame && e.senderFrame.parent) return { ok: false, reason: 'bad-sender' };
     try {
       return await fn(e, ...args);
@@ -80,74 +66,64 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  handle('juqode:versions', versions);
+  /* Every handler lives in `./ipc`, as a plain function over injected dependencies, so the
+   * suite can CALL it. While they lived inside this closure a test could only read the file as
+   * text — and a mutation that deleted the intent validation, the store gate or the sub-frame
+   * check passed everything, because a string-shape assertion holds while behaviour goes. */
+  const evidenceRoot = () => path.join(app.getPath('userData'), 'evidence');
+  const pushUpdate = (snap) => {
+    if (!snap) return;
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:work-update', snap);
+  };
 
-  handle('juqode:boot', () => ({
-    store: db ? { ok: true } : { ok: false, reason: dbFault },
-    recent: db ? project.recent(db) : [],
-  }));
-
-  handle('juqode:open-project', async (e) => {
-    const gate = needDb();
-    if (gate) return gate;
-    const win = BrowserWindow.fromWebContents(e.sender);
-    return project.pick(db, win, (p) => { lastPick = p; });
+  const handlers = makeHandlers({
+    db: () => db,
+    dbFault: () => dbFault,
+    evidenceStore: (projectId) => path.join(evidenceRoot(), projectId),
+    push: pushUpdate,
+    windowFor: (e) => BrowserWindow.fromWebContents(e.sender),
+    versions: () => ({
+      app: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+      arch: process.arch,
+    }),
   });
-
-  handle('juqode:open-path', (_e, target) => {
-    const gate = needDb();
-    if (gate) return gate;
-    /* `lastPick` starts as null, so `target === lastPick` used to admit `openPath(null)` —
-     * and `realpathSync` coerces a non-string, so `null` resolved to a "null" folder under
-     * cwd and was opened as a project the user never chose. The type check is the gate's
-     * first clause now, not an assumption about what a renderer would send. */
-    if (typeof target !== 'string' || target === '') return { ok: false, reason: 'not-offered' };
-    const known = target === lastPick || project.recent(db).some((p) => p.path === target);
-    if (!known) return { ok: false, reason: 'not-offered' };
-    return project.openPath(db, target);
-  });
-
-  /* WBS-03 — the deterministic facts layer. Runs only when the renderer asks, so SC-02 can
-   * show 해석 중 first; `11` F-C1-01 says a project that is already interpreted is NOT
-   * re-interpreted on reopen, which is why `open` hands back whatever is already stored and
-   * this is a separate call the renderer makes only when there is nothing. */
-  handle('juqode:interpret', async (_e, projectId) => {
-    /* Test affordance, in the same spirit as JUQODE_EXIT_AFTER_LOAD: the facts scan finishes
-     * in milliseconds, so 해석 중 cannot be photographed without holding it. Off unless asked
-     * for; never set in a shipped build. It delays the ANSWER, it does not fake one. */
-    const hold = Number(process.env.JUQODE_INTERPRET_DELAY_MS) || 0;
-    if (hold) await new Promise((r) => setTimeout(r, hold));
-    const gate = needDb();
-    if (gate) return gate;
-    const row = db.prepare('select * from project where id = ?').get(projectId);
-    if (!row) return { ok: false, reason: 'no-project' };
-
-    const scanned = scan(row.path);
-    const list = answers(scanned);
-    const note = scanned.skipped ? JSON.stringify(scanned.skipped) : null;
-    const saved = repo.saveInterpretation(db, projectId, {
-      status: statusOf(scanned, list),
-      sourceHash: scanned.sourceHash,
-      skippedNote: note,
-      answers: list,
-      readFiles: scanned.readFiles,
-    });
-    /* The errno travels with the result. `15` SC-02 Failure State asks for the REASON, and a
-     * fixed sentence in the renderer would state a cause that may not be the cause. */
-    return { ok: true, interpretation: { ...saved, failedCode: scanned.failed ?? null } };
-  });
-
-  /* One probe at a time. Each call spawns up to two `claude` processes held for up to 8 s;
-   * without this, anything that calls it in a loop spawns them without bound. */
-  let detecting = null;
-  handle('juqode:claude-detect', () => {
-    if (!detecting) detecting = claude.detect().finally(() => { detecting = null; });
-    return detecting;
-  });
+  for (const [channel, fn] of Object.entries(handlers)) handle(channel, fn);
 
   app.whenReady().then(() => {
     readExternalAttempts = enforceLocalOnly(session.defaultSession);
     openStore();
+    /* D-124 · `20`: a Work whose process is gone cannot be judged, and a Work left `running`
+     * pins D-117's single slot forever.
+     *
+     * A JuQode child is spawned detached and CAN outlive its parent, so this ASKS rather than
+     * assuming. `07` §8.5: a pid is reusable, so a pid that answers is only believed when the
+     * process also started before the Work's own start time was recorded. A Work we cannot
+     * decide about is left alone — closing a live session would let a second one start in the
+     * same repository, which is the thing D-117 exists to prevent. */
+    if (db) {
+      const lost = repo.reconcileLostWorks(db, (_work, proc) => {
+        if (!proc?.pid) return false;                     // no marker: we cannot ask, so it is gone
+        try { process.kill(proc.pid, 0); return true; }   // answers → still there
+        catch (e) { return e.code === 'EPERM'; }          // EPERM: alive and not ours
+      });
+      if (lost.length) trace('work.reconciled', { count: lost.length });
+    }
+
+    /* Anything we started is ours to stop. Without this, quitting mid-Work leaves the CLI
+     * running and editing while the next launch frees the D-117 slot. */
+    app.on('before-quit', () => {
+      for (const [, entry] of supervisor.live) {
+        if (entry.child) { try { require('./claude/session').stop(entry.child); } catch { /* gone */ } }
+      }
+    });
+
+    /* The quiet states are defined by the absence of a signal, so only a clock can deliver
+     * them (`15` 새 신호 없음 · 취소 확인 불가). */
+    supervisor.watchQuiet(db, pushUpdate);
     trace('app.ready', { versions: process.versions.electron });
 
     const win = createWindow({

@@ -89,6 +89,9 @@ const initial = () => ({
   outcome: null,
   lastObserved: null,             // the last thing actually SEEN — the liveness line's content
   denials: [],                    // D-133 contract B: observed denials; unresolved ones need a card
+  inputRequest: null,
+  cancelRequested: false,
+  cancelRequestedAt: null,
   toolsUsed: 0,
   finish: null,
 });
@@ -147,15 +150,18 @@ function reduce(state, signal, at = null) {
 
     case KIND.INPUT_REQUEST:
       s.status = 'input_waiting';
+      s.inputRequest = { text: signal.payload?.text ?? null, raw: signal.payload?.raw ?? null };
       break;
 
     case KIND.ANSWER:
       if (s.status === 'input_waiting') s.status = 'running';
+      s.inputRequest = null;
       break;
 
     case KIND.CANCEL_REQUEST:
       s.status = 'cancel_requested';
       s.cancelRequested = true;
+      s.cancelRequestedAt = at;      // `15` measures 취소 확인 불가 from this, and only this
       break;
 
     case KIND.CANCEL_CONFIRMED:
@@ -231,7 +237,7 @@ function mergeDenials(existing, incoming) {
   return out;
 }
 
-/** Refusals the user has not answered yet. Contract B renders one card per entry. */
+/** Refusals the user has not answered yet, oldest first. */
 const openPermissions = (state) => (state.denials ?? []).filter((d) => !d.resolved);
 /** The one the card shows first — the oldest unanswered. */
 const openPermission = (state) => openPermissions(state)[0] ?? null;

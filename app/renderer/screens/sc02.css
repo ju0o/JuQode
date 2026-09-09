@@ -83,3 +83,27 @@
   display: flex; flex-direction: column; gap: 4px;
 }
 .sc02 .failband .t { font-weight: 600; color: var(--fail); }
+
+/* the request field and everything a submit can produce (15 SC-02) */
+.sc02 .intentfield {
+  font: inherit; font-size: 13px; line-height: 19px;
+  width: 100%; resize: vertical; min-height: 46px;
+  padding: 10px 12px; color: var(--ink);
+  background: var(--card2); border: 1px solid var(--line2); border-radius: var(--r-inner);
+}
+.sc02 .intentfield:focus-visible { border-color: var(--line3); }
+.sc02 .consequence { display: flex; flex-direction: column; gap: 8px; }
+.sc02 .routeline { color: var(--ink2); }
+
+.sc02 .panel {
+  padding: 10px 12px; border-radius: var(--r-inner);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.sc02 .panel > * { overflow-wrap: anywhere; }
+.sc02 .panel .t { font-weight: 600; }
+/* waiting is an amber OUTLINE — a fill would read as 부분 (16 §2.1) */
+.sc02 .panel.wait { border: 1px solid var(--wait); border-left-width: 3px; }
+/* 사용 불가 and 자리 안내 are neutral: neither is a failure (12 §16) */
+.sc02 .panel.grey { background: var(--grey); border: 1px solid var(--line); }
+.sc02 .panel.failband { border: 1px solid var(--failline); background: var(--failbg); }
+.sc02 .panel.failband .t { color: var(--fail); }

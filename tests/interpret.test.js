@@ -12,6 +12,23 @@ const os = require('node:os');
 const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
+
+/* Every fixture directory this file makes, removed when the file finishes. The suite leaked one
+ * per case and filled a 7.5 GB tmpfs mid-run — after which every later failure looked like a
+ * product bug rather than a full disk. */
+const juqodeTempDirs = [];
+const tempDir = (prefix) => {
+  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  juqodeTempDirs.push(d);
+  return d;
+};
+process.on('exit', () => {
+  for (const d of juqodeTempDirs) {
+    for (const target of [d, `${d}-cli`]) {
+      try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* already gone */ }
+    }
+  }
+});
 const { scan, MAX_FILES, MAX_MANIFEST_BYTES, READ_CEILING_BYTES, TREE_DEPTH, isSecret } =
   require(path.join(R, 'app/main/interpret/scan.js'));
 const { answers, statusOf } = require(path.join(R, 'app/main/interpret/answers.js'));
@@ -21,7 +38,7 @@ const repo = require(path.join(R, 'app/main/db/repo.js'));
 
 /** Build a project on disk from a {relative path: contents} map. */
 function fixture(files) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-fix-')));
+  const dir = tempDir('juqode-fix-');
   for (const [rel, body] of Object.entries(files)) {
     const abs = path.join(dir, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -170,7 +187,7 @@ test('the exclusion list is checked directly, name by name', () => {
 });
 
 test('a symlinked manifest is NEVER opened — it can point anywhere on the disk', () => {
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-outside-'));
+  const outside = tempDir('juqode-outside-');
   const secret = path.join(outside, 'private');
   fs.writeFileSync(secret, 'juqode-synthetic-fixture-marker BEGIN OPENSSH PRIVATE KEY');
 
@@ -407,7 +424,7 @@ test('KNOWN LIMIT: a change deeper than the tree cap does not age the Brief', ()
 });
 
 test('a symlink is never followed during the walk', () => {
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-out-'));
+  const outside = tempDir('juqode-out-');
   fs.writeFileSync(path.join(outside, 'secret.txt'), 'juqode-synthetic-fixture-marker');
   const dir = fixture({ 'package.json': '{"name":"l"}' });
   fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(dir, 'linked.txt'));

@@ -7,11 +7,12 @@
   "scripts": {
     "postinstall:electron": "node node_modules/electron/install.js",
     "start": "electron .",
-    "test": "node --test tests/*.test.js",
-    "test:all": "npm test && npm run test:e2e",
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:all": "npm test",
     "test:e2e": "node tests/e2e/boot.test.mjs && node tests/e2e/visual.mjs && node tests/e2e/offline-shutdown.mjs",
     "pack:linux": "electron-builder --linux dir",
-    "pack:win": "electron-builder --win dir zip --x64"
+    "pack:win": "electron-builder --win dir zip --x64",
+    "test:unit": "node --test tests/*.test.js"
   },
   "devDependencies": {
     "electron": "44.3.0",
@@ -20,10 +21,31 @@
   "build": {
     "appId": "app.juqode.desktop",
     "productName": "JuQode",
-    "directories": { "output": "dist" },
-    "files": ["app/**/*", "package.json"],
-    "win": { "target": ["nsis", "zip"], "artifactName": "${productName}-${version}-${arch}.${ext}" },
-    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true },
-    "linux": { "target": ["AppImage", "dir"], "category": "Development" }
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "app/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "dir"
+      ],
+      "category": "Development"
+    }
   }
 }

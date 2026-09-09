@@ -66,3 +66,33 @@ the retry may touch — was re-measured and holds.
 
 Next: SC-03 and the surfaces these engines feed. Every deferred card now has a working engine
 underneath it.
+
+## Batch 04
+
+Report: `BATCH-04.md`. The Work loop becomes real: SC-03, the Intent field, and every card a
+submit can produce.
+
+| Package | State |
+|---|---|
+| WBS-12 Steps · NEXT | IMPLEMENTED |
+| WBS-13 input request · answer | IMPLEMENTED — the panel is built; no headless CLI event maps to `input_request` today, so the state is reachable from the signal and not yet from the CLI |
+| WBS-14 permission pass-through | IMPLEMENTED — D-133 contract B, end to end through the real app |
+| WBS-15 liveness · no-signal · unknown | IMPLEMENTED |
+| WBS-16 cancel · cancel-unconfirmed | IMPLEMENTED |
+| WBS-17 after-snapshot · diff capture | IMPLEMENTED |
+| WBS-06 · WBS-07 · WBS-09 UI halves | LANDED — each now has a destination |
+
+`npm test` runs unit **and** e2e: 199 tests plus three e2e files. The packaged Linux binary
+ships the new modules and boots.
+
+Three reviewers returned 3 BLOCKER + 24 HIGH. Two BLOCKERs shared one root cause — `apply()`
+invented a `running` state for any Work not in the live map, so cancel could never end a Work
+(D-117's slot pinned until restart) and cancelling an ended Work erased its outcome.
+
+The structural test findings mattered more than the mutation score: `main.js` had **zero**
+executed coverage, both Canon thresholds were untestable because the test built its offset from
+the constant under test, the progress check exempted the newest screen by construction, and
+`npm test` never ran the e2e at all.
+
+Next eligible, from `21` §1 `Deps`: WBS-04 (03, 10) · WBS-18 (11, 17) · WBS-19 (06, 07, 08) ·
+WBS-22 (06) · WBS-25 (00, 01) · WBS-26 (17, 18) · WBS-27 (17) · WBS-29 (11) · WBS-34 (21, 11).

@@ -40,11 +40,26 @@ fs.writeFileSync(path.join(SEED, 'node_modules', 'huge.js'), 'x'.repeat(1000));
 /* A fixture CLI, not the host's. Without this the WBS-09 assertions test a different code
  * path on every machine — and on a host with no Claude Code they pass carrying no information. */
 const FAKE_CLI = path.join(DB_DIR, 'claude');
+/* The same fixture also serves the Work loop: asked to run a session it emits a stream that
+ * ends in a permission REFUSAL, which is the D-133 state the screen has to render. */
+const FAKE_CLI_JS = path.join(DB_DIR, 'claude-session.js');
+fs.writeFileSync(FAKE_CLI_JS, `
+const out = [
+  { type: 'system', subtype: 'init', session_id: 's', cwd: '/p', claude_code_version: '9.9.9' },
+  { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_a', name: 'Read', input: { file_path: 'README.md' } }] } },
+  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_a', is_error: false }] } },
+  { type: 'system', subtype: 'permission_denied', tool_name: 'Edit', tool_use_id: 'tu_1',
+    message: 'Claude requested permissions to write to README.md, but you have not granted it yet.' },
+  { type: 'result', subtype: 'success', is_error: false, result: '권한이 없어 바꾸지 못했어요',
+    permission_denials: [{ tool_name: 'Edit', tool_use_id: 'tu_1', tool_input: { file_path: 'README.md' } }] },
+];
+for (const e of out) process.stdout.write(JSON.stringify(e) + '\\n');
+`);
 fs.writeFileSync(FAKE_CLI, [
   '#!/bin/sh',
   "if [ \"$1\" = \"--version\" ]; then echo '9.9.9-fixture (Claude Code)'; exit 0; fi",
   "if [ \"$1\" = \"auth\" ]; then echo '{\"loggedIn\":true,\"email\":\"fixture@example.test\",\"orgId\":\"org-fixture\"}'; exit 0; fi",
-  'exit 1',
+  `exec ${process.execPath} ${FAKE_CLI_JS}`,
 ].join('\n') + '\n', { mode: 0o755 });
 /* TWO projects, SEED opened first so SEED2 is the newer one. That makes "did the recent list
  * get re-read?" answerable: the list starts SEED2-first, the run opens SEED, and on return
@@ -91,10 +106,25 @@ const RED_COUNT = (scope) => `(() => {
 /* Progress on stderr, so a run that stalls says WHERE it stalled instead of going quiet. */
 const step = (m) => process.stderr.write(`  · ${m}\n`);
 
+/* Attaching is a race against the app's own start-up, and how long that takes varies with the
+ * machine. Retrying is not papering over a failure — a refused connection at t=4s and one at
+ * t=20s are different facts, and only the second one means the app did not come up. */
+async function pageTarget(port, { tries = 20, everyMs = 750 } = {}) {
+  let last = null;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+      const page = list.find((t) => t.type === 'page');
+      if (page) return page;
+      last = 'no page target yet';
+    } catch (e) { last = e.message; }
+    await sleep(everyMs);
+  }
+  throw new Error(`no page target on ${port} after ${(tries * everyMs) / 1000}s: ${last}`);
+}
+
 async function cdp(sendFn) {
-  const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-  const page = list.find((t) => t.type === 'page');
-  assert.ok(page, `no page target — did the window open?\n${appErr.slice(-1500)}`);
+  const page = await pageTarget(PORT);
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
   let id = 0;
@@ -286,6 +316,56 @@ const results = await cdp(async ({ send, evalJs }) => {
     fs.writeFileSync(path.join(OUT, `sc02-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
 
+  /* ── the Work loop, end to end through the real app ──────────────────────────────
+   * SC-02 submit → route disclosure → guard/evidence/session → SC-03 with a refusal card →
+   * allow → the same Work resumes. Every card here was deferred in earlier batches precisely
+   * because it had nowhere to lead; this is the run that gives it somewhere. */
+  step('submit an intent');
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]');
+    f.value = 'README.md 의 첫 줄을 바꿔줘'; })()`);
+  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  await sleep(2500);
+
+  out.screenAfterSubmit = await evalJs('window.__screen()');
+  out.work = await evalJs('JSON.stringify(window.__work())');
+  out.permPanel = await evalJs(`document.querySelector('[data-el="permission"]')?.innerText ?? null`);
+  out.workReds = await evalJs(RED_COUNT('.sc03 *'));
+  out.nextSlot = await evalJs(`document.querySelector('[data-el="next"]')?.innerText ?? null`);
+  out.liveness = await evalJs(`document.querySelector('[data-el="liveness"]')?.innerText ?? null`);
+  out.sc03Cards = await evalJs(`JSON.stringify([...document.querySelectorAll('.sc03 [data-card]')].map(n => n.getAttribute('data-card')))`);
+  out.sc03Overflow = await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth');
+  out.sc03Clipped = await evalJs(`[...document.querySelectorAll('.sc03 .card')].filter(n => n.scrollHeight > n.clientHeight + 1).length`);
+  out.sc03Times = await evalJs(`document.querySelector('[data-card="work"] .times')?.innerText ?? null`);
+  out.sc03About = await evalJs(`document.querySelector('[data-card="about"]')?.innerText ?? null`);
+  out.sc03RawCollapsed = await evalJs(`document.querySelector('[data-el="raw"]')?.open === false`);
+  /* Cards must not overlap. `scrollHeight > clientHeight` measures a card clipping ITSELF and
+   * cannot see one card drawn on top of another — which is what a spanned grid row did. */
+  out.overlaps = await evalJs(`(() => {
+    const cards = [...document.querySelectorAll('.sc03 .card, .sc02 .card')].map(n => n.getBoundingClientRect());
+    let hits = 0;
+    for (let i = 0; i < cards.length; i++) for (let j = i + 1; j < cards.length; j++) {
+      const a = cards[i], b = cards[j];
+      if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) hits++;
+    }
+    return hits; })()`);
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc03-permission-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+
+  /* the guard: a second submit while this Work is open must be refused, not queued */
+  step('guard');
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로')).click()`);
+  await sleep(500);
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 오류 고쳐줘'; })()`);
+  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  await sleep(1500);
+  out.guardCard = await evalJs(`document.querySelector('[data-el="guard"]')?.innerText ?? null`);
+  out.guardReds = await evalJs(RED_COUNT('[data-el="guard"], [data-el="guard"] *'));
+  out.guardKeptText = await evalJs(`document.querySelector('[data-el="intent"]').value`);
+
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await evalJs(`document.querySelectorAll('.fade-in').forEach(n => { n.classList.remove('fade-in'); void n.offsetWidth; n.classList.add('fade-in'); })`);
   await sleep(150);
@@ -327,10 +407,14 @@ step('cdp done — stopping app');
 stopApp();
 await sleep(400);
 
+console.log(JSON.stringify(results, null, 2));
+
 const bridge = JSON.parse(results.bridge);
 assert.strictEqual(results.ready, true, 'renderer did not initialise');
 assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.screen}`);
-assert.deepStrictEqual(bridge.keys.sort(), ['boot', 'claudeStatus', 'interpret', 'openPath', 'openProject', 'versions'],
+assert.deepStrictEqual(bridge.keys.sort(),
+  ['boot', 'claudeStatus', 'interpret', 'onWorkUpdate', 'openPath', 'openProject', 'routeIntent',
+   'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges', 'workGet', 'workSignals', 'workStart'],
   'renderer API surface is not exactly the declared one');
 assert.strictEqual(bridge.require, 'undefined', 'require leaked into the renderer');
 assert.strictEqual(bridge.process, 'undefined', 'process leaked into the renderer');
@@ -349,7 +433,7 @@ assert.ok(Math.abs(results.centreOffset) <= 40,
 assert.strictEqual(results.recentRows, 2, 'the seeded projects did not reach SC-01 from the store');
 assert.strictEqual(results.screenAfterOpen, 'SC-02', `opening a project did not reach SC-02 (got ${results.screenAfterOpen})`);
 assert.strictEqual(JSON.parse(results.openedProject).path, SEED, 'SC-02 is showing a different project than the one opened');
-assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(), ['brief', 'history', 'stream'],
+assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(), ['brief', 'history', 'intent', 'stream'],
   'SC-02 board is not the cards this package builds — nothing a later package owns may be drawn');
 /* WBS-03 — the Brief is six answers, and a 확인됨 chip must name the file it rests on (D-114). */
 const interp = JSON.parse(results.interp);
@@ -415,6 +499,45 @@ for (const [what, r] of Object.entries(gate)) {
   assert.strictEqual(r.reason, 'not-offered', `openPath(${what}) answered ${r.reason}, expected not-offered`);
 }
 
+/* ── the Work loop ── */
+assert.strictEqual(results.screenAfterSubmit, 'SC-03', `submitting a change request did not reach SC-03 (${results.screenAfterSubmit})`);
+const work = JSON.parse(results.work);
+assert.ok(work, 'SC-03 rendered without a Work');
+assert.strictEqual(work.intent, 'README.md 의 첫 줄을 바꿔줘', 'the Work is not named by the user\'s own words');
+assert.strictEqual(work.status, 'permission_waiting', `expected the refusal state, got ${work.status}`);
+assert.strictEqual(work.outcome, null, 'a Work with an unanswered refusal was reported as ended');
+assert.strictEqual(work.permission, 'Edit');
+assert.ok(work.signals >= 5, `only ${work.signals} signals were persisted — 기술 출력 보기 needs them all`);
+
+/* D-133: the tool is ALREADY denied, so nothing on this card may call it 대기 중. */
+assert.ok(results.permPanel, 'the permission card did not render');
+assert.ok(results.permPanel.includes('Claude Code가 이 동작을 하지 못했어요'), results.permPanel);
+assert.ok(!results.permPanel.includes('대기'), 'the refusal is described as waiting — D-133 forbids it');
+assert.ok(results.permPanel.includes('허용하고 다시 해 보기'));
+
+/* 사용 불가 / 대기 is amber OUTLINE, and red is failure only — nothing here failed. */
+assert.strictEqual(results.workReds, 0, 'SC-03 renders red for a refusal, which is not a failure');
+/* The NEXT slot is always rendered, and empty is the right answer here (D-107). */
+assert.ok(results.nextSlot && results.nextSlot.includes('Claude Code가 아직 다음 단계를 보내지 않았어요'),
+  `NEXT slot: ${results.nextSlot}`);
+assert.ok(results.liveness && !/\d+\s*%/.test(results.liveness), 'the liveness line shows a percentage');
+assert.deepStrictEqual(JSON.parse(results.sc03Cards).sort(), ['about', 'steps', 'work'],
+  '`15` SC-03 requires the right rail 이 Work 에 대해 alongside the Work and Steps');
+assert.strictEqual(results.sc03Overflow, 0);
+assert.strictEqual(results.sc03Clipped, 0, 'an SC-03 card is clipping its own content');
+assert.strictEqual(results.overlaps, 0, 'two cards are drawn on top of each other');
+/* `15` SC-03 header: the started/ended times, and the right rail with the raw output collapsed. */
+assert.ok(results.sc03Times && results.sc03Times.includes('시작'), `header times: ${results.sc03Times}`);
+assert.ok(results.sc03About && results.sc03About.includes('이 작업에 대해'), `right rail: ${results.sc03About}`);
+assert.strictEqual(results.sc03RawCollapsed, true, '기술 출력 보기 must be collapsed by default (A-11)');
+
+/* D-117: the second request is refused as a guard, and the text stays in the field. */
+assert.ok(results.guardCard && results.guardCard.includes('지금 진행 중인 작업이 있어요'), `guard: ${results.guardCard}`);
+assert.strictEqual(results.guardKeptText, '로그인 오류 고쳐줘',
+  'the refused request was cleared or queued — UF-RULE-NOQUEUE says it stays in the field');
+/* The guard is amber, not red: another Work running is not a failure. */
+assert.strictEqual(results.guardReds, 0, 'the guard card is rendered as a failure');
+
 assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기 did not return to SC-01');
 assert.strictEqual(results.recentAfterBack, 2, 'the recent list lost a row on return');
 assert.ok(results.recentTopAfterBack && results.recentTopAfterBack.endsWith(path.basename(SEED)),
@@ -449,8 +572,7 @@ console.log(JSON.stringify(results, null, 2));
   process.on('exit', stop2);
   await sleep(4000);
 
-  const list = await (await fetch(`http://127.0.0.1:${PORT2}/json/list`)).json();
-  const page = list.find((t) => t.type === 'page');
+  const page = await pageTarget(PORT2);
   assert.ok(page, 'the app did not open a window when its store was unusable — it must still boot');
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });

@@ -110,8 +110,119 @@ function beginWork(db, projectId, intent) {
   return { ok: true, work: db.prepare('select * from work where id = ?').get(id) };
 }
 
+/* ── WBS-10 · the observed stream, persisted before anything interprets it ──────────
+ * `20`: every raw event is a `work_signal`. That is what `기술 출력 보기` reads, and it is why
+ * a stream shape we do not understand still leaves a record.
+ */
+function addSignal(db, workId, { seq, source = 'claude', kind, payload, observedAt }) {
+  db.prepare(`insert into work_signal (id, work_id, seq, source, kind, payload, observed_at)
+              values (?, ?, ?, ?, ?, ?, ?)`)
+    .run(randomUUID(), workId, seq, source, kind,
+         payload == null ? null : (typeof payload === 'string' ? payload : JSON.stringify(payload)),
+         observedAt ?? now());
+}
+
+const signalsFor = (db, workId, limit = 500) =>
+  db.prepare('select * from work_signal where work_id = ? order by seq limit ?').all(workId, limit);
+
+const nextSeq = (db, workId) =>
+  (db.prepare('select max(seq) m from work_signal where work_id = ?').get(workId).m ?? -1) + 1;
+
+/** `20`: outcome and ended_at are set together with status='ended', or not at all. */
+function setWorkState(db, workId, { status, outcome = null }) {
+  if (status === 'ended') {
+    db.prepare("update work set status = 'ended', outcome = ?, ended_at = ? where id = ?")
+      .run(outcome ?? 'ended_unknown', now(), workId);
+  } else {
+    /* `20`'s check is `(status='ended') = (outcome is not null)`, so a non-ended status and an
+     * outcome cannot coexist. Writing the status alone left the pair contradictory and the
+     * engine rejected it — which is the check doing its job, and the write being wrong. */
+    db.prepare('update work set status = ?, outcome = null, ended_at = null where id = ?').run(status, workId);
+  }
+  return db.prepare('select * from work where id = ?').get(workId);
+}
+
+const getWork = (db, id) => db.prepare('select * from work where id = ?').get(id) ?? null;
+
+const worksFor = (db, projectId, limit = 20) =>
+  db.prepare('select * from work where project_id = ? order by started_at desc limit ?').all(projectId, limit);
+
+/* ── WBS-08 · the basis a Work's diffs are computed against (D-121) ── */
+function saveBasis(db, workId, phase, { kind, ref, excluded, files }) {
+  db.prepare(`insert into evidence_basis (id, work_id, phase, kind, ref, excluded, created_at)
+              values (?, ?, ?, ?, ?, ?, ?)`)
+    .run(randomUUID(), workId, phase, kind, ref,
+         excluded && excluded.length ? JSON.stringify(excluded) : null, now());
+  /* A git basis IS its tree object, so the ref alone is enough to compare it later. A manifest
+   * basis is only comparable against the list it was made from, and `20` has no column for
+   * that list — so it lives in the in-process map below and **does not survive a restart**.
+   * A non-Git Work that outlives the app therefore cannot report its change count. Filed as
+   * CANON_FINDINGS CF-9; the fix is a column, not more memory. */
+  if (kind === 'hash_manifest' && files) manifests.set(`${workId}:${phase}`, files);
+}
+
+/* ponytail: in-process only — see the note above. `20` needs a column (CF-9) to fix it. */
+const manifests = new Map();
+
+const basisFor = (db, workId, phase) => {
+  const row = db.prepare('select * from evidence_basis where work_id = ? and phase = ?').get(workId, phase);
+  if (!row) return null;
+  const files = manifests.get(`${workId}:${phase}`);
+  return files ? { ...row, files: JSON.stringify(files) } : row;
+};
+
+/* ── WBS-12 · Steps — only what Claude Code actually declared (D-107) ── */
+function upsertStep(db, workId, { ord, title, state }) {
+  const at = now();
+  const found = db.prepare('select * from step where work_id = ? and ord = ?').get(workId, ord);
+  if (found) {
+    db.prepare('update step set title = ?, state = ?, updated_at = ? where id = ?').run(title, state, at, found.id);
+    return;
+  }
+  db.prepare(`insert into step (id, work_id, ord, title, state, declared_at, updated_at)
+              values (?, ?, ?, ?, ?, ?, ?)`).run(randomUUID(), workId, ord, title, state, at, at);
+}
+
+const stepsFor = (db, workId) =>
+  db.prepare('select * from step where work_id = ? order by ord').all(workId);
+
+/** `20` D-124 startup reconciliation: a Work whose process is gone cannot be judged. */
+/**
+ * D-124: a Work whose process is GONE is closed as 확인 불가. The caller supplies the liveness
+ * test; the default assumes nothing is alive, which is only safe when the caller has already
+ * established that. A JuQode child is spawned detached and CAN outlive its parent — measured —
+ * so "nothing this process started survived it" is not a fact anyone may assume.
+ *
+ * `07` §8.5: a pid is reusable, so identity is `{pid, startedAt}` and both are compared.
+ */
+function processFor(db, workId) {
+  for (const s of db.prepare("select payload from work_signal where work_id = ? and source = 'juqode' order by seq").all(workId)) {
+    try {
+      const p = JSON.parse(s.payload ?? '')?.juqodeProcess;
+      if (p?.pid) return p;
+    } catch { /* not the process marker */ }
+  }
+  return null;
+}
+
+function reconcileLostWorks(db, isAlive = () => false) {
+  const stranded = db.prepare("select * from work where status <> 'ended'").all()
+    .filter((w) => !isAlive(w, processFor(db, w.id)));
+  for (const w of stranded) {
+    setWorkState(db, w.id, { status: 'ended', outcome: 'ended_unknown' });
+    addSignal(db, w.id, { seq: nextSeq(db, w.id), source: 'juqode', kind: 'reconciled', payload: 'ended_unknown' });
+    db.prepare("update step set state = 'not_executed', updated_at = ? where work_id = ? and state in ('running','declared_next')")
+      .run(now(), w.id);
+  }
+  return stranded.map((w) => w.id);
+}
+
 module.exports = {
   openProject, recentProjects,
   saveInterpretation, currentInterpretation,
-  activeWork, beginWork,
+  activeWork, beginWork, getWork, worksFor, setWorkState,
+  addSignal, signalsFor, nextSeq,
+  saveBasis, basisFor,
+  upsertStep, stepsFor,
+  reconcileLostWorks, processFor,
 };
