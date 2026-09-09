@@ -3,6 +3,7 @@ import { renderSC02 } from './screens/sc02.js';
 import { renderSC03 } from './screens/sc03.js';
 import { renderSC04 } from './screens/sc04.js';
 import { mountDrawer } from './screens/td01.js';
+import { capture, morph, actedFrom, trackSource } from './transition.js';
 
 /* window.juqode is the entire renderer-visible surface (see app/preload/preload.js).
  * If the preload failed, fail loudly rather than silently degrading. */
@@ -70,22 +71,39 @@ const nav = {
     state.workSnapshot = null;
     state.reader = null; state.readerGroup = 0; state.readerRaw = false;
     state.prefill = opts.intent ?? null;
+    /* `17`: 읽기면이 접히며 History 로 착지한다 — only from SC-04, which is the only screen the
+     * sentence is about. Coming from anywhere else there is no reading surface to fold. */
+    const from = state.screen === 'SC-04' ? capture('.sc04') : null;
     state.screen = 'SC-02';
     renderSC02(root, api, nav, state);
+    morph(from, '.sc02 [data-card="history"]');
   },
   toWork(snapshot) {
+    /* WBS-37 · `17`: 보드의 Work 카드가 공유 요소로 모프해 SC-03 의 Work 가 된다.
+     *
+     * On the way from a submit the shared element is the pending placeholder (M-04: pending →
+     * Work card); arriving from the guard's 열기 or an orientation line it is whatever card
+     * stands for that Work on the board. Measured BEFORE the render, because the render clears
+     * `#root` and the rect goes with it. */
+    const from = actedFrom() ?? capture('[data-el="pending"]');
     state.workSnapshot = snapshot;
     state.reader = null; state.readerGroup = 0; state.readerRaw = false;
     state.screen = 'SC-03';
     renderSC03(root, api, nav, state);
+    morph(from, '.sc03 [data-card="work"]');
   },
   /* SC-04. The read model is fetched HERE, once, rather than inside the screen: a screen that
    * fetches on render would re-fetch on every group click. */
   async toReader(snapshot, reader = null) {
+    /* `17`: 결과 영역이 읽기면으로 넓어진다. The result card is the thing that widens, so it is
+     * the thing measured — and it is measured BEFORE the await, because a slow read would
+     * otherwise capture a screen the user has already scrolled. */
+    const from = actedFrom() ?? capture('.sc03 [data-card="result"]');
     state.workSnapshot = snapshot;
     state.reader = reader ?? await api.workReader(snapshot.work.id);
     state.screen = 'SC-04';
     renderSC04(root, api, nav, state);
+    morph(from, '.sc04');
   },
   async toPicker() {
     state.project = null;
@@ -103,6 +121,7 @@ const nav = {
   },
 };
 
+trackSource();
 await nav.toPicker();
 
 /* TD-01 · mounted ONCE, over whatever screen is up. `15`: the drawer covers the bottom of the

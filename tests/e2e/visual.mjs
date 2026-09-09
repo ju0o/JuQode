@@ -227,6 +227,65 @@ async function pageTarget(port, { tries = 20, everyMs = 750 } = {}) {
   throw new Error(`no page target on ${port} after ${(tries * everyMs) / 1000}s: ${last}`);
 }
 
+/* WBS-37 · one surface's COMPOSITION, as numbers.
+ *
+ * `17` says the five surfaces must be recognisable as different arrangements, and that
+ * "텍스트만 바뀐 같은 페이지로 읽히면 실패다". That is a claim about geometry, so it is
+ * measured as geometry: how many cards, how many DIFFERENT card widths, how much of the
+ * surface they cover, and how much bigger the biggest one is than the next.
+ *
+ * The last number is what says whether a screen has a SUBJECT. On SC-03 the Work is the
+ * subject of the screen; on SC-02 nothing is. */
+const COMPOSITION = (sel) => `(() => {
+  const board = document.querySelector('${sel}');
+  if (!board) return null;
+  const b = board.getBoundingClientRect();
+  const cards = [...board.querySelectorAll('.card')].map(n => n.getBoundingClientRect())
+    .filter(r => r.width > 0 && r.height > 0);
+  const areas = cards.map(r => r.width * r.height).sort((x, y) => y - x);
+  const widths = [...new Set(cards.map(r => Math.round(r.width / 8) * 8))];
+  const st = getComputedStyle(board);
+  return {
+    cards: cards.length,
+    distinctWidths: widths.length,
+    widestShare: cards.length ? Math.max(...cards.map(r => r.width)) / b.width : 0,
+    density: areas.reduce((a, x) => a + x, 0) / (b.width * b.height),
+    dominance: areas.length > 1 ? areas[0] / areas[1] : null,
+    /* Distinct SIZES, not distinct widths: SC-02 is two equal columns on purpose (a stack
+     * cannot overlap — see sc02.js), so its variety is carried by height. Log buckets, so a
+     * few pixels of text reflow do not invent a new size. */
+    distinctSizes: new Set(areas.map(a => Math.round(Math.log(a) / Math.log(1.25)))).size,
+    largest: cards.length ? (() => {
+      const all = [...board.querySelectorAll('.card')].filter(n => n.getBoundingClientRect().width > 0);
+      const area = (n) => { const r = n.getBoundingClientRect(); return r.width * r.height; };
+      return all.reduce((a, b) => (area(b) > area(a) ? b : a)).getAttribute('data-card');
+    })() : null,
+    radius: cards.length ? getComputedStyle(board.querySelector('.card')).borderTopLeftRadius : null,
+    font: st.fontFamily.slice(0, 40),
+  }; })()`;
+
+/* WBS-37 · did the shared-element morph actually run?
+ *
+ * `17`: 같은 것이라는 사실이 움직임으로 보인다. A source assertion cannot tell a transition
+ * that runs from one that was written and never fires, so this clicks and then counts the
+ * animations ON the incoming element — from inside the page, because a CDP round trip is
+ * longer than the 360 ms the transition lasts.
+ *
+ * It also reports the horizontal overflow while the transform is at its largest. A FLIP scales
+ * an element well past its own box, and an overflow that only exists mid-transition is exactly
+ * the kind of thing a screenshot taken afterwards cannot see. */
+const MORPH = (clickExpr, arriveSel) => `(async () => {
+  ${clickExpr};
+  let overflow = 0;
+  for (let i = 0; i < 90; i++) {
+    await new Promise(r => requestAnimationFrame(r));
+    overflow = Math.max(overflow,
+      document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    const n = document.querySelector('${arriveSel}');
+    if (n) return JSON.stringify({ animations: n.getAnimations().length, overflow });
+  }
+  return JSON.stringify({ animations: -1, overflow }); })()`;
+
 async function cdp(sendFn) {
   const page = await pageTarget(PORT);
   const ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -422,6 +481,8 @@ const results = await cdp(async ({ send, evalJs }) => {
     fs.writeFileSync(path.join(OUT, `sc01-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
 
+  out.compSC01 = await evalJs(COMPOSITION('.sc01'));
+
   // no horizontal overflow at the shipped minimum width
   out.overflow = await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth');
 
@@ -498,6 +559,7 @@ const results = await cdp(async ({ send, evalJs }) => {
     document.body.appendChild(probe); const amber = getComputedStyle(probe).color; probe.remove();
     const line = document.querySelector('[data-card="brief"] .partial-line');
     return line ? getComputedStyle(line).color === amber : null; })()`);
+  out.compSC02       = await evalJs(COMPOSITION('.sc02'));
   out.sc02Cards      = await evalJs(`JSON.stringify([...document.querySelectorAll('[data-card]')].map(n => n.getAttribute('data-card')))`);
   /* The open-path gate, exercised THROUGH the bridge. Asserting that main.js contains the
    * string `not-offered` passes just as happily when the gate is `true || …`. */
@@ -538,6 +600,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.workReds = await evalJs(RED_COUNT('.sc03 *'));
   out.nextSlot = await evalJs(`document.querySelector('[data-el="next"]')?.innerText ?? null`);
   out.liveness = await evalJs(`document.querySelector('[data-el="liveness"]')?.innerText ?? null`);
+  out.compSC03  = await evalJs(COMPOSITION('.sc03'));
   out.sc03Cards = await evalJs(`JSON.stringify([...document.querySelectorAll('.sc03 [data-card]')].map(n => n.getAttribute('data-card')))`);
   out.sc03Overflow = await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth');
   out.sc03Clipped = await evalJs(`[...document.querySelectorAll('.sc03 .card')].filter(n => n.scrollHeight > n.clientHeight + 1).length`);
@@ -582,7 +645,9 @@ const results = await cdp(async ({ send, evalJs }) => {
   step('SC-04');
   /* The guard above needed this Work still ACTIVE, so the grant comes after it: `허용하고 다시
    * 해 보기` is on SC-03, which SC-02's current-Work `열기` returns to. */
-  await evalJs(`[...document.querySelectorAll('.sc02 button')].find(b => b.textContent.trim() === '열기')?.click()`);
+  out.morphToWork = await evalJs(MORPH(
+    `[...document.querySelectorAll('.sc02 button')].find(b => b.textContent.trim() === '열기')?.click()`,
+    '.sc03 [data-card="work"]'));
   await sleep(800);
   /* D-133 contract B: the grant is scoped to THIS tool input and the SAME session resumes. The
    * fixture edits on that turn, which is what gives SC-04 a finished Work with real changes. */
@@ -625,9 +690,12 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
   await sleep(200);
 
-  await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.includes('변경 읽기'))?.click()`);
+  out.morphToReader = await evalJs(MORPH(
+    `[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.includes('변경 읽기'))?.click()`,
+    '.sc04'));
   await sleep(1200);
   out.screenReader   = await evalJs('window.__screen()');
+  out.compSC04       = await evalJs(COMPOSITION('.sc04'));
   out.reader         = await evalJs('JSON.stringify(window.__reader())');
   out.readerReds     = await evalJs(RED_COUNT('.sc04 *'));
   /* Prove the counter can actually see red on THIS screen before trusting a zero from it —
@@ -752,7 +820,11 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('[data-el="history-row"] button')].find(b => b.textContent.includes('변경 보기'))?.click()`);
   await sleep(1500);
   out.historyToReader = await evalJs('window.__screen()');
-  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('이해했어요'))?.click()`);
+  /* WBS-37 · SC-04 → SC-02: 읽기면이 접히며 History 로 착지한다. `이해했어요` is SC-04's own
+   * way out, so it is where the sentence is about. */
+  out.morphToBench = await evalJs(MORPH(
+    `[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('이해했어요'))?.click()`,
+    '.sc02 [data-card="history"]'));
   await sleep(800);
   /* …and `결과 보기` → SC-03. */
   await evalJs(`[...document.querySelectorAll('[data-el="history-row"] button')].find(b => b.textContent.includes('결과 보기'))?.click()`);
@@ -784,6 +856,22 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.presenceMoved = (await evalJs(shot)) !== a1;
 
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+
+  /* WBS-37 · the SAME navigation with motion off. `17`: 전환은 전부 꺼진다.
+   *
+   * The stylesheet's `animation: none !important` does NOT stop a Web Animations call, so the
+   * guard in `transition.js` is the only thing between reduced motion and a transform that
+   * still runs — and a guard nobody measures is a guard nobody has. Round trip, so the run
+   * continues from SC-02 exactly as it did before. */
+  out.morphReducedToWork = await evalJs(MORPH(
+    `[...document.querySelectorAll('[data-el="history-row"] button')].find(b => b.textContent.includes('결과 보기'))?.click()`,
+    '.sc03 [data-card="work"]'));
+  await sleep(900);
+  out.morphReducedToBench = await evalJs(MORPH(
+    `[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`,
+    '.sc02 [data-card="history"]'));
+  await sleep(700);
+
   /* The loop keeps running; under reduced motion it simply paints the same frame every time.
    * One settle-length pause lets the easing finish landing before the two shots are compared. */
   await sleep(300);
@@ -800,6 +888,11 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`document.querySelectorAll('.fade-in').forEach(n => { n.classList.remove('fade-in'); void n.offsetWidth; n.classList.add('fade-in'); })`);
   await sleep(150);
   out.animating = await evalJs('document.getAnimations().filter(a => a.playState === "running").length');
+  /* `21` WBS-37's evidence column: a reduced-motion screenshot. Same screen, no motion. */
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc02-reduced-motion.png'), Buffer.from(shot.result.data, 'base64'));
+  }
   await send('Emulation.setEmulatedMedia', { features: [] });
 
   /* ── TD-01 · the terminal drawer and Quick Command ──────────────────────────────────────
@@ -810,6 +903,15 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.trim() === '터미널')?.click()`);
   await sleep(400);
   out.drawerOpen   = await evalJs('JSON.stringify(window.__drawer())');
+  out.compTD01     = await evalJs(COMPOSITION('.td01'));
+  /* `17` TD-01: 화면 위를 덮되 화면이 뒤에 남아 있는 것이 보인다. Both halves as numbers —
+   * the drawer is anchored to the bottom and does not reach the top of the window. */
+  out.drawerGeom   = await evalJs(`(() => {
+    const d = document.querySelector('.td01'); if (!d) return null;
+    const r = d.getBoundingClientRect();
+    return JSON.stringify({ top: Math.round(r.top), bottom: Math.round(r.bottom),
+                            vh: window.innerHeight,
+                            behind: !!document.querySelector('[data-screen]') }); })()`);
   out.drawerBanner = await evalJs(`document.querySelector('[data-el="banner"]')?.innerText ?? null`);
   /* The drawer is a SIBLING of #root — a child would be destroyed by the screen it sits over. */
   out.drawerOutsideRoot = await evalJs(`(() => {
@@ -1248,6 +1350,82 @@ assert.strictEqual(results.staleAnswersAfterKeep, results.staleAnswers,
   '이대로 계속 changed the Brief instead of only dismissing the notice');
 assert.strictEqual(results.animating, 0,
   'an animation is still running under prefers-reduced-motion: reduce');
+
+/* ── WBS-37 · 화면 구성 차별화 · 전환 모션 (D-136 · `17`) ─────────────────────────────────── */
+{
+  /* `Runtime.evaluate` with `returnByValue` hands these back as objects already; only
+   * `drawerGeom` is a string, because it stringifies inside the page. */
+  const { compSC01: C1, compSC02: C2, compSC03: C3, compSC04: C4 } = results;
+  const geom = JSON.parse(results.drawerGeom);
+  for (const [n, c] of [['SC-01', C1], ['SC-02', C2], ['SC-03', C3], ['SC-04', C4]]) {
+    assert.ok(c, `${n}'s composition was never measured`);
+  }
+
+  /* `17`'s table, surface by surface. Each row is that surface's OWN sentence, in numbers —
+   * not a ranking, so a change to one screen cannot silently satisfy another's rule. */
+
+  /* SC-01 진입 — 카드가 적고 여백이 많다. */
+  assert.ok(C1.cards <= 2, `SC-01 has ${C1.cards} cards — it is not the sparse entry screen`);
+  assert.ok(C1.density < 0.25, `SC-01 covers ${(C1.density * 100).toFixed(0)}% of the surface`);
+
+  /* SC-02 모듈 보드 — 크기가 다른 카드가 여럿 놓인다. By SIZE: the board is two equal columns
+   * on purpose (a stack cannot overlap), so the variety is in area, not in width. */
+  assert.ok(C2.cards >= 4, `SC-02 has only ${C2.cards} cards`);
+  assert.ok(C2.distinctSizes >= 3, `SC-02's cards come in ${C2.distinctSizes} sizes`);
+
+  /* SC-03 집중된 활성 Work — Work 가 화면의 주어다. The biggest card IS the Work, and it is
+   * the biggest by a margin rather than by a pixel. */
+  assert.strictEqual(C3.largest, 'work', `SC-03's largest card is ${C3.largest}, not the Work`);
+  assert.ok(C3.dominance >= 1.8,
+    `SC-03's Work is only ${C3.dominance?.toFixed(2)}× the next card — it is not the subject`);
+
+  /* SC-04 넓은 읽기면 — 변경 묶음과 코드가 폭을 쓴다, and it is the only surface that does. */
+  assert.ok(C4.widestShare >= 0.9,
+    `SC-04's widest card takes ${(C4.widestShare * 100).toFixed(0)}% of the surface`);
+  for (const [n, c] of [['SC-01', C1], ['SC-02', C2], ['SC-03', C3]]) {
+    assert.ok(c.widestShare < C4.widestShare, `${n} is as wide a reading surface as SC-04`);
+  }
+
+  /* TD-01 종속 서랍 — 화면 위를 덮되 화면이 뒤에 남아 있는 것이 보인다. Both halves. */
+  assert.ok(geom.top > 0, 'the drawer reaches the top of the window — it is a screen, not a drawer');
+  assert.ok(geom.bottom >= geom.vh - 2, 'the drawer is not anchored to the bottom');
+  assert.ok(geom.top < geom.vh * 0.85, 'the drawer is a sliver, not a drawer');
+  assert.strictEqual(geom.behind, true, 'nothing is left behind the drawer');
+
+  /* 텍스트만 바뀐 같은 페이지로 읽히면 실패다 — no two surfaces have the same signature. */
+  const sig = (c) => `${c.cards}/${c.distinctSizes}/${Math.round(c.widestShare * 10)}/${Math.round(c.density * 10)}`;
+  const sigs = [['SC-01', C1], ['SC-02', C2], ['SC-03', C3], ['SC-04', C4]].map(([n, c]) => [n, sig(c)]);
+  assert.strictEqual(new Set(sigs.map((x) => x[1])).size, 4,
+    `two surfaces are the same arrangement: ${sigs.map((x) => x.join('=')).join(' · ')}`);
+
+  /* …and 하나의 디자인 시스템은 유지된다: the differentiation is composition, not a second
+   * design system. Same card radius and the same type on every surface. */
+  const radii = new Set([C2.radius, C3.radius, C4.radius].filter(Boolean));
+  assert.strictEqual(radii.size, 1, `the card radius differs between surfaces: ${[...radii]}`);
+  assert.strictEqual(new Set([C1.font, C2.font, C3.font, C4.font]).size, 1,
+    'a surface uses a different typeface — that is a second design system');
+
+  /* The three named transitions actually RUN, and nothing scrolls sideways while they do.
+   * `17`: 같은 것이라는 사실이 움직임으로 보인다 — a transition that is written and never
+   * fires shows nothing. */
+  for (const [name, key] of [['SC-02 → SC-03', 'morphToWork'], ['SC-03 → SC-04', 'morphToReader'],
+                             ['SC-04 → SC-02', 'morphToBench']]) {
+    const m = JSON.parse(results[key]);
+    assert.ok(m.animations >= 1, `${name} ran no transition (${m.animations})`);
+    assert.strictEqual(m.overflow, 0,
+      `${name} scrolled the page sideways by ${m.overflow}px while it played`);
+  }
+
+  /* …and with motion off, every one of them is GONE. Not shortened — absent. The stylesheet's
+   * `animation: none !important` does not reach a Web Animations call, so this measures the
+   * only thing that actually stops them. */
+  for (const [name, key] of [['SC-02 → SC-03', 'morphReducedToWork'],
+                             ['SC-04 → SC-02', 'morphReducedToBench']]) {
+    const m = JSON.parse(results[key]);
+    assert.strictEqual(m.animations, 0,
+      `${name} still animates under prefers-reduced-motion: reduce (${m.animations})`);
+  }
+}
 
 /* ── WBS-35 · Agent Presence, measured ─────────────────────────────────────────────────────
  * SC-02 with no Work open. `21` WBS-35: no mode is reachable by a timer alone, so after all

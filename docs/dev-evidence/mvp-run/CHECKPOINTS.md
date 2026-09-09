@@ -434,3 +434,40 @@ an empty NEXT with the offer still standing.
 
 Next eligible: WBS-37 (screen differentiation · transition motion) · DV-11's pty decision ·
 WBS-32/33 (need humans and Windows).
+
+## Batch 15 · WBS-37
+
+Report: `BATCH-15.md`. No new Canon findings.
+
+| Package | State |
+|---|---|
+| WBS-37 화면 구성 차별화 · 전환 모션 | IMPLEMENTED |
+
+493 tests, three e2e files. **All 39 MVP WBS packages are now IMPLEMENTED except WBS-32
+(dogfood with real people) and WBS-33 (packaging · signing), which need humans and Windows,
+and WBS-25's shell command line, which is DV-11.**
+
+The five surfaces' compositions are now measured as geometry — card count, distinct card
+SIZES (SC-02 is two equal columns on purpose, so width says nothing), the widest card's share,
+density, and which card is the biggest. Each surface is checked against its own sentence from
+`17` rather than against a ranking, and no two signatures may match: 텍스트만 바뀐 같은
+페이지로 읽히면 실패다, measured.
+
+The three named transitions are one FLIP. The first implementation used a hard-coded source
+selector and the e2e showed the SC-02 → SC-03 morph never fired — SC-02 does not draw a Work
+card, and what was on screen was the guard panel. Widening the selector would have been worse:
+for a History list `querySelector` picks the FIRST row, so the morph would have been asserting
+that two different Works are the same thing. The source is now the card the user actually
+pressed, recorded in the capture phase, which makes the morph's statement true by construction.
+
+The reduced-motion guard is in JavaScript because it has to be: `animation: none !important`
+does not reach a Web Animations call. The e2e sails the same two navigations twice and counts
+1/1 with motion on and 0/0 with it off, plus zero horizontal overflow while a FLIP is scaled
+past its own box.
+
+A mutation showed the geometry check could not tell `15`'s Work-card size from a smaller one —
+the card's content keeps it dominant either way. "Is it dominant" and "is it the size `15` says"
+are two claims; only the first was being made. Both are now.
+
+Next eligible: DV-11's pty decision · an independent QA pass over batches 13–15 · WBS-32/33
+(need humans and Windows).
