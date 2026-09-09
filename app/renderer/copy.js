@@ -239,6 +239,13 @@ export const C = {
     workBasis:        '변경 기준',
     workBasisOk:      '확립됨',
     workStepsNote:    'Step은 Claude Code가 알린 것만 보여요.',
+    /* Result claim bodies — generated from what was measured, so `18` cannot carry them (CF-6). */
+    claimChanged:     '바뀐 파일',
+    claimUnknown:     '무엇이 바뀌었는지 확인하지 못했어요.',
+    claimTools:       'JuQode가 지켜본 도구 실행',
+    claimReport:      'Claude Code가 한 말이에요.',
+    claimNotDone:     '허용되지 않아서 하지 못한 것',
+    failedWhat:       '끝난 이유',
     /* `15` SC-03 contract B names this button; `18` carries the other three of the four. */
     permStop:       '그만두기',
     claudeUnknown:  'Claude Code를 쓸 수 없는 이유를 확인하지 못했어요.',

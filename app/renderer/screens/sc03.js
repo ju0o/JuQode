@@ -346,6 +346,37 @@ function rawOutput(snap, api) {
   return d;
 }
 
+/**
+ * One claim, one chip. The chip's meaning and its label move together — an earlier revision
+ * always rendered 확인됨, so a failed Work showed a red chip reading 확인됨.
+ */
+function claimRow(c) {
+  const row = el('div', 'claim');
+  row.setAttribute('data-claim', c.kind ?? 'unknown');
+  const [cls, label] = { confirmed: ['ok', C.brief.chips.ok], expected: ['part', C.brief.chips.exp] }[c.confidence]
+    ?? ['unk', C.brief.chips.no];
+  row.appendChild(el('span', `chip ${cls}`, label));
+
+  const body = el('div', 'body');
+  body.appendChild(el('div', 'sm', claimText(c)));
+  /* A 확인됨 chip is a promise, so what it rests on is named right there. */
+  if (c.confidence === 'confirmed' && c.sourceRef) body.appendChild(el('div', 'xs mut2 src', c.sourceRef));
+  row.appendChild(body);
+  return row;
+}
+
+function claimText(c) {
+  const d = c.data ?? {};
+  switch (c.kind) {
+    case 'changed-files':
+      return d.files?.length ? `${C.gap.claimChanged} ${d.files.length} · ${d.files.join(' · ')}` : C.work.noChanges;
+    case 'changes-unknown': return C.gap.claimUnknown;
+    case 'tools-observed':  return `${C.gap.claimTools} ${d.count}`;
+    case 'agent-report':    return d.text ?? '';
+    default:                return C.brief.chips.no;
+  }
+}
+
 /* ── the result, once the Work has actually ended ── */
 function resultCard(snap, api, nav, state) {
   const card = el('div', 'card c-wide');
@@ -356,29 +387,30 @@ function resultCard(snap, api, nav, state) {
   card.appendChild(head(outcomeTitle(snap.outcome),
     el('span', `chip ${OUTCOME[snap.outcome]?.cls ?? 'unk'}`, outcomeTitle(snap.outcome))));
 
-  /* Claude Code's own words about what it did. Nothing verified them, so they are 예상됨 —
-   * D-114 is explicit that a report not backed by a fact is not 확인됨. The full 된 것 /
-   * 안 된 것 claim list is WBS-18's. */
-  if (snap.finish?.text) {
-    const claim = el('div', 'claim');
-    claim.appendChild(el('span', 'chip part', C.brief.chips.exp));
-    claim.appendChild(el('span', 'sm', snap.finish.text));
-    card.appendChild(claim);
-  }
+  /* WBS-18 · every claim carries its own chip, and a 확인됨 one names the evidence it rests
+   * on (D-114, `18` §0.9). The chip is per CLAIM, never per card — a single chip over a mixed
+   * list would be asserting one confidence for several different things. */
+  for (const c of snap.result?.claims ?? []) card.appendChild(claimRow(c));
 
-  const count = el('div', 'xs mut');
-  count.setAttribute('data-el', 'changes');
-  count.textContent = C.gap.workUnknownChanges;
-  card.appendChild(count);
-  api.workChanges(snap.work.id).then((r) => {
-    if (!r?.ok) return;
-    /* No after-basis means we could not tell — which is not the same as nothing changed, and
-     * `15` 남은 변경 확인 불가 is the state for it. */
-    count.textContent = r.known
-      ? (r.files.length ? `${C.gap.workChangeCount} ${r.files.length}` : C.work.noChanges)
-      : C.work.remainTitle;
-    count.className = r.known ? 'xs mut' : 'xs mut2 unknownline';
-  });
+  /* 부분 완료 needs both lists (`15`): what was done, and what was not. */
+  const done = (snap.result?.items ?? []).filter((i) => i.kind === 'done');
+  const notDone = (snap.result?.items ?? []).filter((i) => i.kind === 'not_done');
+  if (notDone.length) {
+    const box = el('div', 'itemlist');
+    box.setAttribute('data-el', 'not-done');
+    box.appendChild(el('div', 'xs mut2', C.work.notDone));
+    for (const i of notDone) {
+      box.appendChild(el('div', 'sm', `${C.gap.claimNotDone}: ${i.data?.tool ?? ''}${i.data?.target ? ` · ${i.data.target}` : ''}`));
+    }
+    card.appendChild(box);
+  }
+  if (done.length && notDone.length) {
+    const box = el('div', 'itemlist');
+    box.setAttribute('data-el', 'done');
+    box.appendChild(el('div', 'xs mut2', C.work.done));
+    box.appendChild(el('div', 'sm mono', (done[0].data?.files ?? []).join(' · ')));
+    card.appendChild(box);
+  }
 
   const acts = el('div', 'row-acts');
   acts.appendChild(btn('btn sm', C.work.toBench, () => nav.toWorkbench(state.project, state.interpretation)));

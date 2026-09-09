@@ -124,7 +124,12 @@ if (!app.requestSingleInstanceLock()) {
     /* The quiet states are defined by the absence of a signal, so only a clock can deliver
      * them (`15` 새 신호 없음 · 취소 확인 불가). */
     supervisor.watchQuiet(db, pushUpdate);
-    trace('app.ready', { versions: process.versions.electron });
+    /* D-127's S1 path needs the TypeScript compiler API. Its absence is an honest degradation
+     * — every file falls back to hunk blocks — but it IS a capability loss, so it is reported
+     * at boot rather than discovered later from a screen full of 단위로 나누지 못함. */
+    let segmenter = 'hunks-only';
+    try { require('typescript'); segmenter = 'semantic'; } catch { /* S2 everywhere */ }
+    trace('app.ready', { versions: process.versions.electron, segmenter });
 
     const win = createWindow({
       onShown: (via) => {

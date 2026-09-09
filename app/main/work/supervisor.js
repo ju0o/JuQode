@@ -18,6 +18,8 @@ const session = require('../claude/session');
 const gitEvidence = require('../evidence/git');
 const manifest = require('../evidence/manifest');
 const { toSignal, reduce, initial, openPermission, openPermissions, KIND } = require('./reducer');
+const resultBuilder = require('./result');
+const blocks = require('../change/blocks');
 
 /** Live state for Works this process started. Nothing here is authoritative — the DB is. */
 const live = new Map();   // workId -> { child, state, sessionId, cwd, projectId }
@@ -187,6 +189,11 @@ async function startGuarded(db, project, intent, { evidenceStore, onUpdate, bin,
          * `변경 n개` a measured number rather than a claim, and it is captured whatever the
          * outcome — a cancelled or failed Work has changes too, and `12` says so. */
         captureAfter(db, workId, project, pre.useGit, evidenceStore);
+        finishResult(db, workId, project, evidenceStore);
+        /* Only NOW is the live entry released. Dropping it the moment the status changed threw
+         * away the state the result is built from — `entryFor` then rebuilt a bare state from
+         * the row, and Claude Code's own report vanished from the result it belongs to. */
+        release(db, workId);
         onUpdate(snapshot(db, workId));
         markDone({ ok: true, workId });
       }
@@ -295,6 +302,70 @@ function entryFor(db, workId) {
   return { state: { ...initial(), status: row.status, outcome: row.outcome }, hydrated: true };
 }
 
+/**
+ * WBS-18 · write the result once the Work has actually ended. It is built from the evidence
+ * pair and the observed signals — never from the exit code, which `07` §8.1 measured as blind
+ * to both cancellation and refusal.
+ */
+function finishResult(db, workId, project, store) {
+  const work = repo.getWork(db, workId);
+  if (!work || work.status !== 'ended') return null;
+  saveDiffs(db, workId, project, store);
+  const entry = entryFor(db, workId) ?? { state: initial() };
+  const built = resultBuilder.build({
+    state: { ...entry.state, outcome: work.outcome },
+    changes: changes(db, workId, project, store),
+    signals: repo.signalsFor(db, workId),
+  });
+  return repo.saveResult(db, workId, built);
+}
+
+/**
+ * WBS-17 · WBS-27 — the patch, per file, at the fixed `-U3`. Stored so the change reader can
+ * be opened later from History without the session or the live map still existing.
+ */
+function saveDiffs(db, workId, project, store) {
+  const before = repo.basisFor(db, workId, 'before');
+  const after = repo.basisFor(db, workId, 'after');
+  if (!before || !after || before.kind !== 'git_tree' || !store || !project?.path) return;
+  let patch;
+  try { patch = gitEvidence.diff(project.path, store, before.ref, after.ref); } catch { return; }
+  for (const file of blocks.splitDiff(patch)) {
+    repo.saveDiff(db, workId, {
+      file: file.path,
+      patch: file.lines.join('\n'),
+      displayable: !file.binary,
+    });
+  }
+}
+
+/**
+ * The units a file's change was split into. Derived on demand from the stored patch — it is
+ * deterministic, and `20` cannot hold a block until WBS-26 gives it a change group (CF-10).
+ */
+function blocksFor(db, workId, project, store) {
+  const before = repo.basisFor(db, workId, 'before');
+  const after = repo.basisFor(db, workId, 'after');
+  return repo.diffsFor(db, workId).map((d) => {
+    const file = blocks.splitDiff(`diff --git a/${d.file} b/${d.file}\n${d.patch}`)[0];
+    if (!file) return { file: d.file, strategy: 'S2', blocks: [], note: 'unreadable' };
+    const sources = (before && after && project?.path && store && before.kind === 'git_tree')
+      ? { before: gitEvidence.fileAt(project.path, store, before.ref, d.file),
+          after: gitEvidence.fileAt(project.path, store, after.ref, d.file) }
+      : {};
+    return { file: d.file, ...blocks.blocksFor(file, sources) };
+  });
+}
+
+/**
+ * Let go of a finished Work. The handle is dead and the state holds denial payloads with tool
+ * inputs, which have no reason to stay in memory — but it happens AFTER the result is written,
+ * because the result is built from that state.
+ */
+function release(db, workId) {
+  if (repo.getWork(db, workId)?.status === 'ended') live.delete(workId);
+}
+
 /** Fold one signal into the live state and write what it justifies. */
 function apply(db, workId, sig, onUpdate) {
   const entry = entryFor(db, workId) ?? { state: initial() };
@@ -307,9 +378,6 @@ function apply(db, workId, sig, onUpdate) {
     repo.setWorkState(db, workId, { status: after.status, outcome: after.outcome });
   }
   onUpdate(snapshot(db, workId));
-  /* An ended Work keeps nothing live: the handle is dead, and the denial state it holds
-   * carries tool inputs that have no reason to stay in memory. */
-  if (after.status === 'ended') live.delete(workId);
 }
 
 /** What the screen renders. Only facts: nothing here is derived from elapsed time. */
@@ -341,6 +409,7 @@ function snapshot(db, workId) {
     cancelUnconfirmed: work.status === 'cancel_requested' && sinceMs(s.cancelRequestedAt) > CANCEL_CONFIRM_MS,
     signalCount: repo.nextSeq(db, workId),
     evidence: { before: Boolean(repo.basisFor(db, workId, 'before')), after: Boolean(repo.basisFor(db, workId, 'after')) },
+    result: work.status === 'ended' ? repo.resultFor(db, workId) : null,
   };
 }
 
@@ -400,6 +469,8 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
   /* After EVERY retry turn, ended or not — a retry that lands in a second denial still moved
    * files, and the old basis would report them as no change at all. */
   captureAfter(db, workId, opts.project ?? { path: entry.cwd }, entry.useGit, entry.store, { replace: true });
+  finishResult(db, workId, opts.project ?? { path: entry.cwd }, entry.store);
+  release(db, workId);
   (opts.onUpdate ?? (() => {}))(snapshot(db, workId));
   return { ok: true, scope: spec };
 }
@@ -471,7 +542,11 @@ function confirmCancel(db, workId, onUpdate) {
   if (!work || work.status === 'ended') return;
   writeSignal(db, workId, { source: 'juqode', kind: KIND.CANCEL_CONFIRMED, payload: null });
   apply(db, workId, { kind: KIND.CANCEL_CONFIRMED, payload: null }, onUpdate);
-  live.delete(workId);
+  const entry = live.get(workId);
+  /* A cancelled Work has a result too — `15` gives it two of the five outcome cards. */
+  finishResult(db, workId, { path: entry?.cwd }, entry?.store);
+  release(db, workId);
+  onUpdate(snapshot(db, workId));
 }
 
 /**
@@ -495,4 +570,5 @@ function watchQuiet(db, onUpdate, { everyMs = 15_000 } = {}) {
 }
 
 module.exports = { start, allow, answer, cancel, snapshot, preflight, changes, captureAfter,
-                   watchQuiet, live, starting, QUIET_MS, CANCEL_CONFIRM_MS };
+                   finishResult, saveDiffs, blocksFor, watchQuiet, live, starting,
+                   QUIET_MS, CANCEL_CONFIRM_MS };

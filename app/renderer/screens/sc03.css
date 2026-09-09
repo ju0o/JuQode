@@ -91,3 +91,13 @@
 /* the permission chip is amber like 대기, but without the clock glyph: the request is already
    denied (D-133), and a quarter-pie pictogram reads as elapsed progress. */
 .chip.perm { border: 1px solid var(--wait); border-left-width: 3px; color: var(--wait); background: var(--card); }
+
+/* one claim, one chip — the chip sits beside the sentence it qualifies, never above a list */
+.sc03 .claim { display: flex; gap: 8px; align-items: baseline; }
+.sc03 .claim .chip { flex: 0 0 auto; }
+.sc03 .claim .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sc03 .claim .body > * { overflow-wrap: anywhere; }
+.sc03 .claim .src { font-family: var(--font-mono); font-size: 10px; }
+
+/* 부분 완료 · 된 것 / 안 된 것 — two lists, because one of them alone is half an answer */
+.sc03 .itemlist { display: flex; flex-direction: column; gap: 2px; }

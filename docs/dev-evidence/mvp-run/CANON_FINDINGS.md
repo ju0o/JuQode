@@ -93,3 +93,53 @@ ref) and says on the same card that the roles have not been read. The role sente
 with WBS-04 and will be 예상됨 when it does. If Canon intended the facts layer to name roles
 from a heuristic (`src` → 소스 코드, `tests` → 테스트), that heuristic needs to be written down
 and its answers must be **예상됨**, not 확인됨.
+
+## CF-8 · `18` has no key for the SC-03 states this run reached — COPY GAP
+
+`15` SC-03 names the buttons and panels; `18` carries most of them but not all. Missing keys:
+`그만두기` (the second button of D-133 contract B — `18` has the other three), the header's
+elapsed/started field labels, the right rail's own labels (`이 작업에 대해` · `실행자` ·
+`변경 기준`), the liveness line's plain words for each signal kind, and the result card's claim
+bodies. They live in `copy.js` under the marked `gap:` block.
+
+The signal-kind words are the clearest case: `18` §0.7 keeps developer terms out of user
+sentences, and `tool_use` · `permission_denied` · `finish` are exactly that. Each has a plain
+Korean word now, and an event kind with no word still shows — as 그 밖의 신호 — because hiding
+an observation is worse than naming it roughly.
+
+## CF-9 · a non-Git basis has nowhere to keep the list it must be compared against — SCHEMA GAP
+
+`20` gives `evidence_basis` a single `ref`. For the Git mechanism that is enough: the ref IS a
+tree object, and two refs can be diffed later by anything that can read the object store.
+
+A `hash_manifest` basis has no such object. Its `ref` is a digest OF a file list, and the list
+itself has nowhere to live — so a non-Git Work that outlives the process cannot report what it
+changed. Implementation keeps the list in memory, which is honest about its own limit
+(`known: false` after a restart) but is not a fix.
+
+`19` §E also specifies the non-Git basis as "sha256 manifest **+ 텍스트 blob 저장소**(프로젝트
+밖)", and the blob store is not built either — so on the non-Git path a change can be NAMED but
+no Raw Diff or Code Block is derivable from it (D-127). Both need a decision: a column for the
+manifest, and whether the MVP ships the blob store or states the non-Git limit on screen.
+
+## CF-10 · `21` gives WBS-27 `Deps: 17`, but `20` makes a Code Block impossible without WBS-26
+
+`code_block.change_group_id` is `not null references change_group(id)`. A change group is
+WBS-26's, and WBS-26 depends on 17 **and 18**. So WBS-27 cannot persist a single row until
+WBS-26 has run, which the dependency column does not say.
+
+Implementation stores `raw_diff` (which WBS-17/27 can own outright) and derives the blocks on
+demand from the stored patch — deterministic, and it costs nothing. When WBS-26 lands, the
+blocks get their groups and can be persisted. `21`'s `Deps` for WBS-27 should say `17, 26`, or
+`20` should let a block exist without a group.
+
+## CF-11 · D-127's S1 path needs a runtime dependency `19` §D1 does not account for — DECISION TAKEN
+
+`19` §C5-B decides the TypeScript compiler API for TS/JS segmentation. That is a ~20 MB runtime
+dependency in a product whose packaging risk register (`19` §D1) assumes none.
+
+Implementation adds `typescript` as a production dependency and reports which strategy is live
+at boot (`segmenter: "semantic" | "hunks-only"`), because its absence is an honest degradation —
+every file falls back to hunk blocks — but it IS a capability loss and should not be discovered
+from a screen full of 단위로 나누지 못함. Measured: the packaged Linux binary resolves it from
+inside the asar and reports `semantic`; the asar grew from 1.9 MB to 20 MB.

@@ -171,6 +171,77 @@ const basisFor = (db, workId, phase) => {
   return files ? { ...row, files: JSON.stringify(files) } : row;
 };
 
+/* ── WBS-27 · the diff, and the units it was split into ────────────────────────────
+ * `raw_diff` is the patch as the app generated it, at the fixed `-U3` D-127 requires.
+ *
+ * The BLOCKS are computed but not stored yet: `20` makes `code_block.change_group_id` NOT NULL,
+ * so a block cannot exist without a change group — and groups are WBS-26. `21` gives WBS-27
+ * `Deps: 17`, which does not say that. Filed as CANON_FINDINGS CF-10; until WBS-26 lands the
+ * blocks are derived on demand from the stored patch, which is deterministic and costs nothing.
+ */
+const HEAD_LIMIT = 256 * 1024;              // `20`: the bounded head that goes on screen
+
+function saveDiff(db, workId, { file, patch, displayable = true }) {
+  const head = patch.length > HEAD_LIMIT ? patch.slice(0, HEAD_LIMIT) : patch;
+  db.prepare(`insert into raw_diff (id, work_id, file, displayable, unified_head, unified_ref, before_hash, after_hash)
+              values (?, ?, ?, ?, ?, ?, ?, ?)
+              on conflict(work_id, file) do update set displayable = excluded.displayable,
+                                                       unified_head = excluded.unified_head`)
+    .run(randomUUID(), workId, file, displayable ? 1 : 0, head,
+         patch.length > HEAD_LIMIT ? 'truncated' : null, null, null);
+}
+
+const diffsFor = (db, workId) =>
+  db.prepare('select * from raw_diff where work_id = ? order by file').all(workId).map((d) => ({
+    file: d.file,
+    displayable: Boolean(d.displayable),
+    patch: d.unified_head ?? '',
+    truncated: d.unified_ref === 'truncated',
+  }));
+
+/* ── WBS-18 · the result, and what each part of it is worth (D-114) ────────────────
+ * Claims and items carry a structured payload, not a sentence, for the same reason the Brief's
+ * answers do: the Korean is composed in the renderer so `18` stays the single copy source.
+ * See CANON_FINDINGS CF-6.
+ */
+function saveResult(db, workId, result) {
+  db.exec('begin');
+  try {
+    db.prepare('delete from work_result where work_id = ?').run(workId);
+    db.prepare('insert into work_result (work_id, summary, what_failed, created_at) values (?, ?, ?, ?)')
+      .run(workId, result.summary ?? '', result.whatFailed ? JSON.stringify(result.whatFailed) : null, now());
+
+    const claim = db.prepare('insert into result_claim (id, work_id, ord, text, confidence) values (?, ?, ?, ?, ?)');
+    result.claims.forEach((c, i) => claim.run(randomUUID(), workId, i,
+      JSON.stringify({ kind: c.kind, data: c.data ?? null, sourceRef: c.sourceRef ?? null }), c.confidence));
+
+    const item = db.prepare('insert into result_item (id, work_id, kind, ord, text) values (?, ?, ?, ?, ?)');
+    const seen = { done: 0, not_done: 0 };
+    for (const it of result.items) {
+      item.run(randomUUID(), workId, it.kind, seen[it.kind]++, JSON.stringify({ data: it.data ?? null }));
+    }
+    db.exec('commit');
+  } catch (e) {
+    try { db.exec('rollback'); } catch { /* already rolled back */ }
+    throw e;
+  }
+  return resultFor(db, workId);
+}
+
+function resultFor(db, workId) {
+  const row = db.prepare('select * from work_result where work_id = ?').get(workId);
+  if (!row) return null;
+  const parse = (t) => { try { return JSON.parse(t); } catch { return {}; } };
+  return {
+    summary: row.summary || null,
+    whatFailed: row.what_failed ? parse(row.what_failed) : null,
+    claims: db.prepare('select * from result_claim where work_id = ? order by ord').all(workId)
+      .map((c) => ({ confidence: c.confidence, ...parse(c.text) })),
+    items: db.prepare("select * from result_item where work_id = ? order by kind, ord").all(workId)
+      .map((i) => ({ kind: i.kind, ...parse(i.text) })),
+  };
+}
+
 /* ── WBS-12 · Steps — only what Claude Code actually declared (D-107) ── */
 function upsertStep(db, workId, { ord, title, state }) {
   const at = now();
@@ -224,5 +295,7 @@ module.exports = {
   addSignal, signalsFor, nextSeq,
   saveBasis, basisFor,
   upsertStep, stepsFor,
+  saveResult, resultFor,
+  saveDiff, diffsFor,
   reconcileLostWorks, processFor,
 };

@@ -119,6 +119,52 @@ test('a Work runs, ends, and its changes are a measured number', async () => {
     '기술 출력 보기 would have nothing to show for some signal');
 });
 
+test('a finished Work has a result, and every 확인됨 claim names its evidence', async () => {
+  const { dir, db, project, store } = bench();
+  /* A size-CHANGING edit: this test is about the result pipeline, and a same-size edit would
+   * make it depend on git's stat heuristics as well. The same-size shape has its own test. */
+  const bin = cli(dir, [INIT, OK], { edits: [{ path: path.join(dir, 'a.txt'), body: 'two and more\n' }] });
+  const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
+  await r.done;
+
+  const res = repo.resultFor(db, r.workId);
+  assert.ok(res, 'a finished Work wrote no result at all');
+  for (const c of res.claims) {
+    if (c.confidence === 'confirmed') assert.ok(c.sourceRef, `a 확인됨 claim with no source: ${c.kind}`);
+  }
+  const changed = res.claims.find((c) => c.kind === 'changed-files');
+  assert.deepStrictEqual(changed.data.files, ['a.txt']);
+  assert.strictEqual(changed.confidence, 'confirmed');
+
+  /* Claude Code's own words survive into the result. They were lost once: the live entry was
+   * released the moment the status changed, so the result was built from a state rebuilt out
+   * of the row — which has no `finish`. */
+  const report = res.claims.find((c) => c.kind === 'agent-report');
+  assert.ok(report, "the model's own report did not reach the result");
+  assert.strictEqual(report.confidence, 'expected', "the model's own report is never 확인됨");
+  assert.strictEqual(report.data.text, '했어요');
+
+  /* And it survives the store, so History can show it without the session. */
+  assert.strictEqual(supervisor.snapshot(db, r.workId).result.claims.length, res.claims.length);
+});
+
+test('the patch is stored per file, so the change reader works from History', async () => {
+  const { dir, db, project, store } = bench();
+  const bin = cli(dir, [INIT, OK], { edits: [{ path: path.join(dir, 'a.txt'), body: 'two\n' }] });
+  const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
+  await r.done;
+
+  const diffs = repo.diffsFor(db, r.workId);
+  assert.deepStrictEqual(diffs.map((d) => d.file), ['a.txt']);
+  assert.match(diffs[0].patch, /^@@ /m, 'the stored patch has no hunk at all');
+  assert.strictEqual(diffs[0].displayable, true);
+
+  /* …and the units are derivable from it without the session or the live map. */
+  const seg = supervisor.blocksFor(db, r.workId, project, store);
+  assert.strictEqual(seg.length, 1);
+  assert.ok(seg[0].blocks.length > 0, 'the stored patch produced no block at all');
+});
+
 test('a Work that changed nothing says so — it does not guess', async () => {
   const { dir, db, project, store } = bench();
   const bin = cli(dir, [INIT, OK]);

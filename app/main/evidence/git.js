@@ -250,13 +250,25 @@ function nestedRepoFiles(root) {
   return out;
 }
 
-/** `diff-tree -p before after`, read through the JuQode object store. */
+/** One file's content at a basis, or null. Feeds the segmenter's before/after parse. */
+function fileAt(root, store, ref, filePath) {
+  const env = {
+    GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
+  };
+  try { return git(['show', `${ref}:${filePath}`], { cwd: root, env, raw: true }); }
+  catch { return null; }                     // absent on that side — an add or a delete
+}
+
+/** `diff-tree -p before after`, read through the JuQode object store.
+ *  The context width is FIXED at 3 (D-127): S2 block identity depends on it, so it cannot be
+ *  left to whoever produced the patch. */
 function diff(root, store, beforeRef, afterRef) {
   const env = {
     GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
   };
-  return git(['diff-tree', '-p', '--no-color', beforeRef, afterRef], { cwd: root, env });
+  return git(['diff-tree', '-p', '-U3', '--no-color', beforeRef, afterRef], { cwd: root, env, raw: true });
 }
 
 /** The paths in a basis tree — used by the tests to prove no secret is in it. */
@@ -268,4 +280,4 @@ const treePaths = (root, store, ref) => git(['ls-tree', '-r', '--name-only', ref
   },
 }).split('\n').filter(Boolean);
 
-module.exports = { capture, diff, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };
+module.exports = { capture, diff, fileAt, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };

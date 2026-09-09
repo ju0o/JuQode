@@ -96,3 +96,19 @@ the constant under test, the progress check exempted the newest screen by constr
 
 Next eligible, from `21` §1 `Deps`: WBS-04 (03, 10) · WBS-18 (11, 17) · WBS-19 (06, 07, 08) ·
 WBS-22 (06) · WBS-25 (00, 01) · WBS-26 (17, 18) · WBS-27 (17) · WBS-29 (11) · WBS-34 (21, 11).
+
+## Batch 05
+
+Report: `BATCH-05.md`. Canon findings raised: CF-8 · CF-9 · CF-10 · CF-11.
+
+| Package | State |
+|---|---|
+| WBS-18 Work finish & result | IMPLEMENTED |
+| WBS-27 Code Blocks | IMPLEMENTED — blocks derived on demand until WBS-26 gives them a group |
+
+230 unit tests and three e2e files. `typescript` is now a production dependency (D-127's S1
+path); the packaged binary resolves it from inside the asar and reports `segmenter: "semantic"`.
+
+Next eligible: WBS-26 (17, 18) · WBS-28 (26, 27) · WBS-19 (06, 07, 08) · WBS-22 (06) ·
+WBS-25 (00, 01) · WBS-29 (11) · WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-20 (21, 05).
+The change reader — WBS-26 then WBS-28 (SC-04) — is the next surface.

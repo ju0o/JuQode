@@ -284,7 +284,9 @@ test('capability containment: each privileged capability lives in exactly one mo
 
   // Packages NOT yet built must not have a half-implementation hiding in the tree.
   const all = files.map((f) => read(f)).join('\n');
-  for (const notYet of ['change_group', 'code_block', 'raw_diff']) {
+  /* `raw_diff` landed with WBS-17/27. `change_group` and `code_block` belong to WBS-26, which
+     also owns the `change_group_id` a block needs — see CANON_FINDINGS CF-10. */
+  for (const notYet of ['change_group', 'code_block']) {
     const inCode = all.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     assert.ok(!inCode.includes(notYet), `a later WBS package leaked into app/: ${notYet}`);
   }

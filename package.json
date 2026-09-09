@@ -47,5 +47,8 @@
       ],
       "category": "Development"
     }
+  },
+  "dependencies": {
+    "typescript": "^5.9.3"
   }
 }

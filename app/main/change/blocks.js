@@ -1,0 +1,290 @@
+'use strict';
+/* WBS-27 · Code Blocks — D-127, validated in `../evidence/planning/q01-code-block-validation.md`.
+ *
+ * A Code Block is **the innermost NAMED declaration containing a changed line**. Several hunks
+ * inside one declaration become one block; a change outside any declaration is a hunk block.
+ *
+ * Two strategies, and which one a file gets is decided by the file, never by the model:
+ *   S1  TS/JS/TSX/JSX/MJS/CJS — real declarations, from the TypeScript compiler API. If the
+ *       parser reports syntax errors the WHOLE file falls back to S2, because a block derived
+ *       from a broken parse is a unit nobody can trust.
+ *   S2  everything else — hunk blocks, marked `unblocked` for the structured formats where
+ *       "단위로 나누지 못함" is the honest answer and Raw is the way to read it.
+ *
+ * `19` §C5-B is explicit that an LLM may EXPLAIN a block and must never DEFINE one. Nothing in
+ * this file asks anything; it reads the diff the app itself generated at a fixed `-U3`.
+ */
+const path = require('node:path');
+
+/* S2 by policy: a structured format has no declarations to find, and pretending otherwise
+ * would invent units. `19` §C5-B names these and sends them straight to Raw. */
+const UNBLOCKED_EXT = new Set(['.json', '.yaml', '.yml', '.toml', '.md', '.ini', '.env', '.lock', '.xml', '.csv']);
+/* `path.extname('.env.example')` is `.example`, and `.env.local` is `.local` — an extension
+ * test alone misses every dotfile variant, which is most of the ones that matter here. */
+const UNBLOCKED_PREFIX = ['.env', 'dockerfile', 'makefile', '.gitignore', '.npmrc', '.editorconfig'];
+const S1_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
+
+const MAX_DISPLAY_BYTES = 1024 * 1024;   // `19` §C5-B: > 1 MiB is Raw-only
+
+/** The compiler API, if it is there. Its absence degrades S1 to S2 — it never fails a diff. */
+function ts() {
+  try { return require('typescript'); } catch { return null; }
+}
+
+/**
+ * Split a unified diff into per-file entries with their hunks.
+ * The app generates the diff itself at a fixed `-U3` (D-127: S2 block identity depends on the
+ * context width, so the width cannot be left to whoever produced the patch).
+ */
+function splitDiff(patch) {
+  const files = [];
+  let current = null;
+  for (const line of String(patch ?? '').split('\n')) {
+    const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+    if (header) {
+      current = { path: header[2], hunks: [], binary: false, lines: [] };
+      files.push(current);
+      continue;
+    }
+    if (!current) continue;
+    current.lines.push(line);
+    if (/^(GIT binary patch|Binary files )/.test(line)) { current.binary = true; continue; }
+    const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (hunk) {
+      current.hunks.push({
+        beforeStart: Number(hunk[1]), beforeCount: Number(hunk[2] ?? 1),
+        afterStart: Number(hunk[3]), afterCount: Number(hunk[4] ?? 1),
+        lines: [],
+      });
+      continue;
+    }
+    const h = current.hunks.at(-1);
+    if (h && /^[-+ \\]/.test(line)) h.lines.push(line);
+  }
+  return files;
+}
+
+/** The after-side line numbers a hunk actually touched (added or context around a change). */
+function changedLines(hunk) {
+  const out = [];
+  let afterLine = hunk.afterStart;
+  for (const l of hunk.lines) {
+    if (l.startsWith('+')) { out.push(afterLine); afterLine += 1; continue; }
+    if (l.startsWith('-')) continue;                 // no after-side line
+    afterLine += 1;
+  }
+  return out;
+}
+
+/** …and the before-side ones, which is what a pure deletion changed. */
+function deletedLines(hunk) {
+  const out = [];
+  let beforeLine = hunk.beforeStart;
+  for (const l of hunk.lines) {
+    if (l.startsWith('-')) { out.push(beforeLine); beforeLine += 1; continue; }
+    if (l.startsWith('+')) continue;
+    beforeLine += 1;
+  }
+  return out;
+}
+
+/**
+ * Named declarations in a source file, innermost first, with their line ranges.
+ * @returns {{name:string, kind:string, start:number, end:number, depth:number}[]|null}
+ *   null when the file cannot be parsed cleanly — the caller then uses S2 for the whole file.
+ */
+function declarations(source, fileName) {
+  const T = ts();
+  if (!T) return null;
+  const sf = T.createSourceFile(fileName, source, T.ScriptTarget.Latest, true);
+  /* `parseDiagnostics` is not public API but it is what tells us the parse was clean. A block
+   * derived from a broken parse is a unit nobody can trust, so the file goes to S2 whole. */
+  if (sf.parseDiagnostics?.length) return null;
+
+  const out = [];
+  const lineOf = (pos) => sf.getLineAndCharacterOfPosition(pos).line + 1;
+
+  const walk = (node, depth) => {
+    const name = declaredName(T, node);
+    if (name) {
+      out.push({
+        name, kind: T.SyntaxKind[node.kind],
+        start: lineOf(node.getStart(sf)), end: lineOf(node.getEnd()),
+        depth,
+        body: bodyText(sf, node, name),
+      });
+      depth += 1;
+    }
+    node.forEachChild((child) => walk(child, depth));
+  };
+  sf.forEachChild((child) => walk(child, 0));
+  return out;
+}
+
+/* `19` §C5-B's list: function · class · method · arrow-function const · interface · type ·
+ * export const. Anonymous and computed names are deliberately NOT blocks — a unit needs a name
+ * a person can point at. */
+function declaredName(T, node) {
+  const named = (n) => (n && T.isIdentifier(n) ? n.text : null);
+  if (T.isFunctionDeclaration(node) || T.isClassDeclaration(node)) return named(node.name);
+  if (T.isMethodDeclaration(node) || T.isPropertyDeclaration(node)) return named(node.name);
+  if (T.isInterfaceDeclaration(node) || T.isTypeAliasDeclaration(node) || T.isEnumDeclaration(node)) return named(node.name);
+  if (T.isVariableDeclaration(node) && node.initializer
+      && (T.isArrowFunction(node.initializer) || T.isFunctionExpression(node.initializer)
+          || T.isClassExpression(node.initializer))) {
+    return named(node.name);
+  }
+  return null;
+}
+
+/** The declaration's text with its NAME removed — the hash a rename is derived from (A-14). */
+function bodyText(sf, node, name) {
+  const text = sf.text.slice(node.getStart(sf), node.getEnd());
+  return text.split(name).join('\u0000NAME\u0000').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Code blocks for one file's diff.
+ *
+ * @param {object} file        one entry from `splitDiff`
+ * @param {object} sources     `{ before, after }` file contents, or nulls
+ * @returns {{strategy:'S1'|'S2', blocks:object[], note:string|null}}
+ */
+function blocksFor(file, sources = {}) {
+  const ext = path.extname(file.path).toLowerCase();
+
+  if (file.binary) return { strategy: 'S2', blocks: [], note: 'undisplayable' };
+  const size = Math.max(sources.after?.length ?? 0, sources.before?.length ?? 0);
+  if (size > MAX_DISPLAY_BYTES) return { strategy: 'S2', blocks: [], note: 'too-large' };
+
+  if (S1_EXT.has(ext)) {
+    const semantic = semanticBlocks(file, sources);
+    if (semantic) return { strategy: 'S1', blocks: semantic, note: null };
+    /* A parse we cannot trust is not a reason to invent units — the file goes to S2 whole. */
+    return { strategy: 'S2', blocks: hunkBlocks(file), note: 'parse-failed' };
+  }
+
+  return {
+    strategy: 'S2',
+    blocks: hunkBlocks(file),
+    note: isUnblocked(file.path, ext) ? 'unblocked' : null,
+  };
+}
+
+function semanticBlocks(file, sources) {
+  const after = sources.after == null ? null : declarations(sources.after, file.path);
+  const before = sources.before == null ? null : declarations(sources.before, file.path);
+  /* D-127: `parseDiagnostics` 가 있으면 파일 전체를 S2 로. EITHER side failing is enough — a
+   * block whose two sides were derived from a trusted parse and an untrusted one is a unit
+   * built half from evidence and half from a guess. */
+  if (sources.after != null && after === null) return null;
+  if (sources.before != null && before === null) return null;
+  if (after === null && before === null) return null;
+
+  const byName = new Map();
+  /* Before- and after-side line numbers are kept APART. Pooling them put a deleted line from
+   * the old file into the same list as an added line from the new one, so a block reported
+   * lines that do not both exist in any single version of the file. */
+  const touch = (decl, side, line) => {
+    if (!decl) return;
+    const key = `${decl.name}#${decl.kind}`;
+    const found = byName.get(key) ?? { name: decl.name, kind: decl.kind, afterLines: [], beforeLines: [] };
+    (side === 'after' ? found.afterLines : found.beforeLines).push(line);
+    byName.set(key, found);
+  };
+
+  /* Which hunks had a change that fell OUTSIDE every declaration. Only those become hunk
+   * blocks — emitting one per hunk duplicated lines a declaration had already claimed. */
+  const outsideHunks = new Map();
+  const outside = (hunk, side, line) => {
+    const found = outsideHunks.get(hunk) ?? { hunk, afterLines: [], beforeLines: [] };
+    (side === 'after' ? found.afterLines : found.beforeLines).push(line);
+    outsideHunks.set(hunk, found);
+  };
+
+  for (const hunk of file.hunks) {
+    for (const line of changedLines(hunk)) {
+      const d = innermost(after, line);
+      if (d) touch(d, 'after', line); else outside(hunk, 'after', line);
+    }
+    for (const line of deletedLines(hunk)) {
+      const d = innermost(before, line);
+      if (d) touch(d, 'before', line); else outside(hunk, 'before', line);
+    }
+  }
+
+  const afterNames = new Set((after ?? []).map((d) => `${d.name}#${d.kind}`));
+  const beforeNames = new Set((before ?? []).map((d) => `${d.name}#${d.kind}`));
+
+  const sorted = (xs) => [...new Set(xs)].sort((x, y) => x - y);
+  const blocks = [...byName.entries()].map(([key, b]) => ({
+    name: b.name,
+    kind: b.kind,
+    change: !beforeNames.has(key) ? 'add' : !afterNames.has(key) ? 'delete' : 'modify',
+    afterLines: sorted(b.afterLines),
+    beforeLines: sorted(b.beforeLines),
+  }));
+
+  /* Changes outside every declaration — imports, module-level statements — are hunk blocks,
+   * exactly as `19` §C5-B says. They are real changes and must not vanish, and they carry only
+   * the lines no declaration claimed. */
+  for (const [hunk, o] of outsideHunks) {
+    blocks.push({
+      name: null, kind: 'hunk', change: 'modify', outsideDeclaration: true,
+      afterLines: sorted(o.afterLines), beforeLines: sorted(o.beforeLines),
+      beforeStart: hunk.beforeStart, afterStart: hunk.afterStart,
+    });
+  }
+
+  return blocks.concat(renames(before, after, blocks));
+}
+
+/**
+ * A rename is claimed ONLY when it is derivable (A-14): same file, identical body once the name
+ * token is removed, same SyntaxKind, and the name is absent from the other side. If the body
+ * also changed it is a delete plus an add, and saying "renamed" would be a guess.
+ */
+function renames(before, after, blocks) {
+  if (!before || !after) return [];
+  const added = blocks.filter((b) => b.change === 'add');
+  const removed = blocks.filter((b) => b.change === 'delete');
+  const out = [];
+  for (const a of added) {
+    const aDecl = after.find((d) => d.name === a.name && d.kind === a.kind);
+    for (const r of removed) {
+      const rDecl = before.find((d) => d.name === r.name && d.kind === r.kind);
+      if (!aDecl || !rDecl) continue;
+      if (aDecl.kind !== rDecl.kind) continue;
+      if (aDecl.body !== rDecl.body) continue;                  // the body moved too → not a rename
+      if (after.some((d) => d.name === rDecl.name)) continue;    // the old name still exists
+      out.push({ name: a.name, kind: a.kind, change: 'rename', from: r.name,
+                 afterLines: a.afterLines, beforeLines: r.beforeLines });
+    }
+  }
+  return out;
+}
+
+function isUnblocked(filePath, ext) {
+  if (UNBLOCKED_EXT.has(ext)) return true;
+  const base = path.basename(filePath).toLowerCase();
+  return UNBLOCKED_PREFIX.some((p) => base === p || base.startsWith(`${p}.`));
+}
+
+const innermost = (decls, line) => {
+  if (!decls) return null;
+  let best = null;
+  for (const d of decls) {
+    if (line < d.start || line > d.end) continue;
+    if (!best || d.depth > best.depth || (d.end - d.start) < (best.end - best.start)) best = d;
+  }
+  return best;
+};
+
+const hunkBlocks = (file) => file.hunks.map((h, i) => ({
+  name: null, kind: 'hunk', change: 'modify', ord: i,
+  afterLines: changedLines(h), beforeLines: deletedLines(h),
+  beforeStart: h.beforeStart, afterStart: h.afterStart,
+}));
+
+module.exports = { splitDiff, blocksFor, declarations, changedLines, deletedLines, isUnblocked,
+                   MAX_DISPLAY_BYTES, UNBLOCKED_EXT, S1_EXT };
