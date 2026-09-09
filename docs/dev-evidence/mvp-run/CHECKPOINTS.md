@@ -252,3 +252,25 @@ WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
 **한 브랜치에 두 자율 세션을 붙이면 안 된다.** 붙일 거라면 `git add -A` 대신 경로를 지정해
 커밋하고, 매 커밋 전에 `git log` 로 새 커밋이 들어왔는지 확인해야 한다. 이 런의 남은 구간은
 그렇게 한다.
+
+## Batch 09
+
+Report: `BATCH-09.md`.
+
+| Package | State |
+|---|---|
+| WBS-04 Project interpretation — narrative layer | IMPLEMENTED |
+
+`19` §C1's second layer. Same shape as WBS-26 and for the same reason: a pure `merge()` holds
+every rule, so the rules are testable without a CLI or a model. A narrative answer can never be
+확인됨 — only the facts layer's own output can be, and for these three questions it measured
+nothing. A citation the scan really read makes it 예상됨; anything else is 확인 못함 with the
+sentence still shown.
+
+Visual QA caught the Brief contradicting itself: 하는 일 shown with an answer while 확인 못한 것
+still listed it as unanswered. The narrative layer now re-states that row.
+
+379 tests, three e2e files, 18/18 mutants killed.
+
+Next eligible: WBS-05 (03, 04, 21 — now open) · WBS-25 (00, 01 — TD-01, which WBS-22's card
+needs) · WBS-29 (11).
