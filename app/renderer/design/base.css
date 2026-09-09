@@ -82,13 +82,19 @@ body {
 .chip.ok   { border-color: var(--rec);  color: var(--rec);  background: var(--recbg); }
 .chip.ok::before { content: "✓"; font-size: 10px; }
 .chip.unk::before { content: "?"; font-size: 10px; }
+/* `16`: the mark is what survives a greyscale print and a colour-blind reader, and 실패 vs
+   사용 불가 is the pair the product can least afford to blur — `12` §16 says 사용 불가 ≠ 실패.
+   MEASURED before these two glyphs: in greyscale their backgrounds were luminance 244 and 241,
+   so the two states were separated by hue and by nothing else. */
 .chip.fail { border-color: var(--fail); color: var(--fail); background: var(--failbg); }
+.chip.fail::before { content: "×"; font-size: 11px; }
 .chip.part { border-color: var(--part); color: var(--part); background: var(--partbg); }
 .chip.part::before { content: "◧"; font-size: 10px; opacity: .85; }
 .chip.wait { border: 1px solid var(--wait); border-left-width: 3px; color: var(--wait); background: var(--card); }
 .chip.wait::before { content: "◔"; font-size: 10px; opacity: .85; }
 .chip.unk  { border: 1px dashed var(--unk); color: var(--unk); background: var(--unkbg); }
 .chip.unavail { border-color: var(--line2); color: var(--mut); background: var(--grey); }
+.chip.unavail::before { content: "○"; font-size: 10px; opacity: .8; }
 
 /* ---------- motion base ----------
  * 17: nothing here may imply Agent progress. No spinner, no bar, no ETA.

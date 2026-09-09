@@ -337,6 +337,46 @@ const results = await cdp(async ({ send, evalJs }) => {
   await send('Emulation.setEmulatedMedia', { features: [] });
 
   step('sc01 shots');
+  /* ── WBS-29 · the five state vocabularies, measured against each other ──────────────────
+   * `16` §2.1 keeps five states apart, and two of them share the amber hue ON PURPOSE:
+   * 부분 is an amber FILL and 대기 an amber OUTLINE. That is the pair most likely to collapse
+   * into one another in a refactor, and the pair a reader is least able to recover from.
+   *
+   * The measurement is taken in BOTH themes, because a token redefined in only one theme block
+   * is a failure this codebase has already shipped once. And it is taken WITHOUT colour too:
+   * `16` says the mark is what survives a greyscale print and a colour-blind reader, so each
+   * state must differ from every other in something that is not hue. */
+  out.stateGrammar = await evalJs(`(async () => {
+    const KINDS = ['ok', 'part', 'wait', 'fail', 'unk', 'unavail'];
+    const strip = document.createElement('div');
+    strip.id = 'juqode-state-probe';
+    for (const k of KINDS) {
+      const c = document.createElement('span');
+      c.className = 'chip ' + k;
+      c.textContent = k;
+      strip.appendChild(c);
+    }
+    document.body.appendChild(strip);
+
+    const out = {};
+    for (const theme of ['light', 'dark']) {
+      document.documentElement.setAttribute('data-theme', theme);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      out[theme] = KINDS.map((k, i) => {
+        const el = strip.children[i];
+        const s = getComputedStyle(el);
+        const before = getComputedStyle(el, '::before');
+        return { kind: k,
+                 color: s.color, background: s.backgroundColor,
+                 borderColor: s.borderTopColor, borderStyle: s.borderTopStyle,
+                 borderLeft: s.borderLeftWidth, borderTop: s.borderTopWidth,
+                 glyph: (before.content && before.content !== 'none') ? before.content : '' };
+      });
+    }
+    strip.remove();
+    return JSON.stringify(out);
+  })()`);
+
   for (const theme of ['light', 'dark']) {
     await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
     await sleep(250);
@@ -826,6 +866,70 @@ assert.strictEqual((results.staleBand.match(/다시 읽기/g) || []).length, 1);
 assert.ok(results.briefHeadFolded.includes('읽은 시점'),
   'a folded Brief must still say WHEN it was read — that is what makes it a cached Brief');
 assert.strictEqual(results.briefAnswersUnfolded, 6, '펼치기 did not bring the answers back');
+
+/* ── WBS-29 · the five state vocabularies, measured against each other ──────────────────────
+ * `16` §2.1 keeps these apart, and `12` §16 turns one pair into a product promise: 사용 불가 is
+ * NOT 실패. The check runs in both themes, because a token redefined in only one theme block is
+ * a failure this codebase has already shipped. */
+const grammar = JSON.parse(results.stateGrammar);
+for (const theme of ['light', 'dark']) {
+  const rows = grammar[theme];
+  assert.strictEqual(rows.length, 6, `${theme}: expected six states`);
+
+  /* ① Every state differs from every other in COLOUR. */
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      const a = rows[i], b = rows[j];
+      const differs = a.color !== b.color || a.background !== b.background || a.borderColor !== b.borderColor;
+      assert.ok(differs, `${theme}: ${a.kind} and ${b.kind} are the same colour`);
+    }
+  }
+
+  /* ② …and in something that is NOT colour. `16`: the mark is what survives a greyscale print
+   * and a colour-blind reader. Before this test, 실패 and 사용 불가 carried no mark at all and
+   * were separated by hue alone — measured at luminance 244 vs 241 in light theme. */
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      const a = rows[i], b = rows[j];
+      const shape = (r) => `${r.glyph}|${r.borderStyle}|${r.borderLeft}|${r.borderTop}`;
+      assert.notStrictEqual(shape(a), shape(b),
+        `${theme}: ${a.kind} and ${b.kind} are distinguishable only by colour — ${shape(a)}`);
+    }
+  }
+
+  /* ③ 부분 (amber FILL) and 대기 (amber OUTLINE) share the hue BY DESIGN, so the thing that
+   * keeps them apart is the fill. `16` §2.1 names this pair specifically. */
+  const part = rows.find((r) => r.kind === 'part');
+  const wait = rows.find((r) => r.kind === 'wait');
+  assert.notStrictEqual(part.background, wait.background,
+    `${theme}: 부분 and 대기 collapsed into one another — both ${part.background}`);
+  assert.notStrictEqual(part.borderLeft, wait.borderLeft, `${theme}: the outline weight is the same too`);
+
+  /* ④ One red. Only 실패 may wear the failure colour. */
+  const fail = rows.find((r) => r.kind === 'fail');
+  for (const r of rows) {
+    if (r.kind === 'fail') continue;
+    assert.notStrictEqual(r.color, fail.color, `${theme}: ${r.kind} is painted with the failure colour`);
+    assert.notStrictEqual(r.borderColor, fail.borderColor, `${theme}: ${r.kind} is outlined in the failure colour`);
+  }
+
+  /* ⑤ Every state carries a mark. A state with none can only be read by its colour. */
+  for (const r of rows) assert.ok(r.glyph, `${theme}: ${r.kind} has no mark at all`);
+
+  /* ⑥ …and the specific shapes `16` §2.1 NAMES, not merely "different from each other".
+   * Distinctness alone let 알 수 없음 lose its dashed border while its `?` kept the pairwise
+   * check happy — and dashed is the thing Canon actually wrote down. */
+  const unk = rows.find((r) => r.kind === 'unk');
+  assert.strictEqual(unk.borderStyle, 'dashed', `${theme}: 알 수 없음 is not dashed — "dashed blue-grey"`);
+  for (const r of rows) {
+    if (r.kind === 'unk') continue;
+    assert.notStrictEqual(r.borderStyle, 'dashed', `${theme}: ${r.kind} is dashed — that shape means 알 수 없음`);
+  }
+  /* 대기 is an OUTLINE: no fill of its own, so its background is the card's. 부분 is a FILL. */
+  const card = rows.find((r) => r.kind === 'wait').background;
+  assert.strictEqual(wait.background, card);
+  assert.notStrictEqual(part.background, wait.background, `${theme}: 부분 lost its fill`);
+}
 
 /* ── WBS-05 · 오래됨 ──────────────────────────────────────────────────────────────────────
  * A top-level folder appeared while the reader was open — a STRUCTURAL change, so `source_hash`
