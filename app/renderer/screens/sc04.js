@@ -134,7 +134,8 @@ export function renderSC04(root, api, nav, state) {
    * so a user who read the change and did not want it had no way to say so from the screen that
    * had just shown them why. Found in the batch-16 QA pass. */
   const acts = nextActions([
-    btn('btn sm pri', C.reader.understood, () => nav.toWorkbench(p, state.interpretation)),
+    /* `15` §Keyboard: focus returns to the request field after this one specifically. */
+    btn('btn sm pri', C.reader.understood, () => nav.toWorkbench(p, state.interpretation, { focusIntent: true })),
     btn('btn sm', C.work.unwanted, () => {
       if (board.querySelector('[data-el="unwanted"]')) return;
       /* No `먼저 변경 더 읽기`: that button goes to SC-04, and this IS SC-04. */

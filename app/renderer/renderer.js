@@ -63,6 +63,9 @@ const nav = {
      * user has read it before, and the screen's subject is the next request. A first open has
      * no interpretation yet, so it stays large. */
     state.briefFolded = Boolean(interpretation);
+    /* `15` §0 Board: History opens folded (M) and the user expands it (L). Reset on arrival —
+     * an expansion belongs to the visit that made it, not to the project. */
+    state.historyExpanded = false;
     state.stale = null;
     state.refreshFailed = null;
     /* A different project means a different set of scripts — see `clearDrawerState`. */
@@ -71,12 +74,17 @@ const nav = {
     state.workSnapshot = null;
     state.reader = null; state.readerGroup = 0; state.readerRaw = false;
     state.prefill = opts.intent ?? null;
+    /* `15` §Keyboard: focus returns to the request field after `이해했어요 · 다음 요청으로`.
+     * Only then — an automatic focus on every arrival would steal it from the Brief, which is
+     * SC-02's subject on a first open. */
+    const focusIntent = opts.focusIntent === true;
     /* `17`: 읽기면이 접히며 History 로 착지한다 — only from SC-04, which is the only screen the
      * sentence is about. Coming from anywhere else there is no reading surface to fold. */
     const from = state.screen === 'SC-04' ? capture('.sc04') : null;
     state.screen = 'SC-02';
-    renderSC02(root, api, nav, state);
+    const { field } = renderSC02(root, api, nav, state);
     morph(from, '.sc02 [data-card="history"]');
+    if (focusIntent) field?.focus();
   },
   toWork(snapshot) {
     /* WBS-37 · `17`: 보드의 Work 카드가 공유 요소로 모프해 SC-03 의 Work 가 된다.
@@ -155,6 +163,30 @@ window.addEventListener('keydown', (e) => {
   drawer.paint();
 });
 
+/* `15` §Keyboard: `Esc` closes TD-01 / the discover panel — and **never cancels a Work.**
+ *
+ * That last clause is the reason this handler is written as a closed list rather than as "undo
+ * whatever is open": cancelling a Work is a decision with consequences on disk, and `15` DS §1
+ * gives it one ink-outlined button on SC-03 with a sub-line explaining what it does and does
+ * not do. A key that could reach it is a key that could take that decision by accident.
+ *
+ * Innermost first: the panel inside the drawer, then the drawer. Pressing Esc twice closes
+ * both, and pressing it with neither open does nothing at all. */
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (state.qcDiscover) {
+    e.preventDefault();
+    state.qcDiscover = null;
+    drawer.paint();
+    return;
+  }
+  if (state.drawerOpen) {
+    e.preventDefault();
+    state.drawerOpen = false;
+    drawer.paint();
+  }
+});
+
 /* The top-bar toggle each screen draws calls this. */
 /* D-134 · `15` SC-02: opening the drawer FROM the request field carries the user's sentence into
  * the Quick Command box, so they do not retype what they already said. */
@@ -208,6 +240,7 @@ window.__narrative = () => state.narrative ?? null;
 window.__brief = () => ({ folded: state.briefFolded, stale: state.stale,
                           refreshFailed: state.refreshFailed });
 window.__drawer = () => ({ open: state.drawerOpen, phrase: state.qcPhrase,
+                           discover: Boolean(state.qcDiscover),
                            card: state.qcCard ? { kind: state.qcCard.route?.kind ?? null,
                                                   id: state.qcCard.route?.id ?? null,
                                                   available: state.qcCard.available ?? null,

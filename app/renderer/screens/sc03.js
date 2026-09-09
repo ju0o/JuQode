@@ -300,11 +300,20 @@ function stepsCard(snap) {
   if (!snap.steps.length) {
     card.appendChild(el('div', 'sm mut', C.work.noSteps));
   } else {
+    /* `15` SC-03: Steps list (✓ 완료 · ● 진행 중 · ○ 선언된 다음). `18` `work.legend` is that
+     * sentence, and it exists because a mark alone is a glyph the user has to decode — `16`
+     * §2.1's rule that a state is never carried by shape or colour alone applies to these too. */
+    card.appendChild(el('div', 'xs mut2 steplegend', C.work.legend));
     const list = el('div', 'steps');
-    for (const s of snap.steps) {
-      const row = el('div', `step ${s.state}`);
-      row.appendChild(el('span', 'mark', { done: '✓', running: '●', declared_next: '○', not_executed: '·' }[s.state] ?? '·'));
-      row.appendChild(el('span', 'sm', s.title));
+    /* The word for each state, beside the mark. `not_executed` is the one that most needs it:
+     * a `·` next to a step reads as "not started", and `18` says 실행되지 않았어요 — a Work that
+     * ENDED without reaching it (`20`: reconciliation rewrites running/declared_next to this). */
+    const WORD = { declared_next: C.work.nextDeclared, not_executed: C.work.notRun };
+    for (const st of snap.steps) {
+      const row = el('div', `step ${st.state}`);
+      row.appendChild(el('span', 'mark', { done: '✓', running: '●', declared_next: '○', not_executed: '·' }[st.state] ?? '·'));
+      row.appendChild(el('span', 'sm', st.title));
+      if (WORD[st.state]) row.appendChild(el('span', 'xs mut2 stepword', WORD[st.state]));
       list.appendChild(row);
     }
     card.appendChild(list);

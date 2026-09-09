@@ -88,3 +88,12 @@
 /* A script body is judged line by line, so it keeps its lines. Collapsing them reflows the
    thing the user is being asked to approve into a shape it does not have in the file. */
 .td01-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+
+/* `18` `term.safetyTag` — the banner's label. It reads as a tag, not as another sentence. */
+.td01-banner .td01-safetytag {
+  /* `inline-block`, not `inline`: an inline-block is a boundary in the accessibility tree, so
+   * the label and the sentence are read as two runs rather than as `안전 안내여기서…`. */
+  display: inline-block;
+  font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  margin-right: 8px; opacity: .85;
+}

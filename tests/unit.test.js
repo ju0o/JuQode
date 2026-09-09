@@ -392,3 +392,98 @@ test('every copy key the renderer NAMES actually exists', () => {
   }
   assert.deepStrictEqual(missing, [], `the renderer names copy keys that do not exist:\n  ${missing.join('\n  ')}`);
 });
+
+test('every copy key is used by a screen — dead copy goes stale and then lies', () => {
+  /* `copy.js`'s own header: *Keys not yet needed by a built screen are deliberately absent.*
+   * Two keys had outlived that rule, and both had become FALSE:
+   *
+   *   gap.notBuiltPaths     '여기서 이어서 할 수 있는 것은 아직 만드는 중이에요.'
+   *   gap.notBuiltTerminal  '터미널은 아직 없어요.'
+   *
+   * They were written when WBS-04, 22 and 25 had not shipped. All three have. A sentence that
+   * says a path does not exist, still sitting in the dictionary after it does, is one careless
+   * render away from being on screen — and `15` asks for those paths as BUTTONS.
+   *
+   * So: a key nobody renders is not allowed to sit here. The check is what keeps the "deliberately
+   * absent" rule true instead of aspirational.
+   */
+  const src = read('app/renderer/copy.js');
+
+  /* Every renderer file that could reference a key. */
+  const files = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
+      const rel = path.join(dir, e.name);
+      if (e.isDirectory()) walk(rel);
+      else if (/\.js$/.test(e.name) && rel !== path.join('app', 'renderer', 'copy.js')) files.push(rel);
+    }
+  })(path.join('app', 'renderer'));
+  /* Comments stripped. A key NAMED in a comment is not a key a screen renders, and leaving them
+   * in made `history.more` look used because some other file's prose mentioned the word. */
+  const uses = files
+    .map((f) => read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''))
+    .join('\n');
+
+  /* Parse the leaf keys with their parent path. Indentation gives the nesting — this file is
+   * one object literal formatted consistently, and a parser is not worth writing for it. */
+  const stack = [];
+  const leaves = [];
+  for (const line of src.split('\n')) {
+    const open = /^(\s+)([A-Za-z_$][\w$]*):\s*\{\s*$/.exec(line);
+    if (open) { stack[open[1].length] = open[2]; for (const k of Object.keys(stack)) if (+k > open[1].length) delete stack[k]; continue; }
+    const leaf = /^(\s+)([A-Za-z_$][\w$]*):\s*(?!\{)/.exec(line);
+    if (!leaf) continue;
+    const depth = leaf[1].length;
+    const parents = Object.keys(stack).map(Number).filter((d) => d < depth).sort((a, b) => a - b).map((d) => stack[d]);
+    leaves.push({ parent: parents.at(-1) ?? null, key: leaf[2] });
+  }
+  assert.ok(leaves.length > 100, `only ${leaves.length} copy keys parsed — the parser lost the file`);
+
+  /* A parent read with a computed index (`C.orient[…]`, `C.gap.signal[…]`) uses ALL its leaves;
+   * naming them individually would be a list to forget to update. */
+  const dynamicParents = new Set(
+    [...uses.matchAll(/C(?:\.[A-Za-z_$][\w$]*)*\.([A-Za-z_$][\w$]*)\[/g)].map((m) => m[1]));
+
+  /* PENDING — `15` elements `18` has copy for and no screen draws yet.
+   *
+   * This is a to-do list, not an exemption: every entry is a state or a control `15` names, and
+   * each one leaves. It is written down here rather than left implicit so the guard stays live
+   * while the backlog shrinks — an allow-list nobody can add to without saying why.
+   *
+   * A key that is DELETED rather than rendered must be justified in the batch report; two were
+   * (gap.notBuiltPaths · gap.notBuiltTerminal, both of which had become false). */
+  const PENDING = new Set([
+    /* `15` SC-01 recent row: `마지막 Work · <intent>`. Needs the last Work per recent project,
+     * which `juqode:boot` does not return yet. */
+    'sc01.lastWork',
+    /* `15` SC-03 남은 변경 확인 불가 — a state, not a label. */
+    'work.remainTitle',
+    /* `15` SC-03 liveness line: `마지막 관측: 파일 수정 · 12초 전`. The screen shows the
+     * wall-clock time; the relative half is not drawn. */
+    'work.ago',
+    /* `15` TD-01 터미널 지금 안 됨 — the drawer has no unavailable state yet. */
+    'term.unavailableBody', 'term.altQc', 'term.altRaw',
+    /* DV-11. The mock shell line has nowhere to go until the pty decision is made. */
+    'term.mock',
+    /* `출력 전체 보기` needs a full output to show. `20` bounds `quick_command_run.output_head`
+     * at 64 KB and puts the rest behind `output_ref`; nothing writes one yet, and what the head
+     * keeps is a genuine PREFIX with the rest gone (see `qc/run.js`). A button that opened the
+     * same 64 KB again would be lying about what it offers. */
+    'qc.full',
+  ]);
+
+  const unused = leaves
+    .filter(({ parent, key }) => !dynamicParents.has(parent) && !new RegExp(`\\b${key}\\b`).test(uses))
+    .map((u) => `${u.parent ?? 'C'}.${u.key}`)
+    .filter((k) => !PENDING.has(k));
+  assert.deepStrictEqual(unused, [],
+    'copy keys no screen renders — render them, or delete them and say why in the batch report');
+
+  /* …and the PENDING list may not outlive what it names: an entry that HAS been rendered is a
+   * stale exemption, and a stale exemption is how an allow-list turns permanent. */
+  const stale = [...PENDING].filter((k) => {
+    const key = k.split('.').at(-1);
+    return new RegExp(`\\b${key}\\b`).test(uses);
+  });
+  assert.deepStrictEqual(stale, [], 'PENDING names copy that is now rendered — remove the entry');
+});

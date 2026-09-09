@@ -589,3 +589,30 @@ Four mutants, all killed: a `@sentry/electron` devDependency, a `fetch(` in `ipc
 `crashReporter` require in `main.js`, and `connect-src https:` in the CSP.
 
 Next eligible: WBS-32/33 proper (need humans, Windows and a certificate) · the DV-11 decision.
+
+## Batch 21 QA · `15` conformance sweep — dead copy and missing elements
+
+Report: `BATCH-21-QA.md`. No new Canon findings. 2 HIGH · 5 MEDIUM. 500 tests.
+
+One question: does `18` give copy that no screen draws? Twenty-one keys, and two of them had
+become FALSE — the product was telling the user that recovery paths did not exist after WBS-04,
+22 and 25 shipped them. `15` asks for those as 세 개 / 네 개의 복구 버튼, and they are now
+buttons that go to three different places. The Claude-unavailable state — `12` §16's flagship
+사용 불가 ≠ 실패 — had no rendered evidence at all; the fixture CLI can now be flipped
+logged-out by a marker file, so the e2e reaches it through the real detection path and measures
+the card, the chip, zero reds, exactly four buttons, the kept text, and the drawer carrying the
+user's own sentence.
+
+Copy rots more quietly than code: an unreferenced key raises nothing while the world changes
+underneath it. `tests/unit.test.js` now checks every leaf key is referenced by a screen, with
+two traps closed — dynamically indexed parents count as used, and a key named only in a COMMENT
+does not (that one made `history.more` look alive). Seven keys that could not be rendered yet
+are listed with reasons, and the list is itself checked for staleness, so it cannot quietly
+become permanent.
+
+Rendered in passing: the Steps legend and state words (`16` §2.1 — a glyph alone never carries
+a state), History's 더 보기 / 접기 (`15` §0 Board M → L), the ambiguity card's ▸ 다시 적기, the
+drawer banner's 안전 안내 label, and TD-01's empty Quick Command state. Seven keys were deleted
+instead, each with its reason in the report.
+
+Next eligible: the PENDING list · WBS-32/33 · the DV-11 decision.

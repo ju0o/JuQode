@@ -200,7 +200,7 @@ export function renderSC02(root, api, nav, state) {
 
     /* `15` SC-02 keeps the submitted text in the field for every one of these — it is never
      * queued and never thrown away (UF-RULE-NOQUEUE). */
-    consequence.appendChild(refusalCard(r, api, nav, state, p));
+    consequence.appendChild(refusalCard(r, api, nav, state, p, { phrase: text, resubmit: () => startWork(text) }));
   }
 
   /* Work Stream — WIDE. Genuinely empty: this project has no Works, and none can be started
@@ -288,7 +288,13 @@ async function fillHistory(rows, api, nav, state) {
     return;
   }
 
-  for (const w of r.works) {
+  /* `15` §0 Board: History is M and grows to L when expanded — so it does not show everything
+   * at once. `18` gives both controls (`history.more` · `history.collapse`), and the count in
+   * `더 보기` is the REAL number of rows still hidden, not a page size. */
+  const HEAD = 3;
+  const expanded = state.historyExpanded === true;
+  const shown = expanded ? r.works : r.works.slice(0, HEAD);
+  for (const w of shown) {
     const row = el('div', 'histrow');
     row.setAttribute('data-el', 'history-row');
 
@@ -323,6 +329,16 @@ async function fillHistory(rows, api, nav, state) {
     row.appendChild(acts);
 
     rows.appendChild(row);
+  }
+
+  /* The control only exists when there is something behind it. A `더 보기` over a complete list
+   * is a control that does nothing, and `15` DS §1 does not count that as an action. */
+  const hidden = r.works.length - shown.length;
+  if (hidden > 0 || expanded) {
+    const more = el('div', 'row-acts');
+    more.appendChild(btn('btn sm ghost', expanded ? C.history.collapse : `${hidden}${C.history.more}`,
+      () => { state.historyExpanded = !expanded; fillHistory(rows, api, nav, state); }));
+    rows.appendChild(more);
   }
 }
 
@@ -379,6 +395,14 @@ function ambiguousCard(routed, toWork) {
     acts.appendChild(btn('btn sm', C.intent.openTerm, () => window.__openDrawerWith?.(routed.phrase ?? '')));
   }
   if (!offeredWork) acts.appendChild(btn('btn sm', C.intent.toWork, toWork));
+  /* `15` UF-INTENT-REPHRASE: the third way out is to say it differently. The text is already in
+   * the field (nothing is ever queued or thrown away), so this dismisses the card and puts the
+   * cursor back where the user can edit — `18` `intent.rephrase`. */
+  acts.appendChild(btn('btn sm ghost rec', C.intent.rephrase, () => {
+    n.remove();
+    const f = document.querySelector('[data-el="intent"]');
+    if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+  }));
   n.appendChild(acts);
   return n;
 }
@@ -387,7 +411,37 @@ function ambiguousCard(routed, toWork) {
  * Every way a Work can fail to start, each with the reason and the way out `15` names.
  * The submitted text stays in the field throughout — it is never queued (UF-RULE-NOQUEUE).
  */
-function refusalCard(r, api, nav, state, project) {
+/**
+ * `15`'s recovery buttons for the two cards that have them — the evidence refusal and the
+ * Claude-unavailable card. Both lists are `18`'s, in `18`'s order, and every entry is a real
+ * control that goes somewhere that exists.
+ *
+ * The three destinations are genuinely different, which is why three buttons rather than one:
+ *   · 프로젝트 설명 읽기 — unfolds the Brief, which is on this same screen (WBS-05)
+ *   · Quick Command 쓰기 — opens the drawer CARRYING the sentence the user already typed
+ *     (D-134 · `__openDrawerWith`), so they do not retype it
+ *   · 터미널로 직접 확인 — opens the drawer plain
+ *
+ * `16` §2.1: green ▸ is recovery, and every one of these IS a recovery action — a way out of a
+ * state the user did not choose. Not navigation, which never gets the green.
+ */
+function recoveryPaths(labels, phrase, state, nav, project) {
+  const row = el('div', 'row-acts');
+  const go = [
+    () => { state.briefFolded = false; nav.toWorkbench(project, state.interpretation); },
+    () => window.__openDrawerWith?.(phrase ?? ''),
+    () => window.__toggleDrawer?.(),
+  ];
+  labels.forEach((label, i) => {
+    const act = go[i];
+    /* A label with no destination is not rendered at all. `15` DS §1: a control that does
+     * nothing is not an action, and this list is exactly where that used to be tolerated. */
+    if (act) row.appendChild(btn('btn sm ghost rec', label, act));
+  });
+  return row;
+}
+
+function refusalCard(r, api, nav, state, project, { phrase = '', resubmit = null } = {}) {
   const reason = r?.reason;
 
   if (reason === 'active-work') {
@@ -419,11 +473,20 @@ function refusalCard(r, api, nav, state, project) {
     n.appendChild(h);
     n.appendChild(el('div', 'sm', CLAUDE_REASON[r.detail?.reason] ?? C.gap.claudeUnknown));
     n.appendChild(el('div', 'xs mut', C.unavailable.body));
-    /* `15` fixes four recovery paths here; three of them belong to WBS-04, 22 and 25. The one
-     * that is real needs no button — the text is still in the field, so 다시 보내기 IS the
-     * submit button that is already on screen. Naming a button that does nothing would be
-     * worse than naming the fact. */
-    n.appendChild(el('div', 'xs mut2', C.gap.notBuiltPaths));
+    /* `15` names FOUR recovery buttons here and means buttons — 네 개의 복구 버튼.
+     *
+     * They used to be a sentence saying they were not built, because WBS-04, 22 and 25 had not
+     * shipped. All three have. A product that goes on saying a path does not exist after it
+     * does is telling the user something false, which is the one thing this product is for. */
+    n.appendChild(recoveryPaths(C.unavailable.paths, phrase, state, nav, project));
+    if (resubmit) {
+      /* The fourth. The text is still in the field, so this is genuinely the same action as
+       * pressing 보내기 — but `15` asks for it here, next to the reason, and a user who has
+       * just read 로그인이 필요해요 should not have to find their way back up the card. */
+      const row = el('div', 'row-acts');
+      row.appendChild(btn('btn sm ghost rec', C.unavailable.resubmit, resubmit));
+      n.appendChild(row);
+    }
     return n;
   }
 
@@ -439,7 +502,9 @@ function refusalCard(r, api, nav, state, project) {
     d.appendChild(el('summary', 'xs mut', C.sc01.tech));
     d.appendChild(el('div', 'xs mono mut', String(r.detail?.reason ?? '')));
     n.appendChild(d);
-    n.appendChild(el('div', 'xs mut2', C.gap.notBuiltPaths));
+    /* `15`: 세 개의 복구 버튼. `18` `evidence.remain` labels them — 지금 할 수 있는 것. */
+    n.appendChild(el('div', 'xs mut2', C.evidence.remain));
+    n.appendChild(recoveryPaths(C.evidence.paths, phrase, state, nav, project));
     return n;
   }
 

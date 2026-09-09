@@ -168,7 +168,10 @@ for (const e of out) process.stdout.write(JSON.stringify(e) + '\\n');
 fs.writeFileSync(FAKE_CLI, [
   '#!/bin/sh',
   "if [ \"$1\" = \"--version\" ]; then echo '9.9.9-fixture (Claude Code)'; exit 0; fi",
-  "if [ \"$1\" = \"auth\" ]; then echo '{\"loggedIn\":true,\"email\":\"fixture@example.test\",\"orgId\":\"org-fixture\"}'; exit 0; fi",
+  /* A marker file flips the fixture to logged-out, so the e2e can reach `15`'s
+   * Claude-unavailable state — the one `12` §16 calls 사용 불가 ≠ 실패 — with the real
+   * detection code path rather than a stub. `detect()` runs on every preflight, no cache. */
+  `if [ \"$1\" = \"auth\" ]; then if [ -f ${JSON.stringify(path.join(DB_DIR, 'logged-out'))} ]; then echo '{\"loggedIn\":false}'; else echo '{\"loggedIn\":true,\"email\":\"fixture@example.test\",\"orgId\":\"org-fixture\"}'; fi; exit 0; fi`,
   /* "$@" — the fixture has to SEE `--resume`, or it cannot behave like a session that was
    * granted something. Without it every turn replayed the same denial. */
   `exec ${process.execPath} ${FAKE_CLI_JS} "$@"`,
@@ -866,10 +869,16 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.historyToReader = await evalJs('window.__screen()');
   /* WBS-37 · SC-04 → SC-02: 읽기면이 접히며 History 로 착지한다. `이해했어요` is SC-04's own
    * way out, so it is where the sentence is about. */
+  /* `15` §Keyboard, on the real window. */
   out.morphToBench = await evalJs(MORPH(
     `[...document.querySelectorAll('.sc04 [data-el="next-actions"] button')].find(b => b.textContent.includes('이해했어요'))?.click()`,
     '.sc02 [data-card="history"]'));
   await sleep(800);
+  /* `15` §Keyboard: focus returns to the request field after `이해했어요 · 다음 요청으로`.
+   * A user who has finished reading a change is about to type the next request; landing them
+   * anywhere else makes them reach for the mouse to do the thing the screen is for. */
+  out.focusAfterUnderstood = await evalJs(
+    `document.activeElement?.getAttribute('data-el') ?? document.activeElement?.tagName ?? null`);
   /* …and `결과 보기` → SC-03. */
   await evalJs(`[...document.querySelectorAll('[data-el="history-row"] button')].find(b => b.textContent.includes('결과 보기'))?.click()`);
   await sleep(1200);
@@ -947,6 +956,26 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.trim() === '터미널')?.click()`);
   await sleep(400);
   out.drawerOpen   = await evalJs('JSON.stringify(window.__drawer())');
+  /* `15` §Keyboard: `Esc` closes TD-01 / the discover panel — and NEVER cancels a Work.
+   * Innermost first, so one press closes the panel and the next closes the drawer. */
+  await evalJs(`document.querySelector('.td01-discover')?.click()`);
+  await sleep(500);
+  out.escDiscoverOpen = await evalJs('JSON.parse(JSON.stringify(window.__drawer())).discover');
+  const esc = `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`;
+  await evalJs(esc);
+  await sleep(300);
+  out.escAfterOne = await evalJs('JSON.stringify(window.__drawer())');
+  await evalJs(esc);
+  await sleep(300);
+  out.escAfterTwo = await evalJs('JSON.stringify(window.__drawer())');
+  /* …and a third press with nothing open must do nothing, rather than reaching for a Work. */
+  await evalJs(esc);
+  await sleep(200);
+  out.escAfterThree = await evalJs('JSON.stringify(window.__drawer())');
+  out.escScreen = await evalJs('window.__screen()');
+  /* …and put the drawer back, because the rest of this section is about what is inside it. */
+  await evalJs(`window.__toggleDrawer()`);
+  await sleep(400);
   out.compTD01     = await evalJs(COMPOSITION('.td01'));
   /* `17` TD-01: 화면 위를 덮되 화면이 뒤에 남아 있는 것이 보인다. Both halves as numbers —
    * the drawer is anchored to the bottom and does not reach the top of the window. */
@@ -957,6 +986,7 @@ const results = await cdp(async ({ send, evalJs }) => {
                             vh: window.innerHeight,
                             behind: !!document.querySelector('[data-screen]') }); })()`);
   out.drawerBanner = await evalJs(`document.querySelector('[data-el="banner"]')?.innerText ?? null`);
+  out.drawerBannerParts = await evalJs(`JSON.stringify([...(document.querySelector('[data-el="banner"]')?.children ?? [])].map(n => n.textContent))`);
   /* The drawer is a SIBLING of #root — a child would be destroyed by the screen it sits over. */
   out.drawerOutsideRoot = await evalJs(`(() => {
     const d = document.querySelector('[data-el="drawer"]');
@@ -1021,6 +1051,29 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(300);
   out.drawerClosed = await evalJs('JSON.stringify(window.__drawer())');
   out.screenAfterDrawer = await evalJs('window.__screen()');
+
+  /* ── `15` SC-02 Unavailable State — 사용 불가 ≠ 실패 (12 §16) ────────────────────────────
+   * `15` asks for 네 개의 복구 버튼, and they were a sentence saying they were not built until
+   * WBS-04, 22 and 25 shipped. This is the first RENDERED evidence for the state: the real
+   * detection path, through the real bridge, with the fixture logged out. */
+  step('Claude unavailable');
+  fs.writeFileSync(path.join(DB_DIR, 'logged-out'), '');
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 오류 고쳐줘'; })()`);
+  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  await sleep(1500);
+  out.unavailCard = await evalJs(`document.querySelector('[data-el="unavailable"]')?.innerText ?? null`);
+  out.unavailActions = await evalJs(`JSON.stringify([...document.querySelectorAll('[data-el="unavailable"] button')].map(b => b.textContent))`);
+  out.unavailReds = await evalJs(RED_COUNT('[data-el="unavailable"], [data-el="unavailable"] *'));
+  out.unavailKeptText = await evalJs(`document.querySelector('[data-el="intent"]').value`);
+  /* Every one of the four must actually GO somewhere. The drawer one is the easiest to prove
+   * and the one D-134 changed, so it is the one measured: it opens the drawer CARRYING the
+   * sentence the user already typed. */
+  await evalJs(`[...document.querySelectorAll('[data-el="unavailable"] button')].find(b => b.textContent.includes('Quick Command'))?.click()`);
+  await sleep(500);
+  out.unavailToDrawer = await evalJs('JSON.stringify(window.__drawer())');
+  await evalJs(`window.__toggleDrawer()`);
+  await sleep(300);
+  fs.rmSync(path.join(DB_DIR, 'logged-out'));
 
   step('WBS-05 stale');
   await sleep(1200);
@@ -1088,6 +1141,30 @@ const results = await cdp(async ({ send, evalJs }) => {
 
   return out;
 });
+
+/* ── `15` SC-02 Unavailable State ──────────────────────────────────────────────────────── */
+{
+  assert.ok(results.unavailCard, 'a logged-out Claude Code did not produce the 사용 불가 card');
+  assert.ok(results.unavailCard.includes('지금 안 됨 · 실패 아님'),
+    `the card does not carry the 12 §16 chip: ${results.unavailCard}`);
+  assert.ok(results.unavailCard.includes('로그인이 필요해요'),
+    `the card does not name the reason: ${results.unavailCard}`);
+  /* NOT RED. `12` §16: 사용 불가 ≠ 실패, and `16` §2.1 keeps red for failure alone. */
+  assert.strictEqual(results.unavailReds, 0, '사용 불가 was painted as a failure');
+  /* `15`: 네 개의 복구 버튼 — and they are buttons, not a sentence about buttons. */
+  const acts = JSON.parse(results.unavailActions);
+  assert.deepStrictEqual(acts,
+    ['▸ 프로젝트 설명 읽기', '▸ Quick Command 쓰기', '▸ 터미널로 직접 확인', '▸ 해결한 뒤 다시 보내기'],
+    `the four recovery paths are not four buttons: ${JSON.stringify(acts)}`);
+  /* UF-RULE-NOQUEUE: the submitted text is kept, never queued and never thrown away. */
+  assert.strictEqual(results.unavailKeptText, '로그인 오류 고쳐줘',
+    'the submitted text was lost when the Work was refused');
+  /* …and the paths GO somewhere. D-134: this one opens the drawer carrying the sentence. */
+  const d = JSON.parse(results.unavailToDrawer);
+  assert.strictEqual(d.open, true, '▸ Quick Command 쓰기 did not open the drawer');
+  assert.strictEqual(d.phrase, '로그인 오류 고쳐줘',
+    `the drawer did not carry the user's sentence (${d.phrase})`);
+}
 
 step('cdp done — stopping app');
 stopApp();
@@ -1218,16 +1295,49 @@ assert.strictEqual(results.briefAnswersUnfolded, 6, '펼치기 did not bring the
 /* ── TD-01 · the drawer, and Quick Command ────────────────────────────────────────────────── */
 assert.strictEqual(JSON.parse(results.drawerBefore).open, false, '`15`: the drawer starts 닫힘');
 assert.strictEqual(JSON.parse(results.drawerOpen).open, true, '터미널 did not open the drawer');
+
+/* `15` §Keyboard — `Esc` closes TD-01 / the discover panel, and NEVER cancels a Work. */
+{
+  assert.strictEqual(results.escDiscoverOpen, true, '할 수 있는 것 보기 did not open the panel');
+  const one = JSON.parse(results.escAfterOne);
+  const two = JSON.parse(results.escAfterTwo);
+  const three = JSON.parse(results.escAfterThree);
+  /* Innermost first: the panel goes, the drawer stays. */
+  assert.strictEqual(one.discover, false, 'Esc did not close the discover panel');
+  assert.strictEqual(one.open, true, 'Esc closed the drawer instead of the panel inside it');
+  /* Then the drawer. */
+  assert.strictEqual(two.open, false, 'a second Esc did not close the drawer');
+  /* And then nothing — a key that keeps reaching for something to undo is how a Work gets
+   * cancelled by accident, which `15` forbids by name. */
+  assert.deepStrictEqual(three, two, 'Esc did something with nothing open');
+  assert.strictEqual(results.escScreen, 'SC-02', `Esc navigated (now on ${results.escScreen})`);
+}
+
+/* `15` §Keyboard — focus returns to the request field after `이해했어요 · 다음 요청으로`. */
+assert.strictEqual(results.focusAfterUnderstood, 'intent',
+  `focus landed on ${results.focusAfterUnderstood} instead of the request field`);
 assert.strictEqual(results.drawerScreen, 'SC-02',
   'opening the drawer navigated — `15` says it sits OVER the current screen');
 /* A child of `#root` would be destroyed by the next screen render, and `15` requires the screen
  * beneath to be preserved. */
 assert.strictEqual(results.drawerOutsideRoot, true, 'the drawer is inside #root');
 
-/* `19` §S · Q-03: the banner is the product saying it does not isolate. It is drawn always. */
-assert.strictEqual(results.drawerBanner,
-  '여기서 치는 명령은 내 컴퓨터에서 내 권한으로 바로 실행돼요.',
-  'the one line that may never be hidden is missing or reworded');
+/* `19` §S · Q-03: the banner is the product saying it does not isolate. It is drawn always.
+ *
+ * The SENTENCE is pinned as a literal and must appear exactly — that is the point of this
+ * assertion. `18` `term.safetyTag` labels it, so the banner is the tag followed by the
+ * sentence, and nothing else may join them. */
+assert.ok(results.drawerBanner, 'the banner is not drawn');
+assert.ok(results.drawerBanner.endsWith('여기서 치는 명령은 내 컴퓨터에서 내 권한으로 바로 실행돼요.'),
+  `the one line that may never be hidden is missing or reworded: ${results.drawerBanner}`);
+assert.ok(results.drawerBanner.startsWith('안전 안내'),
+  `the banner is not labelled: ${results.drawerBanner}`);
+/* Two children and no more: the label and the sentence. Asserted as PARTS rather than as one
+ * string, because `innerText` runs two inline elements together and the whitespace between them
+ * is a rendering detail, not something the copy should be made to carry. */
+assert.deepStrictEqual(JSON.parse(results.drawerBannerParts),
+  ['안전 안내', '여기서 치는 명령은 내 컴퓨터에서 내 권한으로 바로 실행돼요.'],
+  'something else joined the banner, or the sentence was reworded');
 
 /* `19` §C4: 항상 설명 후 확인. Typing produced an EXPLANATION and ran nothing. */
 assert.strictEqual(results.qcCardKind, 'explained');

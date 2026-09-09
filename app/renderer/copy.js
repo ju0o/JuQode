@@ -144,7 +144,6 @@ export const C = {
     legend:      '끝남 · 진행 중 · 다음',
     notRun:      '실행되지 않았어요',
     nextDeclared:'다음',
-    sessionStart:'시작',
     inputTitle: 'Claude Code가 물어요',
     inputHint:  '답하면 같은 작업이 이어져요. 새 작업이 되지 않아요.',
     inputPh:    '답을 적어요',
@@ -207,7 +206,6 @@ export const C = {
     label:     '다음 행동',
     gloss:     'JuQode가 드리는 선택 — Claude Code가 알린 일이 아니에요',
     stepLabel: 'NEXT · Claude Code가 알린 다음 Step',
-    stepEmpty: 'NEXT 없음',
   },
   /* SC-04 · Change Reader. Every key below is `18` §SC-04 VERBATIM, including the key names.
    * An earlier draft transcribed `15`'s prose instead — `15` describes the screen, `18` is the
@@ -516,8 +514,6 @@ export const C = {
     briefFailGone:  '폴더가 없어졌어요.',
     briefFailOther: '폴더를 읽는 중에 막혔어요.',
     /* SC-03 states `18` has no key for. Written in the `18` §0 voice; filed as CF-8. */
-    workChangeCount:'바뀐 파일',
-    workUnknownChanges:'무엇이 바뀌었는지 아직 확인하지 못했어요.',
     workDenialTool: '하려던 동작',
     workNoScope:    '이 동작은 좁게 허용할 방법이 없어서 허용 버튼을 드리지 않아요.',
     /* Short labels for the header chip. `18`'s panel TITLES are sentences and belong in the
@@ -525,11 +521,6 @@ export const C = {
     chipRunning:    '진행 중',
     chipPermission: '허용 필요',
     chipInput:      '답 필요',
-    /* Where a destination is not built yet, the fact is a SENTENCE. A control that cannot act
-     * is a dead end with extra steps (`12` 원칙 4 · UF-CLAUDE-ALT). */
-    notBuiltTerminal: '터미널은 아직 없어요. 지금은 컴퓨터의 터미널에서 직접 하실 수 있어요.',
-    notBuiltPaths:    '여기서 이어서 할 수 있는 것은 아직 만드는 중이에요.',
-    workElapsed:      '지난 시간',
     workAbout:        '이 작업에 대해',
     workActor:        '실행자',
     workBasis:        '변경 기준',
@@ -539,9 +530,7 @@ export const C = {
     claimChanged:     '바뀐 파일',
     claimUnknown:     '무엇이 바뀌었는지 확인하지 못했어요.',
     claimTools:       'JuQode가 지켜본 도구 실행',
-    claimReport:      'Claude Code가 한 말이에요.',
     claimNotDone:     '허용되지 않아서 하지 못한 것',
-    failedWhat:       '끝난 이유',
     /* `15` SC-03 contract B names this button; `18` carries the other three of the four. */
     permStop:       '그만두기',
     claudeUnknown:  'Claude Code를 쓸 수 없는 이유를 확인하지 못했어요.',

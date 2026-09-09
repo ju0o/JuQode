@@ -63,7 +63,10 @@ function renderDrawer(host, api, state, repaint) {
    * ever stops being drawn, the product is hiding the fact that it does not isolate. */
   const banner = el('div', 'td01-banner');
   banner.setAttribute('data-el', 'banner');
-  banner.textContent = C.term.banner;
+  /* `18` `term.safetyTag` labels the banner. A sentence with no label reads as a note; `19` §S
+   * wants this read as the safety contract it is, and the label is what says which it is. */
+  banner.appendChild(el('span', 'xs td01-safetytag', C.term.safetyTag));
+  banner.appendChild(el('span', '', C.term.banner));
   panel.appendChild(banner);
 
   panel.appendChild(qcRegion(api, state, repaint));
@@ -106,6 +109,9 @@ function qcRegion(api, state, repaint) {
 
   if (state.qcRun) region.appendChild(runCard(api, state, repaint));
   else if (state.qcCard) region.appendChild(routeCard(api, state, repaint));
+  /* `15` TD-01: nothing run yet is a STATE, and it says what to do — `18` `term.qcEmpty`.
+   * An empty region says nothing, and a drawer that opens on nothing looks broken. */
+  else region.appendChild(el('p', 'sm mut', C.term.qcEmpty));
   if (state.qcDiscover) region.appendChild(discoverCard(state, repaint));
   else region.appendChild(btn('btn sm ghost rec td01-discover', C.qc.discover, async () => {
     state.qcDiscover = await api.qcList(state.project.id);
