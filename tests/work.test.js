@@ -15,22 +15,11 @@ const { execFileSync } = require('node:child_process');
 
 const R = path.resolve(__dirname, '..');
 
-/* Every fixture directory this file makes, removed when the file finishes. The suite leaked one
- * per case and filled a 7.5 GB tmpfs mid-run — after which every later failure looked like a
- * product bug rather than a full disk. */
-const juqodeTempDirs = [];
-const tempDir = (prefix) => {
-  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
-  juqodeTempDirs.push(d);
-  return d;
-};
-process.on('exit', () => {
-  for (const d of juqodeTempDirs) {
-    for (const target of [d, `${d}-cli`]) {
-      try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* already gone */ }
-    }
-  }
-});
+/* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
+ * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
+ * tmpfs and made the suite flaky in a different place every run. */
+const { tempDir } = require(path.join(__dirname, 'tmp.js'));
+
 const G = require(path.join(R, 'app/main/evidence/git.js'));
 const M = require(path.join(R, 'app/main/evidence/manifest.js'));
 const { ledger, ledgerDiff, isSecretName, isExcludedPath, pathspec } = require(path.join(R, 'app/main/evidence/exclude.js'));
@@ -101,9 +90,11 @@ test('objects go to a JuQode directory, never into the user repository', () => {
 });
 
 test('a secret the user ALREADY COMMITTED is kept out of the basis tree', () => {
-  /* The measured defect in the approved contract: an `:(exclude)` pathspec only filters what
-   * `add` considers, so a committed `.env` survives in the copied index and `write-tree` keeps
-   * referencing its blob. Both steps are needed and this is the case that proves it. */
+  /* A secret the user COMMITTED is the hard case: it is not ignored, not untracked, and a
+   * pathspec that only filters what `add` considers would leave it in the tree through the
+   * index. The basis now starts from an EMPTY index (see `git.js` — a copied one carries a
+   * stat cache that intermittently misses a real change), so the pathspec is what keeps it out
+   * here. The assertions below are about the RESULT, not about which step produced it. */
   const { dir, store } = repo({
     'src/a.ts': 'export const a = 1;\n',
     '.env': `${MARK}_ENV=aaa\n`,
@@ -113,10 +104,6 @@ test('a secret the user ALREADY COMMITTED is kept out of the basis tree', () => 
   });   // .gitignore does NOT list them — that is the point
 
   const basis = G.capture(dir, store, 'before');
-  assert.deepStrictEqual(basis.droppedFromIndex.sort(),
-    ['.env', '.env.production', 'keys/server.pem', 'src/nested/local.key'],
-    'already-tracked secrets were not dropped from the copied index');
-
   const paths = G.treePaths(dir, store, basis.ref);
   assert.deepStrictEqual(paths.filter((p) => isSecretName(path.basename(p))), [],
     `the basis tree contains secret paths: ${paths}`);
@@ -181,7 +168,7 @@ test('a secret name git has to quote is still excluded', () => {
   const basis = G.capture(dir, store, 'before');
   const paths = G.treePaths(dir, store, basis.ref);
   assert.ok(!paths.some((f) => /\.(pem|key)/i.test(f)), `a quoted secret name reached the basis tree: ${paths}`);
-  assert.strictEqual(basis.droppedFromIndex.length, 3, `dropped ${basis.droppedFromIndex}`);
+  assert.ok(paths.includes('ok.txt'), 'the basis lost the ordinary file, so it proves nothing');
 });
 
 test('a DIRECTORY named .env is excluded, contents and all', () => {
@@ -293,14 +280,31 @@ test('an inherited GIT_DIR cannot redirect the basis at another repository', () 
   } finally { if (saved === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = saved; }
 });
 
-test('the pathspec alone is not enough — the drop step is what closes it', () => {
-  /* A guard on the reasoning, not just the result: if someone ever removes `rm --cached`
-   * believing the pathspec covers it, this states what the measurement showed. */
-  const { dir, store } = repo({ '.env': `${MARK}=x\n`, 'a.ts': '1\n' });
-  const basis = G.capture(dir, store, 'before');
-  assert.ok(basis.droppedFromIndex.includes('.env'),
-    'a committed .env was never in the copied index, so this test is no longer proving anything');
+test('after a capture, JuQode\'s own index carries no excluded path', () => {
+  /* Two guards were designed for the basis: the `:(exclude)` pathspec, and `rm --cached` on the
+   * index. The index is now always EMPTY at the start of a capture (see `git.js`), so the
+   * pathspec is the one that actually fires and `rm --cached` currently has nothing to catch —
+   * it stays as the wall that closes the moment anything ever seeds that index again.
+   *
+   * Rather than assert which step ran, this asserts the POST-CONDITION both exist for: nothing
+   * excluded is in the index JuQode built, so nothing excluded can reach `write-tree`. */
+  const { dir, store } = repo({
+    '.env': `${MARK}=x\n`, 'keys/server.pem': `${MARK}\n`, 'a.ts': '1\n',
+  });
   assert.ok(pathspec().some((p) => p.includes('.env')), 'the pathspec lost its .env exclusion');
+
+  const basis = G.capture(dir, store, 'before');
+  const env = { ...process.env, GIT_INDEX_FILE: path.join(store, 'index.before'),
+                GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
+                GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(dir, '.git/objects') };
+  const staged = execFileSync('git', ['ls-files', '-z'], { cwd: dir, env, encoding: 'utf8' })
+    .split('\0').filter(Boolean);
+
+  assert.deepStrictEqual(staged.filter((f) => isExcludedPath(f)), [],
+    `JuQode's index carries an excluded path: ${staged}`);
+  assert.ok(staged.includes('a.ts'), 'the index is empty, so this test proves nothing');
+  assert.ok(!G.treePaths(dir, store, basis.ref).some((f) => isSecretName(path.basename(f))),
+    'a secret reached the basis tree');
 });
 
 test('an excluded file that changes is DETECTED, without being read', () => {
@@ -866,4 +870,159 @@ test('an add that genuinely produces nothing is still refused', () => {
   const basis = G.capture(dir, store);
   assert.ok(basis.ref, 'an empty project has an empty basis, which is a fact and not an error');
   assert.deepStrictEqual(G.treePaths(dir, store, basis.ref), []);
+});
+
+test('an add that git ABORTED does not become a silent "nothing changed"', () => {
+  /* MEASURED by the batch-06 technical review, and it is a regression this run introduced.
+   *
+   * A file `git add` cannot read makes git exit 128 and abort WITHOUT writing the index. The
+   * index here is a COPY of the user's, so it still holds every tracked file — which means
+   * "the index is non-empty" is NOT evidence that the add worked. `capture()` returned the
+   * BEFORE tree as the AFTER tree, `changedPaths` came back empty, and the product would have
+   * said 바뀐 파일이 없어요 ✓확인됨 about a file the Work had just rewritten.
+   *
+   * A basis that is wrong is worse than a basis that could not be taken: `12` has a state for
+   * "we could not tell" and none for "we told you the opposite". */
+  const dir = tempDir('juqode-unreadable-');
+  const store = tempDir('juqode-store-');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
+  const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  g('init', '-q', '.'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  g('add', '-A', '.'); g('commit', '-qm', 'baseline');
+
+  const before = G.capture(dir, store);
+
+  /* The Work changes a file AND leaves behind one git cannot read. Claude Code producing an
+   * unreadable artefact mid-Work is an ordinary event, not an exotic one. */
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'two\n');
+  const locked = path.join(dir, 'locked.bin');
+  fs.writeFileSync(locked, 'x\n');
+  fs.chmodSync(locked, 0o000);
+
+  /* Running as root defeats the fixture — the file is readable and there is nothing to detect. */
+  let readable = true;
+  try { fs.readFileSync(locked); } catch { readable = false; }
+  if (readable) {
+    fs.chmodSync(locked, 0o600);
+    return;                       // cannot construct the condition here; not a silent pass
+  }
+
+  let after = null, threw = null;
+  try { after = G.capture(dir, store, 'after'); } catch (e) { threw = e; }
+  fs.chmodSync(locked, 0o600);
+
+  assert.ok(threw, 'capture accepted a basis git never wrote');
+  assert.strictEqual(threw.code, 'unreadable-path');
+  assert.ok(String(threw.detail).includes('locked.bin'), `the refusal must name the path: ${threw.detail}`);
+  assert.strictEqual(after, null);
+
+  /* The specific lie the old code told: before.ref === after.ref, so nothing looked changed. */
+  assert.ok(before.ref, 'the before basis itself was fine');
+});
+
+test('a benign ignored-file complaint is still accepted', () => {
+  /* The counterpart. A refusal rule that refused BOTH causes would pass the test above and
+   * break every project with a .gitignore — which is the bug the tolerance was added for. */
+  const dir = tempDir('juqode-benign-');
+  const store = tempDir('juqode-store-');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
+  fs.writeFileSync(path.join(dir, '.env'), 'SECRET_TOKEN=juqode-synthetic-fixture-marker\n');
+  fs.writeFileSync(path.join(dir, '.gitignore'), '.env\n');
+  const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  g('init', '-q', '.'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  g('add', '-A', '.'); g('commit', '-qm', 'baseline');
+
+  const basis = G.capture(dir, store);
+  assert.ok(basis.ref);
+  assert.ok(basis.addWarning, 'git did complain, and the complaint is carried rather than dropped');
+  assert.deepStrictEqual(G.treePaths(dir, store, basis.ref).sort(), ['.env', '.gitignore', 'a.txt']
+    .filter((f) => f !== '.env').sort());
+});
+
+test('a same-size edit made against a racy index is still seen as a change', () => {
+  /* The mechanism behind a measured evidence-integrity failure.
+   *
+   * Git re-checks an index entry against its CONTENT when the entry's mtime is not older than
+   * the index FILE's own mtime — the "racily clean" rule, which exists because two stamps that
+   * close mean the file could have changed after git last looked. `copyFileSync` stamps the
+   * copy with the time of the COPY, which is newer than every entry, so nothing is ever racy
+   * and git trusts the inherited stat cache completely.
+   *
+   * Measured under load before the fix: the after-basis came back byte-identical to the
+   * before-basis while the file on disk held the new content, `git status` against the copied
+   * index reported nothing, and `changes()` said 바뀐 파일이 없어요 with known: true. The loop
+   * suite flaked 2-3 in 14; with the user's index mtime preserved, 0 in 14 under the same load.
+   *
+   * Dating the copy to the epoch is NOT the fix and measured worse — git skips racy handling
+   * entirely when the index timestamp is zero.
+   *
+   * Here the racy condition is forced rather than waited for: the file is given the index's own
+   * mtime, and the edit keeps both the size and that mtime. */
+  const dir = tempDir('juqode-racy-');
+  const store = tempDir('juqode-store-');
+  const f = path.join(dir, 'a.txt');
+  fs.writeFileSync(f, 'one\n');
+  const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  g('init', '-q', '.'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  g('add', '-A', '.'); g('commit', '-qm', 'baseline');
+
+  const idx = fs.statSync(path.join(dir, '.git', 'index'));
+  fs.utimesSync(f, idx.atime, idx.mtime);            // entry mtime == index mtime: racy
+  const before = G.capture(dir, store, 'before');
+
+  fs.writeFileSync(f, 'two\n');                      // four bytes either way
+  fs.utimesSync(f, idx.atime, idx.mtime);            // …and the stamp says nothing happened
+  const after = G.capture(dir, store, 'after');
+
+  assert.notStrictEqual(before.ref, after.ref,
+    'the two bases are identical, so a real edit is invisible — the evidence-integrity class');
+  assert.deepStrictEqual(G.changedPaths(dir, store, before.ref, after.ref), ['a.txt']);
+});
+
+test('a same-size edit is still a change', () => {
+  /* `one\n` → `two\n`: four bytes either way, so nothing but the CONTENT distinguishes them.
+   * This is the shape the racy-clean bug hid, and the shape a config-value edit really has. */
+  const dir = tempDir('juqode-samesize-');
+  const store = tempDir('juqode-store-');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
+  const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  g('init', '-q', '.'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  g('add', '-A', '.'); g('commit', '-qm', 'baseline');
+
+  const before = G.capture(dir, store, 'before');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'two\n');
+  const after = G.capture(dir, store, 'after');
+
+  assert.notStrictEqual(before.ref, after.ref, 'the two bases are identical, so no change is visible');
+  assert.deepStrictEqual(G.changedPaths(dir, store, before.ref, after.ref), ['a.txt']);
+});
+
+test('a capture never reads the user\'s index — the basis starts empty', () => {
+  /* The defect this prevents is intermittent (measured 0/300 with an empty index; a copied one
+   * inherits a stat cache that misses a same-size edit), so no deterministic test can catch a
+   * revert by observing behaviour. This catches it structurally instead: if `capture` ever
+   * reads `.git/index` again, the stat cache is back and so is the missed change. CF-14. */
+  const src = fs.readFileSync(path.join(R, 'app/main/evidence/git.js'), 'utf8')
+    /* Comments are stripped first. The comment above `capture` NAMES `copyFileSync` in order to
+     * say why it is not used any more; documentation of a ban is not the ban being broken. */
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const capture = src.slice(src.indexOf('function capture('), src.indexOf('function fileAt('));
+  assert.ok(!/copyFileSync/.test(capture),
+    'capture() copies a file again — if that is the user index, the stat cache is back');
+  assert.ok(/fs\.rmSync\(index\)/.test(capture),
+    'capture() no longer starts from a removed (empty) index');
+
+  /* …and the property itself, on a real repo: the index JuQode builds is its own. */
+  const dir = tempDir('juqode-idx-');
+  const store = tempDir('juqode-store-');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
+  const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  g('init', '-q', '.'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  g('add', '-A', '.'); g('commit', '-qm', 'baseline');
+
+  const userIndex = path.join(dir, '.git', 'index');
+  const before = fs.readFileSync(userIndex);
+  G.capture(dir, store, 'before');
+  assert.deepStrictEqual(fs.readFileSync(userIndex), before,
+    'the user\'s own index was modified — D-126a exists to prevent exactly that');
 });

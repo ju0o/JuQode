@@ -280,6 +280,21 @@ test('capability containment: each privileged capability lives in exactly one mo
     for (const b of ['require(', 'ipcRenderer', 'process.', "node:"]) {
       assert.ok(!src.includes(b), `renderer file ${f} reaches outside its sandbox: ${b}`);
     }
+
+    /* Nothing is ever PARSED AS MARKUP. The renderer displays a raw diff, a model's sentences
+       and a project's file names — all of it content from the user's own machine — and a
+       mutation swapping one `textContent` for `innerHTML` passed the entire unit suite AND the
+       e2e, because the fixture patches happened to contain no markup. A comment said the patch
+       is never parsed as markup; nothing enforced it.
+
+       Clearing a container is the one allowed use, and it is spelled exactly `innerHTML = ''`. */
+    for (const m of src.matchAll(/\.(innerHTML|outerHTML)\s*=\s*([^;\n]*)/g)) {
+      assert.strictEqual(m[2].trim(), "''",
+        `renderer file ${f} assigns ${m[1]} something other than '' — that parses content as markup`);
+    }
+    for (const b of ['insertAdjacentHTML', 'document.write', 'createContextualFragment']) {
+      assert.ok(!src.includes(b), `renderer file ${f} parses markup via ${b}`);
+    }
   }
 
   // Packages NOT yet built must not have a half-implementation hiding in the tree.

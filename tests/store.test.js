@@ -13,22 +13,11 @@ const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
 
-/* Every fixture directory this file makes, removed when the file finishes. The suite leaked one
- * per case and filled a 7.5 GB tmpfs mid-run — after which every later failure looked like a
- * product bug rather than a full disk. */
-const juqodeTempDirs = [];
-const tempDir = (prefix) => {
-  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
-  juqodeTempDirs.push(d);
-  return d;
-};
-process.on('exit', () => {
-  for (const d of juqodeTempDirs) {
-    for (const target of [d, `${d}-cli`]) {
-      try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* already gone */ }
-    }
-  }
-});
+/* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
+ * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
+ * tmpfs and made the suite flaky in a different place every run. */
+const { tempDir } = require(path.join(__dirname, 'tmp.js'));
+
 const { openDb, DbError, LATEST } = require(path.join(R, 'app/main/db/db.js'));
 const repo = require(path.join(R, 'app/main/db/repo.js'));
 const project = require(path.join(R, 'app/main/project.js'));
@@ -100,7 +89,10 @@ test('a truncated JuQode store is refused, not repaired', () => {
 test('a store below the seeded version is refused too — forward only cuts both ways', () => {
   const dir = tmp(), f = path.join(dir, 'old.db');
   const db = openDb(f);
-  db.prepare('update schema_version set version = 0').run();
+  /* Every applied version is a ROW. Setting them all to 0 collides on the primary key, so the
+   * store is put below the floor by keeping one row and lowering it. */
+  db.prepare('delete from schema_version where version > 0').run();
+  db.prepare('insert into schema_version values (0, ?)').run(new Date().toISOString());
   db.close();
   const before = fs.readFileSync(f);
   assert.throws(() => openDb(f), (e) => e.code === 'db-corrupt',
@@ -120,10 +112,14 @@ test('a migration applies once, moves the version forward, and is not re-run', (
   const dir = tmp(), f = path.join(dir, 'm.db');
   openDb(f).close();                                     // a store at version 1
   const { MIGRATIONS } = require(path.join(R, 'app/main/db/db.js'));
-  MIGRATIONS.push({ to: 2, sql: 'create table migration_probe (a integer)' });
+  /* Numbered AFTER the migrations the product actually ships — a probe that reuses a real
+   * version number collides on `schema_version`'s primary key and fails for the wrong reason. */
+  const shipped = MIGRATIONS.length;
+  const probeAt = 2 + shipped;
+  MIGRATIONS.push({ to: probeAt, sql: 'create table migration_probe (a integer)' });
   try {
     let db = openDb(f);
-    assert.strictEqual(db.prepare('select max(version) v from schema_version').get().v, 2);
+    assert.strictEqual(db.prepare('select max(version) v from schema_version').get().v, probeAt);
     db.prepare('insert into migration_probe values (1)').run();
     db.close();
 
@@ -131,16 +127,18 @@ test('a migration applies once, moves the version forward, and is not re-run', (
     assert.strictEqual(db.prepare('select count(*) n from migration_probe').get().n, 1,
       'the migration ran a second time and wiped the table');
     assert.deepStrictEqual(db.prepare('select version from schema_version order by version').all()
-      .map((r) => r.version), [1, 2]);
+      .map((r) => r.version),
+      Array.from({ length: probeAt }, (_, i) => i + 1));
     db.close();
-  } finally { MIGRATIONS.length = 0; }
+  } finally { MIGRATIONS.length = shipped; }
 });
 
 test('a migration that fails leaves the store on the version it was, with the real error', () => {
   const dir = tmp(), f = path.join(dir, 'mf.db');
   openDb(f).close();
   const { MIGRATIONS } = require(path.join(R, 'app/main/db/db.js'));
-  MIGRATIONS.push({ to: 2, sql: 'create table project (nope integer)' });   // already exists
+  const shipped = MIGRATIONS.length;
+  MIGRATIONS.push({ to: 2 + shipped, sql: 'create table project (nope integer)' });   // already exists
   try {
     assert.throws(() => openDb(f), (e) => {
       assert.strictEqual(e.code, 'db-corrupt');
@@ -149,9 +147,9 @@ test('a migration that fails leaves the store on the version it was, with the re
         'the rollback masked the real migration failure');
       return true;
     });
-  } finally { MIGRATIONS.length = 0; }
-  const db = openDb(f);                                  // MIGRATIONS empty again → still v1
-  assert.strictEqual(db.prepare('select max(version) v from schema_version').get().v, 1);
+  } finally { MIGRATIONS.length = shipped; }
+  const db = openDb(f);                        // the probe is gone → back to what the build ships
+  assert.strictEqual(db.prepare('select max(version) v from schema_version').get().v, LATEST);
   db.close();
 });
 
@@ -187,8 +185,11 @@ test('a store already at the current version applies nothing again', () => {
   const dir = tmp(), f = path.join(dir, 'e.db');
   openDb(f).close();
   const db = openDb(f);
-  const versions = db.prepare('select version from schema_version').all().map((r) => r.version);
-  assert.deepStrictEqual(versions, [1], 'reopening must not re-insert the seed version');
+  const versions = db.prepare('select version from schema_version order by version').all().map((r) => r.version);
+  /* One row per applied version — the seed plus every migration this build ships. Reopening
+   * must add none of them a second time. */
+  assert.deepStrictEqual(versions, Array.from({ length: LATEST }, (_, i) => i + 1),
+    'reopening re-applied something');
   db.close();
 });
 

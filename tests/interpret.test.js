@@ -13,22 +13,11 @@ const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
 
-/* Every fixture directory this file makes, removed when the file finishes. The suite leaked one
- * per case and filled a 7.5 GB tmpfs mid-run — after which every later failure looked like a
- * product bug rather than a full disk. */
-const juqodeTempDirs = [];
-const tempDir = (prefix) => {
-  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
-  juqodeTempDirs.push(d);
-  return d;
-};
-process.on('exit', () => {
-  for (const d of juqodeTempDirs) {
-    for (const target of [d, `${d}-cli`]) {
-      try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* already gone */ }
-    }
-  }
-});
+/* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
+ * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
+ * tmpfs and made the suite flaky in a different place every run. */
+const { tempDir } = require(path.join(__dirname, 'tmp.js'));
+
 const { scan, MAX_FILES, MAX_MANIFEST_BYTES, READ_CEILING_BYTES, TREE_DEPTH, isSecret } =
   require(path.join(R, 'app/main/interpret/scan.js'));
 const { answers, statusOf } = require(path.join(R, 'app/main/interpret/answers.js'));

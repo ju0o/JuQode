@@ -244,6 +244,18 @@ export const C = {
     /* The head-limit note. `18` has no truncation string; `20` bounds the head at 256 KB and
      * the whole patch is kept in a blob, so the sentence states both halves (D-129). */
     readerTruncated:  '변경이 너무 커서 여기에는 앞부분만 실었어요. 원문 전체는 그대로 남아 있어요.',
+    /* `18` has `reader.unexplained` for a pass that FAILED and nothing for a pass that has not
+     * run. Using the failure sentence for it made the product announce its own failure for work
+     * it never attempted, so this states the actual state instead. */
+    readerNotAsked:   '아직 이 변경을 말로 설명하지 않았어요.',
+    /* …and `18` has no key for "we could not tell what changed" on SC-04 either. `reader.none`
+     * is a 확인됨 claim and must not be used when the answer is unknown. */
+    readerUnknown:    '이 작업이 무엇을 바꿨는지 여기서 확인하지 못했어요.',
+    readerUnknownFiles: (files) => `바뀐 것으로 확인된 파일: ${files}`,
+    /* `15` SC-04 Empty State names `▸ 결과 설명으로` · `▸ 다음 의도로`; `18` carries neither. */
+    readerToResult:   '▸ 결과 설명으로',
+    readerToIntent:   '▸ 다음 의도로',
+    readerToGroups:   '▸ 설명으로',
 
     /* Brief ANSWER bodies. `18` is a dictionary of fixed UI strings; a Brief answer is
      * generated from what the scan found, so `18` cannot carry it and does not try. These are

@@ -143,3 +143,74 @@ at boot (`segmenter: "semantic" | "hunks-only"`), because its absence is an hone
 every file falls back to hunk blocks — but it IS a capability loss and should not be discovered
 from a screen full of 단위로 나누지 못함. Measured: the packaged Linux binary resolves it from
 inside the asar and reports `semantic`; the asar grew from 1.9 MB to 20 MB.
+
+## CF-12 · WBS-22 의 검증된 산출물이 두 저장소 어디에도 없다 — 재현 불가
+
+`19` §C4 는 Quick Command 규칙을 "검증됨 — 코퍼스 87/87 PASS" 로 못박고, 근거로
+`../evidence/planning/q02-q03-quick-command-validation.md` 를 든다. 그런데 그 문서 §0 이
+산출물의 위치를 이렇게 적는다:
+
+> **산출물 (스크래치, 저장소 밖)** `scratchpad/final/q02/` — `rules.json` · `match.js` ·
+> `corpus.json` (87 케이스) · `test.js`
+
+**규칙표도 코퍼스도 매처도 두 저장소 어디에도 없다.** 문서는 알고리즘을 완전하게 적어 두었지만
+동사 목록은 `… (+12)` 로 줄여 놓았고, 87 케이스 중 명시적으로 이름이 적힌 것은 마흔 개쯤이다.
+
+구현은 **알고리즘을 그대로** 옮기고, 단어 목록은 문서가 적어 둔 케이스에서 역산했다.
+`tests/qc.test.js` 의 코퍼스는 문서가 실제로 적어 둔 케이스만 담는다 — 87 을 채우려고 케이스를
+지어내면 그건 Canon 의 코퍼스에 대해 아무것도 증명하지 않는다.
+
+**결과: "87/87 PASS" 는 이 저장소에서 재현할 수 없다.** `rules.json` 과 `corpus.json` 이 Canon
+증거로 들어와야 그 숫자가 검증 가능한 주장이 된다. 그 전까지 WBS-22 의 인식 계층은
+IMPLEMENTED_PENDING_VALIDATION 이다.
+
+## CF-13 · `change_group` 에 `source_ref` 자리가 없다 — D-114 를 지킬 수 없다
+
+D-114 는 `확인됨` 이 근거를 대야 한다고 말하고, `20` 은 `interpretation_answer` 에 대해서는
+CHECK 로 강제한다:
+
+```sql
+check (confidence <> 'confirmed' or source_ref is not null)
+```
+
+`change_group` 에는 `confidence` 는 있는데 `source_ref` 열이 없다. `19` §C5-X 는 change group 의
+`확인됨` 을 "관측된 실행 결과" 에 묶으라고 요구하므로, 근거를 **저장할 곳이 없으면 그 요구를
+지킬 수 없다** — 계산해 놓고 버리게 된다. 실제로 그렇게 되어 있었고, 저장소에서 다시 읽은
+묶음은 아무것도 인용하지 않는 ✓확인됨 칩을 달고 있었다.
+
+구현은 마이그레이션 2 로 `change_group.source_ref` 를 추가했다. SQLite 는 기존 테이블에 CHECK 를
+ADD 할 수 없으므로 제약은 저장 계층에 있고(근거 없는 `확인됨` 은 `예상됨` 으로 내린다),
+`tests/explain.test.js` 가 그것을 붙잡는다. `20` 이 이 열과 CHECK 를 정본으로 받아야 한다.
+
+## CF-14 · D-126a 의 "복사한 인덱스" 가 변경을 놓친다 — 측정됨
+
+D-126a 는 증거 기준의 메커니즘을 **복사한 `GIT_INDEX_FILE`** + JuQode 소유 오브젝트 디렉터리 +
+`:(exclude,glob,icase)` pathspec + 복사본에 대한 `rm --cached` 로 정한다.
+
+복사본은 사용자 인덱스의 **stat 캐시** 를 함께 물려받는다. `git add -A` 는 그 캐시를 믿는다 —
+크기와 타임스탬프가 그대로면 파일을 다시 읽지 않는다. 그래서 **크기가 같은 편집이 기준과 같은
+타임스탬프 구간에 떨어지면 보이지 않는다.** after 트리가 before 트리와 바이트 단위로 같아지고,
+제품은 방금 고친 파일에 대해 `바뀐 파일이 없어요 ✓확인됨` 이라고 말한다.
+
+**측정 (실제 supervisor 경로, 같은 크기 편집, Work 300회):**
+
+| 인덱스 | 놓친 횟수 |
+|---|---|
+| 빈 인덱스에서 시작 | **0 / 300** |
+| 복사한 인덱스 + mtime 을 epoch 로 (재읽기 강제 시도) | 4 / 300, 그리고 다른 픽스처에서는 **옛 내용**을 트리에 썼다 |
+
+간헐적이라 더 나쁘다 — 테스트에서 무작위로 다른 자리가 깨지는 것으로 나타났고, 원인을
+찾는 데 뮤테이션 런이 필요했다.
+
+구현은 **빈 인덱스에서 시작한다.** 사용자의 `.git/index` 를 건드리지 않는다는 D-126a 의 목적은
+그대로다(이 인덱스는 JuQode 저장소 안에 있다). 캐시가 없으면 틀릴 캐시도 없고, 내용이 판단한다.
+비용은 캡처마다 트리 재해시이며 트리 크기는 이미 `refusal()` 이 제한한다.
+
+부작용 두 가지를 숨기지 않고 적는다:
+- **tracked 이면서 gitignore 된 파일**은 이제 기준에서 빠진다. 복사한 인덱스라면 남았다.
+  기준이 워크트리를 서술하게 되는데, 그게 Work 가 실제로 바꾼 것이다.
+- `rm --cached` 단계는 **지금은 잡을 것이 없다.** pathspec 이 유일하게 작동하는 방벽이 됐다.
+  코드는 남겨 뒀다(인덱스가 다시 채워지는 순간 닫힌다). 테스트는 어느 단계가 돌았는지가 아니라
+  **사후 조건**(JuQode 인덱스에 제외 경로가 하나도 없다)을 검사한다.
+
+`20`/D-126a 가 메커니즘을 "복사한 인덱스" 로 고정한 문장을 고쳐야 한다.

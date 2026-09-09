@@ -152,10 +152,31 @@ function capture(root, store, phase) {
   fs.mkdirSync(objects, { recursive: true });
 
   const index = path.join(store, `index.${phase}`);
-  const userIndex = path.join(gitDir(root), 'index');
-  /* An unborn repository has no index file yet; starting from an empty one is correct. */
-  if (fs.existsSync(userIndex)) fs.copyFileSync(userIndex, index);
-  else if (fs.existsSync(index)) fs.rmSync(index);
+
+  /* The basis starts from an EMPTY index, not from a copy of the user's.
+   *
+   * A copied index carries the user's STAT CACHE, and git then trusts it: an entry whose
+   * recorded size and mtime still match the file is not re-read. Git's own guard is the
+   * "racily clean" rule — an entry whose mtime is not older than the INDEX FILE's mtime gets a
+   * content check — but `copyFileSync` stamps the copy with the time of the copy, which is
+   * newer than every entry, so no entry is ever racy and the cache is believed completely.
+   *
+   * MEASURED, and it is the evidence-integrity class: a same-size edit made in the same second
+   * as the last `git add` came back as NO CHANGE. The after-basis was byte-identical to the
+   * before-basis while the file on disk held the new content, `git status` against the copied
+   * index reported nothing, and the product said 바뀐 파일이 없어요 ✓확인됨 about a file the
+   * Work had just rewritten. Dating the copy to the epoch is not the fix and measured worse —
+   * git skips racy handling altogether when the index timestamp is zero.
+   *
+   * Starting empty removes the cache instead of trying to outwit it: every file is hashed from
+   * its CONTENT on every capture. It costs a full re-hash, bounded by the size refusal, and it
+   * is what makes a basis evidence rather than a report of what git last happened to notice.
+   *
+   * It also makes D-126a's second exclusion step cheap rather than load-bearing: nothing
+   * carries over from the user's index, so a secret they had already committed cannot arrive
+   * that way at all. The `rm --cached` below stays as the belt to that braces.
+   */
+  if (fs.existsSync(index)) fs.rmSync(index);
 
   const env = {
     GIT_INDEX_FILE: index,
@@ -179,14 +200,33 @@ function capture(root, store, phase) {
    * ordinary case, so throwing here meant JuQode could not take a basis for most real repos.
    *
    * `-f` is NOT the fix: it would stage the ignored file, which is the one thing D-126a exists
-   * to prevent. Suppressing the advice does not clear the status either (measured). So the
-   * status is not trusted in EITHER direction — the ARTIFACT is checked instead, below, and
-   * the failure is kept so a genuinely broken add is still visible. */
+   * to prevent. Suppressing the advice does not clear the status either (measured).
+   *
+   * So a failure is not accepted on the strength of the exit code, and NOT on the strength of a
+   * non-empty index either: the index here is a COPY of the user's, so it holds their tracked
+   * files whether or not this `add` wrote anything. Measured — a file `add` cannot read makes
+   * git exit 128 and abort WITHOUT writing the index, and the copy then still describes the
+   * state before the Work; `capture` returned the before-tree as the after-tree, `changedPaths`
+   * was empty, and the product said 바뀐 파일이 없어요 ✓확인됨 about a file it had just changed.
+   * That is the evidence-integrity class, and it is worse than the throw it replaced.
+   *
+   * The benign cause has exactly one shape — ignored files, which git names as "explicitly
+   * given" only because an exclude element is present. The harmful causes all come down to a
+   * path git could not read, and `firstUnreadable` is the direct detector for that. So on a
+   * failure we look for the harmful cause and refuse when we find it. Reading the message is
+   * not an option: this machine prints it in Korean. */
   let addFailed = null;
   try {
     git(['add', '-A', '--', '.', ...pathspec(), ...nestedSpec], { cwd: root, env });
   } catch (e) {
     addFailed = String(e?.stderr ?? e?.message ?? e);
+    const unreadable = firstUnreadable(root);
+    if (unreadable) {
+      const err = new Error(`git add could not read ${unreadable}`);
+      err.code = REFUSE.UNREADABLE;
+      err.detail = unreadable;
+      throw err;
+    }
   }
 
   /* (2) …and nothing excluded SURVIVES from the copied index either.
@@ -196,13 +236,6 @@ function capture(root, store, phase) {
    * check missed it, and the blob stayed in the basis tree. For a Korean-market product that
    * is the ordinary filename, not the exotic one. */
   const staged = git(['ls-files', '-z'], { cwd: root, env, raw: true }).split('\0').filter(Boolean);
-  /* The artifact check the status is not trusted for: an `add` that reported a problem AND
-   * produced an empty index really did fail, and a basis of nothing is not a basis. */
-  if (addFailed && !staged.length) {
-    const err = new Error(`git add produced no index: ${addFailed}`);
-    err.code = 'add-failed';
-    throw err;
-  }
   const dropped = staged.filter((f) => isExcludedPath(f));
   if (dropped.length) git(['rm', '--cached', '--quiet', '--', ...dropped], { cwd: root, env });
 
@@ -218,8 +251,10 @@ function capture(root, store, phase) {
    *
    * The paths are obtained from git; the CONTENTS are never opened, so nothing leaks. */
   const extra = [...ignoredPaths(root), ...nestedRepoFiles(root)];
+  /* `addWarning` travels with the basis rather than being dropped on the floor: the add
+   * succeeded well enough to keep, and the caller is entitled to know it complained. */
   return { kind: 'git_tree', ref, excluded: ledger(root, extra), droppedFromIndex: dropped, head,
-           nestedRepos: nested };
+           nestedRepos: nested, addWarning: addFailed };
 }
 
 /** Paths git is ignoring. Names only — no file is opened to obtain them. */
@@ -307,11 +342,15 @@ function changedPaths(root, store, beforeRef, afterRef) {
     GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
   };
-  const out = git(['diff-tree', '-r', '-z', '--name-only', '--no-color', beforeRef, afterRef],
-                  { cwd: root, env, raw: true });
-  /* `diff-tree` leads with the commit id line when given commits; `-z` makes that line
-   * NUL-terminated too. Drop any entry that is a bare 40-hex id. */
-  return out.split('\0').filter((p) => p && !/^[0-9a-f]{40}$/.test(p));
+  /* `--no-commit-id` is git's own answer to the leading id line, so nothing here has to guess
+   * which entry is an id. An earlier revision filtered out any bare 40-hex entry instead: these
+   * refs are always TREES, which emit no id line at all, so the filter's only live effect was
+   * deleting real filenames that happen to be 40 hex characters — content-addressed caches,
+   * sha1 fixtures, object dumps. `splitDiff` zips this list with the patch BY INDEX, so one
+   * dropped name shifted every later file and stored one file's diff under another's name. */
+  const out = git(['diff-tree', '-r', '-z', '--no-commit-id', '--name-only', '--no-color',
+                   beforeRef, afterRef], { cwd: root, env, raw: true });
+  return out.split('\0').filter(Boolean);
 }
 
 /** The paths in a basis tree — used by the tests to prove no secret is in it. */

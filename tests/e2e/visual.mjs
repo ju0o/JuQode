@@ -60,7 +60,29 @@ const fs = require('fs');
 /* On the RESUME the grant exists, so the Edit goes through and the Work ends — which is what
  * D-133's contract B describes and what gives SC-04 a finished Work to read. A fixture that
  * denied forever could only ever exercise the refusal card. */
+const ARGV_LOG = ${JSON.stringify(path.join(DB_DIR, 'ARGV.log'))};
+try {
+  fs.mkdirSync(require('path').dirname(ARGV_LOG), { recursive: true });
+  fs.appendFileSync(ARGV_LOG, process.argv.slice(2).join(' ') + '\\n');
+} catch { /* the log is evidence for the test, never a reason for the fixture to die */ }
 const resumed = process.argv.includes('--resume');
+/* The EXPLANATION pass (WBS-26) is distinguishable from a Work turn by the tool restriction it
+ * carries: \`--tools ""\` empties the built-in tool set. Answering it with real groups is what
+ * gives SC-04's explained state — the JUQODE chip, 무엇/왜/어떤 동작에, the confidence chip and
+ * \`readerFor\`'s persisted-groups branch — its first execution anywhere in the suite. */
+const explaining = process.argv.includes('--tools');
+if (explaining) {
+  const groups = [{ title: '실행 안내를 README 에 넣었어요',
+                    what: 'README 에 실행 방법을 적고, greet 함수를 추가했어요',
+                    why: '프로젝트를 처음 여는 사람이 실행 방법을 찾을 수 있게',
+                    affects: '문서와 인사말 함수',
+                    confidence: 'confirmed',
+                    files: ['README.md', 'src/index.js'] }];
+  process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'x', cwd: '/p' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false,
+    permission_denials: [], result: JSON.stringify(groups) }) + '\\n');
+  process.exit(0);
+}
 /* The fixture EDITS the project on the GRANTED turn — the Edit it was denied is the Edit it
  * then performs. A Work that changed nothing could only ever show SC-04's 변경 없음 state.
  * One .js file (S1 — real declarations) and one .md file (S2 — \`19\` §C5-B sends structured
@@ -391,7 +413,7 @@ const results = await cdp(async ({ send, evalJs }) => {
 
   /* the guard: a second submit while this Work is open must be refused, not queued */
   step('guard');
-  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로')).click()`);
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(500);
   await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 오류 고쳐줘'; })()`);
   await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
@@ -442,6 +464,43 @@ const results = await cdp(async ({ send, evalJs }) => {
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(OUT, `sc04-reader-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
+  /* ── the EXPLAINED state ──────────────────────────────────────────────────────────────
+   * Every test in the repository — unit and e2e — used to leave every group unexplainable, so
+   * the whole success path of WBS-26 was dead code: the JUQODE actor chip, the 무엇/왜/어떤
+   * 동작에 rows, the confidence chip, and `readerFor`'s persisted-groups branch. A mutation
+   * that ignored every stored group forever survived the entire suite.
+   *
+   * The pass itself needs a real model, so the GROUPS are seeded directly and the screen is
+   * re-opened — which exercises exactly the code a successful pass leads to. */
+  step('SC-04 explained');
+  await evalJs(`document.querySelector('.sc04-explain')?.click()`);
+  await sleep(3000);
+  out.explainedReader = await evalJs('JSON.stringify(window.__reader())');
+  out.explainedText   = await evalJs(`document.querySelector('.sc04')?.innerText ?? null`);
+  out.explainedReds   = await evalJs(RED_COUNT('.sc04 *'));
+  /* Nothing on any screen may render a stringified object. `when(at)` was called in SC-04's
+   * header without being defined or imported, and it did NOT throw — the browser has a global
+   * `when`, so the header quietly displayed `[object Observable]` beside the outcome chip. A
+   * free identifier that resolves to a platform global fails silently and looks like data. */
+  out.objectText = await evalJs(`(() => {
+    const hits = [];
+    for (const n of document.querySelectorAll('.board, .board *')) {
+      for (const c of n.childNodes) {
+        if (c.nodeType === 3 && /\\[object [A-Z]/.test(c.nodeValue)) hits.push(c.nodeValue.trim());
+      }
+    }
+    return JSON.stringify([...new Set(hits)]);
+  })()`);
+  out.readerStamp = await evalJs(`document.querySelector('.sc04-headtop')?.innerText ?? null`);
+  out.explainArgv     = fs.existsSync(path.join(DB_DIR, 'ARGV.log'))
+    ? fs.readFileSync(path.join(DB_DIR, 'ARGV.log'), 'utf8') : '';
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc04-explained-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업으로'))?.click()`);
   await sleep(600);
   out.screenAfterReader = await evalJs('window.__screen()');
@@ -619,12 +678,15 @@ assert.ok(readerFiles.includes('README.md'), `the edited .md file is missing: ${
 assert.ok(!readerFiles.some((f) => f.includes('.env')), `an excluded path reached SC-04: ${readerFiles}`);
 assert.ok(!readerFiles.some((f) => f.includes('node_modules')), 'node_modules reached SC-04');
 
-/* No pass has run, so every group is 설명 못함 — and the screen says so without a reason. */
+/* No pass has run yet — which is NOT the same as one having failed. `18` reader.unexplained's
+ * truth condition is "LLM 설명 실패/거부", so using it here made the product announce its own
+ * failure for work it never attempted. */
 assert.ok(reader.groups.every((g) => g.explainable === false),
   'nothing explained this Work, yet a group claims it was explained');
-assert.ok(results.readerText.includes('이 변경은 말로 설명하지 못했어요'), 'the 설명 못함 sentence is missing');
-assert.ok(results.readerText.includes('그럴듯한 이유를 지어내지 않아요'),
-  'the guarantee that no reason is invented is not on screen');
+assert.ok(results.readerText.includes('아직 이 변경을 말로 설명하지 않았어요'),
+  `the not-yet-asked state is missing: ${results.readerText.slice(0, 200)}`);
+assert.ok(!results.readerText.includes('이 변경은 말로 설명하지 못했어요'),
+  'the screen claims an explanation FAILED when none was ever requested');
 /* 단위화 불가 — README.md is one of `19` §C5-B's structured formats and goes straight to Raw. */
 assert.ok(results.readerText.includes('이 파일은 단위로 나누지 못했어요'), 'the 단위화 불가 state is missing');
 /* …and the .js file DID produce a named unit, or S1 is not actually running. */
@@ -644,6 +706,43 @@ assert.ok(/^@@|^[-+]|diff/m.test(results.readerPatch ?? ''),
 assert.ok(results.readerRawOverflow <= 0,
   `an open patch made the PAGE scroll sideways by ${results.readerRawOverflow}px — it must scroll inside its own box`);
 assert.strictEqual(results.screenAfterReader, 'SC-03', '작업으로 돌아가기 did not return to SC-03');
+
+/* ── SC-04, once a pass HAS explained the change (WBS-26) ───────────────────────────────
+ * Everything below was dead code in every test that existed before: the whole success path of
+ * the explanation layer, and the branch of `readerFor` that reads persisted groups. */
+const explained = results.explainedReader ? JSON.parse(results.explainedReader) : null;
+assert.ok(explained, 'SC-04 lost its read model after the explanation pass');
+assert.ok(explained.groups.some((g) => g.explainable === true),
+  `the pass returned groups and none of them is explained: ${results.explainedReader}`);
+assert.ok(results.explainedText.includes('무엇') && results.explainedText.includes('왜'),
+  'the 무엇 / 왜 / 어떤 동작에 rows never rendered');
+assert.ok(results.explainedText.includes('실행 안내를 README 에 넣었어요'),
+  'the explanation the pass produced is not on screen');
+assert.ok(!results.explainedText.includes('이 변경은 말로 설명하지 못했어요'),
+  'the screen still claims the change could not be explained');
+assert.strictEqual(results.explainedReds, 0, 'the explained state renders red, and nothing failed');
+
+/* The Work observed no test/run, so `19` §C5-X forbids 확인됨 however confident the model was —
+ * and this is the first time the confidence chip has been rendered at all. */
+assert.ok(results.explainedText.includes('예상됨'),
+  `a model-authored explanation is 예상됨: ${results.explainedText.slice(0, 300)}`);
+assert.ok(!results.explainedText.includes('확인됨'),
+  'the pass claimed 확인됨 with no observed run and the screen printed it');
+
+/* …and the pass really was launched with the built-in tool set emptied. An empty ALLOW list
+ * added no flag at all, and no test looked at argv, so a pass documented as "no tools" ran
+ * with all of them in the user's project directory. */
+assert.ok(/--tools/.test(results.explainArgv),
+  `the explanation pass carried no tool restriction: ${results.explainArgv}`);
+
+assert.deepStrictEqual(JSON.parse(results.objectText), [],
+  'a screen rendered a stringified object — some value reached the DOM without being formatted');
+/* `15` SC-04 Re-entry State: the header shows the Work's time. A change read days later is a
+ * different thing from one read a minute after it happened. */
+assert.ok(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(results.readerStamp ?? ''),
+  `SC-04's header carries no timestamp: ${results.readerStamp}`);
+assert.ok(/끝났어요|일부만|끝내지 못했어요|취소했어요/.test(results.readerStamp ?? ''),
+  `SC-04's header carries no outcome chip: ${results.readerStamp}`);
 /* The NEXT slot is always rendered, and empty is the right answer here (D-107). */
 assert.ok(results.nextSlot && results.nextSlot.includes('Claude Code가 아직 다음 단계를 보내지 않았어요'),
   `NEXT slot: ${results.nextSlot}`);

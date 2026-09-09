@@ -30,7 +30,20 @@ const SCHEMA_FILE = path.join(__dirname, 'schema.sql');
 
 /* schema.sql seeds schema_version = 1 itself. Later versions are appended here and are
  * applied in order; a version is never re-run and never rolled back. */
-const MIGRATIONS = [];
+const MIGRATIONS = [
+  /* 2 — `change_group.source_ref`. D-114 says a 확인됨 claim names the evidence it rests on, and
+   * `interpretation_answer` even carries a CHECK to that effect; `change_group` had nowhere to
+   * put it, so the reference was computed, asserted on in a test, and then dropped on the floor.
+   * A group re-read from the store carried a ✓ 확인됨 chip citing nothing. CANON_FINDINGS CF-13.
+   *
+   * SQLite cannot ADD a CHECK to an existing table, so the constraint is not declared here; the
+   * repository layer refuses the same shape and `tests/explain.test.js` holds it to that.
+   *
+   * `schema.sql` stays at the shape `20` publishes and is NOT edited to include this column: it
+   * seeds version 1, so a fresh store runs this migration exactly like an old one. One path,
+   * exercised on every first run, instead of a second path only old stores ever take. */
+  { to: 2, sql: 'alter table change_group add column source_ref text;' },
+];
 /* A getter, not a constant: computed at module load it could never see a migration a test
  * pushes, so the whole migrate loop below was unreachable from any test. */
 const latest = () => 1 + MIGRATIONS.length;
@@ -75,6 +88,12 @@ function openDb(file) {
         try { db.exec('rollback'); } catch { /* SQLite may have rolled back already */ }
         throw e;
       }
+      /* …and then the SAME migrations an existing store gets. `schema.sql` is the shape `20`
+       * publishes and stays at version 1; everything since is a migration. Running them here
+       * too means there is ONE upgrade path, exercised on every first run, rather than a second
+       * path that only stores older than the current build ever take — and a divergence between
+       * a fresh store and a migrated one would be invisible until a user hit it. */
+      migrate(db, file);
     } else {
       migrate(db, file);
     }

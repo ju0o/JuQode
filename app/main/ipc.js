@@ -39,6 +39,8 @@ function makeHandlers(deps) {
 
   let lastPick = null;
   let detecting = null;
+  /* Projects with an explanation pass in flight — see `juqode:work-explain`. */
+  const explaining = new Set();
 
   return {
     'juqode:versions': () => deps.versions?.() ?? {},
@@ -171,9 +173,26 @@ function makeHandlers(deps) {
       const w = workOr(workId);
       if (!w) return { ok: false, reason: 'no-work' };
       if (w.status !== 'ended') return { ok: false, reason: 'still-running' };
+
+      /* One pass at a time, and never while a Work is running in the same PROJECT. The pass
+       * spawns a Claude Code child in the project directory, so two of them — or one of them
+       * alongside a Work — is two sessions in one repository, which is the thing D-117's single
+       * active Work exists to prevent. The Work check above is per-Work and cannot see this. */
+      if (explaining.has(w.project_id)) return { ok: false, reason: 'already-explaining' };
+      if (repo.activeWork(db(), w.project_id)) return { ok: false, reason: 'work-running' };
+
       const row = db().prepare('select * from project where id = ?').get(w.project_id);
-      const out = await explain.explain(db(), workId, { cwd: row.path, bin: deps.claudeBin?.() });
-      return { ok: true, reason: out.reason,
+      explaining.add(w.project_id);
+      let out;
+      try {
+        /* No `bin` — `session.run` resolves it through `claude-detect.resolveBin()`, which is
+         * the one place `JUQODE_CLAUDE_BIN` is honoured. Passing `deps.claudeBin?.()` looked
+         * like a dependency and was always undefined. */
+        out = await explain.explain(db(), workId, { cwd: row.path });
+      } finally {
+        explaining.delete(w.project_id);
+      }
+      return { ok: out.ok, reason: out.reason, kept: out.kept ?? false,
                ...supervisor.readerFor(db(), workId, row, deps.evidenceStore(w.project_id)) };
     },
 

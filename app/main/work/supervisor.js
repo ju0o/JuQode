@@ -352,7 +352,19 @@ function saveDiffs(db, workId, project, store) {
      * and the change reader came to disagree on every quoted, spaced and renamed path. */
     names = gitEvidence.changedPaths(project.path, store, before.ref, after.ref);
   } catch { return; }
-  for (const file of blocks.splitDiff(patch, names)) {
+
+  /* The two git calls must describe the same patch. If they ever disagree on how many files
+   * there are, zipping them BY INDEX would file one file's diff under another's name — so the
+   * name list is dropped and the header is used, which is wrong for exotic paths but never
+   * wrong about WHICH change belongs to WHICH file. */
+  const zipped = blocks.splitDiff(patch, names);
+  const files = zipped.length === names.length ? zipped : blocks.splitDiff(patch);
+
+  /* Rows for files this Work no longer changes are removed FIRST — a retry that reverted a file
+   * used to leave its diff on SC-04 for good, disagreeing with `changes()`, which reads git. */
+  repo.pruneDiffs(db, workId, files.map((f) => f.path));
+
+  for (const file of files) {
     repo.saveDiff(db, workId, {
       file: file.path,
       patch: file.lines.join('\n'),
@@ -372,7 +384,16 @@ function saveDiffs(db, workId, project, store) {
  */
 function readerFor(db, workId, project, store) {
   const diffs = repo.diffsFor(db, workId);
-  if (!diffs.length) return { groups: [], files: 0 };
+  if (!diffs.length) {
+    /* NO stored patch is not the same fact as NO CHANGE, and SC-04's empty state is a 확인됨
+     * claim. Only a git basis produces a patch, so a non-Git project — or a Work whose diff
+     * could not be rendered — used to reach the sentence `이 작업은 프로젝트 파일을 바꾸지
+     * 않았어요` while SC-03, one click earlier, said 변경 3개. `12` has a state for "we could
+     * not tell" (UF-REMAIN-UNKNOWN) and none for telling the user the opposite. */
+    const changed = changes(db, workId, project, store);
+    if (changed.known && changed.files.length === 0) return { groups: [], files: 0, unknown: false };
+    return { groups: [], files: 0, unknown: true, changedFiles: changed.known ? changed.files : null };
+  }
 
   let groups = repo.changeGroupsFor(db, workId);
   if (!groups.length) {
@@ -384,7 +405,11 @@ function readerFor(db, workId, project, store) {
      * shows and the default the pass falls back to are the same code. */
     const byId = new Map(diffs.map((d) => [d.id, d.file]));
     groups = explain.groupsFrom(null, { diffs, signals: [] }).groups
-      .map((g) => ({ ...g, files: g.files.map((id) => byId.get(id)) }));
+      /* `pending`, not `explainable: false`. Nothing has FAILED here — nothing has been asked.
+       * `18` reader.unexplained's truth condition is "LLM 설명 실패/거부", and announcing that
+       * for a pass that was never run is the same overclaim inverted: the product reporting its
+       * own failure for work it never attempted. */
+      .map((g) => ({ ...g, pending: true, files: g.files.map((id) => byId.get(id)) }));
   }
 
   const segments = new Map(blocksFor(db, workId, project, store).map((b) => [b.file, b]));

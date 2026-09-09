@@ -78,7 +78,7 @@ function allowSpec(denial, cwd) {
  * @returns {Promise<{code:number|null, signal:string|null, sawEvent:boolean, stderr:string,
  *                    startFailed:boolean, unparsed:number}>}
  */
-function run({ cwd, sessionId, prompt, allowedTools = [], resume = false, onSignal, onChild, bin, timeoutMs = 0 }) {
+function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume = false, onSignal, onChild, bin, timeoutMs = 0 }) {
   const args = resume
     ? ['--resume', sessionId, '-p', '--output-format', 'stream-json', '--verbose']
     : baseArgs(sessionId);
@@ -87,6 +87,17 @@ function run({ cwd, sessionId, prompt, allowedTools = [], resume = false, onSign
    * missing deferred-tool marker. The prompt goes on stdin, which also handles a multi-line
    * request without any quoting question. */
   if (allowedTools.length) args.push('--allowedTools', ...allowedTools);
+
+  /* `--tools` selects from the BUILT-IN set, and `--tools ""` disables all of them. It is not
+   * the same knob as `--allowedTools`, which only pre-grants permission for tools the session
+   * already has — passing an empty ALLOW list adds no flag at all and leaves the default set
+   * intact, which is how a pass documented as "no tools" ran with all of them.
+   *
+   * MEASURED (Claude Code 2.1.266, disposable scratch dir, never a real project): asked to edit
+   * a file with `--tools ""`, the CLI produced a text-only turn — "Read (No such file or
+   * directory)" — `permission_denials: []`, one turn, and the target file was byte-identical
+   * afterwards. That is the containment claim, and it is the only one made. */
+  if (tools !== null) args.push('--tools', tools);
 
   const env = { ...process.env };
   /* Nested invocation: Claude Code refuses to run inside its own session unless these go. */

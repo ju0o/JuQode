@@ -23,27 +23,66 @@ const repo = require('../db/repo.js');
 const { KIND } = require('../work/reducer.js');
 const session = require('../claude/session.js');
 
-/* The explanation pass reads a diff we already hold. It is given no tools at all — it never
- * touches the project, so it cannot change what it is explaining and cannot trip a permission
- * prompt in the middle of a Work that has already ended. */
-const NO_TOOLS = [];
+/* The explanation pass reads a diff we already hold, and it gets the BUILT-IN TOOL SET EMPTIED
+ * — `--tools ""`, measured in `claude/session.js` — so it cannot touch the project it is
+ * describing and cannot trip a permission prompt after the Work has already ended.
+ *
+ * An earlier revision passed `allowedTools: []` and this comment claimed the same thing. That
+ * is a different flag: an empty ALLOW list adds no argument at all, so the pass ran with the
+ * CLI's whole default tool set in the user's project directory. `19` §S also keeps `.env`-like
+ * files out of Change Group prompts — an exclusion a tool-enabled pass could simply walk
+ * around by reading the file itself. */
+const NO_TOOLS = '';
 
 /** How much patch text goes into one prompt. The head is already bounded at 256 KB per file. */
 const PROMPT_BUDGET = 120 * 1024;
 
 /* ─────────────────────────────── the pure part ─────────────────────────────── */
 
+/* The built-in tools that RUN something. A Read, an Edit or a Glob observes nothing about
+ * whether the change works — `19` §C5-X ties 확인됨 to a test/run result specifically. */
+const RUN_TOOLS = new Set(['Bash', 'BashOutput']);
+
 /**
- * Did this Work observe a run finish? `19` §C5-X ties 확인됨 to an observed test/run result in
- * `work_signal` — not to the model saying a test passed, and not to the exit code, which `07`
- * §8.1 measured as blind to both cancellation and refusal.
+ * Did this Work observe a RUN finish? Not "did any tool return" — an earlier revision counted
+ * every `tool_result`, so a Work that only edited files let the model's own `"confirmed"` stand
+ * on every group, and the `sourceRef` pointed at whichever tool happened to return last.
+ *
+ * The tool NAME is not on the result signal; it is on the `tool_use` that opened it. So the two
+ * are correlated by `tool_use_id` through the raw CLI lines the signals persist.
+ *
+ * Not the exit code either, which `07` §8.1 measured as blind to both cancellation and refusal.
  *
  * @returns {{observed:boolean, sourceRef:string|null}}
  */
 function observedRun(signals = []) {
-  const results = signals.filter((s) => s.kind === KIND.TOOL_RESULT);
-  if (!results.length) return { observed: false, sourceRef: null };
-  return { observed: true, sourceRef: `signal:${results[results.length - 1].id ?? results.length}` };
+  const runIds = new Set();
+  for (const s of signals) {
+    if (s.kind !== KIND.TOOL_USE) continue;
+    for (const b of contentBlocks(s)) {
+      if (b.type === 'tool_use' && RUN_TOOLS.has(b.name) && b.id) runIds.add(b.id);
+    }
+  }
+  if (!runIds.size) return { observed: false, sourceRef: null };
+
+  for (let i = signals.length - 1; i >= 0; i--) {
+    const s = signals[i];
+    if (s.kind !== KIND.TOOL_RESULT) continue;
+    const hit = contentBlocks(s).some((b) => b.type === 'tool_result' && runIds.has(b.tool_use_id));
+    if (hit) return { observed: true, sourceRef: `signal:${s.id ?? s.seq ?? i}` };
+  }
+  return { observed: false, sourceRef: null };
+}
+
+/** The CLI's content blocks out of a persisted raw line. Anything unparseable contributes none. */
+function contentBlocks(signal) {
+  const raw = signal?.payload;
+  if (typeof raw !== 'string') return [];
+  try {
+    const e = JSON.parse(raw);
+    const c = e?.message?.content;
+    return Array.isArray(c) ? c : [];
+  } catch { return []; }
 }
 
 /** The model may say anything; only these three words mean anything here (D-114). */
@@ -76,10 +115,16 @@ function groupsFrom(response, { diffs = [], signals = [] } = {}) {
      * owned by an earlier group stays with that group: `20` gives a diff exactly one owner
      * (D-121, `code_block.raw_diff_id on delete restrict`). */
     const files = [];
+    const here = new Set();
     for (const f of Array.isArray(raw.files) ? raw.files : []) {
       const id = byFile.get(String(f));
       if (!id) { dropped.push(String(f)); continue; }
-      if (claimed.has(id)) continue;
+      /* Across groups AND within one. A model listing the same file twice is an ordinary slip,
+       * and it used to reach `change_group_file`'s composite primary key as a duplicate insert —
+       * the write threw out of `explain()`, the whole pass was discarded, and the user got a
+       * re-enabled button with no message. */
+      if (claimed.has(id) || here.has(id)) continue;
+      here.add(id);
       files.push(id);
     }
     if (!files.length) continue;                    // cites nothing → not a group
@@ -161,13 +206,26 @@ function fileTitle(ids, diffs) {
 function promptFor(diffs) {
   const parts = [];
   let used = 0;
+  let elided = 0;
   for (const d of diffs) {
     const body = d.displayable ? d.patch : '(표시할 수 없는 변경)';
     const chunk = `--- ${d.file}\n${body}\n`;
-    if (used + chunk.length > PROMPT_BUDGET) { parts.push(`--- ${d.file}\n(생략됨)\n`); continue; }
+    if (used + chunk.length > PROMPT_BUDGET) {
+      /* The elision line is counted too. Counting only the INCLUDED chunks meant a Work
+       * touching tens of thousands of files grew the prompt without bound through the very
+       * lines that were supposed to keep it small. */
+      const note = `--- ${d.file}\n(생략됨)\n`;
+      if (used + note.length > PROMPT_BUDGET) { elided += 1; continue; }
+      used += note.length;
+      parts.push(note);
+      continue;
+    }
     used += chunk.length;
     parts.push(chunk);
   }
+  /* …and when even the names do not fit, the COUNT is still stated. A file that vanishes from
+   * the prompt silently is a file the pass will never mention and nobody will miss. */
+  if (elided) parts.push(`--- (그 밖에 ${elided}개 파일은 이 설명 요청에 싣지 못했어요)\n`);
   return [
     '아래는 이미 끝난 작업이 만든 변경입니다. 읽고 설명만 하세요. 파일을 고치지 마세요.',
     '',
@@ -201,7 +259,7 @@ async function explain(db, workId, { bin, cwd, timeoutMs = 120000 } = {}) {
   let reason = null;
   try {
     const r = await session.run({
-      cwd, bin, prompt: promptFor(diffs), allowedTools: NO_TOOLS, timeoutMs,
+      cwd, bin, prompt: promptFor(diffs), tools: NO_TOOLS, timeoutMs,
       sessionId: randomUUID(),
       onSignal: (sig) => {
         if (sig.kind === KIND.FINISH) answer = sig.payload?.text ?? answer;
@@ -212,10 +270,45 @@ async function explain(db, workId, { bin, cwd, timeoutMs = 120000 } = {}) {
     reason = 'pass-failed';
   }
 
-  /* `groupsFrom` is called with whatever came back — including nothing. That is what makes
-   * 설명 못함 a normal outcome of this function rather than an exception nobody handles. */
+  /* `groupsFrom` is called with whatever came back — including nothing. A refusal, a crash and
+   * silence all become 설명 못함 rather than an exception nobody handles. The one thing it
+   * cannot handle is a writer that rejects the shape, so the write is guarded too. */
   const { groups, downgraded, dropped } = groupsFrom(answer, { diffs, signals });
-  repo.saveChangeGroups(db, workId, groups);
+
+  /* A pass that explained NOTHING must not overwrite a pass that explained something.
+   * `saveChangeGroups` deletes and reinserts, and the 설명 받기 button sits on the 설명 못함
+   * card — which is exactly the card a PARTIALLY explained Work still has. Measured: pressing
+   * it with the CLI unavailable replaced two good groups with one 설명 못함 group covering
+   * every file, and still returned ok. The user saw the screen refresh into "nothing is
+   * explained" with no indication that anything had failed. */
+  const explainedNow = groups.filter((g) => g.explainable).length;
+  if (!explainedNow && repo.changeGroupsFor(db, workId).some((g) => g.explainable)) {
+    return { ok: false, groups: [], downgraded, dropped, reason: reason ?? 'no-explanation',
+             kept: true };
+  }
+
+  /* `20`'s `change_group` has NO column for a citation, so a 확인됨 group read back from the
+   * database cites nothing — and D-114 says a 확인됨 claim names its evidence. The GATING is
+   * intact either way (a group only reaches `confirmed` with an observed run behind it); what
+   * is missing is a place to keep the pointer. Until `20` has one, it goes on the record as a
+   * signal, which is where this codebase already puts a fact with nowhere else to live.
+   * CANON_FINDINGS CF-13. */
+  const cited = groups.filter((g) => g.confidence === 'confirmed' && g.sourceRef);
+  if (cited.length) {
+    try {
+      repo.addSignal(db, workId, {
+        source: 'juqode', kind: KIND.RAW, seq: repo.nextSeq(db, workId),
+        payload: JSON.stringify({ changeGroupCitations: cited.map((g) => ({ title: g.title, sourceRef: g.sourceRef })) }),
+      });
+    } catch { /* the groups matter more than the note about them */ }
+  }
+
+  try {
+    repo.saveChangeGroups(db, workId, groups);
+  } catch (e) {
+    /* The write is the last step; a rejected shape loses the pass but must not lose the screen. */
+    return { ok: false, groups: [], downgraded, dropped, reason: 'write-failed' };
+  }
   return { ok: true, groups, downgraded, dropped, reason };
 }
 

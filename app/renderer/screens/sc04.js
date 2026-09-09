@@ -19,6 +19,11 @@
 import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { mountThemeToggle } from '../design/theme.js';
+/* `when` is imported, not assumed. It was called here without being defined or imported, and
+ * the call did NOT throw: the browser has a global `when`, so the header rendered the string
+ * `[object Observable]` next to the outcome chip. A free identifier that happens to resolve to
+ * a platform global fails silently and looks like data. */
+import { when } from './brief.js';
 
 /* `16` §2.1: 부분 amber FILL · 실패 red (the only red) · 알 수 없음 dashed. A change that
  * could not be explained is 알 수 없음 — dashed — and never red: nothing failed. */
@@ -58,14 +63,40 @@ export function renderSC04(root, api, nav, state) {
 
   board.appendChild(header(snap));
 
-  /* 변경 없음. `15` gives this its own state with two routes down, and the sentence carries
-   * (확인됨) because the evidence pair MEASURED it — it is not "we saw nothing". */
-  if (!reader || !reader.groups.length) {
-    const empty = el('section', 'card c-wide sc04-empty');
-    empty.appendChild(el('p', 'lead', C.reader.none));
+  /* Two different facts, and only ONE of them is 변경 없음. `reader.none` carries (확인됨)
+   * because the evidence pair MEASURED no change; when the pair could not answer, saying it
+   * would be a confirmed claim about something nobody confirmed. */
+  /* A refused read (`{ok:false, reason}`) has no `groups` at all. Reading `.length` off it threw
+   * AFTER the root was cleared, leaving a blank window — and `12` §16 requires 사용 불가 to be
+   * SAID. `groups?.length` handles the shape; this handles the state. */
+  if (reader && reader.ok === false) {
+    const card = el('section', 'card c-wide sc04-empty unknown');
+    card.appendChild(el('p', 'lead', C.gap.readerUnavailable));
+    card.appendChild(el('span', 'chip unavail', C.unavailable.chip));
     const acts = el('div', 'row-acts');
-    acts.appendChild(btn('btn sm ghost rec', C.reader.toBlocks, () => nav.toWork(snap)));
-    acts.appendChild(btn('btn sm ghost rec', C.reader.toRaw, () => nav.toWorkbench(p, state.interpretation)));
+    acts.appendChild(btn('btn sm ghost', C.gap.readerToResult, () => nav.toWork(snap)));
+    card.appendChild(acts);
+    board.appendChild(card);
+    shell.appendChild(board);
+    root.appendChild(shell);
+    return { shell, board };
+  }
+
+  if (!reader || !reader.groups?.length) {
+    const empty = el('section', `card c-wide sc04-empty${reader?.unknown ? ' unknown' : ''}`);
+    empty.appendChild(el('p', 'lead', reader?.unknown ? C.gap.readerUnknown : C.reader.none));
+    if (reader?.unknown && reader.changedFiles?.length) {
+      /* What IS known still gets said — `15`'s Unknown State: 아래는 확인 가능한 부분입니다. */
+      empty.appendChild(el('p', 'sm mut', C.reader.remainNote));
+      empty.appendChild(el('p', 'sm mono', C.gap.readerUnknownFiles(reader.changedFiles.join(' · '))));
+    }
+    /* `15` SC-04 Empty State: `▸ 결과 설명으로` · `▸ 다음 의도로`. `18` carries neither, so both
+     * are gap-marked rather than borrowing `reader.toBlocks`/`toRaw` — those name a code view
+     * and a raw view, and there is no code and no raw on this screen. And neither button is
+     * recovery-green: `16` reserves green ▸ for a recovery action, never for navigation. */
+    const acts = el('div', 'row-acts');
+    acts.appendChild(btn('btn sm ghost', C.gap.readerToResult, () => nav.toWork(snap)));
+    acts.appendChild(btn('btn sm ghost', C.gap.readerToIntent, () => nav.toWorkbench(p, state.interpretation)));
     empty.appendChild(acts);
     board.appendChild(empty);
     shell.appendChild(board);
@@ -87,10 +118,36 @@ export function renderSC04(root, api, nav, state) {
   return { shell, board };
 }
 
+/* `15` SC-04 header: "Work name + outcome chip (완료 / 부분 / 실패 / 취소됨 · 부분 변경)".
+ * Same mapping as SC-03's, and the same rule: `cancelled_nochange` is NEUTRAL, because the grey
+ * 사용 불가 means 지금 안 됨 · 실패 아님 (12 §16), which is a different statement from
+ * "the user stopped it". */
+const OUTCOME = {
+  complete:           { cls: 'ok',   key: 'complete' },
+  partial:            { cls: 'part', key: 'partial' },
+  failed:             { cls: 'fail', key: 'failed' },
+  cancelled_partial:  { cls: 'part', key: 'cancelled_partial' },
+  cancelled_nochange: { cls: '',     key: 'cancelled_none' },
+  ended_unknown:      { cls: 'unk',  key: null },
+};
+
 /* ── header: the Work this change belongs to ── */
 function header(snap) {
   const h = el('header', 'sc04-head');
-  h.appendChild(el('h1', 'h1', C.reader.title));
+  const top = el('div', 'sc04-headtop');
+  top.appendChild(el('h1', 'h1', C.reader.title));
+
+  const o = OUTCOME[snap?.outcome];
+  if (o) {
+    top.appendChild(el('span', `chip ${o.cls}`,
+      o.key ? C.work.resultTitle[o.key] : C.work.unknownTitle));
+  }
+  /* Re-entry from History lands here too, and `15` asks for the Work's time — a change read
+   * days later is a different thing from one read a minute after it happened. */
+  const at = snap?.work?.ended_at ?? snap?.work?.started_at ?? null;
+  if (at) top.appendChild(el('span', 'xs mut', when(at)));
+  h.appendChild(top);
+
   if (snap?.work?.intent) h.appendChild(el('p', 'lead', snap.work.intent));
 
   /* 취소된 Work 의 부분 변경 — an amber note, and the SAME reading path below it. `15` is
@@ -131,10 +188,17 @@ function groupColumn(reader, selected, api, nav, state) {
         card.appendChild(row);
       }
     } else {
-      /* 설명 불가. One sentence, then routes DOWN. There is no `왜` on this card — inventing a
-       * reason for a failure to explain is the overclaim the whole layer exists to prevent. */
-      card.appendChild(el('p', 'sm', C.reader.unexplained));
-      card.appendChild(el('p', 'sm mut', C.reader.unexplainedBody));
+      /* 설명 못함 — but ONLY when a pass actually ran and failed. `18`'s truth condition for
+       * this sentence is "LLM 설명 실패/거부"; a Work nobody has asked about has not failed, and
+       * saying so would be the product reporting a failure it never attempted. */
+      if (g.pending) {
+        card.appendChild(el('p', 'sm mut', C.gap.readerNotAsked));
+      } else {
+        /* One sentence, then routes DOWN. There is no `왜` on this card — inventing a reason
+         * for a failure to explain is the overclaim the whole layer exists to prevent. */
+        card.appendChild(el('p', 'sm', C.reader.unexplained));
+        card.appendChild(el('p', 'sm mut', C.reader.unexplainedBody));
+      }
       const acts = el('div', 'row-acts');
       acts.appendChild(btn('btn sm ghost rec', C.reader.toBlocks, () => select(i, false)));
       acts.appendChild(btn('btn sm ghost rec', C.reader.toRaw, () => select(i, true)));
@@ -167,6 +231,7 @@ function groupColumn(reader, selected, api, nav, state) {
   function select(i, raw) {
     state.readerGroup = i;
     state.readerRaw = raw;
+    /* The group-level button is the SKIP: it shows the whole group, so any block scope goes. */
     state.readerBlock = null;
     nav.toReader(state.workSnapshot, state.reader);
   }
@@ -185,8 +250,16 @@ function blockColumn(group, state, nav) {
 
     /* 표시 불가 — binary or image. `15` gives it routes down and NO red: this is a statement
      * about the file's kind, not about anything having gone wrong. */
-    if (!f.displayable || f.note === 'undisplayable') {
+    if (!f.displayable || f.note === 'undisplayable' || f.note === 'too-large') {
+      /* `19` §C5-B / D-127 send BOTH a binary and a >1 MiB file here — `21` WBS-28 lists
+       * "표시 불가 diff(바이너리 · >1 MiB) → 바이너리 카드" as one acceptance row, and the
+       * over-size half used to fall into the 단위화 불가 branch instead. */
       card.appendChild(el('p', 'sm sc04-undisplayable', C.reader.binary));
+      /* `12` §16: a state that cannot be shown is stated honestly AND routed onward. Without
+       * this the card was a dead end — told the reader nothing can be shown, offered nothing. */
+      const acts = el('div', 'row-acts');
+      acts.appendChild(btn('btn sm ghost rec', C.gap.readerToGroups, () => { state.readerRaw = false; nav.toReader(state.workSnapshot, state.reader); }));
+      card.appendChild(acts);
       col.appendChild(card);
       continue;
     }
@@ -208,14 +281,26 @@ function blockColumn(group, state, nav) {
       continue;
     }
 
-    for (const b of f.blocks) {
-      const row = el('div', 'sc04-block');
+    f.blocks.forEach((b, bi) => {
+      /* `15` SC-04 Inputs: "select Code Block"; Primary Action: `Raw Diff 보기` "on each block";
+       * Transition conditions: "block select → raw". Without this the middle column was
+       * decoration — a reader who wanted the raw text for ONE function got every file in the
+       * group, which is the opposite of 변경 범위 안의 코드만 표시합니다. */
+      const key = `${f.file}#${bi}`;
+      const on = state.readerBlock === key;
+      const row = btn(`sc04-block${on ? ' on' : ''}`, null, () => {
+        /* Selecting a block opens raw scoped to it; selecting it again closes that. */
+        state.readerBlock = on ? null : key;
+        state.readerRaw = !on;
+        nav.toReader(state.workSnapshot, state.reader);
+      });
+      row.setAttribute('data-block', key);
       row.appendChild(el('span', `chip sc04-kind k-${b.change}`, C.reader.kinds[b.change] ?? C.reader.kinds.modify));
       row.appendChild(el('span', 'sm mono sc04-blockname', b.name ?? f.file));
       const lines = b.afterLines?.length ? b.afterLines : b.beforeLines ?? [];
       if (lines.length) row.appendChild(el('span', 'xs mut', lineRange(lines)));
       card.appendChild(row);
-    }
+    });
 
     if (f.truncated) card.appendChild(el('p', 'xs mut sc04-truncated', C.gap.readerTruncated));
     col.appendChild(card);
@@ -241,7 +326,12 @@ function rawColumn(group, state, nav) {
     return col;
   }
 
-  for (const f of group.files) {
+  /* A selected block scopes the panel to ITS file. With none selected the group's whole change
+   * is shown, which is D-118's skip — the path that does not pass through a block at all. */
+  const scoped = state.readerBlock ? String(state.readerBlock).split('#')[0] : null;
+  const shown = scoped ? group.files.filter((f) => f.file === scoped) : group.files;
+
+  for (const f of shown) {
     const card = el('article', 'card c-wide2 sc04-rawcard');
     card.appendChild(el('p', 'sm mono sc04-filename', f.file));
     if (!f.displayable) {
@@ -255,6 +345,17 @@ function rawColumn(group, state, nav) {
       if (f.truncated) card.appendChild(el('p', 'xs mut sc04-truncated', C.gap.readerTruncated));
     }
     col.appendChild(card);
+  }
+
+  /* `15` SC-04 Inputs: `원문 diff 복사`. A reader who cannot get the text out of the app has to
+   * retype it. `18` carries the approved label. */
+  if (shown.some((f) => f.displayable && f.patch)) {
+    const copy = btn('btn sm ghost sc04-copy', C.reader.copy, async () => {
+      const text = shown.filter((f) => f.displayable).map((f) => f.patch).join('\n');
+      try { await navigator.clipboard.writeText(text); copy.textContent = C.gap.readerCopied; }
+      catch { copy.textContent = C.gap.readerCopyFailed; }
+    });
+    col.appendChild(copy);
   }
 
   /* UF-RULE-CHANGE-SCOPED — the footer states the rule the panel obeys. */

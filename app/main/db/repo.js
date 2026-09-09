@@ -181,7 +181,7 @@ const basisFor = (db, workId, phase) => {
  * `Deps: 17`, which does not say that. Filed as CANON_FINDINGS CF-10; until WBS-26 lands the
  * blocks are derived on demand from the stored patch, which is deterministic and costs nothing.
  */
-const HEAD_LIMIT = 256 * 1024;              // `20`: the bounded head that goes on screen
+const HEAD_LIMIT = 256 * 1024;              // `20`: the bounded head that goes on screen, in BYTES
 
 /**
  * D-129 · the head goes on screen, the WHOLE patch goes to a blob file. Writing only the head
@@ -193,7 +193,14 @@ const HEAD_LIMIT = 256 * 1024;              // `20`: the bounded head that goes 
  */
 function saveDiff(db, workId, { file, patch, displayable = true }, blobDir = null) {
   const over = Buffer.byteLength(patch, 'utf8') > HEAD_LIMIT;
-  const head = over ? patch.slice(0, HEAD_LIMIT) : patch;
+  /* BYTES on both sides. `over` was measured in bytes and the cut was made in UTF-16 code
+   * units, so a 600 KB Korean patch stored 600 KB — 2.3x the declared bound — and SC-04 then
+   * showed "앞부분만 실었어요" over a patch that was in fact complete. The cut is made on the
+   * buffer and decoded back, dropping the partial character at the boundary rather than
+   * emitting a replacement one. */
+  const head = over
+    ? Buffer.from(patch, 'utf8').subarray(0, HEAD_LIMIT).toString('utf8').replace(/\uFFFD$/, '')
+    : patch;
   let ref = null;
   if (over) {
     ref = 'truncated';
@@ -213,6 +220,23 @@ function saveDiff(db, workId, { file, patch, displayable = true }, blobDir = nul
                                                        unified_head = excluded.unified_head,
                                                        unified_ref  = excluded.unified_ref`)
     .run(randomUUID(), workId, file, displayable ? 1 : 0, head, ref, null, null);
+}
+
+/**
+ * Drop the rows for files this Work no longer changes.
+ *
+ * `saveDiffs` only ever upserted, so a retry that reverted a file left its old row behind for
+ * good: SC-04 showed a change that no longer exists, and disagreed with `changes()`, which
+ * reads git. The stored diffs are a snapshot of one answer, not an accumulation of every answer.
+ */
+function pruneDiffs(db, workId, keepFiles) {
+  const keep = new Set(keepFiles);
+  const stale = db.prepare('select id, file, unified_ref from raw_diff where work_id = ?').all(workId)
+    .filter((d) => !keep.has(d.file));
+  if (!stale.length) return [];
+  const del = db.prepare('delete from raw_diff where id = ?');
+  for (const d of stale) del.run(d.id);
+  return stale.map((d) => d.file);
 }
 
 const diffsFor = (db, workId) =>
@@ -291,13 +315,17 @@ function saveChangeGroups(db, workId, groups) {
   try {
     /* `change_group_file` cascades from the group, so deleting the groups clears the links. */
     db.prepare('delete from change_group where work_id = ?').run(workId);
-    const g = db.prepare(`insert into change_group (id, work_id, ord, title, what, why, affects, confidence, explainable)
-                          values (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const g = db.prepare(`insert into change_group (id, work_id, ord, title, what, why, affects, confidence, source_ref, explainable)
+                          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const link = db.prepare('insert into change_group_file (change_group_id, raw_diff_id) values (?, ?)');
     groups.forEach((grp, i) => {
       const id = randomUUID();
+      /* D-114, enforced where the CHECK cannot be: a 확인됨 group must name its evidence. It is
+       * DOWNGRADED rather than refused — the rest of what the pass said is still worth keeping,
+       * and 예상됨 is what an unsourced claim always was. */
+      const sourced = grp.confidence === 'confirmed' && !grp.sourceRef ? 'expected' : grp.confidence;
       g.run(id, workId, i, grp.title, grp.what ?? null, grp.why ?? null, grp.affects ?? null,
-            grp.confidence ?? null, grp.explainable === false ? 0 : 1);
+            sourced ?? null, grp.sourceRef ?? null, grp.explainable === false ? 0 : 1);
       for (const rawDiffId of grp.files ?? []) link.run(id, rawDiffId);
     });
     db.exec('commit');
@@ -312,6 +340,7 @@ const changeGroupsFor = (db, workId) =>
   db.prepare('select * from change_group where work_id = ? order by ord').all(workId).map((g) => ({
     id: g.id, ord: g.ord, title: g.title, what: g.what, why: g.why, affects: g.affects,
     confidence: g.confidence,
+    sourceRef: g.source_ref,
     explainable: Boolean(g.explainable),
     files: db.prepare(`select r.file from change_group_file f join raw_diff r on r.id = f.raw_diff_id
                        where f.change_group_id = ? order by r.file`).all(g.id).map((r) => r.file),
@@ -371,7 +400,7 @@ module.exports = {
   saveBasis, basisFor,
   upsertStep, stepsFor,
   saveResult, resultFor,
-  saveDiff, diffsFor,
+  saveDiff, diffsFor, pruneDiffs,
   saveChangeGroups, changeGroupsFor,
   reconcileLostWorks, processFor,
 };

@@ -92,6 +92,6 @@ window.__reader  = () => (state.reader
         confidence: g.confidence, files: g.files.map((f) => f.file),
         blocks: g.files.flatMap((f) => f.blocks.map((b) => b.name ?? b.kind)),
         notes: g.files.map((f) => f.note) })),
-      selected: state.readerGroup, raw: state.readerRaw }
+      selected: state.readerGroup, raw: state.readerRaw, block: state.readerBlock }
   : null);
 window.__ready   = true;

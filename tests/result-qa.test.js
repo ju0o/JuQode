@@ -17,15 +17,11 @@ const supervisor = require(path.join(R, 'app/main/work/supervisor.js'));
 const result = require(path.join(R, 'app/main/work/result.js'));
 const { KIND } = require(path.join(R, 'app/main/work/reducer.js'));
 
-const juqodeTempDirs = [];
-const tempDir = (prefix) => {
-  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
-  juqodeTempDirs.push(d);
-  return d;
-};
-process.on('exit', () => {
-  for (const d of juqodeTempDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone */ } }
-});
+/* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
+ * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
+ * tmpfs and made the suite flaky in a different place every run. */
+const { tempDir } = require(path.join(__dirname, 'tmp.js'));
+
 
 const AVAILABLE = async () => ({ available: true, version: 'x' });
 

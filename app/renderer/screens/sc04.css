@@ -55,7 +55,20 @@
 
 /* ---------- centre · 코드 단위 ---------- */
 .sc04-filename { overflow-wrap: anywhere; color: var(--ink2); }
-.sc04-block { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* A block is a BUTTON — `15` makes it selectable — but it must not look like one until it is
+   hovered or chosen, or the middle column becomes a wall of controls. */
+.sc04-block {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  width: 100%; text-align: left;
+  font: inherit; color: inherit;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-inner); padding: 4px 6px; margin: 0;
+  cursor: pointer;
+  transition: background var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease);
+}
+.sc04-block:hover { background: var(--card2); border-color: var(--line); }
+/* The selected block is what the raw panel is showing. A left rule survives greyscale. */
+.sc04-block.on { background: var(--card2); border-color: var(--juq); box-shadow: inset 3px 0 0 var(--juq); }
 .sc04-blockname { min-width: 0; overflow-wrap: anywhere; }
 /* The kind chips carry a WORD, not a colour: 추가 · 삭제 · 수정 · 이름 변경 are facts about the
    change, and none of them is a failure — so none of them is red. */

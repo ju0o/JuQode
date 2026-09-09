@@ -137,8 +137,10 @@ const qName = (k) => ({
   'folder-roles': C.gap.briefRoles, 'tech-meaning': C.gap.briefTechMeaning,
 }[k] ?? k);
 
-/* A timestamp, stated as a fact. No "3일 전" arithmetic — that judgement is WBS-05's. */
-function when(iso) {
+/* A timestamp, stated as a fact. No "3일 전" arithmetic — that judgement is WBS-05's.
+ * Exported because SC-04's header states the Work's time too, and a second copy is a second
+ * thing to drift. */
+export function when(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const two = (n) => String(n).padStart(2, '0');
