@@ -274,3 +274,25 @@ still listed it as unanswered. The narrative layer now re-states that row.
 
 Next eligible: WBS-05 (03, 04, 21 — now open) · WBS-25 (00, 01 — TD-01, which WBS-22's card
 needs) · WBS-29 (11).
+
+## Batch 10
+
+Report: `BATCH-10.md`. Canon findings raised: CF-16 · CF-17.
+
+| Package | State |
+|---|---|
+| WBS-05 Project brief · fold · stale · refresh | IMPLEMENTED |
+
+Both acceptance rows are about what the product must NOT do on its own: `juqode:brief` is
+read-only (it re-runs the deterministic scan, compares `source_hash`, asks no model and writes
+nothing), and a refresh that cannot read the folder keeps the interpretation the user can still
+read instead of replacing it with a card saying nothing was read.
+
+A new test — "every copy key the renderer NAMES actually exists" — immediately found two more
+places where the product drew blank text: the Brief's failure band had no title, and the result
+card's 한 것 / 못 한 것 headings were empty over the two lists that ARE the 부분 state. The
+existing copy test checks the provenance of strings that exist; it cannot see a missing one.
+
+389 tests, three e2e files, 8/8 mutants killed.
+
+Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs) · WBS-29 (11).
