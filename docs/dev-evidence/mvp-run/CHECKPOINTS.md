@@ -296,3 +296,23 @@ existing copy test checks the provenance of strings that exist; it cannot see a 
 389 tests, three e2e files, 8/8 mutants killed.
 
 Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs) · WBS-29 (11).
+
+## Batch 11
+
+Report: `BATCH-11.md`.
+
+| Package | State |
+|---|---|
+| WBS-29 Error model & state color grammar | IMPLEMENTED |
+
+`21` asks for "visual regression against the VD frames". Pixel-comparing rendered app output to
+design artefacts fails on legitimate differences, so the six state chips are rendered and their
+computed styles MEASURED instead — in both themes, against the properties `16` §2.1 names.
+
+It found 실패 and 사용 불가 separated by hue alone: neither carried a mark, and their light-theme
+backgrounds measured luminance 244 and 241. That is the one pair `12` §16 turns into a product
+promise (사용 불가 ≠ 실패), and only the words were keeping them apart. Both now carry a mark.
+
+389 tests, three e2e files, 5/5 mutants killed.
+
+Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs).
