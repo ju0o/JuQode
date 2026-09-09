@@ -406,3 +406,31 @@ requires a positive liveness verdict, and the e2e measures SC-02's mode while a 
 Next eligible: WBS-36 (light/dark theme completeness) · WBS-37 (screen differentiation ·
 transitions) · WBS-38 (다음 행동 ≠ NEXT) · DV-11's pty decision · WBS-32/33 (need humans and
 Windows).
+
+## Batch 14 · WBS-36 · WBS-38
+
+Report: `BATCH-14.md`. No new Canon findings.
+
+| Package | State |
+|---|---|
+| WBS-36 Light / Dark theme | IMPLEMENTED |
+| WBS-38 다음 행동 강조 (≠ NEXT) | IMPLEMENTED |
+
+485 tests, three e2e files.
+
+WBS-36's named unit test — 토큰 대비비 — did not exist, and writing it found that the LIGHT
+theme was failing WCAG AA: `--mut2` was 3.11:1 on a card and 2.72:1 on the board, for a rank
+that carries real sentences (the presence card's 진행 정도를 뜻하지 않아요 among them). The
+amber pair was 4.40:1 on the board, and dark's `--mut2` failed on two surfaces. Fixing `--mut2`
+squeezed it toward `--mut`, so `--mut` moved too — the test asserts AA AND four separated ranks
+so neither can be paid for the other.
+
+WBS-38's copy keys (`next.label`, `next.gloss`) were in `18` and used by nothing: JuQode's
+choices were unlabelled button rows a user had no way to tell from something the agent had
+announced. They now go through one block that carries JuQode's teal against the NEXT slot's
+Claude purple, is buttons against the slot's text, and says the difference in words. The e2e
+measures both blocks' computed styles in both themes, and measures `17`'s second table row —
+an empty NEXT with the offer still standing.
+
+Next eligible: WBS-37 (screen differentiation · transition motion) · DV-11's pty decision ·
+WBS-32/33 (need humans and Windows).

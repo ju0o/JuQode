@@ -154,3 +154,22 @@ details > summary:hover { color: var(--ink); }
 [data-card="presence"] .plabel {
   font-size: 12px; color: var(--ink2); text-align: center; overflow-wrap: anywhere;
 }
+
+/* WBS-38 · 다음 행동 ≠ NEXT (D-136 · `17`).
+ *
+ * JuQode's own choices, marked as JuQode's. The NEXT slot on SC-03 carries Claude's purple and
+ * has no buttons in it; these two treatments must never converge — `17` calls that the absolute
+ * rule of the package, and `tests/e2e/visual.mjs` measures both blocks in both themes. */
+.nextacts {
+  border-top: 1px solid var(--line);
+  border-left: 3px solid var(--juq);
+  padding: 8px 0 0 10px;
+  margin-top: 4px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.nextacts .nahead { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.nextacts .nalabel {
+  font-size: 12px; font-weight: 600; letter-spacing: .03em;
+  color: var(--juq);
+}
+.nextacts .nagloss { min-width: 0; overflow-wrap: anywhere; }

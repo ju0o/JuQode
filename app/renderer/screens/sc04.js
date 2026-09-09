@@ -24,6 +24,7 @@ import { mountThemeToggle } from '../design/theme.js';
  * `[object Observable]` next to the outcome chip. A free identifier that happens to resolve to
  * a platform global fails silently and looks like data. */
 import { when } from './brief.js';
+import { nextActions } from '../nextaction.js';
 
 /* `16` §2.1: 부분 amber FILL · 실패 red (the only red) · 알 수 없음 dashed. A change that
  * could not be explained is 알 수 없음 — dashed — and never red: nothing failed. */
@@ -76,9 +77,9 @@ export function renderSC04(root, api, nav, state) {
     const card = el('section', 'card c-wide sc04-empty unknown');
     card.appendChild(el('p', 'lead', C.gap.readerUnavailable));
     card.appendChild(el('span', 'chip unavail', C.unavailable.chip));
-    const acts = el('div', 'row-acts');
-    acts.appendChild(btn('btn sm ghost', C.gap.readerToResult, () => nav.toWork(snap)));
-    card.appendChild(acts);
+    card.appendChild(nextActions([
+      btn('btn sm ghost', C.gap.readerToResult, () => nav.toWork(snap)),
+    ]));
     board.appendChild(card);
     shell.appendChild(board);
     root.appendChild(shell);
@@ -97,10 +98,10 @@ export function renderSC04(root, api, nav, state) {
      * are gap-marked rather than borrowing `reader.toBlocks`/`toRaw` — those name a code view
      * and a raw view, and there is no code and no raw on this screen. And neither button is
      * recovery-green: `16` reserves green ▸ for a recovery action, never for navigation. */
-    const acts = el('div', 'row-acts');
-    acts.appendChild(btn('btn sm ghost', C.gap.readerToResult, () => nav.toWork(snap)));
-    acts.appendChild(btn('btn sm ghost', C.gap.readerToIntent, () => nav.toWorkbench(p, state.interpretation)));
-    empty.appendChild(acts);
+    empty.appendChild(nextActions([
+      btn('btn sm ghost', C.gap.readerToResult, () => nav.toWork(snap)),
+      btn('btn sm ghost', C.gap.readerToIntent, () => nav.toWorkbench(p, state.interpretation)),
+    ]));
     board.appendChild(empty);
     shell.appendChild(board);
     root.appendChild(shell);

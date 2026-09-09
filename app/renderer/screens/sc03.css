@@ -60,10 +60,19 @@
 .sc03 .step.not_executed { color: var(--mut2); }
 
 /* the NEXT slot is always rendered; empty is a correct answer (D-107) */
+/* WBS-38 · the NEXT slot is CLAUDE's, and it is text.
+ *
+ * `17`'s absolute rule is that JuQode's 다음 행동 and Claude's NEXT never share a treatment.
+ * They are separated by voice (Claude's purple here, JuQode's teal on `.nextacts`), by shape
+ * (this slot holds no control — 다음 행동 is buttons) and by words (`next.stepLabel` names the
+ * speaker). Changing either colour to match the other is the failure the package is about. */
 .sc03 .nextslot {
-  border-top: 1px solid var(--line); padding-top: 8px;
+  border-top: 1px solid var(--line);
+  border-left: 3px solid var(--claude);
+  padding: 8px 0 0 10px;
   display: flex; flex-direction: column; gap: 2px;
 }
+.sc03 .nextslot .nlabel { color: var(--claude); font-weight: 600; letter-spacing: .03em; }
 .sc03 .unknownline { border-left: 1px dashed var(--unk); padding-left: 8px; }
 
 .sc03 .rawout {

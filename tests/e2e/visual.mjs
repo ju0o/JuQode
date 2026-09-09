@@ -589,6 +589,42 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.includes('허용하고'))?.click()`);
   await sleep(2500);
   out.afterAllow = await evalJs('JSON.stringify(window.__work())');
+
+  /* ── WBS-38 · 다음 행동 ≠ NEXT, measured on the one screen that shows BOTH ─────────────────
+   * `17`'s absolute rule is about VISUAL TREATMENT, so it can only be checked against the real
+   * cascade. Taken in both themes: a rule that holds in light and collapses in dark has not
+   * held. */
+  out.nextVsActions = await evalJs(`(async () => {
+    const out = {};
+    for (const theme of ['light', 'dark']) {
+      document.documentElement.setAttribute('data-theme', theme);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const slot = document.querySelector('[data-el="next"]');
+      const acts = document.querySelector('[data-el="next-actions"]');
+      const st = (n) => { const s = getComputedStyle(n); return {
+        borderLeftColor: s.borderLeftColor, borderLeftWidth: s.borderLeftWidth }; };
+      out[theme] = {
+        slot: slot ? { ...st(slot), buttons: slot.querySelectorAll('button').length,
+                       labelColor: getComputedStyle(slot.querySelector('.nlabel')).color,
+                       text: slot.innerText } : null,
+        acts: acts ? { ...st(acts), buttons: acts.querySelectorAll('button').length,
+                       labelColor: getComputedStyle(acts.querySelector('.nalabel')).color,
+                       text: acts.innerText } : null,
+      };
+    }
+    document.documentElement.setAttribute('data-theme', '');
+    return JSON.stringify(out); })()`);
+
+  /* `21` WBS-38's evidence: 두 요소가 같은 화면에 있는 스크린샷. */
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(250);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc03-result-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await sleep(200);
+
   await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.includes('변경 읽기'))?.click()`);
   await sleep(1200);
   out.screenReader   = await evalJs('window.__screen()');
@@ -1277,6 +1313,35 @@ assert.ok(results.permPanel.includes('허용하고 다시 해 보기'));
 assert.strictEqual(results.workReds, 0, 'SC-03 renders red for a refusal, which is not a failure');
 
 /* ── SC-04 · Change Reader ─────────────────────────────────────────────────────────────── */
+/* ── WBS-38 · D-136's absolute rule, on the rendered screen ──────────────────────────────── */
+{
+  const nva = JSON.parse(results.nextVsActions);
+  for (const theme of ['light', 'dark']) {
+    const { slot, acts } = nva[theme];
+    assert.ok(slot, `${theme}: SC-03 has no NEXT slot — D-107 requires it always rendered`);
+    assert.ok(acts, `${theme}: SC-03's finished Work has no 다음 행동 block`);
+    /* Shape. The slot is text; the offer is buttons. A control in the NEXT slot would be the
+     * user pressing something Claude "said". */
+    assert.strictEqual(slot.buttons, 0, `${theme}: the NEXT slot contains a control`);
+    assert.ok(acts.buttons >= 1, `${theme}: 다음 행동 has no buttons`);
+    /* Voice. Different actor colours, and the label colours differ too — a shared accent is
+     * exactly the "같은 시각 처리" `17` forbids. */
+    assert.notStrictEqual(slot.borderLeftColor, acts.borderLeftColor,
+      `${theme}: the two blocks carry the same accent colour`);
+    assert.notStrictEqual(slot.labelColor, acts.labelColor,
+      `${theme}: the two labels are painted the same`);
+    /* Words. Each names its own speaker, and neither claims the other's. */
+    assert.ok(acts.text.includes('다음 행동'), `${theme}: the offer is not labelled 다음 행동`);
+    assert.ok(slot.text.startsWith('NEXT'), `${theme}: the slot does not open with NEXT`);
+    assert.ok(!slot.text.includes('다음 행동'), `${theme}: 다음 행동 rendered inside the NEXT slot`);
+    /* D-107 · this Work's fixture declares no next Step, so the slot is EMPTY — and the offer
+     * is there anyway. That is the second row of `17`'s table, measured: 신호가 없으면 NEXT 는
+     * 비어 있고, 다음 행동은 그대로 있다. */
+    assert.ok(slot.text.includes('아직 다음 단계를 보내지 않았어요'),
+      `${theme}: the empty NEXT slot says something else: ${slot.text}`);
+  }
+}
+
 assert.strictEqual(results.screenReader, 'SC-04', `변경 읽기 did not reach SC-04 (${results.screenReader})`);
 const reader = results.reader ? JSON.parse(results.reader) : null;
 assert.ok(reader, 'SC-04 rendered without a read model');

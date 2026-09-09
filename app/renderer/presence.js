@@ -114,7 +114,7 @@ function tint(token) {
   const m = /^#([0-9a-f]{6})$/i.exec(hex);
   /* A token that does not resolve is a bug, not a colour to guess at — but a canvas that throws
    * takes the whole screen with it, so it falls back to the muted ink and stays visible. */
-  const rgb = m ? [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)).join(',') : '93,102,114';
+  const rgb = m ? [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)).join(',') : '76,84,95';
   tintCache.v[token] = rgb;
   return rgb;
 }

@@ -13,6 +13,7 @@ import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceCard, modeFor } from '../presence.js';
+import { nextActions } from '../nextaction.js';
 
 /* The schema's outcome codes → the class that paints them and `18`'s own title key.
  * `cancelled_nochange` is a NEUTRAL chip (`15`): the 사용 불가 grey means "지금 안 됨 · 실패
@@ -314,7 +315,7 @@ function stepsCard(snap) {
   const next = el('div', 'nextslot');
   next.setAttribute('data-el', 'next');
   const declared = snap.steps.find((s) => s.state === 'declared_next');
-  next.appendChild(el('span', 'xs mut2', C.next.stepLabel));
+  next.appendChild(el('span', 'xs nlabel', C.next.stepLabel));
   next.appendChild(el('div', 'sm' + (declared ? '' : ' mut'), declared ? declared.title : C.work.nextEmpty));
   card.appendChild(next);
 
@@ -420,17 +421,21 @@ function resultCard(snap, api, nav, state) {
     card.appendChild(box);
   }
 
-  const acts = el('div', 'row-acts');
-  /* `15` SC-04 entry: SC-03 `변경 읽기`. It is the PRIMARY action here — a finished Work's next
-   * question is what it actually changed, and reading that is the product's whole argument. */
-  acts.appendChild(btn('btn sm pri', C.work.readChanges, () => nav.toReader(snap)));
-  acts.appendChild(btn('btn sm', C.work.unwanted, () => {
-    /* Open the panel in place rather than navigating: `15` puts the Unwanted-result state on
-     * SC-03, and a user who is not sure yet must be able to go on reading. */
-    if (card.querySelector('[data-el="unwanted"]')) return;
-    card.insertBefore(unwantedPanel(snap, nav, state), acts);
-  }));
-  acts.appendChild(btn('btn sm', C.work.toBench, () => nav.toWorkbench(state.project, state.interpretation)));
+  /* WBS-38 · these are D-136's own examples of 다음 행동 — 변경 내용 보기 · 프로젝트로 돌아가기.
+   * They are JuQode's offer, and the block says so; Claude's NEXT lives on the Steps card and
+   * is text, not buttons. */
+  const acts = nextActions([
+    /* `15` SC-04 entry: SC-03 `변경 읽기`. It is the PRIMARY action here — a finished Work's next
+     * question is what it actually changed, and reading that is the product's whole argument. */
+    btn('btn sm pri', C.work.readChanges, () => nav.toReader(snap)),
+    btn('btn sm', C.work.unwanted, () => {
+      /* Open the panel in place rather than navigating: `15` puts the Unwanted-result state on
+       * SC-03, and a user who is not sure yet must be able to go on reading. */
+      if (card.querySelector('[data-el="unwanted"]')) return;
+      card.insertBefore(unwantedPanel(snap, nav, state), acts);
+    }),
+    btn('btn sm', C.work.toBench, () => nav.toWorkbench(state.project, state.interpretation)),
+  ]);
   card.appendChild(acts);
 
   card.appendChild(el('div', 'xs mut2 foot', C.rules.noRollback));
@@ -454,15 +459,15 @@ function unwantedPanel(snap, nav, state) {
   panel.appendChild(el('div', 'ct', C.work.unwantedTitle));
   panel.appendChild(el('p', 'sm', C.work.unwantedBody));
 
-  const acts = el('div', 'row-acts');
-  acts.appendChild(btn('btn sm pri', C.work.correction, () => {
-    /* Straight to the intent field with the sentence already in it — and NOT submitted. The
-     * user sends it, because `12` treats submitting as consent to change files. */
-    nav.toWorkbench(state.project, state.interpretation,
-                    { intent: C.gap.correctionIntent(snap.work.intent) });
-  }));
-  acts.appendChild(btn('btn sm ghost rec', C.work.readMore, () => nav.toReader(snap)));
-  panel.appendChild(acts);
+  panel.appendChild(nextActions([
+    btn('btn sm pri', C.work.correction, () => {
+      /* Straight to the intent field with the sentence already in it — and NOT submitted. The
+       * user sends it, because `12` treats submitting as consent to change files. */
+      nav.toWorkbench(state.project, state.interpretation,
+                      { intent: C.gap.correctionIntent(snap.work.intent) });
+    }),
+    btn('btn sm ghost rec', C.work.readMore, () => nav.toReader(snap)),
+  ]));
   return panel;
 }
 
