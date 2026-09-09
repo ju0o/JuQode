@@ -14,6 +14,7 @@ const repo = require('./db/repo');
 const project = require('./project');
 const claude = require('./claude-detect');
 const supervisor = require('./work/supervisor');
+const explain = require('./change/explain');
 const { classify } = require('./router/intent');
 const { scan } = require('./interpret/scan');
 const { answers, statusOf } = require('./interpret/answers');
@@ -148,6 +149,32 @@ function makeHandlers(deps) {
       if (!w) return { ok: false, reason: 'no-work' };
       const row = db().prepare('select * from project where id = ?').get(w.project_id);
       return { ok: true, ...supervisor.changes(db(), workId, row, deps.evidenceStore(w.project_id)) };
+    },
+
+    /* WBS-28 · SC-04. One read: the groups, the diffs they cite, and the blocks already cut.
+     * All of it is derived from rows this Work wrote — nothing here asks a model anything. */
+    'juqode:work-reader': (_e, workId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const w = workOr(workId);
+      if (!w) return { ok: false, reason: 'no-work' };
+      const row = db().prepare('select * from project where id = ?').get(w.project_id);
+      return { ok: true, ...supervisor.readerFor(db(), workId, row, deps.evidenceStore(w.project_id)) };
+    },
+
+    /* WBS-26 · the explanation pass, run when the USER asks for it. It spawns a Claude Code
+     * child, so it is never a side effect of opening a screen — and a Work that is still
+     * running is not explained, because the change it would describe is not final. */
+    'juqode:work-explain': async (_e, workId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const w = workOr(workId);
+      if (!w) return { ok: false, reason: 'no-work' };
+      if (w.status !== 'ended') return { ok: false, reason: 'still-running' };
+      const row = db().prepare('select * from project where id = ?').get(w.project_id);
+      const out = await explain.explain(db(), workId, { cwd: row.path, bin: deps.claudeBin?.() });
+      return { ok: true, reason: out.reason,
+               ...supervisor.readerFor(db(), workId, row, deps.evidenceStore(w.project_id)) };
     },
 
     /* `기술 출력 보기` — the raw lines, as they arrived and in the order they arrived. */

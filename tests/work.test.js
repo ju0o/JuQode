@@ -821,3 +821,49 @@ echo '{"type":"result","subtype":"success","is_error":false}'
   assert.match(argv, /--allowedTools Edit\(note\.txt\)/);
   assert.ok(!/--session-id/.test(argv), '--session-id and --resume must not both be sent');
 });
+
+test('a project that gitignores its own .env can still have a basis taken', () => {
+  /* MEASURED (git 2.53.0), found by the SC-04 e2e: the moment any `:(exclude)` element is in
+   * the pathspec, `git add` treats an ignored file as EXPLICITLY named and exits 1 — while
+   * writing a perfectly correct index. `git add -A -- .` without excludes exits 0 on the same
+   * tree. Every fixture in this suite happened to have no `.gitignore`, so `capture()` threw
+   * for most REAL projects and nothing here could tell.
+   *
+   * `-f` is not the fix — it would stage the secret. The index is checked instead. */
+  const dir = tempDir('juqode-ignored-');
+  const store = tempDir('juqode-store-');
+  fs.writeFileSync(path.join(dir, 'app.js'), 'export const a = 1;\n');
+  fs.writeFileSync(path.join(dir, '.env'), 'SECRET_TOKEN=juqode-synthetic-fixture-marker\n');
+  fs.mkdirSync(path.join(dir, 'node_modules'));
+  fs.writeFileSync(path.join(dir, 'node_modules', 'x.js'), 'x\n');
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n.env\n');
+  const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  g('init', '-q', '.'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  g('add', '-A', '.'); g('commit', '-qm', 'baseline');
+
+  const basis = G.capture(dir, store);
+  assert.ok(basis.ref, 'no basis could be taken for a project with an ordinary .gitignore');
+
+  const tree = G.treePaths(dir, store, basis.ref);
+  assert.deepStrictEqual(tree.slice().sort(), ['.gitignore', 'app.js'].sort(),
+    `the basis tree is wrong: ${JSON.stringify(tree)}`);
+  assert.ok(!tree.some((f) => f.includes('.env')), 'the ignored secret reached the basis tree');
+  assert.ok(!tree.some((f) => f.includes('node_modules')), 'node_modules reached the basis tree');
+
+  /* D-126a: the excluded set is reported as METADATA. The paths are named; nothing is opened. */
+  const paths = basis.excluded.map((e) => e.path);
+  assert.ok(paths.includes('.env'), `the ignored secret is not in the ledger either: ${paths}`);
+  assert.ok(!JSON.stringify(basis).includes('SECRET_TOKEN'), 'a secret VALUE reached the basis record');
+});
+
+test('an add that genuinely produces nothing is still refused', () => {
+  /* The counterpart: tolerating the exit status must not become tolerating a failed add. */
+  const dir = tempDir('juqode-empty-');
+  const store = tempDir('juqode-store-');
+  const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  g('init', '-q', '.'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  /* An empty repository stages nothing — and that is a legitimate empty basis, not a failure. */
+  const basis = G.capture(dir, store);
+  assert.ok(basis.ref, 'an empty project has an empty basis, which is a fact and not an error');
+  assert.deepStrictEqual(G.treePaths(dir, store, basis.ref), []);
+});

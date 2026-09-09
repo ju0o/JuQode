@@ -20,6 +20,7 @@ const manifest = require('../evidence/manifest');
 const { toSignal, reduce, initial, openPermission, openPermissions, KIND } = require('./reducer');
 const resultBuilder = require('./result');
 const blocks = require('../change/blocks');
+const explain = require('../change/explain');
 
 /** Live state for Works this process started. Nothing here is authoritative — the DB is. */
 const live = new Map();   // workId -> { child, state, sessionId, cwd, projectId }
@@ -361,6 +362,56 @@ function saveDiffs(db, workId, project, store) {
 }
 
 /**
+ * WBS-28 · everything SC-04 needs for one Work, in one read.
+ *
+ * The change groups are the spine (`19` §C5-X), and each one carries the diffs it cites with
+ * their code blocks already derived. A Work whose explanation pass has not run — or never will,
+ * because it refused — still reads: `groupsFrom(null, …)` produces exactly one 설명 못함 group
+ * holding every change, so `21` WBS-28's "Code Block 없음 → Raw 로만 도달 가능" is the DEFAULT
+ * shape rather than a special case that has to be remembered.
+ */
+function readerFor(db, workId, project, store) {
+  const diffs = repo.diffsFor(db, workId);
+  if (!diffs.length) return { groups: [], files: 0 };
+
+  let groups = repo.changeGroupsFor(db, workId);
+  if (!groups.length) {
+    /* Nothing has explained this Work yet. That is 설명 못함, not an error and not an empty
+     * screen — `21` WBS-28: change_group 이 하나도 없음 → 빈 상태가 오류로 보이지 않는다.
+     *
+     * DERIVED, not written: this is a read, and a read that writes surprises every caller. The
+     * shape comes from `groupsFrom` rather than being built here, so the default the screen
+     * shows and the default the pass falls back to are the same code. */
+    const byId = new Map(diffs.map((d) => [d.id, d.file]));
+    groups = explain.groupsFrom(null, { diffs, signals: [] }).groups
+      .map((g) => ({ ...g, files: g.files.map((id) => byId.get(id)) }));
+  }
+
+  const segments = new Map(blocksFor(db, workId, project, store).map((b) => [b.file, b]));
+  const byFile = new Map(diffs.map((d) => [d.file, d]));
+  return {
+    files: diffs.length,
+    groups: groups.map((g) => ({
+      ...g,
+      files: g.files.map((file) => {
+        const d = byFile.get(file);
+        const seg = segments.get(file) ?? {};
+        return {
+          file,
+          displayable: d?.displayable ?? false,
+          truncated: d?.truncated ?? false,
+          ref: d?.ref ?? null,
+          patch: d?.patch ?? '',
+          strategy: seg.strategy ?? 'S2',
+          note: seg.note ?? null,
+          blocks: seg.blocks ?? [],
+        };
+      }),
+    })),
+  };
+}
+
+/**
  * The units a file's change was split into. Derived on demand from the stored patch — it is
  * deterministic, and `20` cannot hold a block until WBS-26 gives it a change group (CF-10).
  */
@@ -598,5 +649,5 @@ function watchQuiet(db, onUpdate, { everyMs = 15_000 } = {}) {
 }
 
 module.exports = { start, allow, answer, cancel, snapshot, preflight, changes, captureAfter,
-                   finishResult, saveDiffs, blocksFor, watchQuiet, live, starting,
+                   finishResult, saveDiffs, blocksFor, readerFor, watchQuiet, live, starting,
                    QUIET_MS, CANCEL_CONFIRM_MS };

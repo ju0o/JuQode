@@ -167,6 +167,51 @@ export const C = {
     stepLabel: 'NEXT · Claude Code가 알린 다음 Step',
     stepEmpty: 'NEXT 없음',
   },
+  /* SC-04 · Change Reader. Every key below is `18` §SC-04 VERBATIM, including the key names.
+   * An earlier draft transcribed `15`'s prose instead — `15` describes the screen, `18` is the
+   * copy, and where they differ `18` wins. The strings the dictionary has no key for are in
+   * `gap:` with the rest, not invented here where they would look approved. */
+  reader: {
+    title:        '변경 읽기',
+    flow:         '뜻 → 코드 → 원문',
+    groups:       '무엇이 바뀌었나요',
+    blocks:       '어떤 코드가 바뀌었나요',
+    raw:          'Raw Diff — 실제로 바뀐 글자',
+    what:         '무엇',
+    why:          '왜',
+    affects:      '어떤 동작에',
+    openRaw:      'Raw Diff 보기',
+    copy:         '원문 복사',
+    back:         '작업으로 돌아가기',
+    understood:   '이해했어요 · 다음 요청으로',
+
+    /* 설명 못함. The body says out loud that no reason will be invented — the sentence IS the
+     * guarantee, so it is not paraphrased and not shortened. */
+    unexplained:     '이 변경은 말로 설명하지 못했어요',
+    unexplainedBody: '그럴듯한 이유를 지어내지 않아요. 아래에서 코드로 직접 볼 수 있어요.',
+    toBlocks:        '▸ 코드로 보기',
+    toRaw:           '▸ 원문으로 보기',
+
+    unblocked:    '이 파일은 단위로 나누지 못했어요',
+    binary:       '이미지 파일이어서 여기서는 보여 드릴 수 없어요',
+    scoped:       '이 작업이 바꾼 부분만 보여요.',
+    none:         '이 작업은 프로젝트 파일을 바꾸지 않았어요.',
+    cancelledNote: '취소한 작업이 남긴 변경이에요. 마무리되지 않았을 수 있어요.',
+    remainNote:   '남은 변경을 다 확인하지는 못했어요. 아래는 확인된 부분이에요.',
+
+    /* 증거 공백 — `19` §E. Paths only. The `why` line says these are files the project itself
+     * asked to ignore, which is a fact; nothing here says what changed inside them. */
+    evidenceGap:      '증거에 담기지 않은 변경이 있어요',
+    /* Canon's own placeholder is `{paths}`. Keeping it in the literal and substituting is what
+     * makes this string checkable as `18` verbatim — a template literal quietly rewrites the
+     * approved text into something the dictionary does not contain. */
+    evidenceGapPaths: (paths) => '담기지 않은 경로: {paths}'.replace('{paths}', paths),
+    evidenceGapWhy:   '이 파일들은 프로젝트가 무시하도록 설정해 둔 파일이에요.',
+    evidenceGapAlt:   '▸ 터미널로 직접 확인',
+
+    kinds: { add: '추가', modify: '수정', delete: '삭제', rename: '이름 변경', unblocked: '나누지 못함' },
+  },
+
   theme: {
     label:  '테마',
     light:  '밝게',
@@ -190,6 +235,16 @@ export const C = {
    *                        supplies only the 로그인 필요 sentence.
    */
   gap: {
+    /* SC-04 states `18` has no key for. Each one is a state the SCREEN has and the dictionary
+     * does not, so it is marked rather than dressed up as approved copy. */
+    readerRawClose:   'Raw Diff 닫기',
+    readerExplain:    '이 변경 설명 받기',
+    readerExplaining: '설명을 받는 중…',
+    readerFiles:      (n) => `파일 ${n}개`,
+    /* The head-limit note. `18` has no truncation string; `20` bounds the head at 256 KB and
+     * the whole patch is kept in a blob, so the sentence states both halves (D-129). */
+    readerTruncated:  '변경이 너무 커서 여기에는 앞부분만 실었어요. 원문 전체는 그대로 남아 있어요.',
+
     /* Brief ANSWER bodies. `18` is a dictionary of fixed UI strings; a Brief answer is
      * generated from what the scan found, so `18` cannot carry it and does not try. These are
      * the smallest sentences that state a fact without adding a judgement. CF-6. */

@@ -217,6 +217,9 @@ function saveDiff(db, workId, { file, patch, displayable = true }, blobDir = nul
 
 const diffsFor = (db, workId) =>
   db.prepare('select * from raw_diff where work_id = ? order by file').all(workId).map((d) => ({
+    /* The row id, because `change_group_file` is a FK to it — a group cites a diff row, not a
+     * path, so nothing downstream has to trust a filename it was handed. */
+    id: d.id,
     file: d.file,
     displayable: Boolean(d.displayable),
     patch: d.unified_head ?? '',
@@ -278,6 +281,42 @@ function resultFor(db, workId) {
   };
 }
 
+/* ── WBS-26 · Change Groups — the explanation layer's only writer ────────────────
+ * `20` gives a raw_diff exactly one owning group (D-121: `code_block.raw_diff_id` is
+ * `on delete restrict`). The write is one transaction and it REPLACES: re-running the
+ * explanation pass must not leave a file owned by two groups.
+ */
+function saveChangeGroups(db, workId, groups) {
+  db.exec('begin');
+  try {
+    /* `change_group_file` cascades from the group, so deleting the groups clears the links. */
+    db.prepare('delete from change_group where work_id = ?').run(workId);
+    const g = db.prepare(`insert into change_group (id, work_id, ord, title, what, why, affects, confidence, explainable)
+                          values (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const link = db.prepare('insert into change_group_file (change_group_id, raw_diff_id) values (?, ?)');
+    groups.forEach((grp, i) => {
+      const id = randomUUID();
+      g.run(id, workId, i, grp.title, grp.what ?? null, grp.why ?? null, grp.affects ?? null,
+            grp.confidence ?? null, grp.explainable === false ? 0 : 1);
+      for (const rawDiffId of grp.files ?? []) link.run(id, rawDiffId);
+    });
+    db.exec('commit');
+  } catch (e) {
+    try { db.exec('rollback'); } catch { /* already rolled back */ }
+    throw e;
+  }
+  return changeGroupsFor(db, workId);
+}
+
+const changeGroupsFor = (db, workId) =>
+  db.prepare('select * from change_group where work_id = ? order by ord').all(workId).map((g) => ({
+    id: g.id, ord: g.ord, title: g.title, what: g.what, why: g.why, affects: g.affects,
+    confidence: g.confidence,
+    explainable: Boolean(g.explainable),
+    files: db.prepare(`select r.file from change_group_file f join raw_diff r on r.id = f.raw_diff_id
+                       where f.change_group_id = ? order by r.file`).all(g.id).map((r) => r.file),
+  }));
+
 /* ── WBS-12 · Steps — only what Claude Code actually declared (D-107) ── */
 function upsertStep(db, workId, { ord, title, state }) {
   const at = now();
@@ -333,5 +372,6 @@ module.exports = {
   upsertStep, stepsFor,
   saveResult, resultFor,
   saveDiff, diffsFor,
+  saveChangeGroups, changeGroupsFor,
   reconcileLostWorks, processFor,
 };

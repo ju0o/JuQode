@@ -4,7 +4,7 @@
  * screenshots so a human can look at them. DOM assertions alone are not enough —
  * 21 WBS-01 QA evidence asks for per-OS screenshots.
  */
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -36,6 +36,18 @@ fs.writeFileSync(path.join(SEED, '.env'), 'SECRET_TOKEN=juqode-synthetic-fixture
 for (const d of ['src', 'lib', 'node_modules']) fs.mkdirSync(path.join(SEED, d));
 fs.writeFileSync(path.join(SEED, 'src', 'index.js'), 'export const hi = 1;\n');
 fs.writeFileSync(path.join(SEED, 'node_modules', 'huge.js'), 'x'.repeat(1000));
+/* A real git repo, because that is what a real project is — and it is the ONLY basis kind that
+ * produces a diff (`git_tree`; the non-Git manifest basis compares hashes and has no patch to
+ * read). Without this SC-04 could only ever be exercised in its 변경 없음 state. */
+{
+  const g = (...a) => execFileSync('git', a, { cwd: SEED, stdio: 'ignore' });
+  g('init', '-q', '-b', 'main');
+  g('config', 'user.email', 'fixture@example.test');
+  g('config', 'user.name', 'fixture');
+  fs.writeFileSync(path.join(SEED, '.gitignore'), 'node_modules/\n.env\n');
+  g('add', '-A');
+  g('commit', '-qm', 'seed');
+}
 
 /* A fixture CLI, not the host's. Without this the WBS-09 assertions test a different code
  * path on every machine — and on a host with no Claude Code they pass carrying no information. */
@@ -44,7 +56,27 @@ const FAKE_CLI = path.join(DB_DIR, 'claude');
  * ends in a permission REFUSAL, which is the D-133 state the screen has to render. */
 const FAKE_CLI_JS = path.join(DB_DIR, 'claude-session.js');
 fs.writeFileSync(FAKE_CLI_JS, `
-const out = [
+const fs = require('fs');
+/* On the RESUME the grant exists, so the Edit goes through and the Work ends — which is what
+ * D-133's contract B describes and what gives SC-04 a finished Work to read. A fixture that
+ * denied forever could only ever exercise the refusal card. */
+const resumed = process.argv.includes('--resume');
+/* The fixture EDITS the project on the GRANTED turn — the Edit it was denied is the Edit it
+ * then performs. A Work that changed nothing could only ever show SC-04's 변경 없음 state.
+ * One .js file (S1 — real declarations) and one .md file (S2 — \`19\` §C5-B sends structured
+ * formats straight to Raw), so both strategies get rendered evidence. */
+if (resumed) {
+  fs.writeFileSync(${JSON.stringify(path.join(SEED, 'src', 'index.js'))},
+    'export const hi = 1;\\n\\nexport function greet(name) {\\n  return "hi " + name;\\n}\\n');
+  fs.writeFileSync(${JSON.stringify(path.join(SEED, 'README.md'))},
+    '# seed-app\\n\\n작은 예제 프로젝트예요.\\n\\n## 설치\\n\\nnpm i\\n\\n## 실행\\n\\nnpm run dev\\n');
+}
+const out = resumed ? [
+  { type: 'system', subtype: 'init', session_id: 's', cwd: '/p', claude_code_version: '9.9.9' },
+  { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_2', name: 'Edit', input: { file_path: 'README.md' } }] } },
+  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_2', is_error: false }] } },
+  { type: 'result', subtype: 'success', is_error: false, result: 'README.md 와 src/index.js 를 고쳤어요', permission_denials: [] },
+] : [
   { type: 'system', subtype: 'init', session_id: 's', cwd: '/p', claude_code_version: '9.9.9' },
   { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_a', name: 'Read', input: { file_path: 'README.md' } }] } },
   { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_a', is_error: false }] } },
@@ -59,7 +91,9 @@ fs.writeFileSync(FAKE_CLI, [
   '#!/bin/sh',
   "if [ \"$1\" = \"--version\" ]; then echo '9.9.9-fixture (Claude Code)'; exit 0; fi",
   "if [ \"$1\" = \"auth\" ]; then echo '{\"loggedIn\":true,\"email\":\"fixture@example.test\",\"orgId\":\"org-fixture\"}'; exit 0; fi",
-  `exec ${process.execPath} ${FAKE_CLI_JS}`,
+  /* "$@" — the fixture has to SEE `--resume`, or it cannot behave like a session that was
+   * granted something. Without it every turn replayed the same denial. */
+  `exec ${process.execPath} ${FAKE_CLI_JS} "$@"`,
 ].join('\n') + '\n', { mode: 0o755 });
 /* TWO projects, SEED opened first so SEED2 is the newer one. That makes "did the recent list
  * get re-read?" answerable: the list starts SEED2-first, the run opens SEED, and on return
@@ -366,6 +400,56 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.guardReds = await evalJs(RED_COUNT('[data-el="guard"], [data-el="guard"] *'));
   out.guardKeptText = await evalJs(`document.querySelector('[data-el="intent"]').value`);
 
+  /* ── SC-04 · Change Reader (WBS-28) ──────────────────────────────────────────────────
+   * The Work has ended, so the result card carries `변경 읽기`. This is the first rendered
+   * evidence for the screen, and for the reading order it argues for: 뜻 → 코드 → 원문. */
+  step('SC-04');
+  /* The guard above needed this Work still ACTIVE, so the grant comes after it: `허용하고 다시
+   * 해 보기` is on SC-03, which SC-02's current-Work `열기` returns to. */
+  await evalJs(`[...document.querySelectorAll('.sc02 button')].find(b => b.textContent.trim() === '열기')?.click()`);
+  await sleep(800);
+  /* D-133 contract B: the grant is scoped to THIS tool input and the SAME session resumes. The
+   * fixture edits on that turn, which is what gives SC-04 a finished Work with real changes. */
+  await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.includes('허용하고'))?.click()`);
+  await sleep(2500);
+  out.afterAllow = await evalJs('JSON.stringify(window.__work())');
+  await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.includes('변경 읽기'))?.click()`);
+  await sleep(1200);
+  out.screenReader   = await evalJs('window.__screen()');
+  out.reader         = await evalJs('JSON.stringify(window.__reader())');
+  out.readerReds     = await evalJs(RED_COUNT('.sc04 *'));
+  /* Prove the counter can actually see red on THIS screen before trusting a zero from it —
+   * a red count that is structurally always zero is the exact shape of test this run keeps
+   * finding. */
+  await evalJs(`document.querySelector('.sc04 .card')?.style.setProperty('color', 'var(--fail)')`);
+  out.readerRedProbe = await evalJs(RED_COUNT('.sc04 *'));
+  await evalJs(`document.querySelector('.sc04 .card')?.style.removeProperty('color')`);
+  out.readerOverflow = await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth');
+  out.readerCols     = await evalJs(`document.querySelectorAll('.sc04-col').length`);
+  out.readerRawShut  = await evalJs(`document.querySelectorAll('.sc04-patch').length`);
+  out.readerText     = await evalJs(`document.querySelector('.sc04')?.innerText ?? null`);
+
+  /* D-118's skip: the RAW text must be reachable from the group, without going through a block. */
+  await evalJs(`document.querySelector('.sc04-group .sc04-rawbtn')?.click()`);
+  await sleep(500);
+  out.readerRawOpen  = await evalJs(`document.querySelectorAll('.sc04-patch').length`);
+  out.readerPatch    = await evalJs(`document.querySelector('.sc04-patch')?.innerText ?? null`);
+  /* The patch scrolls INSIDE its own box; the page never scrolls sideways (`16` responsive). */
+  out.readerRawOverflow = await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth');
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc04-reader-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업으로'))?.click()`);
+  await sleep(600);
+  out.screenAfterReader = await evalJs('window.__screen()');
+  /* …and on to SC-02, which is where the rest of the run continues from. */
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
+  await sleep(600);
+
+
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await evalJs(`document.querySelectorAll('.fade-in').forEach(n => { n.classList.remove('fade-in'); void n.offsetWidth; n.classList.add('fade-in'); })`);
   await sleep(150);
@@ -414,7 +498,8 @@ assert.strictEqual(results.ready, true, 'renderer did not initialise');
 assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.screen}`);
 assert.deepStrictEqual(bridge.keys.sort(),
   ['boot', 'claudeStatus', 'interpret', 'onWorkUpdate', 'openPath', 'openProject', 'routeIntent',
-   'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges', 'workGet', 'workSignals', 'workStart'],
+   'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges', 'workExplain', 'workGet',
+   'workReader', 'workSignals', 'workStart'],
   'renderer API surface is not exactly the declared one');
 assert.strictEqual(bridge.require, 'undefined', 'require leaked into the renderer');
 assert.strictEqual(bridge.process, 'undefined', 'process leaked into the renderer');
@@ -517,6 +602,48 @@ assert.ok(results.permPanel.includes('허용하고 다시 해 보기'));
 
 /* 사용 불가 / 대기 is amber OUTLINE, and red is failure only — nothing here failed. */
 assert.strictEqual(results.workReds, 0, 'SC-03 renders red for a refusal, which is not a failure');
+
+/* ── SC-04 · Change Reader ─────────────────────────────────────────────────────────────── */
+assert.strictEqual(results.screenReader, 'SC-04', `변경 읽기 did not reach SC-04 (${results.screenReader})`);
+const reader = results.reader ? JSON.parse(results.reader) : null;
+assert.ok(reader, 'SC-04 rendered without a read model');
+assert.ok(reader.groups.length >= 1, 'the Work edited two files and the reader shows no group');
+
+/* Every file the Work changed is in exactly one group. This is D-121, and it is the property
+ * that makes 변경 n개 and the reader the same statement. */
+const readerFiles = reader.groups.flatMap((g) => g.files);
+assert.strictEqual(new Set(readerFiles).size, readerFiles.length, 'a file appears in two groups');
+assert.ok(readerFiles.includes('src/index.js'), `the edited .js file is missing: ${readerFiles}`);
+assert.ok(readerFiles.includes('README.md'), `the edited .md file is missing: ${readerFiles}`);
+/* `19` §C5-B: the .env is excluded by JuQode's own list, so it can never reach this screen. */
+assert.ok(!readerFiles.some((f) => f.includes('.env')), `an excluded path reached SC-04: ${readerFiles}`);
+assert.ok(!readerFiles.some((f) => f.includes('node_modules')), 'node_modules reached SC-04');
+
+/* No pass has run, so every group is 설명 못함 — and the screen says so without a reason. */
+assert.ok(reader.groups.every((g) => g.explainable === false),
+  'nothing explained this Work, yet a group claims it was explained');
+assert.ok(results.readerText.includes('이 변경은 말로 설명하지 못했어요'), 'the 설명 못함 sentence is missing');
+assert.ok(results.readerText.includes('그럴듯한 이유를 지어내지 않아요'),
+  'the guarantee that no reason is invented is not on screen');
+/* 단위화 불가 — README.md is one of `19` §C5-B's structured formats and goes straight to Raw. */
+assert.ok(results.readerText.includes('이 파일은 단위로 나누지 못했어요'), 'the 단위화 불가 state is missing');
+/* …and the .js file DID produce a named unit, or S1 is not actually running. */
+assert.ok(reader.groups.some((g) => g.blocks.includes('greet')),
+  `the added function is not a Code Block: ${JSON.stringify(reader.groups.map((g) => g.blocks))}`);
+
+assert.strictEqual(results.readerReds, 0, 'SC-04 renders red, and nothing on it failed (16 §2)');
+assert.ok(results.readerRedProbe > 0, 'the SC-04 red counter cannot see red — its zero proves nothing');
+assert.strictEqual(results.readerCols, 3, '15 §0: SC-04 is three columns — 뜻 · 코드 · 원문');
+assert.ok(results.readerOverflow <= 0, `SC-04 scrolls sideways by ${results.readerOverflow}px`);
+
+/* D-118: Raw is reachable from the GROUP, without passing through a Code Block. */
+assert.strictEqual(results.readerRawShut, 0, 'the raw panel is open before it was asked for');
+assert.ok(results.readerRawOpen > 0, 'Raw Diff 보기 on the group did not open the raw text');
+assert.ok(/^@@|^[-+]|diff/m.test(results.readerPatch ?? ''),
+  `the raw panel is not showing a patch: ${String(results.readerPatch).slice(0, 80)}`);
+assert.ok(results.readerRawOverflow <= 0,
+  `an open patch made the PAGE scroll sideways by ${results.readerRawOverflow}px — it must scroll inside its own box`);
+assert.strictEqual(results.screenAfterReader, 'SC-03', '작업으로 돌아가기 did not return to SC-03');
 /* The NEXT slot is always rendered, and empty is the right answer here (D-107). */
 assert.ok(results.nextSlot && results.nextSlot.includes('Claude Code가 아직 다음 단계를 보내지 않았어요'),
   `NEXT slot: ${results.nextSlot}`);

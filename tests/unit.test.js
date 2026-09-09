@@ -284,9 +284,11 @@ test('capability containment: each privileged capability lives in exactly one mo
 
   // Packages NOT yet built must not have a half-implementation hiding in the tree.
   const all = files.map((f) => read(f)).join('\n');
-  /* `raw_diff` landed with WBS-17/27. `change_group` and `code_block` belong to WBS-26, which
-     also owns the `change_group_id` a block needs — see CANON_FINDINGS CF-10. */
-  for (const notYet of ['change_group', 'code_block']) {
+  /* `raw_diff` landed with WBS-17/27; `change_group` with WBS-26. `code_block` is still not
+     persisted — blocks are derived on demand from the stored patch, which is deterministic and
+     costs nothing to recompute (CANON_FINDINGS CF-10). The day a block needs an id that
+     survives a restart, this line is what says so out loud. */
+  for (const notYet of ['code_block']) {
     const inCode = all.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     assert.ok(!inCode.includes(notYet), `a later WBS package leaked into app/: ${notYet}`);
   }

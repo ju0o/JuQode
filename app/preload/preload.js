@@ -37,6 +37,11 @@ contextBridge.exposeInMainWorld('juqode', {
   workChanges: (workId) => ipcRenderer.invoke('juqode:work-changes', workId),
   workSignals: (workId) => ipcRenderer.invoke('juqode:work-signals', workId),
 
+  /** WBS-28 — SC-04's whole read: groups, the diffs they cite, and the blocks already cut. */
+  workReader: (workId) => ipcRenderer.invoke('juqode:work-reader', workId),
+  /** WBS-26 — the explanation pass, only when the user asks. It spawns a child process. */
+  workExplain: (workId) => ipcRenderer.invoke('juqode:work-explain', workId),
+
   /**
    * A running session pushes here. The renderer gets the VALUE, never the event object —
    * an IpcRendererEvent carries `sender`, which would hand the renderer the bridge itself.

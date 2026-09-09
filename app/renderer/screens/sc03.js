@@ -413,6 +413,9 @@ function resultCard(snap, api, nav, state) {
   }
 
   const acts = el('div', 'row-acts');
+  /* `15` SC-04 entry: SC-03 `변경 읽기`. It is the PRIMARY action here — a finished Work's next
+   * question is what it actually changed, and reading that is the product's whole argument. */
+  acts.appendChild(btn('btn sm pri', C.work.readChanges, () => nav.toReader(snap)));
   acts.appendChild(btn('btn sm', C.work.toBench, () => nav.toWorkbench(state.project, state.interpretation)));
   card.appendChild(acts);
 

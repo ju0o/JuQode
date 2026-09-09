@@ -112,3 +112,31 @@ path); the packaged binary resolves it from inside the asar and reports `segment
 Next eligible: WBS-26 (17, 18) · WBS-28 (26, 27) · WBS-19 (06, 07, 08) · WBS-22 (06) ·
 WBS-25 (00, 01) · WBS-29 (11) · WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-20 (21, 05).
 The change reader — WBS-26 then WBS-28 (SC-04) — is the next surface.
+
+## Batch 05 QA
+
+Report: `BATCH-05-QA.md`. 2 BLOCKER · 8 HIGH · 5 MEDIUM · 6 false comments, all fixed.
+
+Both BLOCKERs were one root cause — two regexes parsing one patch, neither able to read git's
+C-quoted paths. The 확인됨 claim named the wrong file for a Work that edited `결제.js`. The
+changed-file list now comes from `diff-tree -r -z --name-only`, and `changes()` and `saveDiffs()`
+share it. 19 mutants, 19 killed.
+
+## Batch 06
+
+Report: `BATCH-06.md`.
+
+| Package | State |
+|---|---|
+| WBS-26 Change Groups | IMPLEMENTED |
+| WBS-28 SC-04 Change Reader | IMPLEMENTED |
+
+285 unit tests, three e2e files, SC-04 screenshots in both themes.
+
+Adding SC-04 to the e2e required a fixture that really edits files, which required a real git
+repo — and that immediately exposed a defect no unit test could see: `git add` exits 1 whenever
+the pathspec carries any `:(exclude)` element and the project gitignores a file, so JuQode could
+not take a basis for most REAL projects. Fixed by checking the artifact rather than the status.
+
+Next eligible: WBS-19 (06, 07, 08) · WBS-22 (06) · WBS-25 (00, 01) · WBS-29 (11) · WBS-04 (03, 10) ·
+WBS-05 (03, 04, 21) · WBS-20 (21, 05) · WBS-34 (21, 11).

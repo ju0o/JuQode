@@ -171,7 +171,23 @@ function capture(root, store, phase) {
    * at all. D-126 asks for exactly this: exclude, and report. */
   const nested = nestedRepos(root);
   const nestedSpec = nested.flatMap((r) => [`:(exclude)${r}`, `:(exclude,glob)${r}/**`]);
-  git(['add', '-A', '--', '.', ...pathspec(), ...nestedSpec], { cwd: root, env });
+
+  /* MEASURED (git 2.53.0): the moment ANY `:(exclude)` element is present, `git add` treats an
+   * ignored file as EXPLICITLY named and exits 1 — "다음 경로는 .gitignore 파일 중 하나 때문에
+   * 무시합니다: .env" — even though the index it wrote is exactly right. `git add -A -- .`
+   * without excludes exits 0 on the same tree. A project that gitignores its own `.env` is the
+   * ordinary case, so throwing here meant JuQode could not take a basis for most real repos.
+   *
+   * `-f` is NOT the fix: it would stage the ignored file, which is the one thing D-126a exists
+   * to prevent. Suppressing the advice does not clear the status either (measured). So the
+   * status is not trusted in EITHER direction — the ARTIFACT is checked instead, below, and
+   * the failure is kept so a genuinely broken add is still visible. */
+  let addFailed = null;
+  try {
+    git(['add', '-A', '--', '.', ...pathspec(), ...nestedSpec], { cwd: root, env });
+  } catch (e) {
+    addFailed = String(e?.stderr ?? e?.message ?? e);
+  }
 
   /* (2) …and nothing excluded SURVIVES from the copied index either.
    *
@@ -180,6 +196,13 @@ function capture(root, store, phase) {
    * check missed it, and the blob stayed in the basis tree. For a Korean-market product that
    * is the ordinary filename, not the exotic one. */
   const staged = git(['ls-files', '-z'], { cwd: root, env, raw: true }).split('\0').filter(Boolean);
+  /* The artifact check the status is not trusted for: an `add` that reported a problem AND
+   * produced an empty index really did fail, and a basis of nothing is not a basis. */
+  if (addFailed && !staged.length) {
+    const err = new Error(`git add produced no index: ${addFailed}`);
+    err.code = 'add-failed';
+    throw err;
+  }
   const dropped = staged.filter((f) => isExcludedPath(f));
   if (dropped.length) git(['rm', '--cached', '--quiet', '--', ...dropped], { cwd: root, env });
 
