@@ -74,6 +74,10 @@ export function renderSC02(root, api, nav, state) {
       state.interpretation = r?.ok
         ? r.interpretation
         : { status: 'failed', failedCode: null, answers: [], readFiles: [] };
+      /* WBS-04's own report — how many answers the narrative pass filled, and why it did not.
+       * It is not drawn: the Brief shows the ANSWERS and their chips, which is what the reader
+       * needs. This is for the run log and the e2e, the way `__work` carries counts. */
+      state.narrative = r?.narrative ?? null;
       renderBrief(brief, state.interpretation);
     });
   }

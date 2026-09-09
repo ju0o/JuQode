@@ -121,6 +121,13 @@ function answerBody(a) {
       if (d.depthLimited?.length) out.push(field(C.gap.briefDeepDirs, d.depthLimited.join(' · ')));
       return out.length ? out : [p('sm mut', '—')];
     }
+    case 'narrative':
+      /* WBS-04. The model's own sentence, and the files it cited — which are files the SCAN
+       * actually read, filtered in `narrate.merge`, so the line under the answer is a list the
+       * reader can go and open. An answer with nothing under it carries a 확인 못함 chip and
+       * says so by having no evidence line at all, rather than by being hidden. */
+      return [p('sm', d.text),
+              ...(d.cites?.length ? [field(C.gap.briefCites, d.cites.join(' · '))] : [])];
     case 'no-manifest': return [p('sm mut', C.gap.briefNoManifest)];
     case 'no-folders':  return [p('sm mut', C.gap.briefNoFolders)];
     case 'no-scripts':  return [p('sm mut', C.gap.briefNoScripts)];

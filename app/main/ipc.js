@@ -15,6 +15,7 @@ const project = require('./project');
 const claude = require('./claude-detect');
 const supervisor = require('./work/supervisor');
 const explain = require('./change/explain');
+const narrate = require('./interpret/narrate');
 const { classify } = require('./router/intent');
 const { scan } = require('./interpret/scan');
 const { answers, statusOf } = require('./interpret/answers');
@@ -58,6 +59,8 @@ function makeHandlers(deps) {
   let detecting = null;
   /* Projects with an explanation pass in flight — see `juqode:work-explain`. */
   const explaining = new Set();
+  /* …and with a narrative pass in flight (`19` §C1 ⑦). Both spawn a Claude Code child. */
+  const narrating = new Set();
 
   return {
     'juqode:versions': () => deps.versions?.() ?? {},
@@ -96,7 +99,29 @@ function makeHandlers(deps) {
       if (!row) return { ok: false, reason: 'no-project' };
 
       const scanned = scan(row.path);
-      const list = answers(scanned);
+      let list = answers(scanned);
+
+      /* WBS-04 · the narrative layer. `19` §C1 ⑥ makes its failure a 부분 Brief rather than a
+       * failed one, so it is written as an ENRICHMENT of the deterministic answers: whatever
+       * comes back, `list` is still the facts layer's six rows or better.
+       *
+       * ⑦ the narrative session does not overlap an active Work — D-117's spirit, and the same
+       * rule the change-explanation pass obeys. A Work is what the user asked for; the Brief is
+       * not, so the Brief is the one that waits. The scan already happened either way, so the
+       * facts are on screen regardless. */
+      let narrated = null;
+      if (!scanned.failed && !repo.activeWork(db(), projectId) && !narrating.has(projectId)) {
+        narrating.add(projectId);
+        try {
+          narrated = await narrate.narrate({
+            deterministic: list, readFiles: scanned.readFiles, facts: scanned.facts,
+            cwd: row.path, bin: deps.claudeBin?.(),
+          });
+          list = narrated.answers;
+        } catch { /* `19` §C1 ⑥ — the facts stand on their own */ }
+        finally { narrating.delete(projectId); }
+      }
+
       const saved = repo.saveInterpretation(db(), projectId, {
         status: statusOf(scanned, list),
         sourceHash: scanned.sourceHash,
@@ -106,7 +131,12 @@ function makeHandlers(deps) {
       });
       /* The errno travels with the result: `15` SC-02 Failure State asks for the REASON, and a
        * fixed sentence in the renderer would state a cause that may not be the cause. */
-      return { ok: true, interpretation: { ...saved, failedCode: scanned.failed ?? null } };
+      return { ok: true,
+               interpretation: { ...saved, failedCode: scanned.failed ?? null },
+               /* Why the Brief looks the way it does, for the run log — not for the screen. */
+               narrative: narrated ? { filled: narrated.filled, grounded: narrated.grounded,
+                                       reason: narrated.reason, detail: narrated.detail ?? null }
+                                   : { skipped: true } };
     },
 
     /* One probe at a time. Each call spawns up to two `claude` processes held for up to 8 s. */

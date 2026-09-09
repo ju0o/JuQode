@@ -89,8 +89,31 @@ function merge(response, { deterministic = [], readFiles = [] } = {}) {
     };
   });
 
+  /* ⑥ 확인 못한 것 is a statement about the WHOLE interpretation, so it has to be re-stated once
+   * the narrative layer has answered some of what it lists. Leaving it alone made the card
+   * contradict itself on its own face: 하는 일 shown with an answer and an 예상됨 chip, and
+   * three rows below, 하는 일 listed among the things still unanswered. */
+  const answeredKeys = new Set();
+  for (const row of answers) {
+    if (row.kind !== 'narrative') continue;
+    for (const k of Q_KEYS[row.q] ?? []) answeredKeys.add(k);
+  }
+  if (answeredKeys.size) {
+    const i = answers.findIndex((r) => r.kind === 'unknown');
+    if (i !== -1 && Array.isArray(answers[i].data?.questions)) {
+      answers[i] = { ...answers[i],
+                     data: { ...answers[i].data,
+                             questions: answers[i].data.questions.filter((k) => !answeredKeys.has(k)) } };
+    }
+  }
+
   return { answers, filled, refused, grounded };
 }
+
+/* The names `answers.js` uses when it lists a question as unanswered. `folder-roles` is what it
+ * pushes when the folders EXIST but their roles are unknown, `folders` when there are none —
+ * and the narrative layer answers the roles, so both are cleared by an answer to q4. */
+const Q_KEYS = { 1: ['what'], 2: ['features'], 4: ['folder-roles', 'folders'] };
 
 /** The model's text is not JSON just because we asked for JSON — same tolerance as `explain`. */
 function parse(response) {
@@ -161,6 +184,7 @@ function promptFor({ deterministic, readFiles, facts }) {
 async function narrate({ deterministic, readFiles, facts, cwd, bin, timeoutMs = 120000 }) {
   let answer = null;
   let reason = null;
+  let detail = null;
   try {
     const r = await session.run({
       cwd, bin, tools: NO_TOOLS, timeoutMs,
@@ -168,14 +192,23 @@ async function narrate({ deterministic, readFiles, facts, cwd, bin, timeoutMs = 
       prompt: promptFor({ deterministic, readFiles, facts }),
       onSignal: (sig) => { if (sig.kind === KIND.FINISH) answer = sig.payload?.text ?? answer; },
     });
-    if (!r.sawEvent) reason = 'no-response';
+    /* One reason, and the child's own stderr with it. `session.run`'s `startFailed` does NOT
+     * mean the spawn failed — it means no first event arrived inside the start window — so
+     * splitting on it would have produced two names for one fact. What actually distinguishes
+     * the causes is the stderr, and carrying it is what identified a broken fixture as a broken
+     * fixture rather than as a model that declined to answer. `19` §C1 ⑥ makes every one of
+     * them the same 부분 Brief on screen, so this line is the only place the difference lives. */
+    if (!r.sawEvent) {
+      reason = 'no-response';
+      detail = String(r.stderr ?? '').trim().slice(0, 200) || null;
+    }
   } catch {
     reason = 'pass-failed';
   }
 
   const merged = merge(answer, { deterministic, readFiles });
   if (!merged.filled && !reason) reason = 'nothing-answered';
-  return { ...merged, reason };
+  return { ...merged, reason, detail };
 }
 
 module.exports = { narrate, merge, promptFor, NARRATIVE_Q, PROMPT_BUDGET };

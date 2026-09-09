@@ -92,6 +92,7 @@ window.__work    = () => (state.workSnapshot
       permission: state.workSnapshot.permission?.tool ?? null,
       signals: state.workSnapshot.signalCount }
   : null);
+window.__narrative = () => state.narrative ?? null;
 window.__reader  = () => (state.reader
   ? { groups: state.reader.groups.map((g) => ({ title: g.title, explainable: g.explainable,
         confidence: g.confidence, files: g.files.map((f) => f.file),

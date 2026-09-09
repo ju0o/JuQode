@@ -209,6 +209,19 @@ test('a project with thousands of read files still produces a bounded prompt', (
   assert.ok(prompt.length <= N.PROMPT_BUDGET, `prompt was ${prompt.length}`);
 });
 
+test('the budget holds even when the file list alone is bigger than it', () => {
+  /* Capping the COUNT is not the same as capping the SIZE, and a mutant that removed the size
+   * cap survived because 20 000 short paths never reached the budget. Two hundred paths of
+   * five hundred characters do — deep monorepo paths are exactly this shape. */
+  const b = bench();
+  const long = Array.from({ length: 200 }, (_, i) => `${'nested/'.repeat(70)}file-${i}.ts`);
+  assert.ok(long.join('\n').length > N.PROMPT_BUDGET, 'the fixture must actually exceed the budget');
+
+  const prompt = N.promptFor({ deterministic: b.deterministic, readFiles: long, facts: b.scanned.facts });
+  assert.ok(prompt.length <= N.PROMPT_BUDGET + 32, `prompt was ${prompt.length}`);
+  assert.ok(prompt.includes('생략됨'), 'a prompt that was cut must say it was cut');
+});
+
 /* ───────── the live pass ───────── */
 
 /** A CLI that answers with the given text, in the stream-json shape the app parses. */
@@ -277,4 +290,196 @@ test('the narrative pass is launched with the built-in tool set EMPTIED', async 
   assert.ok(at !== -1, `no tool restriction reached the CLI: ${JSON.stringify(argv)}`);
   assert.strictEqual(argv[at + 1], '', '`--tools ""` is what empties the set');
   assert.ok(!argv.includes('--allowedTools'), 'an ALLOW list grants tools — the opposite restriction');
+});
+
+/* ───────── the handler: enrichment, never replacement ───────── */
+
+function handlerBench(projectFiles = {}) {
+  const { openDb } = require(path.join(R, 'app/main/db/db.js'));
+  const repo = require(path.join(R, 'app/main/db/repo.js'));
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const b = bench(projectFiles);
+  const db = openDb(':memory:');
+  const project = repo.openProject(db, b.dir, path.basename(b.dir));
+  return { ...b, db, repo, project,
+           make: (bin) => makeHandlers({ db: () => db, dbFault: () => null,
+                                         evidenceStore: () => tempDir('juqode-store-'),
+                                         push: () => {}, claudeBin: () => bin }) };
+}
+
+test('the Brief keeps its measured answers when the narrative pass fails', async () => {
+  /* `19` §C1 ⑥: 서술 실패 → 사실 층만으로 Brief(부분). The failure must not reach the screen as
+   * a failed interpretation, and it must not cost the facts. */
+  const h = handlerBench();
+  const out = await h.make(fakeCli('', { silent: true }))['juqode:interpret'](null, h.project.id);
+
+  assert.strictEqual(out.ok, true);
+  assert.notStrictEqual(out.interpretation.status, 'failed', 'a narrative failure failed the Brief');
+  const tech = answerFor(out.interpretation.answers, 3);
+  assert.strictEqual(tech.confidence, 'confirmed');
+  assert.ok(tech.sourceRef, '`20` requires a source_ref on every confirmed row');
+  assert.strictEqual(out.narrative.filled, 0);
+});
+
+test('a successful pass fills the three open questions and persists them', async () => {
+  const h = handlerBench();
+  const bin = fakeCli(JSON.stringify([
+    { q: 1, text: '할 일을 적는 앱이에요', cites: ['README.md'] },
+    { q: 4, text: 'src 에 소스가 있어요', cites: ['README.md'] },
+  ]));
+  const out = await h.make(bin)['juqode:interpret'](null, h.project.id);
+
+  assert.strictEqual(out.narrative.filled, 2);
+  assert.strictEqual(out.narrative.grounded, 2);
+
+  /* …and it is on the row, not only in the return value. */
+  const back = h.repo.currentInterpretation(h.db, h.project.id);
+  assert.strictEqual(answerFor(back.answers, 1).confidence, 'expected');
+  assert.strictEqual(answerFor(back.answers, 1).data.text, '할 일을 적는 앱이에요');
+  assert.strictEqual(answerFor(back.answers, 3).confidence, 'confirmed', 'the measured row survived the write');
+});
+
+test('the narrative pass does not run while a Work is running', async () => {
+  /* `19` §C1 ⑦ — D-117's spirit. A Work is what the user asked for; the Brief is not, so the
+   * Brief is the one that waits. The facts still reach the screen either way. */
+  const h = handlerBench();
+  assert.strictEqual(h.repo.beginWork(h.db, h.project.id, '진행 중인 작업').ok, true);
+
+  const bin = fakeCli(JSON.stringify([{ q: 1, text: '이건 안 실려야 해요', cites: ['README.md'] }]));
+  const out = await h.make(bin)['juqode:interpret'](null, h.project.id);
+
+  assert.deepStrictEqual(out.narrative, { skipped: true });
+  assert.strictEqual(answerFor(out.interpretation.answers, 1).kind, 'needs-narrative',
+    'a second Claude Code session ran in a project that already had one');
+  assert.strictEqual(answerFor(out.interpretation.answers, 3).confidence, 'confirmed',
+    'the facts layer must still answer while a Work is running');
+});
+
+test('a scan that failed does not get a narrative pass on top of it', () => {
+  /* `19` §C1 ⑥ separates the two failures: a scan failure is a 읽기 실패 card. Asking a model to
+   * narrate a project nobody could read would produce an answer with nothing under it. */
+  const { openDb } = require(path.join(R, 'app/main/db/db.js'));
+  const repo = require(path.join(R, 'app/main/db/repo.js'));
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const db = openDb(':memory:');
+  const gone = path.join(tempDir('juqode-gone-'), 'not-here');
+  const project = repo.openProject(db, gone, 'gone');
+
+  let spawned = false;
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x',
+                           push: () => {}, claudeBin: () => { spawned = true; return '/bin/false'; } });
+  return h['juqode:interpret'](null, project.id).then((out) => {
+    assert.strictEqual(out.ok, true, 'a scan failure is a card, not a dead channel');
+    assert.deepStrictEqual(out.narrative, { skipped: true });
+    assert.strictEqual(spawned, false, 'a model was asked about a project nobody could read');
+  });
+});
+
+test('a narrative pass that THROWS still leaves the facts on screen', () => {
+  /* `19` §C1 ⑥ has no exception clause: however the narrative layer goes wrong, the Brief is
+   * the facts layer's six rows. `narrate()` catches its own failures, so the handler's guard is
+   * for the ones it cannot — and a guard nothing exercises is a guard nobody has checked. */
+  const h = handlerBench();
+  const narrateModule = require(path.join(R, 'app/main/interpret/narrate.js'));
+  const real = narrateModule.narrate;
+  narrateModule.narrate = () => { throw new Error('boom'); };
+
+  return h.make('/bin/false')['juqode:interpret'](null, h.project.id)
+    .then((out) => {
+      assert.strictEqual(out.ok, true);
+      assert.strictEqual(answerFor(out.interpretation.answers, 3).confidence, 'confirmed',
+        'a thrown narrative pass took the measured answers with it');
+      assert.strictEqual(out.interpretation.answers.length, 6, 'the six questions are a closed set');
+    })
+    .finally(() => { narrateModule.narrate = real; });
+});
+
+test('a pass whose CLI is broken says so in the detail, not only in the reason', () => {
+  /* `19` §C1 ⑥ makes every narrative failure the same 부분 Brief on screen, so the run log is
+   * the only place the cause survives. A fixture with a syntax error and a model that declined
+   * to answer both produce `no-response`; only the child's stderr tells them apart — which is
+   * exactly how a broken fixture was identified as broken rather than as a refusal. */
+  const home = tempDir('juqode-broken-');
+  const script = path.join(home, 'fake.js');
+  const bin = path.join(home, 'fake');
+  fs.writeFileSync(script, 'this is not javascript (\n');
+  fs.writeFileSync(bin, '#!/bin/sh\nexec ' + process.execPath + ' ' + script + ' "$@"\n', { mode: 0o755 });
+
+  const b = bench();
+  return N.narrate({ ...b, cwd: b.dir, bin }).then((out) => {
+    assert.strictEqual(out.reason, 'no-response');
+    assert.ok(out.detail, 'the child said something on stderr and it was thrown away');
+    assert.ok(/SyntaxError/i.test(out.detail), `the detail does not name the cause: ${out.detail}`);
+    assert.deepStrictEqual(out.answers, b.deterministic, 'a broken CLI cost the facts');
+  });
+});
+
+test('a pass that answered carries no detail, even when it wrote to stderr', () => {
+  /* A CLI that prints a deprecation warning and then answers correctly has not failed. Reporting
+   * its stderr would put a failure detail on every healthy run and make the one that matters
+   * indistinguishable from noise. */
+  const home = tempDir('juqode-noisy-');
+  const script = path.join(home, 'fake.js');
+  const bin = path.join(home, 'fake');
+  const six = [{ q: 1, text: '할 일 앱', cites: ['README.md'] }];
+  const NL = String.raw`\n`;              // a literal backslash-n INSIDE the generated script
+  fs.writeFileSync(script, [
+    `process.stderr.write('(node:1) Warning: something deprecated${NL}');`,
+    `process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', cwd: '/p' }) + '${NL}');`,
+    `process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [], result: ${JSON.stringify(JSON.stringify(six))} }) + '${NL}');`,
+  ].join('\n'));
+  fs.writeFileSync(bin, '#!/bin/sh\nexec ' + process.execPath + ' ' + script + ' "$@"\n', { mode: 0o755 });
+
+  const b = bench();
+  return N.narrate({ ...b, cwd: b.dir, bin }).then((out) => {
+    assert.strictEqual(out.reason, null, 'a warning on stderr was read as a failure');
+    assert.strictEqual(out.detail, null, 'a successful pass reported a failure detail');
+    assert.strictEqual(out.filled, 1, 'the answer was lost');
+  });
+});
+
+test('확인 못한 것 stops listing a question the narrative layer answered', () => {
+  /* The card has to agree with itself. Before this, 하는 일 was shown WITH an answer and an
+   * 예상됨 chip, and three rows below, 하는 일 was listed among the things still unanswered —
+   * the exact self-contradiction `answers.js` warns about in its own comment on this row. */
+  const b = bench();
+  const before = answerFor(b.deterministic, 6).data.questions;
+  assert.ok(before.includes('what') && before.includes('features') && before.includes('folder-roles'),
+    `the fixture must start with these unanswered: ${JSON.stringify(before)}`);
+
+  const { answers: merged } = N.merge(JSON.stringify([
+    { q: 1, text: '할 일 앱', cites: ['README.md'] },
+    { q: 4, text: 'src 는 소스', cites: ['README.md'] },
+  ]), b);
+
+  const after = answerFor(merged, 6).data.questions;
+  assert.ok(!after.includes('what'), 'q1 was answered and is still listed as unanswered');
+  assert.ok(!after.includes('folder-roles'), 'q4 was answered and is still listed as unanswered');
+  /* …and what really is still unanswered stays listed. */
+  assert.ok(after.includes('features'), 'q2 was not answered and vanished from the list');
+  assert.ok(after.includes('tech-meaning'), 'a sub-claim nobody answered was dropped');
+
+  /* The row itself is untouched otherwise — it is still the scan's own measured statement. */
+  const row = answerFor(merged, 6);
+  assert.strictEqual(row.confidence, 'confirmed');
+  assert.strictEqual(row.sourceRef, 'scan');
+  assert.strictEqual(row.data.readCount, answerFor(b.deterministic, 6).data.readCount);
+});
+
+test('an UNGROUNDED narrative answer still counts as answered for 확인 못한 것', () => {
+  /* 확인 못함 with a sentence is not the same as no sentence: the question WAS answered, and the
+   * chip is what says how much to trust it. Listing it again under 확인 못한 것 would say the
+   * product has nothing, while the row above it shows something. */
+  const b = bench();
+  const { answers: merged } = N.merge(
+    JSON.stringify([{ q: 1, text: '결제 시스템이에요', cites: ['nobody-read-this.ts'] }]), b);
+
+  assert.strictEqual(answerFor(merged, 1).confidence, 'unconfirmed');
+  assert.ok(!answerFor(merged, 6).data.questions.includes('what'));
+});
+
+test('a narrative pass that answered nothing leaves 확인 못한 것 exactly as it was', () => {
+  const b = bench();
+  const { answers: merged } = N.merge(null, b);
+  assert.deepStrictEqual(answerFor(merged, 6), answerFor(b.deterministic, 6));
 });

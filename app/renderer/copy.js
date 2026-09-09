@@ -275,6 +275,11 @@ export const C = {
     readerToResult:   '▸ 결과 설명으로',
     readerToIntent:   '▸ 다음 의도로',
     readerToGroups:   '▸ 설명으로',
+    /* WBS-04 · the files a narrative answer cited. `18` has `brief.q[*]` and the chips, and no
+     * key for the evidence line under an answer — the facts layer's rows carry `source_ref` in
+     * the schema instead of on screen. These are files the SCAN read, so the reader can open
+     * them; that is the whole difference between 예상됨 and 확인 못함 here. */
+    briefCites:       '근거로 읽은 파일',
     /* `18` has `reader.copy` for the button; it has no key for what the button says afterwards. */
     readerCopied:     '복사했어요',
     readerCopyFailed: '복사하지 못했어요',
