@@ -62,3 +62,26 @@ A WBS package whose only outstanding item is a DV entry is recorded
 `IMPLEMENTED_PENDING_VALIDATION` and **the run continues**. A package is
 `BLOCKED` only when the work itself cannot be done here — and that is stated with
 the specific reason, never with "Windows".
+
+
+## DV-11 · TD-01 의 셸 명령줄 — pty 결정이 필요하다
+
+`15` TD-01 은 서랍 안에 **셸 명령줄**을 요구하고(사용자가 직접 명령을 친다), `19` §C6 REC-010 은
+프로젝트당 pty 하나를 말한다. 같은 절이 **"Real T1 must validate: pty libraries per runtime;
+Windows ConPTY"** 라고 적어 두었다 — Canon 스스로 미검증이다.
+
+이 런에서 넣지 않은 이유는 두 가지고, 둘 다 이 저장소가 이미 내린 결정이다.
+
+1. `tests/unit.test.js` 의 능력 격리 검사가 `node-pty` 를 **어디에도 없어야 하는 것** 목록에
+   두었다. 네이티브 모듈은 Electron 버전마다 재빌드가 필요하고, DB 가 `node:sqlite` 를 고른
+   이유가 바로 그것이다(CF-5).
+2. 대상 OS 는 Windows 이고 이 런에서 DEFERRED_VALIDATION 이다. **검증할 수 없는 OS 에서
+   네이티브 모듈을 새로 들이는 것은 검증된 진척이 아니다.**
+
+**들어간 것:** 서랍 전체 · 상시 배너 · Quick Command 카드 전부 · 실행기(자기 자식 프로세스,
+셸 없음). REC-010 자신이 긴 Quick Command 는 서랍 pty 가 아니라 자기 프로세스에서 돈다고
+적어 두었으므로, QC 는 pty 없이 온전히 동작한다.
+
+**남은 것:** 사용자가 직접 치는 셸 줄 하나. 그리고 그것을 위한 결정 — node-pty 를 들일지,
+파이프 셸(TTY 없음)로 정직하게 갈지, `18` `term.mock` 이 이미 자리를 마련해 둔 mock 으로 갈지.
+셋 다 제품 결정이고 구현 결정이 아니다.
