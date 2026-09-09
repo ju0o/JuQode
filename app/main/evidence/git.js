@@ -342,12 +342,15 @@ function changedPaths(root, store, beforeRef, afterRef) {
     GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
     GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
   };
-  /* `--no-commit-id` is git's own answer to the leading id line, so nothing here has to guess
-   * which entry is an id. An earlier revision filtered out any bare 40-hex entry instead: these
-   * refs are always TREES, which emit no id line at all, so the filter's only live effect was
-   * deleting real filenames that happen to be 40 hex characters — content-addressed caches,
-   * sha1 fixtures, object dumps. `splitDiff` zips this list with the patch BY INDEX, so one
-   * dropped name shifted every later file and stored one file's diff under another's name. */
+  /* The list is FILENAMES, and nothing here tries to recognise an object id by its shape.
+   *
+   * An earlier revision filtered out any bare 40-hex entry, to drop a leading commit-id line.
+   * `diff-tree` prints that line only for the single-commit form, which this never uses, so the
+   * filter's only live effect was deleting real filenames that happen to be 40 hex characters —
+   * content-addressed caches, sha1 fixtures, object dumps. `splitDiff` zips this list with the
+   * patch BY INDEX, so one dropped name shifted every later file and filed one file's diff
+   * under another's name. `--no-commit-id` says the intent out loud; it is belt to that braces,
+   * not the thing doing the work. */
   const out = git(['diff-tree', '-r', '-z', '--no-commit-id', '--name-only', '--no-color',
                    beforeRef, afterRef], { cwd: root, env, raw: true });
   return out.split('\0').filter(Boolean);

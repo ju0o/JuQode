@@ -519,6 +519,40 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(600);
 
 
+  /* ── History (WBS-20) ─────────────────────────────────────────────────────────────────
+   * SC-02's History was empty-only until now, which meant `15`'s `변경 보기` entry into SC-04
+   * did not exist and a finished Work could only be reached while it was still on screen. */
+  step('history');
+  await sleep(1200);                       // the list is filled by an async read of the store
+  out.historyRows   = await evalJs(`document.querySelectorAll('[data-el="history-row"]').length`);
+  out.historyText   = await evalJs(`document.querySelector('[data-card="history"]')?.innerText ?? null`);
+  out.historyReds   = await evalJs(RED_COUNT('[data-card="history"], [data-card="history"] *'));
+  /* Cards must not be drawn on top of each other. The existing overlap check runs while SC-03
+   * is on screen, so its `.sc02 .card` half matched NOTHING and could never fail — and SC-02's
+   * real layout, once History had rows, drew the History card over the Brief. */
+  out.sc02Overlaps = await evalJs(`(() => {
+    const cards = [...document.querySelectorAll('.sc02 .card')].map(n => n.getBoundingClientRect());
+    let hits = 0;
+    for (let i = 0; i < cards.length; i++) for (let j = i + 1; j < cards.length; j++) {
+      const a = cards[i], b = cards[j];
+      if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) hits++;
+    }
+    return hits; })()`);
+  out.sc02CardCount = await evalJs(`document.querySelectorAll('.sc02 .card').length`);
+  out.sc02Clipped2 = await evalJs(`[...document.querySelectorAll('.sc02 .card')].filter(n => n.scrollHeight > n.clientHeight + 1).length`);
+  /* `변경 보기` → SC-04, for a Work that is no longer the one on screen. */
+  await evalJs(`[...document.querySelectorAll('[data-el="history-row"] button')].find(b => b.textContent.includes('변경 보기'))?.click()`);
+  await sleep(1500);
+  out.historyToReader = await evalJs('window.__screen()');
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('이해했어요'))?.click()`);
+  await sleep(800);
+  /* …and `결과 보기` → SC-03. */
+  await evalJs(`[...document.querySelectorAll('[data-el="history-row"] button')].find(b => b.textContent.includes('결과 보기'))?.click()`);
+  await sleep(1200);
+  out.historyToWork = await evalJs('window.__screen()');
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
+  await sleep(800);
+
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await evalJs(`document.querySelectorAll('.fade-in').forEach(n => { n.classList.remove('fade-in'); void n.offsetWidth; n.classList.add('fade-in'); })`);
   await sleep(150);
@@ -566,9 +600,9 @@ const bridge = JSON.parse(results.bridge);
 assert.strictEqual(results.ready, true, 'renderer did not initialise');
 assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.screen}`);
 assert.deepStrictEqual(bridge.keys.sort(),
-  ['boot', 'claudeStatus', 'interpret', 'onWorkUpdate', 'openPath', 'openProject', 'routeIntent',
-   'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges', 'workExplain', 'workGet',
-   'workReader', 'workSignals', 'workStart'],
+  ['boot', 'claudeStatus', 'history', 'interpret', 'onWorkUpdate', 'openPath', 'openProject',
+   'routeIntent', 'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges',
+   'workExplain', 'workGet', 'workReader', 'workSignals', 'workStart'],
   'renderer API surface is not exactly the declared one');
 assert.strictEqual(bridge.require, 'undefined', 'require leaked into the renderer');
 assert.strictEqual(bridge.process, 'undefined', 'process leaked into the renderer');
@@ -769,6 +803,28 @@ assert.ok(!/juqode-synthetic-fixture-marker/.test(results.evidenceGap),
   'the evidence-gap card leaked the CONTENTS of an excluded file');
 /* 알 수 없음 is dashed, never red: nothing failed here. */
 assert.strictEqual(results.evidenceGapReds, 0, 'the evidence-gap card renders red — it is not a failure');
+
+/* ── History · WBS-20 ─────────────────────────────────────────────────────────────────── */
+assert.ok(results.historyRows >= 1, 'a Work ended and History shows no row');
+assert.ok(!results.historyText.includes('아직 끝난 작업이 없어요'),
+  'History claims it is empty while holding a row');
+/* `18` orient.* — one true sentence. Nothing is running, so it is not the running one, and
+   `확인 불가` is reserved for a Work whose process could not be found. */
+assert.ok(results.historyText.includes('마지막 작업이 끝났어요'),
+  `the orientation sentence is wrong or missing: ${results.historyText}`);
+assert.ok(!results.historyText.includes('확인할 수 없어요'),
+  'History says the Work\'s state is unknown when the Work plainly ended');
+assert.ok(/변경 \d+개/.test(results.historyText), `the row states no measured change count: ${results.historyText}`);
+assert.ok(results.historyText.includes('끝났어요'), 'the row carries no outcome chip');
+assert.strictEqual(results.historyReds, 0, 'History renders red for a Work that completed');
+
+/* Both destinations `15` names, for a Work that is not the one on screen. */
+assert.strictEqual(results.historyToReader, 'SC-04', `변경 보기 did not reach SC-04 (${results.historyToReader})`);
+assert.strictEqual(results.historyToWork, 'SC-03', `결과 보기 did not reach SC-03 (${results.historyToWork})`);
+
+assert.ok(results.sc02CardCount >= 3, `the overlap check saw ${results.sc02CardCount} cards — it proves nothing`);
+assert.strictEqual(results.sc02Overlaps, 0, 'SC-02 draws cards on top of each other');
+assert.strictEqual(results.sc02Clipped2, 0, 'an SC-02 card clips its own content');
 /* The NEXT slot is always rendered, and empty is the right answer here (D-107). */
 assert.ok(results.nextSlot && results.nextSlot.includes('Claude Code가 아직 다음 단계를 보내지 않았어요'),
   `NEXT slot: ${results.nextSlot}`);

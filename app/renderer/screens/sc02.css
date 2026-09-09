@@ -6,30 +6,33 @@
   flex: 1 1 auto;
   overflow: auto;
   padding: 24px 32px 40px;
+  /* TWO COLUMN STACKS. `17` asks for a module board of differently sized cards; the first
+     implementation read that as a six-column grid with `grid-auto-flow: dense` and auto rows,
+     and MEASURED it drew the Brief on top of the card below it — an auto row sized to 449 px
+     around a 591 px card, with dense flow packing a second card into the space the Brief was
+     already painting on. `align-self: stretch` only moved the failure: the card then clipped
+     its own content, which `16` §4 forbids. A stack cannot overlap. */
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  grid-auto-rows: minmax(148px, auto);       /* 16 §4: a card may grow its row, never clips */
-  grid-auto-flow: dense;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
-  align-content: start;
+  align-items: start;
   max-width: 1440px;
   width: 100%;
   margin: 0 auto;
 }
+.sc02-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
-/* 16 §4 sizes. Only the ones this screen actually places. */
-.sc02 .c-s     { grid-column: span 1; }
-.sc02 .c-m     { grid-column: span 2; }
-.sc02 .c-wide  { grid-column: span 3; }
-.sc02 .c-wide2 { grid-column: span 3; grid-row: span 2; }
+/* `16` §4 sizes are about WIDTH; inside a stack every card fills its column and is exactly as
+   tall as its content. The classes stay so the markup keeps saying what each card weighs. */
+.sc02 .c-s, .sc02 .c-m, .sc02 .c-wide, .sc02 .c-wide2 { width: 100%; }
 
 .sc02 .card {
   padding: 14px 16px;
   display: flex; flex-direction: column; gap: 8px;
   min-width: 0;                               /* long paths must wrap, not widen the column */
-  align-self: start;                          /* a tall card grows its row (16 §4); its
-                                                 neighbours must not stretch to match */
+  align-self: start;                          /* 16 §4: a card is as tall as its content */
 }
+
 
 .sc02 .chead { display: flex; align-items: center; gap: 8px; }
 .sc02 .chead .ct { font-size: 12px; font-weight: 600; letter-spacing: .03em; color: var(--mut); }
@@ -45,11 +48,9 @@
 
 .sc02 [data-card="unavail"] { background: var(--grey); }
 
-/* narrow window: the 6-column board folds rather than clipping */
+/* narrow window: one stack, in reading order — the Brief first, then what the user says next. */
 @media (max-width: 900px) {
-  .sc02 { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 20px; }
-  .sc02 .c-wide, .sc02 .c-wide2, .sc02 .c-m { grid-column: span 2; }
-  .sc02 .c-wide2 { grid-row: span 1; }
+  .sc02 { grid-template-columns: minmax(0, 1fr); padding: 20px; }
 }
 
 /* Brief — the six answers. Each row is label + chip, then the answer, then the file the
@@ -107,3 +108,20 @@
 .sc02 .panel.grey { background: var(--grey); border: 1px solid var(--line); }
 .sc02 .panel.failband { border: 1px solid var(--failline); background: var(--failbg); }
 .sc02 .panel.failband .t { color: var(--fail); }
+
+/* ---------- History (WBS-20) ----------
+ * A row is a fact sheet, not a link: name, outcome, what it changed, when. The two actions are
+ * explicit buttons because `15` gives them different destinations — the result and the changes
+ * are two different questions about the same Work. */
+.sc02 .histrows { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sc02 .hist-orient { margin: 0 0 2px; }
+.sc02 .histrow {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 0; border-top: 1px solid var(--line); min-width: 0;
+}
+.sc02 .histrow:first-of-type { border-top: 0; padding-top: 0; }
+.sc02 .histtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+/* The user's own words name the Work. They can be long; they wrap rather than being cut, because
+   a truncated intent is a different sentence. */
+.sc02 .histname { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+.sc02 .histfacts { display: flex; gap: 8px; flex-wrap: wrap; }

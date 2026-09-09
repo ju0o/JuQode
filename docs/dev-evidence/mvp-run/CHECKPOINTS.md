@@ -163,3 +163,27 @@ repository (CF-12), so the recognition layer is IMPLEMENTED_PENDING_VALIDATION.
 Next eligible: WBS-25 (00, 01 — TD-01, and WBS-22's card depends on it) · WBS-19 (06, 07, 08) ·
 WBS-20 (21, 05) · WBS-34 (21, 11) · WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
 Unfinished inside SC-04: per-block Raw selection, 원문 복사, the evidence-gap card.
+
+## Batch 07
+
+Report: `BATCH-07.md`.
+
+| Package | State |
+|---|---|
+| WBS-20 History & re-entry orientation | IMPLEMENTED |
+
+SC-02's History had only an empty state, so Canon's `변경 보기` entry into SC-04 did not exist.
+It now lists every Work newest-first with a measured `변경 n개` (or nothing, when the evidence
+pair could not tell), and both destinations `15` names are reached by the e2e for a Work that is
+no longer on screen.
+
+Visual QA found the History card drawing on top of the Brief the moment History had rows — a
+591 px card in a 449 px auto row, with `grid-auto-flow: dense` packing another card into the
+space it was already painting. SC-02 is now two column stacks, which cannot overlap. The existing
+overlap check ran while SC-03 was on screen, so its `.sc02 .card` half matched nothing and could
+never have caught it.
+
+341 tests, three e2e files.
+
+Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs) · WBS-19 (06, 07, 08) ·
+WBS-34 (21, 11) · WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).

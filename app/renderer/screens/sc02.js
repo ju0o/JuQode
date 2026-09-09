@@ -22,7 +22,7 @@
  */
 import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
-import { renderBrief } from './brief.js';
+import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 
 export function renderSC02(root, api, nav, state) {
@@ -44,12 +44,27 @@ export function renderSC02(root, api, nav, state) {
   shell.appendChild(bar);
 
   const board = el('main', 'sc02 board fade-in');
+  /* TWO COLUMN STACKS, not a row grid.
+   *
+   * `17` asks for a module board of differently sized cards, and the first implementation used a
+   * six-column grid with `grid-auto-flow: dense` and auto rows. MEASURED: once History had rows,
+   * the Brief was drawn straight OVER the card below it — an auto row sized to 449 px while the
+   * card in it was 591 px tall, and dense flow then packed another card into the space the Brief
+   * was already painting on. `align-self: stretch` only moved the failure: the card then clipped
+   * its own content at exactly two rows, which `16` §4 forbids outright.
+   *
+   * A stack cannot overlap. Each column is a flex column, so a card is exactly as tall as its
+   * content and the next card starts below it — no row arithmetic to get wrong. */
+  const colL = el('div', 'sc02-col');
+  const colR = el('div', 'sc02-col');
+  board.appendChild(colL);
+  board.appendChild(colR);
   board.setAttribute('data-screen', 'SC-02');
 
   /* ① Brief — WIDE. Real now: three of the six answers come from files this project actually
    * contains, and the other three say 확인 못함 (`11`: 부분 해석은 실패가 아니다). */
   const brief = card('wide2', 'brief');
-  board.appendChild(brief);
+  colL.appendChild(brief);
   renderBrief(brief, state.interpretation);
   if (!state.interpretation) {
     api.interpret(p.id).then((r) => {
@@ -87,7 +102,7 @@ export function renderSC02(root, api, nav, state) {
   intent.appendChild(row);
   intent.appendChild(el('div', 'xs mut2', C.intent.examples));
   intent.appendChild(el('div', 'xs mut2', C.intent.approvalNote));
-  board.appendChild(intent);
+  colR.appendChild(intent);
 
   /* Enter submits, Shift+Enter is a newline (`15` SC-02 Inputs). */
   field.addEventListener('keydown', (e) => {
@@ -134,20 +149,99 @@ export function renderSC02(root, api, nav, state) {
    * CF-2; SC-03 is one Work and cannot have a "nothing requested yet" state.) */
   const stream = card('wide', 'stream');
   stream.appendChild(el('div', 'sm mut', C.work.empty));
-  board.appendChild(stream);
+  colL.appendChild(stream);
 
-  /* History — M (cols 5–6). Also genuinely empty. */
+  /* History — M (cols 5–6). WBS-20: every Work this project started, newest first. `12`
+   * F-C2-04 — it never disappears, and a failed or cancelled Work stays in it. */
   const hist = card('m', 'history');
   hist.appendChild(head(C.history.title));
-  hist.appendChild(el('div', 'sm mut', C.history.empty));
+  const rows = el('div', 'histrows');
+  hist.appendChild(rows);
   hist.appendChild(el('div', 'xs mut2 foot', C.history.note));
-  board.appendChild(hist);
+  colR.appendChild(hist);
+
+  /* The list is filled from the store, which is a read the screen does not have synchronously.
+   * Until it answers, the card shows nothing rather than a wrong empty state — `아직 끝난
+   * 작업이 없어요` is a CLAIM about this project, and it is not made before it is known. */
+  fillHistory(rows, api, nav, state);
 
   shell.appendChild(board);
   root.appendChild(shell);
 
   return { shell, board, field };
 }
+
+/**
+ * WBS-20 · the History list and the one orientation sentence above it.
+ *
+ * Each row is name · outcome chip · 변경 n개 · time, and it leads to the two places `15` names:
+ * the Work's result (SC-03) and its changes (SC-04). Nothing here is derived from a clock —
+ * every field is a column the store already holds.
+ */
+async function fillHistory(rows, api, nav, state) {
+  const r = await api.history(state.project.id);
+  rows.innerHTML = '';
+  if (!r?.ok) return;
+
+  /* `18` orient.* — where the user is, in one sentence. `확인 불가` is reserved for a Work whose
+   * process could not be found; it is never a stand-in for "we have not looked". */
+  rows.appendChild(el('p', 'sm mut hist-orient', C.orient[r.orientation] ?? C.orient.idle));
+  rows.previousSibling?.setAttribute?.('data-orient', r.orientation);
+
+  if (!r.works.length) {
+    rows.appendChild(el('div', 'sm mut', C.history.empty));
+    return;
+  }
+
+  for (const w of r.works) {
+    const row = el('div', 'histrow');
+    row.setAttribute('data-el', 'history-row');
+
+    const top = el('div', 'histtop');
+    top.appendChild(el('span', 'sm histname', w.intent));
+    const o = HIST_OUTCOME[w.outcome];
+    if (w.status !== 'ended') {
+      top.appendChild(el('span', 'chip wait', C.gap.historyRunning));
+    } else if (o) {
+      top.appendChild(el('span', `chip ${o.cls}`, C.work.resultTitle[o.key] ?? C.work.unknownTitle));
+    }
+    row.appendChild(top);
+
+    const facts = el('div', 'xs mut histfacts');
+    /* 변경 n개 only when the evidence pair actually answered. `null` means it could not tell,
+     * and a zero printed in its place would be a measurement nobody made. */
+    if (w.changes != null) facts.appendChild(el('span', '', C.gap.historyChanged(w.changes)));
+    facts.appendChild(el('span', '', when(w.endedAt ?? w.startedAt)));
+    row.appendChild(facts);
+
+    const acts = el('div', 'row-acts');
+    acts.appendChild(btn('btn sm ghost', C.history.result, async () => {
+      const got = await api.workGet(w.id);
+      if (got?.ok) nav.toWork(got.work);
+    }));
+    /* `15` SC-02: History row → SC-03 (result) or `변경 보기` → SC-04. The change reader is
+     * reachable from History and not only from a Work that just ended. */
+    acts.appendChild(btn('btn sm ghost', C.history.changes, async () => {
+      const got = await api.workGet(w.id);
+      if (got?.ok) nav.toReader(got.work);
+    }));
+    row.appendChild(acts);
+
+    rows.appendChild(row);
+  }
+}
+
+/* The schema's outcome codes → the class that paints them and `18`'s own title key. Same table
+ * as SC-03's; `cancelled_nochange` is NEUTRAL, not grey-unavailable — the user stopped it, which
+ * is a different statement from 지금 안 됨. */
+const HIST_OUTCOME = {
+  complete:           { cls: 'ok',   key: 'complete' },
+  partial:            { cls: 'part', key: 'partial' },
+  failed:             { cls: 'fail', key: 'failed' },
+  cancelled_partial:  { cls: 'part', key: 'cancelled_partial' },
+  cancelled_nochange: { cls: '',     key: 'cancelled_none' },
+  ended_unknown:      { cls: 'unk',  key: null },
+};
 
 const line = (t) => el('div', 'sm routeline', t);
 

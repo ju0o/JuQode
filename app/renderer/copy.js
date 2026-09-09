@@ -45,10 +45,22 @@ export const C = {
     chips: { ok: '확인됨', exp: '예상됨', no: '확인 못함' },
   },
   history: {
-    title: '기록',
-    more:  '개 더',
-    empty: '아직 끝난 작업이 없어요. 첫 작업을 보내면 여기에 남아요.',
-    note:  '끝난 작업은 사라지지 않아요. 실패하거나 멈춘 작업도 남아요.',
+    title:   '기록',
+    more:    '개 더',
+    empty:   '아직 끝난 작업이 없어요. 첫 작업을 보내면 여기에 남아요.',
+    note:    '끝난 작업은 사라지지 않아요. 실패하거나 멈춘 작업도 남아요.',
+    result:  '결과 보기',
+    changes: '변경 보기',
+    collapse: '접기',
+  },
+
+  /* `18` orient.* — SC-02's one orientation sentence. `unknown` is reserved for a Work whose
+   * process could not be found after reconciliation; it never stands in for "not looked yet". */
+  orient: {
+    idle:     '진행 중인 작업은 없어요. 지난 작업은 기록에 있어요.',
+    running:  '진행 중인 작업이 있어요.',
+    finished: '마지막 작업이 끝났어요.',
+    unknown:  '이전 작업이 지금 어떤 상태인지 확인할 수 없어요.',
   },
   intent: {
     label:   '요청 · 프로젝트를 바꾸는 요청',
@@ -259,6 +271,10 @@ export const C = {
     /* `18` has `reader.copy` for the button; it has no key for what the button says afterwards. */
     readerCopied:     '복사했어요',
     readerCopyFailed: '복사하지 못했어요',
+    /* `18` has `history.changes` for the BUTTON and no key for the count on a row. `15` writes
+     * it as `변경 3개`, which is what SC-03's result card already says. */
+    historyChanged:   (n) => `변경 ${n}개`,
+    historyRunning:   '진행 중',
     /* A read the main process refused. `18` has SC-01's 저장소 copy and nothing for this — the
      * screen still has to SAY it rather than going blank (12 §16). */
     readerUnavailable: '이 변경을 지금 불러오지 못했어요.',
@@ -266,6 +282,10 @@ export const C = {
      * result, and the result is a fact about what just happened on this machine. */
     readerCopied:     '복사했어요',
     readerCopyFailed: '복사하지 못했어요',
+    /* `18` has `history.changes` for the BUTTON and no key for the count on a row. `15` writes
+     * it as `변경 3개`, which is what SC-03's result card already says. */
+    historyChanged:   (n) => `변경 ${n}개`,
+    historyRunning:   '진행 중',
 
     /* Brief ANSWER bodies. `18` is a dictionary of fixed UI strings; a Brief answer is
      * generated from what the scan found, so `18` cannot carry it and does not try. These are

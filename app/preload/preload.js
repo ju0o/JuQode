@@ -37,6 +37,9 @@ contextBridge.exposeInMainWorld('juqode', {
   workChanges: (workId) => ipcRenderer.invoke('juqode:work-changes', workId),
   workSignals: (workId) => ipcRenderer.invoke('juqode:work-signals', workId),
 
+  /** WBS-20 — every Work this project started, newest first, with its orientation sentence. */
+  history: (projectId) => ipcRenderer.invoke('juqode:history', projectId),
+
   /** WBS-28 — SC-04's whole read: groups, the diffs they cite, and the blocks already cut. */
   workReader: (workId) => ipcRenderer.invoke('juqode:work-reader', workId),
   /** WBS-26 — the explanation pass, only when the user asks. It spawns a child process. */

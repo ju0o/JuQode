@@ -28,6 +28,20 @@ const { answers, statusOf } = require('./interpret/answers');
  * @param {(e:object) => object} [deps.windowFor]
  * @param {() => object} [deps.versions]
  */
+/**
+ * `18` orient.* — ONE sentence about where the user is, and it must be true.
+ *
+ * `확인 불가` is reserved: `21` WBS-20 allows it only for a Work that is not ended and whose
+ * process could not be found after reconciliation (WBS-34 writes `ended_unknown` for those).
+ * Anything that ended states its outcome, however it ended.
+ */
+function orientationOf(works) {
+  if (works.some((w) => w.status !== 'ended')) return 'running';
+  if (works.some((w) => w.outcome === 'ended_unknown')) return 'unknown';
+  if (!works.length) return 'idle';
+  return 'finished';
+}
+
 function makeHandlers(deps) {
   const db = () => deps.db();
   const needDb = () => (db() ? null : { ok: false, reason: 'no-store', detail: deps.dbFault?.() ?? null });
@@ -142,6 +156,30 @@ function makeHandlers(deps) {
       if (gate) return gate;
       if (!workOr(workId)) return { ok: false, reason: 'no-work' };
       return supervisor.cancel(db(), workId, { onUpdate: deps.push });
+    },
+
+    /* WBS-20 · History. Every Work this project ever started, newest first, with the one fact
+     * each row needs beyond its own outcome: how many files it changed. `12` F-C2-04 — History
+     * never disappears, and a failed or cancelled Work stays in it. */
+    'juqode:history': (_e, projectId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const row = db().prepare('select * from project where id = ?').get(projectId);
+      if (!row) return { ok: false, reason: 'no-project' };
+
+      const store = deps.evidenceStore(projectId);
+      const works = repo.worksFor(db(), projectId).map((w) => {
+        /* `변경 n개` is a MEASURED number or it is not shown. `changes()` answers `known:false`
+         * when the evidence pair cannot tell, and that is carried through rather than flattened
+         * to zero — `12` has a state for "we could not tell". */
+        const changed = w.status === 'ended' ? supervisor.changes(db(), w.id, row, store) : null;
+        return {
+          id: w.id, intent: w.intent, status: w.status, outcome: w.outcome,
+          startedAt: w.started_at, endedAt: w.ended_at,
+          changes: changed && changed.known ? changed.files.length : null,
+        };
+      });
+      return { ok: true, works, orientation: orientationOf(works) };
     },
 
     'juqode:work-changes': (_e, workId) => {

@@ -174,3 +174,122 @@ test('blocks derived from a truncated patch say so', async () => {
   assert.strictEqual(seg.note, 'truncated', 'the reader must not believe the change ends there');
   assert.ok(seg.ref, 'and it must be told where the rest of it is');
 });
+
+/* ───────── batch-06 review · the stored diffs ───────── */
+
+test('the head limit is a BYTE bound, not a code-unit one', () => {
+  /* Measured: `over` was computed with `Buffer.byteLength` and the cut was made with
+   * `String.slice`, which counts UTF-16 code units. A 600 KB Korean patch stored 600 KB — 2.3x
+   * the declared bound — and SC-04 then said 앞부분만 실었어요 over a patch that was complete. */
+  const { db, project, store } = bench();
+  const workId = repo.beginWork(db, project.id, 'x').work.id;
+  const patch = '가'.repeat(300 * 1024);                 // 900 KB in UTF-8, 300 K code units
+  assert.ok(Buffer.byteLength(patch, 'utf8') > 256 * 1024);
+
+  repo.saveDiff(db, workId, { file: 'k.ts', patch }, store);
+  const [d] = repo.diffsFor(db, workId);
+
+  assert.ok(Buffer.byteLength(d.patch, 'utf8') <= 256 * 1024,
+    `the stored head is ${Buffer.byteLength(d.patch, 'utf8')} bytes`);
+  assert.ok(!d.patch.includes('�'), 'the cut split a character and left a replacement mark');
+  assert.strictEqual(d.truncated, true);
+  assert.strictEqual(fs.readFileSync(path.join(store, d.ref), 'utf8'), patch, 'the whole patch survives');
+});
+
+test('a file that no longer differs loses its stored diff', () => {
+  /* `saveDiffs` only upserted, so a retry that reverted a file left its row behind for good:
+   * SC-04 showed a change that no longer exists and disagreed with `changes()`, which reads git. */
+  const { db, project } = bench();
+  const workId = repo.beginWork(db, project.id, 'x').work.id;
+  repo.saveDiff(db, workId, { file: 'a.ts', patch: '+a\n' });
+  repo.saveDiff(db, workId, { file: 'b.ts', patch: '+b\n' });
+  assert.strictEqual(repo.diffsFor(db, workId).length, 2);
+
+  const dropped = repo.pruneDiffs(db, workId, ['a.ts']);
+  assert.deepStrictEqual(dropped, ['b.ts']);
+  assert.deepStrictEqual(repo.diffsFor(db, workId).map((d) => d.file), ['a.ts'],
+    'the file that still changes is kept, and only that one');
+
+  /* …and pruning to the SAME list removes nothing. */
+  assert.deepStrictEqual(repo.pruneDiffs(db, workId, ['a.ts']), []);
+  assert.strictEqual(repo.diffsFor(db, workId).length, 1);
+});
+
+test('a name list that disagrees with the patch is not zipped by index', () => {
+  /* The two git calls must describe the same patch. If they ever disagree on how many files
+   * there are, zipping BY INDEX files one file's diff under another's name — silently. The
+   * guard drops the name list and reads the header, which is wrong for exotic paths but never
+   * wrong about WHICH change belongs to WHICH file.
+   *
+   * The disagreement is forced here by stubbing the one call that produces the list — the same
+   * module object the supervisor holds, so the stub is on the real seam. */
+  const git = require(path.join(R, 'app/main/evidence/git.js'));
+  const { db, project, store } = bench();
+  const workId = repo.beginWork(db, project.id, 'x').work.id;
+
+  const g = (...a) => execFileSync('git', a, { cwd: project.path, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  fs.writeFileSync(path.join(project.path, 'second.txt'), 'one\n');
+  g('add', '-A', '.'); g('commit', '-qm', 'two files');
+
+  const before = git.capture(project.path, store, 'before');
+  repo.saveBasis(db, workId, 'before', { kind: 'git_tree', ref: before.ref, excluded: [] });
+  fs.writeFileSync(path.join(project.path, 'a.txt'), 'changed\n');
+  fs.writeFileSync(path.join(project.path, 'second.txt'), 'changed too\n');
+  const after = git.capture(project.path, store, 'after');
+  repo.saveBasis(db, workId, 'after', { kind: 'git_tree', ref: after.ref, excluded: [] });
+
+  const real = git.changedPaths;
+  git.changedPaths = (...a) => real(...a).slice(0, 1);      // one name short of the patch
+  try {
+    supervisor.saveDiffs(db, workId, project, store);
+  } finally {
+    git.changedPaths = real;
+  }
+
+  const stored = repo.diffsFor(db, workId);
+  assert.deepStrictEqual(stored.map((d) => d.file).sort(), ['a.txt', 'second.txt'],
+    `both files must be stored under their OWN names: ${JSON.stringify(stored.map((d) => d.file))}`);
+  const added = (d) => d.patch.split('\n').filter((l) => l.startsWith('+')).join('|');
+  for (const d of stored) {
+    if (d.file === 'a.txt') {
+      assert.ok(/\+changed$/m.test(d.patch) && !d.patch.includes('changed too'),
+        `a.txt was filed with another file's patch: ${added(d)}`);
+    }
+    if (d.file === 'second.txt') {
+      assert.ok(d.patch.includes('changed too'),
+        `second.txt was filed with another file's patch: ${added(d)}`);
+    }
+  }
+});
+
+test('saveDiffs itself drops a file that stopped differing', () => {
+  /* The prune has to run on the real path, not only when called directly: a retry re-captures
+   * the after-basis, and the diff rows are a snapshot of THAT answer. */
+  const git = require(path.join(R, 'app/main/evidence/git.js'));
+  const { db, project, store } = bench();
+  const workId = repo.beginWork(db, project.id, 'x').work.id;
+  const g = (...a) => execFileSync('git', a, { cwd: project.path, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  fs.writeFileSync(path.join(project.path, 'b.txt'), 'one\n');
+  g('add', '-A', '.'); g('commit', '-qm', 'two files');
+
+  const before = git.capture(project.path, store, 'before');
+  repo.saveBasis(db, workId, 'before', { kind: 'git_tree', ref: before.ref, excluded: [] });
+
+  /* First turn: both files change. */
+  fs.writeFileSync(path.join(project.path, 'a.txt'), 'changed\n');
+  fs.writeFileSync(path.join(project.path, 'b.txt'), 'changed\n');
+  let after = git.capture(project.path, store, 'after');
+  repo.saveBasis(db, workId, 'after', { kind: 'git_tree', ref: after.ref, excluded: [] });
+  supervisor.saveDiffs(db, workId, project, store);
+  assert.deepStrictEqual(repo.diffsFor(db, workId).map((d) => d.file).sort(), ['a.txt', 'b.txt']);
+
+  /* Retry: b.txt is put back the way it was, so it is no longer part of this change. */
+  fs.writeFileSync(path.join(project.path, 'b.txt'), 'one\n');
+  after = git.capture(project.path, store, 'after2');
+  db.prepare('delete from evidence_basis where work_id = ? and phase = ?').run(workId, 'after');
+  repo.saveBasis(db, workId, 'after', { kind: 'git_tree', ref: after.ref, excluded: [] });
+  supervisor.saveDiffs(db, workId, project, store);
+
+  assert.deepStrictEqual(repo.diffsFor(db, workId).map((d) => d.file), ['a.txt'],
+    'a file that no longer differs still had a diff on SC-04');
+});
