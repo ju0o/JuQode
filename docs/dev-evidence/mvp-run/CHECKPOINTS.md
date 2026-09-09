@@ -316,3 +316,26 @@ promise (사용 불가 ≠ 실패), and only the words were keeping them apart. 
 389 tests, three e2e files, 5/5 mutants killed.
 
 Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs).
+
+## Batch 12
+
+Report: `BATCH-12.md`. Canon findings raised: CF-18. Deferred: DV-11.
+
+| Package | State |
+|---|---|
+| WBS-22 Quick Command rules & explanation | IMPLEMENTED |
+| WBS-25 Terminal drawer | PARTIAL — the drawer and Quick Command are in; the SHELL LINE is not |
+
+`19` §C6 marks the pty unvalidated, and this repository's own capability-containment test bans
+`node-pty` outright. But REC-010 says long-running Quick Commands run in their OWN child
+processes rather than the drawer pty — so everything except the user-typed shell line ships
+without one. That line, and the decision behind it, is DV-11.
+
+"No shell" now holds all the way to the spawn: `availability()` yields an argv, `spawn` is
+called with a program and arguments, and the test passes `&& touch CANARY` and `$(id)` as
+arguments and measures that neither happens.
+
+414 tests, three e2e files, 20/20 mutants killed.
+
+Next eligible: an independent QA pass over batches 07–12 · the SC-04 evidence-gap and
+per-block work listed in BATCH-06 · DV-11's decision.
