@@ -28,8 +28,8 @@ JuQode 는 비개발자가 소프트웨어 프로젝트를 이해하고, Claude 
 | **Product Version** | v0.1 MVP — Reset Generation |
 | **현재 Phase** | **P1 — Product Planning** |
 | **다음 Phase** | **F1 — Feature Planning** |
-| **Implementation** | **NONE / HOLD.** 이 저장소에는 현재 구현이 없다 |
-| **구현 착수 조건** | **Final Planning Gate 통과.** 그 전까지 프로덕션 구현 금지 |
+| **Implementation** | **IN PROGRESS.** Final Planning Gate PASS (2026-09-09). 승인 범위는 **WBS-00 → WBS-01** 이고, 그 결과는 `docs/dev-evidence/` 에 있다 |
+| **다음 판정 지점** | WBS-01 인수 — **Windows 호스트가 필요하다** (D-125 대상 OS 미검증) |
 
 ---
 

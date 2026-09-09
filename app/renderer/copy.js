@@ -20,6 +20,15 @@ export const C = {
     failTitle:  '이 폴더는 열 수 없어요',
     other:      '▸ 다른 폴더 고르기',
   },
+  /* Not in Canon 18 yet: SC-01 has no "folder open is not built" state, because in the
+   * finished product it always is. These are DEV-ONLY strings for the WBS-01 shell and are
+   * marked as such so they cannot be mistaken for approved copy. They use the Canon
+   * `unavailable.chip` vocabulary (18:145) rather than inventing a failure voice. */
+  dev: {
+    notReadyTitle: '아직 준비되지 않았어요',
+    notReadyChip:  '지금 안 됨 · 실패 아님',   // 18 `unavailable.chip` — verbatim
+  },
+
   theme: {
     label:  '테마',
     light:  '밝게',

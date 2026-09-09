@@ -36,11 +36,9 @@ if (!app.requestSingleInstanceLock()) {
   }));
 
   /* WBS-02 owns this. Saying "not built yet" is the honest answer; a fake dialog is not. */
-  ipcMain.handle('juqode:open-project', () => ({
-    ok: false,
-    reason: '아직 폴더를 열 수 없어요',
-    detail: 'WBS-02',
-  }));
+  /* Internal result only — never rendered verbatim. The renderer picks its own approved
+     copy, so this carries a machine reason rather than a user-facing sentence. */
+  ipcMain.handle('juqode:open-project', () => ({ ok: false, reason: 'not-implemented' }));
 
   app.whenReady().then(() => {
     readExternalAttempts = enforceLocalOnly(session.defaultSession);

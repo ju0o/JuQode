@@ -28,8 +28,14 @@ test('preload exposes exactly the named API, and never ipcRenderer', () => {
   const src = read('app/preload/preload.js');
   assert.match(src, /exposeInMainWorld\('juqode'/);
   assert.doesNotMatch(src, /exposeInMainWorld\([^)]*ipcRenderer/);
-  // no generic passthrough that would widen the surface to every channel
-  assert.doesNotMatch(src, /invoke:\s*\(\s*channel/);
+  // No generic passthrough. Renaming the parameter must not defeat this, so assert on the
+  // shape: every exposed value must invoke a STRING LITERAL channel.
+  const body = src.slice(src.indexOf('exposeInMainWorld'));
+  const invocations = [...body.matchAll(/ipcRenderer\.invoke\(([^,)]+)/g)].map((m) => m[1].trim());
+  assert.ok(invocations.length > 0, 'preload exposes nothing');
+  for (const arg of invocations) {
+    assert.match(arg, /^'[^']+'$/, `preload forwards a non-literal channel: ${arg}`);
+  }
   assert.doesNotMatch(src, /require\(['"]child_process/);
 });
 
@@ -52,9 +58,27 @@ test('theme tokens: every state-grammar colour exists in light AND dark', () => 
   const dark = rule(':root[data-theme="dark"] {');
   const auto = css.slice(css.indexOf('@media (prefers-color-scheme: dark)'));
   assert.match(auto, /:root:not\(\[data-theme="light"\]\)/);
+  const decls = (block) => {
+    const out = {};
+    for (const m of block.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim();
+    return out;
+  };
+  const L = decls(light), D = decls(dark), A = decls(auto);
+
   for (const t of ['--fail', '--part', '--wait', '--unk', '--grey', '--rec', '--claude', '--juq', '--ink', '--board', '--card']) {
-    assert.match(light, new RegExp(`${t}\\s*:`), `${t} missing from light`);
-    assert.match(dark, new RegExp(`${t}\\s*:`), `${t} missing from dark`);
+    assert.ok(L[t], `${t} missing from light`);
+    assert.ok(D[t], `${t} missing from dark`);
+    assert.notStrictEqual(D[t], L[t], `${t} is identical in light and dark — the theme does nothing`);
+  }
+
+  // THE regression that shipped a 1.83:1 button: a token redefined in the media block but
+  // NOT in [data-theme="dark"] is correct only while the OS already prefers dark. The two
+  // dark paths must declare exactly the same set, with the same values.
+  const missing = Object.keys(A).filter((k) => !(k in D));
+  assert.deepStrictEqual(missing, [],
+    `token(s) in the prefers-color-scheme block but not in [data-theme="dark"]: ${missing.join(', ')} — the toggle would not win`);
+  for (const k of Object.keys(A)) {
+    assert.strictEqual(D[k], A[k], `${k} differs between the two dark blocks`);
   }
 });
 
@@ -87,16 +111,31 @@ test('no fabricated progress anywhere in the renderer', () => {
   }
 });
 
-test('copy is transcribed from Canon 18, not invented', () => {
-  const { readFileSync } = require('node:fs');
-  const copy = read('app/renderer/copy.js');
-  const canon = '/home/skkse12/Desktop/Projects/Team/JuQode-Private/docs/current/18_KOREAN_UX_COPY.md';
+test('every Korean string is either Canon 18 verbatim or explicitly marked DEV-ONLY', () => {
+  const canon = process.env.JUQODE_CANON ||
+    '/home/skkse12/Desktop/Projects/Team/JuQode-Private/docs/current/18_KOREAN_UX_COPY.md';
   let dict;
-  try { dict = readFileSync(canon, 'utf8'); } catch { return; }  // Canon repo absent in CI
-  for (const s of ['프로젝트 열기', '이미 있는 폴더를 고르면 돼요. 새로 만들지는 않아요.',
-                   '폴더를 읽고 있어요…', '최근에 연 프로젝트', '아직 기록이 없어요 — 처음 열기']) {
-    assert.ok(copy.includes(s), `copy.js missing "${s}"`);
-    assert.ok(dict.includes(s), `"${s}" is not in Canon 18 — copy must not be invented`);
+  try { dict = fs.readFileSync(canon, 'utf8'); }
+  catch {
+    // Skipping silently is how invented copy got in. Fail loudly instead; CI must set the path.
+    assert.fail(`Canon 18 not readable at ${canon} — set JUQODE_CANON. Refusing to pass vacuously.`);
+  }
+
+  // Enumerate EVERY Korean string in the renderer, rather than whitelisting a few.
+  const hangul = /['"`]([^'"`]*[\uAC00-\uD7A3][^'"`]*)['"`]/g;
+  const found = new Map();
+  for (const f of ['app/renderer/copy.js', 'app/renderer/screens/sc01.js',
+                   'app/renderer/renderer.js', 'app/main/main.js']) {
+    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const m of src.matchAll(hangul)) found.set(m[1], f);
+  }
+  assert.ok(found.size >= 10, `expected to find the SC-01 copy, found ${found.size} strings`);
+
+  // Strings under copy.js `dev:` are allowed to be absent from Canon; everything else is not.
+  const devBlock = read('app/renderer/copy.js').split('dev: {')[1]?.split('},')[0] ?? '';
+  for (const [s, f] of found) {
+    if (devBlock.includes(s)) continue;             // explicitly marked DEV-ONLY
+    assert.ok(dict.includes(s), `"${s}" (${f}) is not in Canon 18 and is not marked DEV-ONLY`);
   }
 });
 
@@ -107,12 +146,29 @@ test('index.html: CSP forbids remote content', () => {
   assert.doesNotMatch(html, /https?:\/\//);   // no external asset of any kind
 });
 
-test('scope containment: no WBS-02+ capability is implemented', () => {
-  const main = read('app/main/main.js');
-  // folder open must answer "not yet", not open a dialog
-  assert.doesNotMatch(main, /showOpenDialog/);
-  assert.match(main, /ok:\s*false/);
-  for (const later of ['node-pty', 'child_process', 'sqlite', 'better-sqlite3', 'claude']) {
-    assert.ok(!main.includes(later), `main.js reaches into WBS-02+ territory: ${later}`);
+test('scope containment: no WBS-02+ capability is implemented, anywhere under app/', () => {
+  // Walk the WHOLE tree. Reading one file let WBS-02+ code hide in any other.
+  const files = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
+      const rel = path.join(dir, e.name);
+      if (e.isDirectory()) walk(rel);
+      else if (/\.(js|mjs|cjs|html)$/.test(e.name)) files.push(rel);
+    }
+  })('app');
+  assert.ok(files.length >= 6, `expected to scan the app tree, found ${files.length} files`);
+
+  const banned = [
+    'showOpenDialog', 'dialog.show', 'child_process', 'node-pty', 'spawn(', 'execSync',
+    'better-sqlite3', 'sqlite', 'fs.readFile', 'fs.writeFile', 'writeFileSync',
+  ];
+  for (const f of files) {
+    // strip comments — a comment that says "WBS-02 does this" is documentation, not code
+    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const b of banned) {
+      assert.ok(!src.includes(b), `${f} reaches into WBS-02+ territory: ${b}`);
+    }
   }
+  // and the folder-open IPC must still refuse
+  assert.match(read('app/main/main.js'), /ok:\s*false/);
 });

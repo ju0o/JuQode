@@ -7,8 +7,9 @@
   "scripts": {
     "postinstall:electron": "node node_modules/electron/install.js",
     "start": "electron .",
-    "test": "node --test tests/",
-    "test:e2e": "node tests/e2e/boot.test.mjs",
+    "test": "node --test tests/*.test.js",
+    "test:all": "npm test && npm run test:e2e",
+    "test:e2e": "node tests/e2e/boot.test.mjs && node tests/e2e/visual.mjs && node tests/e2e/offline-shutdown.mjs",
     "pack:linux": "electron-builder --linux dir",
     "pack:win": "electron-builder --win dir zip --x64"
   },

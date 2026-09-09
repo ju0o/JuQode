@@ -271,7 +271,7 @@ TD-01 의 `터미널을 열 수 없습니다` 는 **try/catch 로 잡을 수 없
 | **A** 갓 `git init`(전부 untracked) | 2,530 ms | 3,271 ms | 16 MB |
 | **B** sha256 manifest, warm | 391 ms | 419 ms | 83 MB |
 | **B** 같은 것, cold | 1,990 ms | **14,085 ms** | 84 MB |
-| **A** 50k 파일, 추적됨 | 490 ms | 530 ms | 17 MB |
+| **A** 50k 파일, 추적됨 | 490 ms | 490 ms | 17 MB |
 
 **A 가 B 보다 warm 3.9× · cold 19× · 최악 108× 빠르고 메모리는 10× 적다.**
 

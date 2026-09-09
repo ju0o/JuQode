@@ -40,7 +40,6 @@
   /* actors */
   --claude: #4c3d8f;   --claudebg: #eeeafa; --claude2: #8a7bd1; --claudeline: #cfc6ee;
   --juq:    #0f5f6b;   --juqbg:    #e6f3f5; --juqline:  #8ec4cc;
-  --on-juq: #ffffff;   /* foreground ON --juq. Must be re-picked per theme. */
 
   /* shape */
   --r-card: 12px; --r-inner: 8px; --r-chip: 999px; --r-badge: 4px;
@@ -77,8 +76,6 @@
     --grey: #23262c;
     --claude: #b5a6f2; --claudebg: #211c37; --claude2: #8a7bd1; --claudeline: #443a70;
     --juq: #63cfdc;    --juqbg: #0d292e;    --juqline: #2c5f68;
-  --on-juq: #06232a;
-    --on-juq: #06232a;  /* dark ink on the light teal — white here fails contrast */
     --sh-rest:  0 1px 0 rgba(0,0,0,.35);
     --sh-raise: 0 1px 2px rgba(0,0,0,.4), 0 6px 16px -10px rgba(0,0,0,.7);
   }

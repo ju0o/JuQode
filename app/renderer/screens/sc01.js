@@ -26,7 +26,7 @@ export function renderSC01(root, api) {
   const main = el('main', 'sc01 fade-in');
   main.setAttribute('data-screen', 'SC-01');
 
-  const hero = el('div', 'hero');
+  const hero = el('div', 'card hero');   /* 16 §1: everything is a card */
   hero.appendChild(el('h1', 'h1', C.sc01.title));
   hero.appendChild(el('p', 'lead', C.sc01.lead));
 
@@ -82,8 +82,7 @@ function showNotYet(main, res) {
   n.innerHTML = '';
   const head = el('div', null);
   head.style.cssText = 'display:flex;align-items:center;gap:8px';
-  head.appendChild(el('span', 'sm', (res && res.reason) || '아직 폴더를 열 수 없어요'));
-  head.appendChild(el('span', 'chip unavail', '지금 안 됨 · 실패 아님'));
+  head.appendChild(el('span', 'sm', C.dev.notReadyTitle));
+  head.appendChild(el('span', 'chip unavail', C.dev.notReadyChip));
   n.appendChild(head);
-  n.appendChild(el('span', 'xs mut', '프로젝트 열기는 다음 단계(WBS-02)에서 만들어요.'));
 }

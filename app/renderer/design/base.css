@@ -2,22 +2,22 @@
  * No speculative components — 21 WBS-01 says foundation, not a component library. */
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body, #root { height: 100%; }   /* #root too, or .shell's 100% resolves against auto */
 
 body {
   margin: 0;
   background: var(--board);          /* explicit token background — 16 §2.1 rule 4 */
   color: var(--ink);
-  font: 14px/1.55 var(--font-sans);
+  font: 13px/19px var(--font-sans);   /* 16 §3 body */
   -webkit-font-smoothing: antialiased;
   overflow: hidden;                   /* the shell owns scrolling, not the document */
 }
 
 /* ---------- typography ---------- */
-.h1 { font-size: 22px; line-height: 1.35; font-weight: 700; letter-spacing: -.01em; margin: 0; }
-.lead { font-size: 15px; line-height: 1.6; color: var(--ink2); margin: 0; }
-.sm { font-size: 13px; line-height: 1.5; }
-.xs { font-size: 12px; line-height: 1.45; }
+.h1 { font-size: 20px; line-height: 26px; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+.lead { font-size: 13px; line-height: 19px; color: var(--ink2); margin: 0; }
+.sm { font-size: 12px; line-height: 17px; }
+.xs { font-size: 11px; line-height: 15px; }
 .mut { color: var(--mut); }
 .mono { font-family: var(--font-mono); font-size: .92em; }
 
@@ -32,7 +32,7 @@ body {
 /* ---------- buttons ---------- */
 .btn {
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ink);
   background: var(--card);
   border: 1px solid var(--line2);
@@ -43,12 +43,17 @@ body {
 }
 .btn:hover { border-color: var(--line3); background: var(--card2); }
 .btn.pri {
-  color: var(--on-juq);
-  background: var(--juq);
-  border-color: var(--juq);
+  /* 16 §6: "pri = ink". Both sides are theme tokens that flip together, so the pair can
+     never drift out of contrast. An earlier revision used an accent fill with a separate
+     foreground token; that token was not redefined in every theme block and shipped a
+     1.83:1 button. Canon's recipe removes the failure mode rather than guarding it. */
+  color: var(--board);
+  background: var(--ink);
+  border-color: var(--ink);
   font-weight: 600;
 }
-.btn.pri:hover { filter: brightness(1.08); }
+.btn.pri:hover { background: var(--ink2); border-color: var(--ink2); }
+.btn:active { transform: translateY(1px); }
 .btn.sm { font-size: 13px; padding: 6px 12px; }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--mut); }
 .btn.ghost:hover { color: var(--ink); background: var(--card2); border-color: var(--line); }
