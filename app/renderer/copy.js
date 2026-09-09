@@ -256,6 +256,16 @@ export const C = {
     readerToResult:   '▸ 결과 설명으로',
     readerToIntent:   '▸ 다음 의도로',
     readerToGroups:   '▸ 설명으로',
+    /* `18` has `reader.copy` for the button; it has no key for what the button says afterwards. */
+    readerCopied:     '복사했어요',
+    readerCopyFailed: '복사하지 못했어요',
+    /* A read the main process refused. `18` has SC-01's 저장소 copy and nothing for this — the
+     * screen still has to SAY it rather than going blank (12 §16). */
+    readerUnavailable: '이 변경을 지금 불러오지 못했어요.',
+    /* The copy button's own feedback. `18` carries the label (`reader.copy`) and not the
+     * result, and the result is a fact about what just happened on this machine. */
+    readerCopied:     '복사했어요',
+    readerCopyFailed: '복사하지 못했어요',
 
     /* Brief ANSWER bodies. `18` is a dictionary of fixed UI strings; a Brief answer is
      * generated from what the scan found, so `18` cannot carry it and does not try. These are

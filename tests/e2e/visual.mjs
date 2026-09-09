@@ -11,6 +11,9 @@ import fs from 'node:fs';
 import assert from 'node:assert';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+/* Stale Xvfb locks accumulate and eventually starve `xvfb-run -a` — see xvfb.mjs. */
+import { sweepDisplays } from './xvfb.mjs';
+sweepDisplays();
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
@@ -92,6 +95,11 @@ if (resumed) {
     'export const hi = 1;\\n\\nexport function greet(name) {\\n  return "hi " + name;\\n}\\n');
   fs.writeFileSync(${JSON.stringify(path.join(SEED, 'README.md'))},
     '# seed-app\\n\\n작은 예제 프로젝트예요.\\n\\n## 설치\\n\\nnpm i\\n\\n## 실행\\n\\nnpm run dev\\n');
+  /* …and it touches the gitignored, JuQode-excluded .env. Canon 19 SS-E: that change is NOT in
+   * the diff by design, and the product still has to SAY it happened — from the ledger, as a
+   * path and nothing more. This gives the evidence-gap card its first rendered evidence. */
+  fs.writeFileSync(${JSON.stringify(path.join(SEED, '.env'))},
+    'SECRET_TOKEN=juqode-synthetic-fixture-marker-CHANGED\\n');
 }
 const out = resumed ? [
   { type: 'system', subtype: 'init', session_id: 's', cwd: '/p', claude_code_version: '9.9.9' },
@@ -492,6 +500,8 @@ const results = await cdp(async ({ send, evalJs }) => {
     return JSON.stringify([...new Set(hits)]);
   })()`);
   out.readerStamp = await evalJs(`document.querySelector('.sc04-headtop')?.innerText ?? null`);
+  out.evidenceGap = await evalJs(`document.querySelector('[data-el="evidence-gap"]')?.innerText ?? null`);
+  out.evidenceGapReds = await evalJs(RED_COUNT('[data-el="evidence-gap"], [data-el="evidence-gap"] *'));
   out.explainArgv     = fs.existsSync(path.join(DB_DIR, 'ARGV.log'))
     ? fs.readFileSync(path.join(DB_DIR, 'ARGV.log'), 'utf8') : '';
   for (const theme of ['light', 'dark']) {
@@ -743,6 +753,22 @@ assert.ok(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(results.readerStamp ?? ''),
   `SC-04's header carries no timestamp: ${results.readerStamp}`);
 assert.ok(/끝났어요|일부만|끝내지 못했어요|취소했어요/.test(results.readerStamp ?? ''),
   `SC-04's header carries no outcome chip: ${results.readerStamp}`);
+
+/* Canon 19 SS-E · 증거에 담기지 않은 변경. The Work touched the seed's gitignored `.env`, which
+ * JuQode also excludes, so that change is not in the diff BY DESIGN — and the product still has
+ * to say it happened. From the ledger: the PATH, and nothing else. */
+assert.ok(results.evidenceGap, 'the excluded path changed and no evidence-gap card was drawn');
+assert.ok(results.evidenceGap.includes('증거에 담기지 않은 변경이 있어요'));
+assert.ok(results.evidenceGap.includes('.env'), `the card names no path: ${results.evidenceGap}`);
+assert.ok(results.evidenceGap.includes('이 파일들은 프로젝트가 무시하도록 설정해 둔 파일이에요'));
+/* Metadata only. The ledger holds (path, size, mtime_ns); the file was never opened, so nothing
+ * about its CONTENTS may appear — and the synthetic marker is what proves it did not. */
+assert.ok(!results.evidenceGap.includes('SECRET_TOKEN'),
+  'the evidence-gap card leaked a name from inside an excluded file');
+assert.ok(!/juqode-synthetic-fixture-marker/.test(results.evidenceGap),
+  'the evidence-gap card leaked the CONTENTS of an excluded file');
+/* 알 수 없음 is dashed, never red: nothing failed here. */
+assert.strictEqual(results.evidenceGapReds, 0, 'the evidence-gap card renders red — it is not a failure');
 /* The NEXT slot is always rendered, and empty is the right answer here (D-107). */
 assert.ok(results.nextSlot && results.nextSlot.includes('Claude Code가 아직 다음 단계를 보내지 않았어요'),
   `NEXT slot: ${results.nextSlot}`);

@@ -5,6 +5,8 @@
  * the shutdown paths leave no orphan (Spike C: killing the parent can strand descendants).
  */
 import { spawn, execSync } from 'node:child_process';
+import { sweepDisplays } from './xvfb.mjs';
+sweepDisplays();
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert';

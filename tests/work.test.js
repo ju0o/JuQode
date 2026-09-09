@@ -860,8 +860,11 @@ test('a project that gitignores its own .env can still have a basis taken', () =
   assert.ok(!JSON.stringify(basis).includes('SECRET_TOKEN'), 'a secret VALUE reached the basis record');
 });
 
-test('an add that genuinely produces nothing is still refused', () => {
-  /* The counterpart: tolerating the exit status must not become tolerating a failed add. */
+test('an empty project has an empty basis, and that is not a failure', () => {
+  /* The name used to say "an add that genuinely produces nothing is still REFUSED", which is
+   * the opposite of what the body asserts and of what is correct: a repository with no files
+   * has a legitimately empty basis. The refusal path is covered by the unreadable-path test
+   * below, which is the case that actually needs refusing. */
   const dir = tempDir('juqode-empty-');
   const store = tempDir('juqode-store-');
   const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });

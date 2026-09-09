@@ -265,7 +265,10 @@ test('a group cannot cite a diff row belonging to another Work', () => {
 
 /* ───────────── the prompt hands over the diff; it does not hand over the project ───────────── */
 
-test('the pass is given the diff text and no tools', () => {
+test('the pass is given the diff text JuQode already measured', () => {
+  /* This test used to be named "…and no tools" and asserted nothing about tools — the argv
+   * assertion that actually checks that is further down. A name that claims more than the body
+   * checks is how the missing restriction survived review. */
   const { diffs } = bench();
   const prompt = E.promptFor(diffs);
   assert.ok(prompt.includes('a.ts') && prompt.includes('+one'), 'the diff JuQode measured goes in the prompt');

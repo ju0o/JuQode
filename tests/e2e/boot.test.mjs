@@ -13,12 +13,15 @@ import path from 'node:path';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
+import { sweepDisplays } from './xvfb.mjs';
 
 /* Isolated store per run: a test must never touch the user's real juqode.db. */
 const DB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-e2e-')), 'juqode.db');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ELECTRON = path.join(ROOT, 'node_modules', '.bin', 'electron');
+
+sweepDisplays();
 
 function boot(extraArgs = [], env = {}) {
   return new Promise((resolve) => {
@@ -48,6 +51,7 @@ const ev = (events, name) => events.find((e) => e.ev === name);
 
 const runs = [];
 for (let i = 0; i < 3; i++) runs.push(await boot([], { JUQODE_EXIT_AFTER_LOAD: '1' }));
+
 
 // Every run must have produced the same shape.
 for (const [i, r] of runs.entries()) {

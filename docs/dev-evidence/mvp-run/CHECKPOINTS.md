@@ -140,3 +140,26 @@ not take a basis for most REAL projects. Fixed by checking the artifact rather t
 
 Next eligible: WBS-19 (06, 07, 08) · WBS-22 (06) · WBS-25 (00, 01) · WBS-29 (11) · WBS-04 (03, 10) ·
 WBS-05 (03, 04, 21) · WBS-20 (21, 05) · WBS-34 (21, 11).
+
+## Batch 06 QA
+
+Report: `BATCH-06-QA.md`. Three independent audits — product, technical/security, test adversary.
+Two of them found the same BLOCKER: the explanation pass documented as "no tools at all" ran with
+the CLI's entire default tool set, because `allowedTools: []` adds no argument. `--tools ""` is
+the flag that empties the built-in set, measured on a disposable scratch directory.
+
+The adversary's headline: 20 of 29 mutants survived, including `pre.innerHTML = f.patch` (passed
+unit AND e2e) and `renderSC04` returning nothing at all. Its incidental finding was the biggest
+one — the suite leaked temp directories until the tmpfs quota broke it, producing a 50% flake
+that made every previous "N tests pass" claim unreliable. Chasing that flake turned up CF-14.
+
+Also landed here: **WBS-22 Quick Command rules & availability** — `app/main/qc/rules.js` and
+`app/main/qc/availability.js`, the deterministic half of the package. The UI card and the
+executor belong to TD-01 (WBS-25) and are not built. Canon's validated corpus is not in either
+repository (CF-12), so the recognition layer is IMPLEMENTED_PENDING_VALIDATION.
+
+334 tests, three e2e files, flake 0/10.
+
+Next eligible: WBS-25 (00, 01 — TD-01, and WBS-22's card depends on it) · WBS-19 (06, 07, 08) ·
+WBS-20 (21, 05) · WBS-34 (21, 11) · WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
+Unfinished inside SC-04: per-block Raw selection, 원문 복사, the evidence-gap card.

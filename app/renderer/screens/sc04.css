@@ -15,6 +15,8 @@
 }
 
 .sc04-head { display: flex; flex-direction: column; gap: 6px; }
+/* The title, the outcome chip and the Work's time sit on one line and must not touch. */
+.sc04-headtop { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 /* 부분 — amber FILL (`16` §2.1). A cancelled Work's leftover change is 부분, not 실패, so it
    must never borrow the one red this product has. */
 .sc04-cancelled {
@@ -73,15 +75,31 @@
 /* The kind chips carry a WORD, not a colour: 추가 · 삭제 · 수정 · 이름 변경 are facts about the
    change, and none of them is a failure — so none of them is red. */
 .sc04-kind { flex: 0 0 auto; }
-.sc04-kind.k-add    { border-color: var(--rec); color: var(--rec); background: var(--recbg); }
-.sc04-kind.k-delete { border-color: var(--line3); color: var(--ink2); }
-.sc04-kind.k-rename { border-color: var(--juq); color: var(--juq); }
+/* 추가 was painted with `--rec`. `16` reserves green for a RECOVERY action — never for a
+   status, never for navigation — and an added function is not a recovery. All four kinds are
+   neutral; the word is the whole signal, which is also what survives a greyscale print. */
+.sc04-kind.k-add,
+.sc04-kind.k-delete,
+.sc04-kind.k-rename { border-color: var(--line3); color: var(--ink2); }
 
 /* 단위화 불가 · 표시 불가 — statements about the file's kind. Grey, per 12 §16: 사용 불가 ≠ 실패. */
 .sc04-unblocked, .sc04-undisplayable {
   background: var(--grey); border-radius: var(--r-inner); padding: 8px 12px; color: var(--mut);
 }
 .sc04-truncated { color: var(--mut); }
+/* A block the reader has opened. Same left rule as the selected group — legible in greyscale. */
+.sc04-block.on { box-shadow: inset 3px 0 0 var(--juq); padding-left: 6px; border-radius: var(--r-badge); }
+.sc04-blockraw { margin-left: auto; }
+
+/* 증거 공백 — `19` §E. 알 수 없음 is DASHED, and never red: nothing failed, we simply do not
+   cover these paths. Paths only; the contents were never read. */
+.sc04-gap {
+  border-style: dashed; border-color: var(--unk); background: var(--unkbg);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.sc04-gap .mono { overflow-wrap: anywhere; }
+.sc04-gapalt { color: var(--rec); }
+.sc04-copy { align-self: flex-start; }
 
 /* ---------- right · 원문 diff ---------- */
 .sc04-raw.closed .sc04-collabel { opacity: .55; }

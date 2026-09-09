@@ -113,6 +113,12 @@ export function renderSC04(root, api, nav, state) {
   cols.appendChild(rawColumn(group, state, nav));
   board.appendChild(cols);
 
+  /* `15` SC-04 Evidence-gap State: a dashed(모름) card BELOW the change list. It is context for
+   * what the reader just read, not a headline — putting it on top made the excluded paths the
+   * first thing on a screen whose subject is the change itself. */
+  const gap = evidenceGapCard(reader);
+  if (gap) board.appendChild(gap);
+
   shell.appendChild(board);
   root.appendChild(shell);
   return { shell, board };
@@ -156,6 +162,33 @@ function header(snap) {
     h.appendChild(el('p', 'sm sc04-cancelled', C.reader.cancelledNote));
   }
   return h;
+}
+
+/**
+ * `19` §E · 증거에 담기지 않은 변경.
+ *
+ * `.gitignore`d and JuQode-excluded paths are not in the diff, by design (D-126a). The product
+ * still has to SAY they changed — and it says it from the ledger the two bases recorded:
+ * `(path, size, mtime_ns)`, and nothing else. The CONTENTS were never opened, so this card
+ * cannot describe what changed inside them, and does not try.
+ *
+ * Dashed (알 수 없음), never red: this is a statement of fact, not a failure.
+ *
+ * When a ledger is missing the card is not drawn at all — claiming "no excluded file changed"
+ * on evidence that cannot prove it is exactly the overclaim this layer exists to prevent.
+ */
+function evidenceGapCard(reader) {
+  const gap = reader?.evidenceGap;
+  if (!gap?.known || !gap.paths?.length) return null;
+
+  const card = el('section', 'card c-wide sc04-gap');
+  card.setAttribute('data-el', 'evidence-gap');
+  card.appendChild(el('p', 'lead', C.reader.evidenceGap));
+  card.appendChild(el('p', 'sm mono', C.reader.evidenceGapPaths(gap.paths.map((p) => p.path).join(' · '))));
+  card.appendChild(el('p', 'sm mut', C.reader.evidenceGapWhy));
+  /* The only honest next step: JuQode does not guess at the contents, and says where to look. */
+  card.appendChild(el('p', 'xs sc04-gapalt', C.reader.evidenceGapAlt));
+  return card;
 }
 
 /* ── left: 변경 묶음 ── */

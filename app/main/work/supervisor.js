@@ -21,6 +21,7 @@ const { toSignal, reduce, initial, openPermission, openPermissions, KIND } = req
 const resultBuilder = require('./result');
 const blocks = require('../change/blocks');
 const explain = require('../change/explain');
+const exclude = require('../evidence/exclude');
 
 /** Live state for Works this process started. Nothing here is authoritative — the DB is. */
 const live = new Map();   // workId -> { child, state, sessionId, cwd, projectId }
@@ -416,6 +417,7 @@ function readerFor(db, workId, project, store) {
   const byFile = new Map(diffs.map((d) => [d.file, d]));
   return {
     files: diffs.length,
+    evidenceGap: evidenceGap(db, workId),
     groups: groups.map((g) => ({
       ...g,
       files: g.files.map((file) => {
@@ -434,6 +436,29 @@ function readerFor(db, workId, project, store) {
       }),
     })),
   };
+}
+
+/**
+ * `19` §E · changes the evidence could not cover.
+ *
+ * `.gitignore`d and excluded paths are not in the diff — by design (D-126a). The product still
+ * has to SAY they changed, and it says it from the ledger the two bases recorded: `(path, size,
+ * mtime_ns)`, and nothing else. The contents were never opened, so nothing here can describe
+ * what changed inside them, and nothing tries.
+ *
+ * @returns {{known:boolean, paths:{path:string, change:string}[]}}
+ *   `known: false` when a ledger is missing — which is NOT the same as "nothing changed". An
+ *   answer of "none" is only ever given when both ledgers exist to prove it.
+ */
+function evidenceGap(db, workId) {
+  const parse = (row) => {
+    if (!row?.excluded) return null;
+    try { const v = JSON.parse(row.excluded); return Array.isArray(v) ? v : null; } catch { return null; }
+  };
+  const before = parse(repo.basisFor(db, workId, 'before'));
+  const after = parse(repo.basisFor(db, workId, 'after'));
+  if (!before || !after) return { known: false, paths: [] };
+  return { known: true, paths: exclude.ledgerDiff(before, after) };
 }
 
 /**
