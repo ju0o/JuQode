@@ -1,0 +1,101 @@
+/* JuQode design tokens.
+ *
+ * SOURCE OF TRUTH: JuQode-Private docs/current/16_VISUAL_DESIGN_SPEC.md §2 and §2.1 (D-135),
+ * as implemented in docs/visual/visual-design.html. These values are TRANSCRIBED from the
+ * approved Canon, not invented here. If Canon changes, change it there first.
+ *
+ * Theme contract (16 §2.1):
+ *   1. complete light palette on bare :root
+ *   2. dark values redefined ONLY as tokens, guarded :root:not([data-theme="light"])
+ *   3. same dark values under :root[data-theme="dark"] so the toggle wins both ways
+ *   4. body gets an explicit token background
+ *   5. no colour is defined only inside a media/[data-theme] block
+ */
+
+:root {
+  /* surfaces */
+  --board: #eef0f4;
+  --card: #ffffff;
+  --card2: #f7f8fa;
+
+  /* text */
+  --ink: #14171c;
+  --ink2: #2a2f38;
+  --mut: #5d6672;
+  --mut2: #8a93a0;
+
+  /* lines */
+  --line: #d6dbe3;
+  --line2: #c9cfd8;
+  --line3: #bcc4d0;
+
+  /* state grammar — 16 §2. Meaning is fixed; only the value changes per theme. */
+  --rec: #245c3a;      --recbg: #eef6f0;   --recline: #a9c9b3;   /* recovery · 확인됨 · 끝남 */
+  --part: #b45309;     --partbg: #fff6ea;  --partline: #e7b98a;  /* partial — FILL */
+  --wait: #b45309;                                               /* waiting — OUTLINE only */
+  --fail: #9b2c2c;     --failbg: #fdf1f1;  --failline: #d9a3a3;  /* failure — the ONLY red */
+  --unk:  #37445c;     --unkbg:  #e6ebf3;                        /* unknown — always dashed */
+  --grey: #f1f1ee;                                               /* 지금 안 됨 · 실패 아님 */
+
+  /* actors */
+  --claude: #4c3d8f;   --claudebg: #eeeafa; --claude2: #8a7bd1; --claudeline: #cfc6ee;
+  --juq:    #0f5f6b;   --juqbg:    #e6f3f5; --juqline:  #8ec4cc;
+  --on-juq: #ffffff;   /* foreground ON --juq. Must be re-picked per theme. */
+
+  /* shape */
+  --r-card: 12px; --r-inner: 8px; --r-chip: 999px; --r-badge: 4px;
+
+  /* grid — 16 §4 */
+  --u: 216px; --row: 148px; --gap: 16px;
+
+  /* elevation */
+  --sh-rest:  0 1px 0 rgba(20,23,28,.04);
+  --sh-raise: 0 1px 2px rgba(20,23,28,.05), 0 6px 16px -10px rgba(20,23,28,.16);
+
+  /* motion — 17 */
+  --d-fast: 140ms; --d-base: 220ms; --d-slow: 360ms; --d-settle: 520ms;
+  --ease: cubic-bezier(.2,.8,.2,1);
+  --ease-in: cubic-bezier(.4,0,.6,1);
+  --ease-spring: cubic-bezier(.3,1.25,.4,1);
+
+  /* type */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR",
+               "Malgun Gothic", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --board: #0c0e12; --card: #161a20; --card2: #1d222a;
+    --ink: #e9ecf2; --ink2: #ccd3dd; --mut: #99a3b2; --mut2: #79838f;
+    --line: #2a303a; --line2: #39414e; --line3: #4b5462;
+    --rec: #5cc98d;  --recbg: #10241a;  --recline: #2f5c43;
+    --part: #eab35c; --partbg: #2a1f0d; --partline: #6d4d1c;
+    --wait: #eab35c;
+    --fail: #f08b8b; --failbg: #2c1415; --failline: #6e3030;
+    --unk: #a9b5c9;  --unkbg: #1b2029;
+    --grey: #23262c;
+    --claude: #b5a6f2; --claudebg: #211c37; --claude2: #8a7bd1; --claudeline: #443a70;
+    --juq: #63cfdc;    --juqbg: #0d292e;    --juqline: #2c5f68;
+  --on-juq: #06232a;
+    --on-juq: #06232a;  /* dark ink on the light teal — white here fails contrast */
+    --sh-rest:  0 1px 0 rgba(0,0,0,.35);
+    --sh-raise: 0 1px 2px rgba(0,0,0,.4), 0 6px 16px -10px rgba(0,0,0,.7);
+  }
+}
+
+:root[data-theme="dark"] {
+  --board: #0c0e12; --card: #161a20; --card2: #1d222a;
+  --ink: #e9ecf2; --ink2: #ccd3dd; --mut: #99a3b2; --mut2: #79838f;
+  --line: #2a303a; --line2: #39414e; --line3: #4b5462;
+  --rec: #5cc98d;  --recbg: #10241a;  --recline: #2f5c43;
+  --part: #eab35c; --partbg: #2a1f0d; --partline: #6d4d1c;
+  --wait: #eab35c;
+  --fail: #f08b8b; --failbg: #2c1415; --failline: #6e3030;
+  --unk: #a9b5c9;  --unkbg: #1b2029;
+  --grey: #23262c;
+  --claude: #b5a6f2; --claudebg: #211c37; --claude2: #8a7bd1; --claudeline: #443a70;
+  --juq: #63cfdc;    --juqbg: #0d292e;    --juqline: #2c5f68;
+  --sh-rest:  0 1px 0 rgba(0,0,0,.35);
+  --sh-raise: 0 1px 2px rgba(0,0,0,.4), 0 6px 16px -10px rgba(0,0,0,.7);
+}

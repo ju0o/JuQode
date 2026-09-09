@@ -1,0 +1,96 @@
+/* Base + primitives. Only what SC-01 needs and what the approved MVP obviously shares.
+ * No speculative components — 21 WBS-01 says foundation, not a component library. */
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--board);          /* explicit token background — 16 §2.1 rule 4 */
+  color: var(--ink);
+  font: 14px/1.55 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;                   /* the shell owns scrolling, not the document */
+}
+
+/* ---------- typography ---------- */
+.h1 { font-size: 22px; line-height: 1.35; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+.lead { font-size: 15px; line-height: 1.6; color: var(--ink2); margin: 0; }
+.sm { font-size: 13px; line-height: 1.5; }
+.xs { font-size: 12px; line-height: 1.45; }
+.mut { color: var(--mut); }
+.mono { font-family: var(--font-mono); font-size: .92em; }
+
+/* ---------- surface primitives ---------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--sh-rest);
+}
+
+/* ---------- buttons ---------- */
+.btn {
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line2);
+  border-radius: var(--r-inner);
+  padding: 9px 16px;
+  cursor: pointer;
+  transition: border-color var(--d-fast) var(--ease), background var(--d-fast) var(--ease);
+}
+.btn:hover { border-color: var(--line3); background: var(--card2); }
+.btn.pri {
+  color: var(--on-juq);
+  background: var(--juq);
+  border-color: var(--juq);
+  font-weight: 600;
+}
+.btn.pri:hover { filter: brightness(1.08); }
+.btn.sm { font-size: 13px; padding: 6px 12px; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--mut); }
+.btn.ghost:hover { color: var(--ink); background: var(--card2); border-color: var(--line); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn:disabled:hover { border-color: var(--line2); background: var(--card); }
+
+/* ---------- focus: visible, and never removed ---------- */
+:focus-visible {
+  outline: 2px solid var(--juq);
+  outline-offset: 2px;
+  border-radius: var(--r-badge);
+}
+
+/* ---------- chips: the state grammar, kept distinguishable ----------
+ * 16 §2.1 — partial(FILL) vs waiting(OUTLINE) must not collapse. They share the
+ * amber hue by design, so they are separated by fill, border weight and a glyph. */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 8px;
+  border: 1px solid var(--line2); border-radius: var(--r-chip);
+  background: var(--card); color: var(--mut);
+  font-size: 11px; line-height: 1; white-space: nowrap;
+}
+.chip.ok   { border-color: var(--rec);  color: var(--rec);  background: var(--recbg); }
+.chip.fail { border-color: var(--fail); color: var(--fail); background: var(--failbg); }
+.chip.part { border-color: var(--part); color: var(--part); background: var(--partbg); }
+.chip.part::before { content: "◧"; font-size: 10px; opacity: .85; }
+.chip.wait { border: 1px solid var(--wait); border-left-width: 3px; color: var(--wait); background: var(--card); }
+.chip.wait::before { content: "◔"; font-size: 10px; opacity: .85; }
+.chip.unk  { border: 1px dashed var(--unk); color: var(--unk); background: var(--unkbg); }
+.chip.unavail { border-color: var(--line2); color: var(--mut); background: var(--grey); }
+
+/* ---------- motion base ----------
+ * 17: nothing here may imply Agent progress. No spinner, no bar, no ETA.
+ * Reduced motion switches everything off — no information may live in movement alone. */
+.fade-in { animation: fade-in var(--d-base) var(--ease) both; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}

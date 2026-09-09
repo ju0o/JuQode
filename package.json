@@ -1,0 +1,28 @@
+{
+  "name": "juqode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JuQode — AI Coding Workbench for vibe coders",
+  "main": "app/main/main.js",
+  "scripts": {
+    "postinstall:electron": "node node_modules/electron/install.js",
+    "start": "electron .",
+    "test": "node --test tests/",
+    "test:e2e": "node tests/e2e/boot.test.mjs",
+    "pack:linux": "electron-builder --linux dir",
+    "pack:win": "electron-builder --win dir zip --x64"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "app.juqode.desktop",
+    "productName": "JuQode",
+    "directories": { "output": "dist" },
+    "files": ["app/**/*", "package.json"],
+    "win": { "target": ["nsis", "zip"], "artifactName": "${productName}-${version}-${arch}.${ext}" },
+    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true },
+    "linux": { "target": ["AppImage", "dir"], "category": "Development" }
+  }
+}
