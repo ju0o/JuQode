@@ -1,0 +1,245 @@
+/* WBS-30 · Security boundaries — `19` §S, `07` §2, D-126a.
+ *
+ * `21` WBS-30's acceptance is two sentences, and both are measurable:
+ *
+ *   ① 저장소 전체 문자열 검사에서 sandbox·격리·containment 주장이 0건
+ *   ② `19` §C4 의 제외 목록(`.env*` · `*.pem` · `*.key`)에 있는 파일이 해석·설명 프롬프트·증거에
+ *      포함되지 않는다
+ *
+ * The first one is about what the product SAYS. This product's entire thesis is that it does not
+ * claim what it cannot show, and a false containment claim is the most dangerous kind: a user who
+ * believes JuQode isolates will hand it a project they would not otherwise.
+ *
+ * The second is about what it READS. It is checked here END TO END — through the interpretation,
+ * through BOTH read-only model prompts, and through the evidence basis — rather than in each
+ * module separately, because the exclusion is only worth anything if it holds on every path at
+ * once. A file excluded from the scan and then embedded in a prompt is not excluded.
+ */
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+
+const R = path.resolve(__dirname, '..');
+const juqodeTempDirs = [];
+const tempDir = (prefix) => {
+  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  juqodeTempDirs.push(d);
+  return d;
+};
+process.on('exit', () => {
+  for (const d of juqodeTempDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone */ } }
+});
+
+const read = (f) => fs.readFileSync(path.join(R, f), 'utf8');
+
+/* ─────────────── ① the product does not claim containment ─────────────── */
+
+test('no user-visible string claims isolation, sandboxing or protection', () => {
+  /* `19` §S · `07` §2: JuQode runs Claude Code and Quick Commands as the user, in the user's own
+   * environment. It is NOT a sandbox. `15` TD-01 makes the product say so out loud, and the one
+   * thing it may never do is say the opposite.
+   *
+   * Only `copy.js` is scanned, because that is everything the user reads. A comment explaining
+   * why the product does not isolate is documentation; a SENTENCE ON SCREEN saying it does is
+   * the claim. */
+  const copy = read('app/renderer/copy.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const strings = [...copy.matchAll(/['"`]([^'"`\n]{2,})['"`]/g)].map((m) => m[1]);
+  assert.ok(strings.length > 100, `expected the copy dictionary, found ${strings.length} strings`);
+
+  /* Words that would assert a boundary this product does not have. */
+  const CLAIMS = ['격리', '샌드박스', 'sandbox', '안전하게', '보호돼', '보호해', '차단해', '차단돼',
+                  '막아드려', '막아줘요', 'containment', 'isolated'];
+  const offenders = [];
+  for (const s of strings) {
+    for (const w of CLAIMS) if (s.includes(w)) offenders.push(`${w} :: ${s}`);
+  }
+  assert.deepStrictEqual(offenders, [], `a user-visible string claims a boundary the product does not have:\n  ${offenders.join('\n  ')}`);
+});
+
+test('the one line that states the truth is present and cannot be conditional', () => {
+  /* `19` §S · Q-03 · `15` TD-01: 드로어 상단에 상시 표시되는 한 줄(닫을 수 없다). The inverse of
+   * the test above — the product must not merely avoid the false claim, it must make the true
+   * statement. */
+  const copy = read('app/renderer/copy.js');
+  assert.ok(copy.includes('여기서 치는 명령은 내 컴퓨터에서 내 권한으로 바로 실행돼요.'),
+    'the banner text is gone from the dictionary');
+
+  const drawer = read('app/renderer/screens/td01.js');
+  const body = drawer.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(body.includes('C.term.banner'), 'the drawer no longer draws the banner');
+  /* It is drawn unconditionally, before any state branch. A banner inside an `if` is a banner
+   * that some state can remove. */
+  const drawn = body.indexOf('C.term.banner');
+  const firstBranch = body.indexOf('function qcRegion');
+  assert.ok(drawn < firstBranch, 'the banner is drawn after the state branches — a state could skip it');
+});
+
+test('masking is never described as a guarantee', () => {
+  /* q02 §5.6: 가림의 효과는 측정되지 않았다. A product that calls it protection teaches the user
+   * that whatever appeared unmasked is safe to share. */
+  const src = read('app/main/qc/run.js');
+  /* Canon's OWN words, not any of several phrasings: `19` §C4 says 가림의 효과는 측정되지
+   * 않았다. Accepting a family of near-synonyms let a mutant replace the admission with the
+   * claim "the masking keeps secrets off the screen" while a different disclaimer elsewhere in
+   * the file kept the test happy. */
+  assert.ok(/not measured/i.test(src), 'run.js no longer says the masking is NOT MEASURED');
+  assert.ok(/never a guarantee|NOT a guarantee/i.test(src),
+    'run.js no longer says the masking is not a guarantee');
+
+  /* …and it makes no claim in the other direction. A comment that says masking KEEPS secrets
+   * off the screen is exactly the belief the admission exists to prevent. */
+  const claims = [/mask\w*[^.\n]{0,40}(keeps|prevents|ensures|guarantees)/i,
+                  /(keeps|prevents|stops)[^.\n]{0,30}secrets?[^.\n]{0,30}(off|from|leaking)/i];
+  for (const re of claims) {
+    assert.ok(!re.test(src), `run.js claims the masking protects something: ${re}`);
+  }
+  const copy = read('app/renderer/copy.js');
+  assert.ok(!/가려드려요|가려집니다|안 보이게 해드/.test(copy),
+    'a user-visible string promises that secrets are hidden');
+});
+
+/* ─────────────── ② excluded files reach nothing ─────────────── */
+
+/** A project carrying one of every excluded category, plus ordinary files. */
+function projectWithSecrets() {
+  const dir = tempDir('juqode-sec-');
+  const w = (rel, body) => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), body);
+  };
+  /* Every value below is a SYNTHETIC FIXTURE MARKER — it is not a credential, and the point of
+   * the test is that none of these strings reaches anything. */
+  const MARK = 'juqode-synthetic-fixture-marker';
+  w('package.json', JSON.stringify({ name: 'sec', scripts: { dev: 'vite' }, dependencies: { vite: '^5' } }, null, 2));
+  w('package-lock.json', '{"lockfileVersion":3}');
+  w('README.md', '# sec\n\n작은 프로젝트예요.\n');
+  w('src/index.js', 'export const hi = 1;\n');
+  w('.env', `SECRET_TOKEN=${MARK}\n`);
+  w('.env.local', `LOCAL_SECRET=${MARK}\n`);
+  w('.env.production', `PROD_SECRET=${MARK}\n`);
+  w('certs/server.pem', `-----BEGIN CERTIFICATE-----\n${MARK}\n`);
+  w('certs/server.key', `-----BEGIN PRIVATE KEY-----\n${MARK}\n`);
+  w('id_rsa', `-----BEGIN OPENSSH PRIVATE KEY-----\n${MARK}\n`);
+  w('keystore.p12', MARK);
+  w('결제.key', MARK);                       // non-ASCII name — the ordinary case here
+  return { dir, MARK };
+}
+
+test('no excluded file reaches the interpretation, either prompt, or the evidence basis', () => {
+  const { dir, MARK } = projectWithSecrets();
+  const { scan } = require(path.join(R, 'app/main/interpret/scan.js'));
+  const { answers } = require(path.join(R, 'app/main/interpret/answers.js'));
+  const narrate = require(path.join(R, 'app/main/interpret/narrate.js'));
+  const explain = require(path.join(R, 'app/main/change/explain.js'));
+  const G = require(path.join(R, 'app/main/evidence/git.js'));
+
+  const scanned = scan(dir);
+  const deterministic = answers(scanned);
+
+  /* ── the interpretation ── */
+  const interp = JSON.stringify({ scanned, deterministic });
+  assert.ok(!interp.includes(MARK), 'a secret VALUE reached the interpretation');
+  for (const f of scanned.readFiles) {
+    assert.ok(!/\.env|\.pem$|\.key$|\.p12$|id_rsa/.test(f), `the scan read an excluded file: ${f}`);
+  }
+
+  /* ── the narrative prompt (WBS-04) ── */
+  const narrPrompt = narrate.promptFor({ deterministic, readFiles: scanned.readFiles, facts: scanned.facts });
+  assert.ok(!narrPrompt.includes(MARK), 'a secret VALUE reached the narrative prompt');
+  for (const bad of ['.env', '.pem', '.key', 'id_rsa', 'p12']) {
+    assert.ok(!narrPrompt.includes(bad), `an excluded PATH reached the narrative prompt: ${bad}`);
+  }
+
+  /* ── the evidence basis (WBS-08 · D-126a) ── */
+  const store = tempDir('juqode-store-');
+  const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  g('init', '-q', '.'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  g('add', '-A', '.'); g('commit', '-qm', 'baseline');
+
+  const basis = G.capture(dir, store, 'before');
+  const tree = G.treePaths(dir, store, basis.ref);
+  for (const f of tree) {
+    assert.ok(!/\.env|\.pem$|\.key$|\.p12$|id_rsa/.test(f), `an excluded file is IN the basis tree: ${f}`);
+  }
+  /* …and the ledger names them as PATHS, with no content — D-126a's whole point. */
+  assert.ok(!JSON.stringify(basis).includes(MARK), 'a secret VALUE reached the basis record');
+  const ledgerPaths = basis.excluded.map((e) => e.path);
+  assert.ok(ledgerPaths.some((p) => p.includes('.env')), 'the excluded set is not even reported as paths');
+
+  /* ── the change-explanation prompt (WBS-26) ── */
+  fs.writeFileSync(path.join(dir, 'src/index.js'), 'export const hi = 2;\n');
+  fs.writeFileSync(path.join(dir, '.env'), `SECRET_TOKEN=${MARK}-changed\n`);
+  const after = G.capture(dir, store, 'after');
+  const names = G.changedPaths(dir, store, basis.ref, after.ref);
+  for (const f of names) {
+    assert.ok(!/\.env|\.pem$|\.key$|id_rsa/.test(f), `an excluded file is reported as changed: ${f}`);
+  }
+  const patch = G.diff(dir, store, basis.ref, after.ref);
+  assert.ok(!patch.includes(MARK), 'a secret VALUE is in the diff the explanation prompt carries');
+
+  const diffs = names.map((f, i) => ({ id: `d${i}`, file: f, patch, displayable: true }));
+  const explPrompt = explain.promptFor(diffs);
+  assert.ok(!explPrompt.includes(MARK), 'a secret VALUE reached the change-explanation prompt');
+  for (const bad of ['.env', '.pem', 'id_rsa']) {
+    assert.ok(!explPrompt.includes(bad), `an excluded PATH reached the change-explanation prompt: ${bad}`);
+  }
+});
+
+test('the exclusion is by NAME, at every depth, and case-insensitively', () => {
+  /* `19` §C1 ④ / D-126a. A secret in a subdirectory, or named `.ENV`, is still a secret. */
+  const { isExcludedPath, isSecretName } = require(path.join(R, 'app/main/evidence/exclude.js'));
+  for (const p of ['.env', '.env.local', '.ENV', 'deep/nested/.env.production',
+                   'certs/server.pem', 'a/b/c/server.KEY', 'id_rsa', 'sub/id_ed25519',
+                   'keystore.p12', '결제.key', 'node_modules/pkg/.env']) {
+    assert.ok(isExcludedPath(p), `not excluded: ${p}`);
+  }
+  /* …and ordinary files are not swept up with them. */
+  for (const p of ['src/index.js', 'README.md', 'package.json', 'envelope.js', 'keyboard.ts',
+                   'src/environment.ts']) {
+    assert.ok(!isExcludedPath(p), `wrongly excluded: ${p}`);
+  }
+  assert.strictEqual(typeof isSecretName, 'function');
+});
+
+/* ─────────────── no credential storage ─────────────── */
+
+test('the schema has nowhere to put a credential', () => {
+  /* `21` WBS-30: no credential storage. The strongest form of that is a schema with no column
+   * for one — a product that cannot store a secret cannot leak one from its own store. */
+  const schema = read('app/main/db/schema.sql').toLowerCase();
+  for (const word of ['password', 'token', 'secret', 'credential', 'api_key', 'apikey',
+                      'access_key', 'refresh_token', 'session_key']) {
+    assert.ok(!new RegExp(`^\\s*${word}\\b`, 'm').test(schema), `the schema declares a ${word} column`);
+  }
+  /* …and `20` says so itself, in the deliberately-absent list. */
+  assert.ok(read('app/main/db/schema.sql').includes('deliberately absent'),
+    'the schema no longer states what it deliberately does not hold');
+});
+
+test('nothing in the app reads the user\'s shell or git credentials', () => {
+  const files = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
+      const rel = path.join(dir, e.name);
+      if (e.isDirectory()) walk(rel);
+      else if (/\.(js|mjs|cjs)$/.test(e.name)) files.push(rel);
+    }
+  })('app');
+
+  const FORBIDDEN = ['.netrc', 'credential.helper', 'git-credential', '.aws/credentials',
+                     'id_rsa', '.ssh/', 'keychain', 'libsecret'];
+  for (const f of files) {
+    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    /* Two modules name some of these BECAUSE they exclude them, which is the opposite of
+     * reading them. They are the ONLY two, and naming them here is what keeps the exemption
+     * from quietly widening: a third file that starts matching on `id_rsa` fails this test. */
+    if (f.endsWith('evidence/exclude.js') || f.endsWith('interpret/scan.js')) continue;
+    for (const bad of FORBIDDEN) {
+      assert.ok(!src.includes(bad), `${f} names ${bad}`);
+    }
+  }
+});
