@@ -172,3 +172,13 @@ test('scope containment: no WBS-02+ capability is implemented, anywhere under ap
   // and the folder-open IPC must still refuse
   assert.match(read('app/main/main.js'), /ok:\s*false/);
 });
+
+test('visual test writes to an untracked path unless goldens are explicitly updated', () => {
+  const src = read('tests/e2e/visual.mjs');
+  // default output must not be the tracked evidence directory
+  assert.match(src, /const UPDATE = /);
+  assert.match(src, /UPDATE \? GOLDEN : path\.join\(ROOT, 'tmp-visual'\)/);
+  // and the untracked path must actually be ignored
+  const ignore = read('.gitignore');
+  assert.match(ignore, /^tmp-visual\/$/m, 'tmp-visual/ is not gitignored — test output would be committed');
+});

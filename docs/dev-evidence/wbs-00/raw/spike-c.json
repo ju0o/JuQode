@@ -1,0 +1,69 @@
+{
+  "utc": "2026-09-09T03:51:42.389Z",
+  "host": {
+    "platform": "linux",
+    "release": "7.0.0-31-generic",
+    "node": "22.22.1",
+    "isWSL": false
+  },
+  "note": "POSIX only. Windows has no process groups or POSIX signals — see scripts/windows-spikes.mjs.",
+  "findings": {
+    "F1_spawnModes": {
+      "question": "Does detached:true actually give the child its own process group?",
+      "driver": "8020    8020    8015 Sl   node scripts/spikes/process-lifecycle.mjs",
+      "notDetached": "8027    8020    8020 S    sleep 300",
+      "detached": "8028    8028    8020 Ss   sleep 300",
+      "detachedHasOwnPgid": true,
+      "notDetachedSharesDriverPgid": true
+    },
+    "F3_parentOnlyKill": {
+      "question": "Does killing only the parent leave the grandchild running?",
+      "grandchildrenBefore": [
+        "8048    8020    8041 S    sleep 600"
+      ],
+      "kidAlive": false,
+      "grandchildAlive": [
+        {
+          "pid": "8048",
+          "alive": true,
+          "ps": "8048    8020       1 S    sleep 600"
+        }
+      ],
+      "orphanSurvived": true
+    },
+    "F3b_groupKill": {
+      "question": "Does a group kill reach the grandchild?",
+      "grandchildren": [
+        "8062"
+      ],
+      "kidAlive": false,
+      "anyGrandchildAlive": false
+    },
+    "F4_escalation": {
+      "question": "Does SIGTERM→SIGKILL escalation actually fire for a child that traps SIGTERM?",
+      "survivedSigterm": true,
+      "deadAfterSigkill": true,
+      "totalMs": 1602
+    },
+    "F5_cancelExitCode": {
+      "question": "Can exit code distinguish a cancelled run from a successful one?",
+      "childThatHandlesSigint": {
+        "code": 0,
+        "signal": null
+      },
+      "childThatDoesNot": {
+        "code": null,
+        "signal": "SIGINT"
+      },
+      "exitCodeIsUsableAsCancelEvidence": false,
+      "conclusion": "A child that handles its own signal exits 0 — identical to success. Exit code is not cancel evidence."
+    },
+    "F6_zombieTrap": {
+      "question": "Does kill(pid,0) prove a process is running?",
+      "zombiePid": null,
+      "killZeroSaysAlive": null,
+      "psSaysState": null,
+      "conclusion": "no zombie observed in this run — the trap is documented in WBS-00-REPORT §2.8"
+    }
+  }
+}

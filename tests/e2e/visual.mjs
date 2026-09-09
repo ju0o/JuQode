@@ -11,7 +11,13 @@ import fs from 'node:fs';
 import assert from 'node:assert';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const OUT = path.join(ROOT, 'docs', 'dev-evidence', 'wbs-01');
+
+/* Artifact hygiene: a test run must never mutate committed evidence, or a reviewer cannot
+ * verify without dirtying the tree. Screenshots go to an untracked directory by default;
+ * replacing the tracked goldens requires saying so explicitly. */
+const GOLDEN = path.join(ROOT, 'docs', 'dev-evidence', 'wbs-01');
+const UPDATE = process.argv.includes('--update-golden') || process.env.JUQODE_UPDATE_GOLDEN === '1';
+const OUT = UPDATE ? GOLDEN : path.join(ROOT, 'tmp-visual');
 fs.mkdirSync(OUT, { recursive: true });
 const PORT = 9223;
 
@@ -150,4 +156,5 @@ assert.ok(Math.abs(results.centreOffset) <= 40,
 assert.ok(results.notYet && results.notYet.includes('지금 안 됨'), 'folder open did not report honestly');
 
 console.log(JSON.stringify(results, null, 2));
-console.log('\nvisual+behaviour: PASS   screenshots ->', OUT);
+console.log('\nvisual+behaviour: PASS   screenshots ->', OUT,
+  UPDATE ? '(tracked goldens UPDATED)' : '(untracked; pass --update-golden to replace tracked evidence)');
