@@ -971,3 +971,39 @@ test('the filler list is Canon\'s six and nothing more', () => {
     assert.strictEqual(match(phrase).kind, 'qc', `"${phrase}" stopped working`);
   }
 });
+
+test('SC-02 and the drawer never disagree about what is technical', () => {
+  /* D-134 · `15` SC-02: the request field decides a phrase is technical and hands it to the
+   * drawer, which then decides whether it is one of the six. Two rule tables meant those two
+   * answers could differ — `서버 얼른 켜줘` routed to the terminal and came back 미인식, so the
+   * product told the user where to go and then said it did not understand them.
+   *
+   * They are separate modules on purpose (SC-02 also has to answer `work`), so this checks the
+   * one thing they must agree on rather than merging them. */
+  const { classify } = require(path.join(R, 'app/main/router/intent.js'));
+  const corpus = CORPUS.map(([phrase]) => phrase).filter(Boolean);
+  assert.ok(corpus.length >= 40, `expected Canon's corpus, got ${corpus.length}`);
+
+  const disagreements = [];
+  for (const phrase of corpus) {
+    const sc02 = classify(phrase);
+    const drawer = match(phrase);
+    const sc02Technical = sc02.route === 'terminal';
+    const drawerTechnical = drawer.kind === 'qc';
+    /* An ambiguity on one side and an ambiguity on the other is agreement; so is work/미인식. */
+    if (sc02.route === 'ambiguous' && drawer.kind === 'ambiguous') continue;
+    if (sc02Technical !== drawerTechnical) {
+      disagreements.push(`${phrase}: SC-02=${sc02.route} drawer=${drawer.kind}`);
+    }
+  }
+  assert.deepStrictEqual(disagreements, [],
+    `the two rule tables disagree:\n  ${disagreements.join('\n  ')}`);
+});
+
+test('the two routers share ONE filler list', () => {
+  /* The structural half of the test above. Sharing the list is what makes the agreement hold
+   * for phrases nobody has written down yet. */
+  const { FILLERS: routerFillers } = require(path.join(R, 'app/main/router/rules.js'));
+  const { FILLERS: qcFillers } = require(path.join(R, 'app/main/qc/rules.js'));
+  assert.strictEqual(routerFillers, qcFillers, 'the routers have two filler lists again');
+});

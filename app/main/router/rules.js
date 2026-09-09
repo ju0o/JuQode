@@ -19,7 +19,16 @@ const ENDINGS = [
 ];
 
 /* Fillers removed from the compacted string (q02 §2 step 6). */
-const FILLERS = ['좀만', '좀', '제발', '빨리', '한번', '지금', '그냥', '얼른', '일단', '우선', '잠깐', '혹시', '부탁'];
+/* ONE list, shared with `qc/rules.js`.
+ *
+ * SC-02 decides that a phrase is technical and hands it to the drawer (D-134), and the drawer
+ * then decides whether it is one of the six. Two filler lists meant those two answers could
+ * disagree: `서버 얼른 켜줘` routed to the terminal here and came back 미인식 there, so the
+ * product told the user where to go and then said it did not understand.
+ *
+ * `19` §C4 writes the six out in full, so the list is Canon's and there is nothing to
+ * reconstruct — see the note in `qc/rules.js`. */
+const { FILLERS } = require('../qc/rules');
 
 /* Longest key first at substitution time. */
 const SYNONYMS = [

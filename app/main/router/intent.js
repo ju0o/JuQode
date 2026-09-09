@@ -18,6 +18,8 @@
  * having to predict them. Corpus evidence: q02 §4, negative.danger 8/8.
  */
 const { RULES, ENDINGS, FILLERS, SYNONYMS, CHANGE_FORMS } = require('./rules');
+/* The drawer's table — the one that decides whether a phrase is one of the six (D-134). */
+const { match: qcMatch } = require('../qc/rules');
 
 /* The matcher is O(input) per rule per pass, and the tail-stripping loop rescans what is left.
  * A pasted wall of text is a realistic input for a request field, so the string the MATCHER
@@ -126,8 +128,21 @@ function classify(input) {
       return { route: 'ambiguous', options: [...bare, 'work'], text, tier: `${tier}:verb-only` };
     }
   }
-  /* Nothing in the rule table consumed it. Now — and only now — a change verb decides between
-   * the two remaining answers. The order matters: `수정된 파일 확인해줘` is a git.status
+  /* Nothing in THIS table consumed it — so ask the one that actually owns the question.
+   *
+   * D-134 makes the drawer the place technical execution lives, and `qc/rules.js` is the table
+   * that decides whether a phrase is one of the six. Two tables answering "is this technical?"
+   * could differ, and did: `dev 서버` was a Quick Command in the drawer and 미인식 here, so the
+   * request field would have sent it to a Work while the drawer would have run it. This module
+   * keeps its own logic for the `work` split, which the drawer has no opinion about. */
+  const qc = qcMatch(text);
+  if (qc.kind === 'qc') return { route: 'terminal', rule: qc.id, text, tier: `qc:${qc.tier}` };
+  if (qc.kind === 'ambiguous') {
+    const options = qc.readings.map((r) => (r === 'work' ? 'work' : r));
+    return { route: 'ambiguous', options, text, tier: `qc:${qc.tier}` };
+  }
+
+  /* Now — and only now — a change verb decides between the two remaining answers. The order matters: `수정된 파일 확인해줘` is a git.status
    * match whose OBJECT contains 수정, and checking change verbs first would misread it as a
    * request to modify something (q02 §4 names this exact case). */
   const compact = applySynonyms(raw);
