@@ -113,11 +113,90 @@ Two judgements worth stating:
 
 ## Tests
 
-`npm test` — 146 tests. `npm run test:e2e` — three files. All passing, no orphan processes.
+`npm test` — 169 tests. `npm run test:e2e` — three files. All passing, no orphan processes.
 
 The evidence tests build throwaway git repositories under the OS temp directory; the D-133
 cycle ran in a disposable scratch repo. **No real user project was involved at any point, and
 every secret in every fixture is a clearly-labelled synthetic marker.**
+
+## Review
+
+Two independent reviewers ran against the committed batch. They returned **4 BLOCKERs and
+14 HIGH**, and two of the BLOCKERs were live secret disclosures I reproduced before fixing.
+Everything is fixed and re-tested; the fixes are in the follow-up commit.
+
+### BLOCKER
+
+**1 · A secret filename git has to quote reached the basis tree in plaintext.**
+`git ls-files` was read without `-z`, so git C-quoted any path that is not plain ASCII: `키.pem`
+came back as `"\355\202\244.pem"`, its basename ended in a quote, the name check missed it,
+and `write-tree` kept referencing its blob. **For a Korean-market product that is the ordinary
+filename, not the exotic one.** The same shape swallowed a *directory* named `.env`: `.env/config`
+has the basename `config`, and a git glob pathspec does not cross `/`, so neither mechanism
+matched it. Both reproduced with the marker read back out of the tree.
+*Fixed:* `ls-files -z`, matching on **every path segment** rather than the basename, and
+directory forms (`x/**`) in the pathspec.
+
+**2 · A case-variant untracked secret was hashed into JuQode's own object store.**
+The name check is case-insensitive; a git pathspec is case-**sensitive**. So an untracked
+`.ENV` passed the pathspec, git hashed it and wrote the plaintext blob into
+`GIT_OBJECT_DIRECTORY`, and only then did the drop step clean the tree. The tree was innocent;
+the store held the secret, and that store is never garbage-collected. Reproduced.
+*Fixed:* `:(exclude,glob,icase)`.
+
+**3 · A capture wrote into the user's `.git` on any repo with `core.splitIndex`.**
+`GIT_INDEX_FILE` redirects the index, but the *shared* half is written to `$GIT_DIR` — every
+capture left a new `sharedindex.*` behind. Split index is the standard advice for large repos,
+which is JuQode's stated target. This is `07` §1's absolute rule.
+*Fixed:* `-c core.splitIndex=false` on every call.
+
+**4 · An orphan that left the process group pinned the Work forever.**
+Resolution hung off `close`, which waits for every inherited pipe; `07` §8.7 had already
+measured the orphan class that defeats it — a `setsid` grandchild holds stdout open. The
+promise never settled, so the Work stayed `running` and **D-117's single active slot was never
+released**. Measured: hung indefinitely; now settles in 2.3 s.
+*Fixed:* resolve on `exit` with a once-guard, and release the pipes after answering.
+
+### HIGH
+
+| | Finding | Fix |
+|---|---|---|
+| H-1 | The ledger covered only the secret list, so a change to a **gitignored** file was invisible in the diff AND in the ledger — the exact silence D-126a replaced the old mechanism to end | the ledger takes the whole excluded set: secrets, ignored paths, nested-repo files |
+| H-2 | A nested repository swallowed its whole subtree from evidence and ledger both; with no commit in it, `add -A` failed outright and no basis could be taken at all | excluded by pathspec **and reported**, its files ledgered (D-126 asks for exactly this) |
+| H-3 | `manifest.diff()` compared only sha256, and an unreadable file has `null` on both sides — a file that went from 10 to 29 bytes read as unchanged | size compared too; an unreadable file reports `unknown`, never "unchanged" |
+| H-5 | `firstUnreadable` checked directories only and skipped `node_modules`, so an unreadable **file** made capture throw instead of refusing, and an unreadable directory under `node_modules` let the basis silently shrink | files and directories, at every depth |
+| H-6 | The NDJSON reader concatenated Buffers as strings, so a Korean character split across a pipe chunk became U+FFFD — and `unparsed` stayed 0, because corrupted text is still valid JSON | `setEncoding('utf8')` |
+| H-7 | `allowSpec` emitted glob grants: `file_path: '<cwd>/*'` produced `Edit(*)` — the bare-tool grant D-133 bans outright — while the approval card showed one path | any target that could mean more than one thing is refused |
+| H-8 | A crafted `tool_input` injected a second grant: `a),Bash(rm -rf ~` produced `Edit(a),Bash(rm -rf ~)`, and the flag accepts comma-separated specs | same |
+| H-9 | A relative `file_path` resolved against **JuQode's** cwd, so the card and the grant named different files | resolved against the project |
+| H-10 | Only the most recent denial was held, so granting one discarded the card for another the user never answered — q04b measured two denials in one turn | denials are a list; each unanswered one keeps its card |
+| H-11 | A stray grant moved an **ended** Work back to `running` while keeping `outcome: complete`, re-taking the D-117 slot | an ended Work is ended; only reconciliation may speak about it |
+| H-12 | A cancelled Work reported 완료, because `result.is_error` is as blind to cancellation as the exit code (`07` §8.1) | a cancel request survives the finish |
+| H-13 | `error_max_turns` reports `is_error: false`, so it read as a success. `19` §C3-L says the three signals are read **together** | terminal reason and API error status carried and read |
+| H-14 | **Eight comments asserting properties the code did not have** — including the byte-identical claim on a fingerprint that could not see index rewrites | each rewritten to say what is true, and what is not covered |
+
+Also: a grant with no id resolved *every* outstanding refusal (one click could report 완료 with
+refusals the user never saw); `mergeDenials` dropped the result's entry — the only source of
+`tool_input`, which the card needs — when both ids were null; only the first of several parallel
+tool calls was counted; an inherited `GIT_DIR` redirected the basis at another repository; and
+`stop()` escalated to SIGKILL without re-checking, which `07` §8.5 warns can hit a recycled pid.
+
+### The test that could not fail, again
+
+The single test guarding `07` §1 — "a capture leaves the user repository byte-identical" — ran
+`git status` **inside its own fingerprint**, which stat-refreshes and rewrites `.git/index`, and
+only then hashed the tree. Both sides came back normalised to the same post-refresh bytes, so an
+index rewrite was invisible to it. Two mutants survived on exactly that. The fingerprint now
+hashes `.git/index` first, before any git command runs, and every git call in it carries
+`--no-optional-locks` so the measurement cannot cause the damage it is looking for.
+
+Mutation testing scored **41 killed / 32 survived (56%)** — the worst of the run. Five survivors
+applied together left the suite fully green. Beyond the fixes above, the suite gained: the
+untracked-secret case (the pathspec's only real job, and every fixture secret had been
+pre-committed, so nothing tested it), nanosecond mtime asserted directly rather than after a
+deliberate millisecond wait, diff direction, `failed` / `input_waiting` / cancellation outcomes
+that no recording happens to contain, the process-group property `07` §8.2 calls the 3am bug,
+and the constant CLI flags without which a retry could never resume.
 
 ## State
 

@@ -38,10 +38,12 @@ function toSignal(event) {
   if (t === 'rate_limit_event') return { kind: KIND.RATE_LIMIT, payload: event.rate_limit_info ?? null };
 
   if (t === 'assistant') {
+    /* A message can carry SEVERAL tool_use blocks (parallel calls). Reporting only the first
+     * undercounted the tools used and lost whichever call was batched with it. */
     const uses = blocks(event).filter((b) => b.type === 'tool_use');
     if (uses.length) {
-      const u = uses[0];
-      return { kind: KIND.TOOL_USE, payload: { tool: u.name, toolUseId: u.id, input: u.input } };
+      const all = uses.map((u) => ({ tool: u.name, toolUseId: u.id, input: u.input }));
+      return { kind: KIND.TOOL_USE, payload: { ...all[0], all } };
     }
     return { kind: KIND.RAW, payload: { text: text(event) } };
   }
@@ -49,8 +51,8 @@ function toSignal(event) {
   if (t === 'user') {
     const results = blocks(event).filter((b) => b.type === 'tool_result');
     if (results.length) {
-      const r = results[0];
-      return { kind: KIND.TOOL_RESULT, payload: { toolUseId: r.tool_use_id ?? null, isError: r.is_error === true } };
+      const all = results.map((r) => ({ toolUseId: r.tool_use_id ?? null, isError: r.is_error === true }));
+      return { kind: KIND.TOOL_RESULT, payload: { ...all[0], all } };
     }
     return { kind: KIND.RAW, payload: null };
   }
@@ -60,6 +62,10 @@ function toSignal(event) {
       kind: KIND.FINISH,
       payload: {
         subtype: st ?? null,
+        /* `19` §C3-L: the three signals are read TOGETHER — `is_error`, the terminal reason,
+         * and the exit code. Carrying only `is_error` meant `error_max_turns` reported 완료. */
+        terminalReason: event.terminal_reason ?? event.stop_reason ?? null,
+        apiErrorStatus: event.api_error_status ?? null,
         /* MEASURED: a run whose tool was denied still reports `is_error: false`. A denial can
          * never be detected from this field, or from the process exit code. */
         isError: event.is_error === true,
@@ -82,15 +88,22 @@ const initial = () => ({
   status: 'running',              // a `work` row exists only once the session started (`20`)
   outcome: null,
   lastObserved: null,             // the last thing actually SEEN — the liveness line's content
-  pendingPermission: null,        // D-133 contract B: observed denial, not yet resolved
-  denials: [],
+  denials: [],                    // D-133 contract B: observed denials; unresolved ones need a card
   toolsUsed: 0,
   finish: null,
 });
 
+let denialSeq = 0;
+
 function reduce(state, signal, at = null) {
   const s = { ...state };
   s.lastObserved = { kind: signal.kind, at };
+
+  /* An ended Work is ended. A late or stray signal must not reopen it — measured: a stray
+   * grant moved a completed Work back to `running` while keeping `outcome: 'complete'`, which
+   * both contradicts itself and re-occupies the D-117 slot. Only reconciliation may speak
+   * about a Work that has already ended, and it only ever confirms it. */
+  if (state.status === 'ended' && signal.kind !== KIND.RECONCILED) return s;
 
   switch (signal.kind) {
     case KIND.SESSION_START:
@@ -98,27 +111,39 @@ function reduce(state, signal, at = null) {
       break;
 
     case KIND.TOOL_USE:
-      s.toolsUsed += 1;
+      s.toolsUsed += (signal.payload?.all?.length ?? 1);
       break;
 
     case KIND.PERMISSION_DENIED:
       /* The tool is ALREADY DENIED — nothing is pending on Claude Code's side (D-133). What
        * the Work waits for is the USER's decision, and that is what this status names. The
-       * product must never describe the request itself as 대기 중 (`15` SC-03 contract B). */
-      s.pendingPermission = { ...signal.payload, resolved: false };
+       * product must never describe the request itself as 대기 중 (`15` SC-03 contract B).
+       *
+       * Denials are a LIST, not one slot. q04b experiment D measured two in a single turn, and
+       * keeping only the most recent one meant the earlier refusal lost its card entirely —
+       * the user could not answer a question they were never shown. */
+      s.denials = [...s.denials, { ...signal.payload, resolved: false, id: `d${denialSeq++}` }];
       s.status = 'permission_waiting';
-      s.denials = [...s.denials, signal.payload];
       break;
 
-    case KIND.PERMISSION_GRANTED:
-      /* A denial the user then allowed is RESOLVED. Leaving it counted would report a Work as
-       * 부분 완료 because something was refused once and then done — which is not what the
-       * user saw happen. */
-      s.denials = s.denials.map((d) =>
-        (!signal.payload?.toolUseId || d.toolUseId === signal.payload.toolUseId) ? { ...d, resolved: true } : d);
-      s.pendingPermission = null;
-      s.status = 'running';
+    case KIND.PERMISSION_GRANTED: {
+      /* Resolve the ONE denial the user answered. A grant carrying no id used to resolve every
+       * outstanding refusal, so a single click could report a Work as 완료 while refusals the
+       * user never saw went unmentioned — a D-116 break. With no id, resolve the oldest
+       * unresolved denial for that tool, and nothing else. */
+      const want = signal.payload ?? {};
+      let matched = false;
+      s.denials = s.denials.map((d) => {
+        if (matched || d.resolved) return d;
+        const byId = want.toolUseId && d.toolUseId === want.toolUseId;
+        const byTool = !want.toolUseId && want.tool && d.tool === want.tool;
+        if (!byId && !byTool) return d;
+        matched = true;
+        return { ...d, resolved: true };
+      });
+      s.status = s.denials.some((d) => !d.resolved) ? 'permission_waiting' : 'running';
       break;
+    }
 
     case KIND.INPUT_REQUEST:
       s.status = 'input_waiting';
@@ -130,6 +155,7 @@ function reduce(state, signal, at = null) {
 
     case KIND.CANCEL_REQUEST:
       s.status = 'cancel_requested';
+      s.cancelRequested = true;
       break;
 
     case KIND.CANCEL_CONFIRMED:
@@ -142,20 +168,34 @@ function reduce(state, signal, at = null) {
       const denials = signal.payload?.denials ?? [];
       if (denials.length) s.denials = mergeDenials(s.denials, denials);
 
-      /* An unresolved permission keeps the Work OPEN. The turn ended, but under contract B the
+      /* An unresolved refusal keeps the Work OPEN. The turn ended, but under contract B the
        * user can still allow and the SAME Work resumes in the SAME session — so ending it here
        * would throw away the thing the card is for. */
-      if (s.pendingPermission && !s.pendingPermission.resolved) {
-        s.status = 'permission_waiting';
+      if (s.denials.some((d) => !d.resolved)) {
+        /* …unless the user asked to stop. Then the refusal is moot and the Work ends. */
+        if (!s.cancelRequested) { s.status = 'permission_waiting'; break; }
+      }
+
+      /* A cancelled Work does not become 완료 because the turn happened to report success.
+       * `07` §8.1: a cancelled child exits 0 and `result.is_error` is just as blind to it. */
+      if (s.cancelRequested) {
+        s.status = 'ended';
+        s.outcome = s.toolsUsed > 0 ? 'cancelled_partial' : 'cancelled_nochange';
         break;
       }
+
       s.status = 'ended';
-      /* `partial` when a tool was refused and the Work still finished: something was done and
-       * something was not. The full 된 것 / 안 된 것 judgement is WBS-18's. */
+      /* `19` §C3-L reads three things together, not `is_error` alone: a turn that ran out of
+       * turns reports `is_error: false` with `subtype: 'error_max_turns'`, and calling that
+       * 완료 is exactly the invented success the grammar exists to prevent. */
+      const p = signal.payload ?? {};
+      const failed = p.isError === true
+        || (typeof p.subtype === 'string' && p.subtype.startsWith('error'))
+        || Boolean(p.apiErrorStatus)
+        || (p.terminalReason && p.terminalReason !== 'end_turn' && p.terminalReason !== 'stop_sequence');
       /* `partial` only for a refusal that was never resolved: something was asked for and not
        * done. The full 된 것 / 안 된 것 judgement is WBS-18's. */
-      s.outcome = signal.payload?.isError ? 'failed'
-        : (s.denials.some((d) => !d.resolved) ? 'partial' : 'complete');
+      s.outcome = failed ? 'failed' : (s.denials.some((d) => !d.resolved) ? 'partial' : 'complete');
       break;
     }
 
@@ -171,14 +211,30 @@ function reduce(state, signal, at = null) {
   return s;
 }
 
+/* A denial with no `tool_use_id` must not be deduplicated against another one that also has
+ * none — the result's entry is the ONLY source of `tool_input`, which is what the allow card
+ * and the scoped grant are built from, so dropping it loses the card's target. */
 function mergeDenials(existing, incoming) {
-  const seen = new Set(existing.map((d) => d.toolUseId));
-  return [...existing, ...incoming.filter((d) => !seen.has(d.toolUseId))];
+  const seen = new Set(existing.map((d) => d.toolUseId).filter(Boolean));
+  const out = [...existing];
+  for (const d of incoming) {
+    const known = d.toolUseId && seen.has(d.toolUseId);
+    if (known) {
+      /* the same refusal, now carrying its input: enrich rather than duplicate */
+      const i = out.findIndex((x) => x.toolUseId === d.toolUseId);
+      out[i] = { ...out[i], ...d, resolved: out[i].resolved };
+      continue;
+    }
+    out.push({ ...d, resolved: false, id: `d${denialSeq++}` });
+    if (d.toolUseId) seen.add(d.toolUseId);
+  }
+  return out;
 }
 
-/** Is there a refusal the user has not answered yet? Contract B's card hangs on this. */
-const openPermission = (state) => state.pendingPermission && !state.pendingPermission.resolved
-  ? state.pendingPermission : null;
+/** Refusals the user has not answered yet. Contract B renders one card per entry. */
+const openPermissions = (state) => (state.denials ?? []).filter((d) => !d.resolved);
+/** The one the card shows first — the oldest unanswered. */
+const openPermission = (state) => openPermissions(state)[0] ?? null;
 
 /** Replay a whole stream. Used by the fixture tests and by startup recovery. */
 function replay(signals) {
@@ -187,4 +243,4 @@ function replay(signals) {
   return s;
 }
 
-module.exports = { toSignal, reduce, replay, initial, openPermission, KIND };
+module.exports = { toSignal, reduce, replay, initial, openPermission, openPermissions, KIND };

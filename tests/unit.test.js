@@ -197,7 +197,8 @@ test('capability containment: each privileged capability lives in exactly one mo
     /* Three modules spawn a process, and each spawns exactly one thing:
          claude-detect  — `claude --version` / `auth status`, constant arguments
          claude/session — the headless Claude Code session, constant flags + stdin
-         evidence/git   — `git`, constant arguments, never a shell */
+         evidence/git   — `git`, never a shell. The arguments are NOT all constant: staged
+                          paths and tree oids flow in, always after `--` or as 40-hex ids */
     'child_process':  ['app/main/claude-detect.js', 'app/main/claude/session.js', 'app/main/evidence/git.js'],
     'execFile':       ['app/main/claude-detect.js', 'app/main/evidence/git.js'],
     'spawn(':         ['app/main/claude/session.js'],

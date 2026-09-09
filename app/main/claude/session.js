@@ -30,18 +30,36 @@ function baseArgs(sessionId) {
  * `--allowedTools` scoped to ONE tool and ONE input. `Edit(/abs/path)` with a single leading
  * slash is read as a cwd-relative glob and silently denies, so an absolute path takes `//`.
  */
+/* A grant is a sentence in `--allowedTools`' own grammar, and `tool_input` is chosen by the
+ * MODEL — so a repository file can influence it. Two measured consequences:
+ *   - `file_path: '<cwd>/*'` produced the grant `Edit(*)`, which is the bare-tool grant D-133
+ *     bans outright, while the approval card would have shown a single path;
+ *   - `file_path: '<cwd>/a),Bash(rm -rf ~'` produced `Edit(a),Bash(rm -rf ~)`, and the flag
+ *     accepts comma-separated specs, so the second half became an independent grant.
+ * Anything that could mean more than one thing is refused. Not granting is always safe. */
+const UNSAFE_TARGET = /[(),*?[\]{}!\n\r\0]|^\s*$/;
+
 function allowSpec(denial, cwd) {
   const tool = denial?.tool;
-  if (!tool) return null;
+  if (!tool || !/^[A-Za-z][A-Za-z0-9_]*$/.test(tool)) return null;
   const input = denial.input ?? {};
   const file = input.file_path ?? input.path ?? input.notebook_path ?? null;
-  if (file) {
-    const rel = path.isAbsolute(file) ? path.relative(cwd, file) : file;
-    /* Prefer the cwd-relative form; fall back to the `//`-prefixed absolute one. */
-    const target = rel && !rel.startsWith('..') ? rel : `/${path.resolve(file)}`;
+
+  if (typeof file === 'string' && file) {
+    /* Resolve against the PROJECT, not against JuQode's own working directory — measured:
+     * a relative `../../../etc/shadow` resolved into an unrelated tree, so the card and the
+     * grant named different files. */
+    const abs = path.resolve(cwd, file);
+    const rel = path.relative(cwd, abs);
+    const target = rel && !rel.startsWith('..') ? rel : `/${abs}`;
+    if (UNSAFE_TARGET.test(target)) return null;
     return `${tool}(${target})`;
   }
-  if (typeof input.command === 'string') return `${tool}(${input.command}:*)`;
+
+  if (typeof input.command === 'string' && input.command.trim()) {
+    if (UNSAFE_TARGET.test(input.command)) return null;
+    return `${tool}(${input.command}:*)`;
+  }
   return null;                       // nothing we can scope narrowly → do not widen it instead
 }
 
@@ -86,15 +104,25 @@ function run({ cwd, sessionId, prompt, allowedTools = [], resume = false, onSign
     }
 
     let seq = 0, unparsed = 0, sawEvent = false, stderr = '', buf = '';
-    let killer = null;
+    let killer = null, settled = false;
+
+    /* A multi-byte character split across chunk boundaries becomes U+FFFD if each Buffer is
+     * stringified on its own — measured on 7-byte chunks, Korean text came back as replacement
+     * characters and `unparsed` stayed 0, because a corrupted string is still valid JSON. The
+     * line persisted for 기술 출력 보기 would not have been what the CLI emitted. */
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
 
     const line = (text) => {
       if (!text.trim()) return;
       let raw = null;
       try { raw = JSON.parse(text); } catch { unparsed += 1; }
       sawEvent = true;
-      /* The RAW line is handed over whether or not it parsed. An event shape we do not
-       * recognise must still reach `기술 출력 보기`; only the interpretation is optional. */
+      /* The line is handed over whether or not it parsed. An event shape we do not recognise
+       * must still reach `기술 출력 보기`; only the interpretation is optional. The stream is
+       * decoded as UTF-8 by the stream itself, so a character split across two chunks stays
+       * one character — concatenating Buffers as strings turned Korean text into replacement
+       * characters while `unparsed` stayed 0, because corrupted text is still valid JSON. */
       const sig = raw ? toSignal(raw) : { kind: 'raw', payload: { unparsed: true } };
       onSignal?.({ ...sig, seq: seq++ }, raw, text);
     };
@@ -109,9 +137,19 @@ function run({ cwd, sessionId, prompt, allowedTools = [], resume = false, onSign
 
     if (timeoutMs > 0) killer = setTimeout(() => stop(child), timeoutMs);
 
-    child.on('close', (code, sig) => {
+    /* `close` waits for every inherited pipe to close, and `07` §8.7 measured the orphan class
+     * that defeats it: a grandchild that leaves the process group with `setsid` holds stdout
+     * open forever. The promise never settled, so the Work stayed `running` and the D-117 slot
+     * was never released. `exit` fires on process death regardless of stdio; a short grace
+     * gives `close` its chance to flush first, and whichever arrives first wins once. */
+    const finish = (code, sig) => {
+      if (settled) return;
+      settled = true;
       if (killer) clearTimeout(killer);
       if (buf.trim()) line(buf);
+      /* An orphan that left the process group still holds these pipes, and a held pipe keeps
+       * the whole runtime alive. The answer is already recorded, so let them go. */
+      for (const st of [child.stdout, child.stderr, child.stdin]) { try { st?.destroy(); } catch { /* gone */ } }
       resolve({
         code, signal: sig, sawEvent, stderr: stderr.slice(0, 4000), unparsed, seq,
         /* `19` §C3-L / `15` SC-02: a session that produced NO event before dying did not
@@ -119,16 +157,30 @@ function run({ cwd, sessionId, prompt, allowedTools = [], resume = false, onSign
          * anything else — a denied run exits 0. */
         startFailed: !sawEvent,
       });
-    });
+    };
+
+    child.on('close', finish);
+    child.on('exit', (code, sig) => { setTimeout(() => finish(code, sig), 250).unref?.(); });
   });
 }
 
-/** SIGTERM to the GROUP, then SIGKILL. The child is in its own group, so this cannot hit us. */
+/** SIGTERM to the GROUP, then SIGKILL. On POSIX the child is in its own group, so this cannot
+ *  reach JuQode. Windows has no process groups and is NOT covered — see the note inside. */
 function stop(child, { graceMs = 5000 } = {}) {
-  if (!child || child.exitCode !== null) return;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  /* POSIX only. `detached: true` creates no process group on Windows and `kill(-pid)` throws
+   * there, so the target OS needs `taskkill /T` — NOT VALIDATED here (DV-7). Saying so is the
+   * point: `07` §8.2's group rule is a Linux measurement and does not port by itself. */
   const group = -child.pid;
   try { process.kill(group, 'SIGTERM'); } catch { /* already gone */ }
-  setTimeout(() => { try { process.kill(group, 'SIGKILL'); } catch { /* already gone */ } }, graceMs).unref?.();
+  const hard = setTimeout(() => {
+    /* Re-check before escalating: `07` §8.5 warns that a pid is reusable, and SIGKILL to a
+     * recycled group would kill an unrelated process tree. */
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    try { process.kill(group, 'SIGKILL'); } catch { /* already gone */ }
+  }, graceMs);
+  hard.unref?.();
+  child.once('exit', () => clearTimeout(hard));
 }
 
 /**

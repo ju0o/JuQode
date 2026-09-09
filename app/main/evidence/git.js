@@ -18,7 +18,7 @@
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathspec, isSecretName, ledger } = require('./exclude');
+const { pathspec, isExcludedPath, ledger } = require('./exclude');
 
 /** Refusal reasons. `15` SC-02 turns these into 확립 불가 with the reason. */
 const REFUSE = {
@@ -31,11 +31,30 @@ const REFUSE = {
 
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024 * 1024;   // q19 tested a byte cap; 2 GiB is its default
 
-function git(args, { cwd, env, maxBuffer = 32 * 1024 * 1024 } = {}) {
-  return execFileSync('git', ['--no-optional-locks', ...args], {
-    cwd, env: { ...process.env, ...env }, encoding: 'utf8', maxBuffer,
+/* An inherited GIT_* variable silently redirects a command at another repository — measured:
+ * `rev-parse HEAD` returned an unrelated repo's commit. The environment is built, not spread. */
+const GIT_VARS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+                  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CEILING_DIRECTORIES', 'GIT_COMMON_DIR'];
+
+function baseEnv() {
+  const env = { ...process.env };
+  for (const v of GIT_VARS) delete env[v];
+  return env;
+}
+
+function git(args, { cwd, env, maxBuffer = 256 * 1024 * 1024, raw = false } = {}) {
+  const out = execFileSync('git', [
+    '--no-optional-locks',
+    /* `GIT_INDEX_FILE` redirects the index, but a split index writes its SHARED half into the
+     * user's `$GIT_DIR` — measured: every capture left a new `sharedindex.*` file behind. That
+     * is a write into the user's repository, which `07` §1 forbids without qualification. */
+    '-c', 'core.splitIndex=false',
+    ...args,
+  ], {
+    cwd, env: { ...baseEnv(), ...env }, encoding: 'utf8', maxBuffer,
     stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
+  });
+  return raw ? out : out.trim();
 }
 
 const isGitRepo = (root) => fs.existsSync(path.join(root, '.git'));
@@ -52,8 +71,8 @@ function refusal(root, { maxBytes = DEFAULT_MAX_BYTES } = {}) {
     if (fs.existsSync(path.join(dir, marker))) return { reason: REFUSE.MID_MERGE, detail: marker };
   }
 
-  /* `add -A` only WARNS about a path it cannot read, so an unreadable directory would silently
-   * shrink the basis. It has to be found first. */
+  /* `add -A` only WARNS about a path it cannot read, so an unreadable path would silently
+   * shrink the basis. Files and directories are both checked, at every depth. */
   const unreadable = firstUnreadable(root);
   if (unreadable) return { reason: REFUSE.UNREADABLE, detail: unreadable };
 
@@ -70,6 +89,13 @@ function gitDir(root) {
   return m ? path.resolve(root, m[1].trim()) : p;
 }
 
+/**
+ * The first path `add -A` would fail to read. FILES are checked as well as directories: an
+ * unreadable file made `capture()` throw an uncaught error instead of producing the refusal
+ * card, and `node_modules` was skipped entirely — an unreadable directory under it passed the
+ * check and the basis silently shrank, which is the exact failure `add -A`'s warn-only
+ * behaviour makes possible.
+ */
 function firstUnreadable(root) {
   const stack = [''];
   while (stack.length) {
@@ -78,9 +104,13 @@ function firstUnreadable(root) {
     try { entries = fs.readdirSync(path.join(root, rel || '.'), { withFileTypes: true }); }
     catch { return rel || '.'; }
     for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      if (e.name === '.git' || e.name === 'node_modules') continue;
-      stack.push(rel ? `${rel}/${e.name}` : e.name);
+      const child = rel ? `${rel}/${e.name}` : e.name;
+      if (e.name === '.git') continue;
+      if (e.isDirectory()) { stack.push(child); continue; }
+      if (!e.isFile()) continue;
+      if (isExcludedPath(child)) continue;      // never opened by anything, so never a blocker
+      try { fs.accessSync(path.join(root, child), fs.constants.R_OK); }
+      catch { return child; }
     }
   }
   return null;
@@ -106,8 +136,13 @@ function measure(root, maxBytes) {
 }
 
 /**
- * Capture one basis. `store` is a JuQode-owned directory; the user's repository is never
- * written to and is verified byte-identical by the tests around this.
+ * Capture one basis. `store` is a JuQode-owned directory.
+ *
+ * The user's repository is not written to, and the test around this hashes `.git/index` FIRST
+ * — before any git command runs — because a `git status` inside the check refreshes the index
+ * and would normalise away the very damage it is looking for. What is NOT covered: `.git/objects`
+ * is excluded from that hash (the alternate makes new objects there impossible, not merely
+ * unobserved), and no platform other than Linux has been measured at all.
  *
  * @returns {{kind:'git_tree', ref:string, excluded:object[], droppedFromIndex:string[], head:string|null}}
  */
@@ -128,19 +163,91 @@ function capture(root, store, phase) {
     GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
   };
 
-  // (1) nothing excluded is newly staged
-  git(['add', '-A', '--', '.', ...pathspec()], { cwd: root, env });
+  /* (1) nothing excluded is newly staged.
+   *
+   * Nested repositories are excluded here as well as reported: `add -A` records one as a
+   * gitlink whose commit lives in neither object store, and a nested repo with NO commit makes
+   * `add` fail outright ("does not have a commit checked out") — a basis that cannot be taken
+   * at all. D-126 asks for exactly this: exclude, and report. */
+  const nested = nestedRepos(root);
+  const nestedSpec = nested.flatMap((r) => [`:(exclude)${r}`, `:(exclude,glob)${r}/**`]);
+  git(['add', '-A', '--', '.', ...pathspec(), ...nestedSpec], { cwd: root, env });
 
-  // (2) …and nothing excluded SURVIVES from the copied index either
-  const staged = git(['ls-files'], { cwd: root, env }).split('\n').filter(Boolean);
-  const dropped = staged.filter((f) => isSecretName(path.basename(f)));
+  /* (2) …and nothing excluded SURVIVES from the copied index either.
+   *
+   * `-z` is required. Without it git C-quotes any path that is not plain ASCII, so a Korean
+   * secret filename came back as `"\355\202\244.pem"` — basename ends in a quote, the name
+   * check missed it, and the blob stayed in the basis tree. For a Korean-market product that
+   * is the ordinary filename, not the exotic one. */
+  const staged = git(['ls-files', '-z'], { cwd: root, env, raw: true }).split('\0').filter(Boolean);
+  const dropped = staged.filter((f) => isExcludedPath(f));
   if (dropped.length) git(['rm', '--cached', '--quiet', '--', ...dropped], { cwd: root, env });
 
   const ref = git(['write-tree'], { cwd: root, env });
   let head = null;
   try { head = git(['rev-parse', 'HEAD'], { cwd: root }); } catch { /* unborn */ }
 
-  return { kind: 'git_tree', ref, excluded: ledger(root), droppedFromIndex: dropped, head };
+  /* D-126a: the ledger covers the excluded set — the secret list **and the ignored files**.
+   * Recording only the secret list left every `.gitignore`d path outside both the tree diff
+   * and the ledger, so a change to one was invisible in every channel. That silence is what
+   * D-126a replaced the old `--ignored=matching` comparison to eliminate; carrying only half
+   * the set reintroduced it.
+   *
+   * The paths are obtained from git; the CONTENTS are never opened, so nothing leaks. */
+  const extra = [...ignoredPaths(root), ...nestedRepoFiles(root)];
+  return { kind: 'git_tree', ref, excluded: ledger(root, extra), droppedFromIndex: dropped, head,
+           nestedRepos: nested };
+}
+
+/** Paths git is ignoring. Names only — no file is opened to obtain them. */
+function ignoredPaths(root) {
+  try {
+    return git(['ls-files', '-z', '--others', '--ignored', '--exclude-standard'],
+      { cwd: root, raw: true }).split('\0').filter(Boolean);
+  } catch { return []; }
+}
+
+/**
+ * A nested repository is recorded by `add -A` as a gitlink, so none of its files reach the
+ * basis and a change inside one is invisible in the diff. D-126 requires it excluded **and
+ * reported**; the files go into the ledger so a change to them can still be stated.
+ */
+function nestedRepos(root) {
+  const found = [];
+  const stack = [''];
+  while (stack.length) {
+    const rel = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(path.join(root, rel || '.'), { withFileTypes: true }); }
+    catch { continue; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const child = rel ? `${rel}/${e.name}` : e.name;
+      if (e.name === '.git') { if (rel) found.push(rel); continue; }
+      if (e.name === 'node_modules') continue;
+      stack.push(child);
+    }
+  }
+  return found.sort();
+}
+
+function nestedRepoFiles(root) {
+  const out = [];
+  for (const repoRel of nestedRepos(root)) {
+    const stack = [repoRel];
+    while (stack.length) {
+      const rel = stack.pop();
+      let entries;
+      try { entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true }); }
+      catch { continue; }
+      for (const e of entries) {
+        const child = `${rel}/${e.name}`;
+        if (e.isDirectory()) { if (e.name !== '.git') stack.push(child); continue; }
+        if (e.isFile()) out.push(child);
+      }
+    }
+  }
+  return out;
 }
 
 /** `diff-tree -p before after`, read through the JuQode object store. */
@@ -161,4 +268,4 @@ const treePaths = (root, store, ref) => git(['ls-tree', '-r', '--name-only', ref
   },
 }).split('\n').filter(Boolean);
 
-module.exports = { capture, diff, refusal, treePaths, isGitRepo, REFUSE, DEFAULT_MAX_BYTES };
+module.exports = { capture, diff, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };
