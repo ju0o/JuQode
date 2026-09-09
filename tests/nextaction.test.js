@@ -19,7 +19,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const R = path.resolve(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(R, p), 'utf8');
+const { code: read, text: raw } = require(path.join(__dirname, 'src.js'));
 const NA = read('app/renderer/nextaction.js');
 const SC03 = read('app/renderer/screens/sc03.js');
 const SC04 = read('app/renderer/screens/sc04.js');
@@ -44,7 +44,7 @@ test('nextActions cannot be handed a declared Step', () => {
   assert.strictEqual(sig[1].trim(), 'buttons');
   /* Comments stripped: the file EXPLAINS what a declared Step is, and must, since that is the
    * thing it exists to stay away from. What matters is that no code path carries one. */
-  const code = NA.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+  const code = NA;
   for (const banned of ['declared', 'step', 'Step', 'snap.']) {
     assert.ok(!code.includes(banned), `nextaction.js takes a ${banned}`);
   }

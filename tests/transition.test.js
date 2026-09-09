@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(R, p), 'utf8');
+const { code: read, text: raw } = require(path.join(__dirname, 'src.js'));
 const SRC = read('app/renderer/transition.js');
 const ROUTER = read('app/renderer/renderer.js');
 
@@ -47,7 +47,7 @@ test('nothing in a transition can express an amount', () => {
   /* `17` · D-120: 모션이 Agent 의 진행을 지어내지 않는다. The module is handed two rectangles
    * and nothing else — there is no parameter a fraction could arrive through, and no word for
    * one in the code. */
-  const code = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+  const code = SRC;
   for (const banned of ['percent', 'progress', 'eta', 'remaining', 'ratio', 'step']) {
     assert.ok(!new RegExp(`\\b${banned}\\b`, 'i').test(code), `transition.js speaks of ${banned}`);
   }

@@ -671,3 +671,29 @@ Third time this run a string scan was fooled by a file DESCRIBING what it does n
 one's own comment named `app.getPath('userData')`). Recorded as a rule: strip comments first.
 
 Next eligible: WBS-32/33 · the DV-11 decision.
+
+## Batch 24 · source scans that read prose instead of code
+
+Report: `BATCH-24.md`. No new Canon findings. 503 tests.
+
+Four times this run a check was fooled by a file DESCRIBING what it does not do — `presence.js`
+naming `setInterval` in the comment that says it has none, `nextaction.js` explaining what a
+declared Step is, `main.js`'s comment naming `app.getPath('userData')` inside the check that the
+relocation comes first — and once in the other direction, where `history.more` looked used
+because another file's prose contained the word.
+
+`tests/src.js` now has `code()` (comments stripped) and `text()` (raw, for the checks whose
+subject IS what the file says), and `tests/unit.test.js` makes going around it a failure: no
+test may read `app/` as text directly. Byte-for-byte comparisons are exempt and stay undecoded.
+
+The stripper is a small lexer rather than a regex, because the regex version creates its own
+false passes: `'http://x//y'` in a string, `/a\/\/b/` in a regex literal, and a `/* … */` inside
+a template literal all survive it. The meta-test also checks the helper is real — `text()` finds
+`setInterval` in `presence.js` and `code()` does not — since a `code()` that did not strip would
+satisfy every other line while changing nothing.
+
+Migrating turned up one more of the same: `presence.test.js`'s no-face check proved the points
+were evenly distributed by finding the word `fibonacci`, which appears only in a comment. It now
+checks the golden-angle constant, which is the distribution.
+
+Next eligible: WBS-32/33 · the DV-11 decision.

@@ -22,7 +22,11 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const R = path.resolve(__dirname, '..');
-const SRC = fs.readFileSync(path.join(R, 'app/renderer/presence.js'), 'utf8');
+const { code: srcOf, text: rawOf } = require(path.join(__dirname, 'src.js'));
+
+/* Comments stripped — `tests/src.js`. This file's own first draft was fooled by the doc
+ * comment it had just written. */
+const SRC = srcOf('app/renderer/presence.js');
 const load = () => import(pathToFileURL(path.join(R, 'app/renderer/presence.js')).href);
 
 /** The nine, from `15` §42 and `16` §9. Written out, not read from the module under test. */
@@ -189,7 +193,7 @@ test('no clock in this file can reach a mode', () => {
   /* Comments stripped — the file NAMES the things it does not do, and must, or the claim is
    * unreadable. (This bit the first draft: the doc comment saying `setInterval appears nowhere`
    * made the scan report a setInterval.) */
-  const code = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+  const code = SRC;
   for (const banned of ['setInterval', 'setTimeout', 'setImmediate', 'queueMicrotask',
                         'Date.now', 'new Date']) {
     assert.ok(!code.includes(banned), `presence.js contains ${banned} — a mode could move on a clock`);
@@ -269,7 +273,7 @@ test('nothing in the presence encodes an amount', () => {
     assert.ok(a.includes('0, Math.PI * 2'), `not a full circle: ${a}`);
   }
   for (const banned of ['%', 'percent', 'progress', 'eta', 'remaining']) {
-    assert.ok(!new RegExp(`\\b${banned}\\b`, 'i').test(SRC.replace(/\/\*[\s\S]*?\*\//g, '')),
+    assert.ok(!new RegExp(`\\b${banned}\\b`, 'i').test(SRC),
       `presence.js speaks of ${banned}`);
   }
 });
@@ -278,9 +282,13 @@ test('no face: nothing is drawn as a pair, and no primitive is an eye or a mouth
   /* The point cloud is a fibonacci sphere — evenly spaced by construction, with no pole cluster
    * and no bilateral pairing that could read as two eyes. The only non-cloud marks are one
    * centred dot and centred rings. */
-  assert.ok(SRC.includes('fibonacci'), 'the point distribution is not the even one');
+  /* Checked on the CODE, not on the word. The first version asserted the file CONTAINED
+   * "fibonacci" — which it does, in a comment — so the check was reading the description of
+   * the distribution rather than the distribution. The golden angle is the distribution. */
+  assert.ok(/Math\.PI \* \(3 - Math\.sqrt\(5\)\)/.test(SRC),
+    'the points are not placed at the golden angle — the cloud can cluster and pair');
   for (const banned of ['eye', 'mouth', 'face', 'blink', 'smile', 'mascot']) {
-    assert.ok(!new RegExp(banned, 'i').test(SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '')),
+    assert.ok(!new RegExp(banned, 'i').test(SRC),
       `presence.js draws a ${banned}`);
   }
   /* Every filled shape is centred on the canvas centre or on a cloud point. A hard-coded offset
@@ -295,7 +303,7 @@ test('no face: nothing is drawn as a pair, and no primitive is an eye or a mouth
 
 test('every mode takes its colour from a token, and red is only failure', async () => {
   const { MODES } = await load();
-  const tokens = fs.readFileSync(path.join(R, 'app/renderer/design/tokens.css'), 'utf8');
+  const tokens = rawOf('app/renderer/design/tokens.css');
   for (const [name, m] of Object.entries(MODES)) {
     assert.ok(m.tint.startsWith('--'), `${name} does not use a token`);
     assert.ok(tokens.includes(`${m.tint}:`), `${name} uses ${m.tint}, which tokens.css does not define`);
@@ -334,7 +342,7 @@ test('cancelled and failure share P-06 but only failure is red', async () => {
 /* ───────── the screens agree with it ───────── */
 
 test('SC-02 never guesses a mode from a History row', () => {
-  const src = fs.readFileSync(path.join(R, 'app/renderer/screens/sc02.js'), 'utf8');
+  const src = srcOf('app/renderer/screens/sc02.js');
   /* A History row has `status` and `outcome` and nothing else. Deriving the mode from it would
    * announce 활동 for a Work that is actually waiting for the user to answer a question. */
   assert.ok(/modeFor\(snap\)/.test(src), 'SC-02 does not map from a snapshot');
@@ -349,7 +357,7 @@ test('SC-02 never guesses a mode from a History row', () => {
 });
 
 test('SC-03 draws the presence from the very snapshot it is already drawing', () => {
-  const src = fs.readFileSync(path.join(R, 'app/renderer/screens/sc03.js'), 'utf8');
+  const src = srcOf('app/renderer/screens/sc03.js');
   assert.ok(/presenceCard\(modeFor\(snap\)\)/.test(src),
     'SC-03 could show a mode that disagrees with its own chip');
 });

@@ -22,6 +22,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
+const { code: srcOf, text: rawOf } = require(path.join(__dirname, 'src.js'));
 const { match, normalize, RULES, ruleById } = require(path.join(R, 'app/main/qc/rules.js'));
 const { availability, packageManager } = require(path.join(R, 'app/main/qc/availability.js'));
 
@@ -236,7 +237,7 @@ test('정리/치워 is two readings, and the other one is a Work', () => {
 /* ── the rule set is closed ── */
 
 test('there are exactly the six rules `20` has a foreign key for', () => {
-  const schema = fs.readFileSync(path.join(R, 'app/main/db/schema.sql'), 'utf8');
+  const schema = rawOf('app/main/db/schema.sql');
   /* The statement is one line of `('a'),('b'),…;` — read to the semicolon, not to the first
    * closing paren, or this counts one rule and passes for the wrong reason. */
   const stmt = /insert into quick_command_rule values([^;]*);/.exec(schema);
@@ -519,7 +520,9 @@ test('masking is a REDUCTION and the code says so — it is not measured', () =>
   /* q02 §5.6: 가림의 효과는 측정되지 않았다 — 정규식 초안뿐이고 오탐/미탐을 재지 않았다. The
    * product must not treat this as a containment boundary, and a comment claiming it does is
    * the kind of false claim this run keeps finding. This test pins the ADMISSION. */
-  const src = fs.readFileSync(path.join(R, 'app/main/qc/run.js'), 'utf8');
+  /* `rawOf`, not `srcOf`: the SUBJECT here is the admission, and the admission is a comment.
+   * Stripping comments would leave this test unable to see the only thing it is about. */
+  const src = rawOf('app/main/qc/run.js');
   assert.ok(/not measured|UNMEASURED/i.test(src),
     'run.js no longer admits that the masking is unmeasured');
 
@@ -828,7 +831,7 @@ test('every refusal the run handler can give has a sentence', () => {
    * uses hyphens, so a handler reason fell through to `unknown_rule` — "정해진 Quick Command 가
    * 아니에요" about a command the product had just explained. Every reason either side can
    * produce must resolve to something true. */
-  const copy = fs.readFileSync(path.join(R, 'app/renderer/copy.js'), 'utf8');
+  const copy = srcOf('app/renderer/copy.js');
   const HANDLER = ['already-running', 'unknown-rule', 'not-executable', 'no-project'];
   const AVAIL = ['no_script', 'no_package_json', 'already_running', 'not_running',
                  'placeholder_script', 'not_git', 'unknown_rule'];
@@ -1014,7 +1017,7 @@ test('every rule the drawer can explain has all three sentences', () => {
    * missing any one of them would ask the user to confirm a blank — which the stop card did:
    * its action is a SIGNAL, not a package.json script, so it had no command string at all. */
   const { RULES } = require(path.join(R, 'app/main/qc/rules.js'));
-  const copy = fs.readFileSync(path.join(R, 'app/renderer/copy.js'), 'utf8');
+  const copy = srcOf('app/renderer/copy.js');
   for (const rule of RULES) {
     for (const table of ['qcUnderstood', 'qcMeaning']) {
       const block = copy.slice(copy.indexOf(`${table}: {`));

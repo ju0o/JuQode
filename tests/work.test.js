@@ -14,6 +14,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const R = path.resolve(__dirname, '..');
+const { code: srcOf } = require(path.join(__dirname, 'src.js'));
 
 /* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
  * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
@@ -1005,10 +1006,10 @@ test('a capture never reads the user\'s index — the basis starts empty', () =>
    * inherits a stat cache that misses a same-size edit), so no deterministic test can catch a
    * revert by observing behaviour. This catches it structurally instead: if `capture` ever
    * reads `.git/index` again, the stat cache is back and so is the missed change. CF-14. */
-  const src = fs.readFileSync(path.join(R, 'app/main/evidence/git.js'), 'utf8')
-    /* Comments are stripped first. The comment above `capture` NAMES `copyFileSync` in order to
-     * say why it is not used any more; documentation of a ban is not the ban being broken. */
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  /* `srcOf` strips comments — see `tests/src.js`. The comment above `capture` NAMES
+   * `copyFileSync` in order to say why it is not used any more; documentation of a ban is not
+   * the ban being broken. */
+  const src = srcOf('app/main/evidence/git.js');
   const capture = src.slice(src.indexOf('function capture('), src.indexOf('function fileAt('));
   assert.ok(!/copyFileSync/.test(capture),
     'capture() copies a file again — if that is the user index, the stat cache is back');

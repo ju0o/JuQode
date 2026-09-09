@@ -13,6 +13,8 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 
 const R = path.resolve(__dirname, '..');
+const { code: srcOf, text: rawOf } = require(path.join(__dirname, 'src.js'));
+
 
 /* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
  * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
@@ -269,8 +271,7 @@ test('binary and oversized files are undisplayable, and say so', () => {
 test('the segmenter never asks anything — it only reads the diff', () => {
   /* `19` §C5-B: an LLM may EXPLAIN a block and must never DEFINE one. The unit has to be
    * derivable from the file, or the user cannot check it. */
-  const src = require('node:fs').readFileSync(path.join(R, 'app/main/change/blocks.js'), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const src = srcOf('app/main/change/blocks.js');
   for (const forbidden of ['claude', 'session.run', 'spawn(', 'fetch(', 'execFile']) {
     assert.ok(!src.includes(forbidden), `the segmenter reaches for ${forbidden} — a unit must be derived, not asked for`);
   }
@@ -440,11 +441,11 @@ test('the observed-tools count is the caller\'s measurement, never derived from 
    * parameter, so there is nothing capped or bundled for it to miscount. (`sourceRef` still
    * NAMES `signals:tool_result` — that is where the number came from, and saying so is the
    * point of a source ref.) */
-  const src = fs.readFileSync(path.join(R, 'app/main/work/result.js'), 'utf8');
+  const src = srcOf('app/main/work/result.js');
   const sig = /function build\(\{([^}]*)\}\)/.exec(src);
   assert.ok(sig, 'build is gone');
   assert.ok(!/signals/.test(sig[1]), `build still takes the signal list: ${sig[1].trim()}`);
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+  const code = src;
   assert.ok(!/signals\s*\./.test(code) && !/signals\.filter/.test(code),
     'result.js still reads a signal list');
 });
@@ -457,7 +458,7 @@ test('`15` SC-03 남은 변경 확인 불가 is a STATE, not just a claim row', 
    *
    * NOTE: this state has no RENDERED evidence yet — the e2e's project is a git repo whose
    * evidence pair always answers, so the flow cannot reach it. Recorded in BATCH-22. */
-  const src = fs.readFileSync(path.join(R, 'app/renderer/screens/sc03.js'), 'utf8');
+  const src = srcOf('app/renderer/screens/sc03.js');
   assert.ok(/if \(\(snap\.result\?\.claims \?\? \[\]\)\.some\(\(c\) => c\.kind === 'changes-unknown'\)\) \{/.test(src),
     'the panel is not driven by the claim the builder actually produces');
   const panel = /function remainPanel\(snap, nav, state\) \{([\s\S]*?)\n\}/.exec(src);
@@ -484,7 +485,7 @@ test('a 부분 result draws BOTH lists, and the unmeasurable one says 확인 못
    *
    * `verify()` had been reporting this all along and `buildChecked` could only write it to the
    * record — the screen went on drawing one list. */
-  const src = fs.readFileSync(path.join(R, 'app/renderer/screens/sc03.js'), 'utf8');
+  const src = srcOf('app/renderer/screens/sc03.js');
   assert.ok(/const isPartial = snap\.outcome === 'partial' \|\| snap\.outcome === 'cancelled_partial';/.test(src),
     'the result card does not know what a 부분 outcome is');
   assert.ok(/if \(done\.length \|\| \(isPartial && notDone\.length\)\) \{/.test(src),

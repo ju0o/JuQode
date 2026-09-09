@@ -20,8 +20,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { code: srcOf, text: rawOf } = require(path.join(__dirname, 'src.js'));
 
-const CSS = fs.readFileSync(path.resolve(__dirname, '..', 'app/renderer/design/tokens.css'), 'utf8');
+const CSS = rawOf('app/renderer/design/tokens.css');
 
 /** The declarations of one rule block, by selector. */
 function block(sel) {
@@ -153,7 +154,7 @@ test('the presence tints are readable on a card in both themes', () => {
   /* D-135 names Agent Presence in its list of things that must keep working in both themes.
    * The cloud is drawn at partial alpha, so this is the ceiling rather than what is painted —
    * but a tint that cannot clear AA at full strength has no chance at .42. */
-  const src = fs.readFileSync(path.resolve(__dirname, '..', 'app/renderer/presence.js'), 'utf8');
+  const src = srcOf('app/renderer/presence.js');
   const tints = [...src.matchAll(/tint: '(--[a-z0-9-]+)'/g)].map((m) => m[1]);
   assert.strictEqual(new Set(tints).size >= 6, true, `only ${new Set(tints).size} distinct tints`);
   for (const [name, T] of [['light', LIGHT], ['dark', DARK]]) {
@@ -168,10 +169,10 @@ test('the presence tints are readable on a card in both themes', () => {
 test('D-135 · there is no settings screen — the theme control is one toggle', () => {
   /* `21` WBS-36's named scope violation: 설정 화면이 생김 → 범위 위반. The toggle is three
    * buttons in the top bar and there is no route, screen or panel behind it. */
-  const theme = fs.readFileSync(path.resolve(__dirname, '..', 'app/renderer/design/theme.js'), 'utf8');
+  const theme = srcOf('app/renderer/design/theme.js');
   assert.ok(/light/.test(theme) && /dark/.test(theme) && /system/.test(theme),
     'the toggle does not offer all three of light / dark / system');
-  const renderer = fs.readFileSync(path.resolve(__dirname, '..', 'app/renderer/renderer.js'), 'utf8');
+  const renderer = srcOf('app/renderer/renderer.js');
   for (const banned of ['SC-05', 'settings', 'Settings', '설정']) {
     assert.ok(!renderer.includes(banned), `the renderer has a ${banned} route — D-135 forbids one`);
   }

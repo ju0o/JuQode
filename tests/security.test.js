@@ -34,7 +34,7 @@ process.on('exit', () => {
   for (const d of juqodeTempDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone */ } }
 });
 
-const read = (f) => fs.readFileSync(path.join(R, f), 'utf8');
+const { code: read, text: raw } = require(path.join(__dirname, 'src.js'));
 
 /* ─────────────── ① the product does not claim containment ─────────────── */
 
@@ -46,7 +46,7 @@ test('no user-visible string claims isolation, sandboxing or protection', () => 
    * Only `copy.js` is scanned, because that is everything the user reads. A comment explaining
    * why the product does not isolate is documentation; a SENTENCE ON SCREEN saying it does is
    * the claim. */
-  const copy = read('app/renderer/copy.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const copy = read('app/renderer/copy.js');
   const strings = [...copy.matchAll(/['"`]([^'"`\n]{2,})['"`]/g)].map((m) => m[1]);
   assert.ok(strings.length > 100, `expected the copy dictionary, found ${strings.length} strings`);
 
@@ -68,8 +68,7 @@ test('the one line that states the truth is present and cannot be conditional', 
   assert.ok(copy.includes('여기서 치는 명령은 내 컴퓨터에서 내 권한으로 바로 실행돼요.'),
     'the banner text is gone from the dictionary');
 
-  const drawer = read('app/renderer/screens/td01.js');
-  const body = drawer.replace(/\/\*[\s\S]*?\*\//g, '');
+  const body = read('app/renderer/screens/td01.js');
   assert.ok(body.includes('C.term.banner'), 'the drawer no longer draws the banner');
   /* It is drawn unconditionally, before any state branch. A banner inside an `if` is a banner
    * that some state can remove. */
@@ -81,7 +80,10 @@ test('the one line that states the truth is present and cannot be conditional', 
 test('masking is never described as a guarantee', () => {
   /* q02 §5.6: 가림의 효과는 측정되지 않았다. A product that calls it protection teaches the user
    * that whatever appeared unmasked is safe to share. */
-  const src = read('app/main/qc/run.js');
+  /* `raw`, not `code`: the SUBJECT of this test is what the file SAYS. The admission lives in a
+   * comment, and so would a claim in the other direction — stripping them would make both
+   * halves of this test unable to see the thing they are about. */
+  const src = raw('app/main/qc/run.js');
   /* Canon's OWN words, not any of several phrasings: `19` §C4 says 가림의 효과는 측정되지
    * 않았다. Accepting a family of near-synonyms let a mutant replace the admission with the
    * claim "the masking keeps secrets off the screen" while a different disclaimer elsewhere in
@@ -233,7 +235,7 @@ test('nothing in the app reads the user\'s shell or git credentials', () => {
   const FORBIDDEN = ['.netrc', 'credential.helper', 'git-credential', '.aws/credentials',
                      'id_rsa', '.ssh/', 'keychain', 'libsecret'];
   for (const f of files) {
-    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const src = read(f);
     /* Two modules name some of these BECAUSE they exclude them, which is the opposite of
      * reading them. They are the ONLY two, and naming them here is what keeps the exemption
      * from quietly widening: a third file that starts matching on `id_rsa` fails this test. */
@@ -297,7 +299,7 @@ test('no code enables crash reporting or calls out to a network', () => {
     [/from ['"]node:https?['"]/, "import node:http(s)"],
   ];
   for (const f of files) {
-    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const src = read(f);
     for (const [re, name] of OUT) {
       assert.ok(!re.test(src), `${f} uses ${name} — the product makes no network calls`);
     }
@@ -331,7 +333,7 @@ test('a test run cannot write into the real application data directory', () => {
   /* ORDER, on the code — the comment above the fix names `app.getPath('userData')` while
    * explaining it, which is the third time in this run that a scan has been fooled by a file
    * describing the thing it does not do. */
-  const code = main.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const code = main;
   /* Before anything reads a path from it — `app.setPath` after `whenReady` is too late. */
   assert.ok(code.indexOf('JUQODE_USER_DATA') < code.indexOf('requestSingleInstanceLock'),
     'userData is relocated after the app has already started');

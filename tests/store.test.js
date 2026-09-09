@@ -12,6 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
+const { code: srcOf, text: rawOf } = require(path.join(__dirname, 'src.js'));
 
 /* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
  * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
@@ -172,7 +173,7 @@ test('a store whose first run was interrupted is refused, not adopted', () => {
    * creates most tables, so a crash midway used to leave an adoptable half-store. */
   const { DatabaseSync } = require('node:sqlite');
   const dir = tmp(), f = path.join(dir, 'half.db');
-  const sql = fs.readFileSync(path.join(R, 'app/main/db/schema.sql'), 'utf8');
+  const sql = rawOf('app/main/db/schema.sql');
   const half = sql.slice(0, sql.indexOf('create table interpretation ('));
   const d = new DatabaseSync(f);
   d.exec('pragma foreign_keys = on');
@@ -435,14 +436,14 @@ test('navigation away from the app file is refused, and so is every new window',
 });
 
 test('the allowed navigation URL is a real file URL, not string concatenation', () => {
-  const src = fs.readFileSync(path.join(R, 'app/main/window.js'), 'utf8');
+  const src = srcOf('app/main/window.js');
   assert.match(src, /pathToFileURL\(RENDERER\)\.href/,
     'building it as `file://${path}` cannot match what the browser reports, so the allowlist becomes deny-all');
 });
 
 test('preload exposes exactly the channels main handles — no more, no less', () => {
-  const pre = fs.readFileSync(path.join(R, 'app/preload/preload.js'), 'utf8');
-  const main = fs.readFileSync(path.join(R, 'app/main/main.js'), 'utf8');
+  const pre = srcOf('app/preload/preload.js');
+  const main = srcOf('app/main/main.js');
 
   const used = [...pre.matchAll(/ipcRenderer\.invoke\('([^']+)'/g)].map((m) => m[1]).sort();
   /* Read from the handler TABLE, not from the file's text: the handlers are registered in a
@@ -544,7 +545,7 @@ test('the main-process handler wrapper answers instead of rejecting, and refuses
   /* The wrapper stays in main.js because it needs ipcMain. What it must do is checked here:
      a throwing handler becomes an ANSWER (a rejected invoke blanks the window, because the
      renderer's boot is a top-level await), and a sub-frame is refused. */
-  const src = fs.readFileSync(path.join(R, 'app/main/main.js'), 'utf8');
+  const src = srcOf('app/main/main.js');
   const body = src.split('const handle = (channel, fn)')[1].slice(0, 900);
   assert.match(body, /senderFrame && e\.senderFrame\.parent/, 'the sub-frame check is gone');
   assert.match(body, /bad-sender/);

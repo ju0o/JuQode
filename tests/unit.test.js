@@ -6,7 +6,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const R = path.join(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(R, p), 'utf8');
+/* Comments stripped — see `tests/src.js`. Three times in this run a scan was fooled by a
+ * file DESCRIBING what it does not do; `raw()` is there for the few checks whose subject IS
+ * the whole file. */
+const { code: read, text: raw } = require(path.join(__dirname, 'src.js'));
 
 /* Block comments, whole-line comments, AND trailing ones. Stripping only the first two let a
    trailing `// …` carry Korean past the copy check — a comment explaining a rule was read as
@@ -308,8 +311,7 @@ test('capability containment: each privileged capability lives in exactly one mo
      costs nothing to recompute (CANON_FINDINGS CF-10). The day a block needs an id that
      survives a restart, this line is what says so out loud. */
   for (const notYet of ['code_block']) {
-    const inCode = all.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    assert.ok(!inCode.includes(notYet), `a later WBS package leaked into app/: ${notYet}`);
+    assert.ok(!all.includes(notYet), `a later WBS package leaked into app/: ${notYet}`);
   }
 });
 
@@ -421,7 +423,7 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
   /* Comments stripped. A key NAMED in a comment is not a key a screen renders, and leaving them
    * in made `history.more` look used because some other file's prose mentioned the word. */
   const uses = files
-    .map((f) => read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''))
+    .map((f) => read(f))
     .join('\n');
 
   /* Parse the leaf keys with their parent path. Indentation gives the nesting — this file is
@@ -491,4 +493,43 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
     return new RegExp(`\\b${key}\\b`).test(uses);
   });
   assert.deepStrictEqual(stale, [], 'PENDING names copy that is now rendered — remove the entry');
+});
+
+test('no test reads product source without going through tests/src.js', () => {
+  /* THREE times in this run a check was fooled by a file describing what it does not do:
+   * `presence.js`'s comment naming `setInterval`, `nextaction.js` explaining what a declared
+   * Step is, `main.js`'s comment naming `app.getPath('userData')`. And once the other way —
+   * `history.more` looked used because some other file's prose contained the word.
+   *
+   * The fix cannot be "remember to strip". `tests/src.js` has `code()` (stripped) and `text()`
+   * (raw, for the checks whose subject IS what the file says), and this makes going around it
+   * a test failure rather than a habit.
+   */
+  const testFiles = fs.readdirSync(path.join(R, 'tests'))
+    .filter((f) => f.endsWith('.test.js'));
+  assert.ok(testFiles.length >= 10, `only ${testFiles.length} test files found`);
+
+  const offenders = [];
+  for (const f of testFiles) {
+    for (const line of raw(path.join('tests', f)).split('\n')) {
+      /* A read of something under `app/` — the product. Fixtures, temp directories and this
+       * repository's own docs are not what the rule is about. */
+      /* Only reads that produce TEXT. A byte-for-byte comparison against Canon's own
+       * `schema.sql` is not a source scan and must not be decoded at all — stripping comments
+       * out of it would defeat the comparison. */
+      if (!/readFileSync\s*\([^)]*['"`]app\//.test(line)) continue;
+      if (!/utf8/.test(line)) continue;
+      offenders.push(`${f}: ${line.trim().slice(0, 90)}`);
+    }
+  }
+  assert.deepStrictEqual(offenders, [],
+    'read product source with `code()` from tests/src.js — or `text()`, and say why');
+
+  /* …and the helper is the real thing, not a re-export of readFileSync: a `code()` that did
+   * not strip would satisfy every line above while changing nothing. */
+  const { code, text } = require(path.join(R, 'tests', 'src.js'));
+  const withComment = text('app/renderer/presence.js');
+  assert.ok(withComment.includes('setInterval'), 'presence.js no longer names setInterval anywhere');
+  assert.ok(!code('app/renderer/presence.js').includes('setInterval'),
+    'code() does not strip comments — every check built on it is reading prose');
 });
