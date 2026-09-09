@@ -85,9 +85,12 @@ function excludedLedger() {
       const base = path.basename(rel);
       const hit = EXCLUDE.some((g) => new RegExp('^' + g.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$').test(base));
       if (!hit) continue;
-      const st = fs.statSync(path.join(PROJ, rel));
       // size + mtime only. We never open the file, so its contents cannot leak.
-      out.push({ path: rel, size: st.size, mtimeNs: String(st.mtimeNs) });
+      // `{ bigint: true }` is REQUIRED — a plain statSync has no `mtimeNs`, so this recorded
+      // the string "undefined" and the ledger could only detect a SIZE change. The original
+      // run of this spike passed only because its fixture file also grew. Corrected 2026-09-09.
+      const st = fs.statSync(path.join(PROJ, rel), { bigint: true });
+      out.push({ path: rel, size: Number(st.size), mtimeNs: String(st.mtimeNs) });
     }
   };
   walk('.');

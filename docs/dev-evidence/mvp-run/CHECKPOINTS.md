@@ -43,3 +43,26 @@ Next eligible: WBS-08 (deps 00, 21) · WBS-10 (deps 09, 21) · WBS-25 (deps 00, 
 WBS-04 (deps 03, 10) · WBS-05 (deps 03, 04, 21). The Work chain — 08 · 10 · 11 — is next,
 and it is what lets WBS-06's field, WBS-07's card and WBS-09's 사용 불가 card land with the
 triggers Canon specifies for them.
+
+## Batch 03
+
+Report: `BATCH-03.md`. The Work chain's engines: evidence basis, session launch, reducer.
+
+| Package | State |
+|---|---|
+| WBS-08 evidence basis | IMPLEMENTED_PENDING_VALIDATION — corrected D-126a contract in production |
+| WBS-10 session launch | IMPLEMENTED_PENDING_VALIDATION — validated against the real CLI 2.1.266 |
+| WBS-11 stream → state | IMPLEMENTED — pure, driven by a real recorded stream |
+
+146 unit tests, 3 e2e files, all passing, no orphan processes.
+
+Two corrections came out of building it. The excluded-path ledger had been recording
+`"undefined"` for every mtime — `fs.statSync` has no `mtimeNs` without `{ bigint: true }` — so
+it could only detect a size change, and **the WBS-00 spike that validated the contract carried
+the same defect**. And D-133's resume mechanics have changed since the CLI version that
+validated them: `--allowedTools` is variadic and was swallowing the prompt, and `--resume`
+alone no longer reconstructs the blocked call. The safety property — that the grant bounds what
+the retry may touch — was re-measured and holds.
+
+Next: SC-03 and the surfaces these engines feed. Every deferred card now has a working engine
+underneath it.

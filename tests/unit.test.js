@@ -188,12 +188,19 @@ test('capability containment: each privileged capability lives in exactly one mo
   assert.ok(files.length >= 10, `expected to scan the app tree, found ${files.length} files`);
 
   // token -> the single file allowed to contain it
+  /* token -> the file(s) allowed to contain it. A privileged capability lives in ONE place, so
+     an audit of that place is an audit of the capability. */
   const OWNER = {
-    'showOpenDialog':  'app/main/project.js',
-    'child_process':   'app/main/claude-detect.js',
-    'execFile':        'app/main/claude-detect.js',
-    'node:sqlite':     'app/main/db/db.js',
-    'DatabaseSync':    'app/main/db/db.js',
+    'showOpenDialog': ['app/main/project.js'],
+    'node:sqlite':    ['app/main/db/db.js'],
+    'DatabaseSync':   ['app/main/db/db.js'],
+    /* Three modules spawn a process, and each spawns exactly one thing:
+         claude-detect  — `claude --version` / `auth status`, constant arguments
+         claude/session — the headless Claude Code session, constant flags + stdin
+         evidence/git   — `git`, constant arguments, never a shell */
+    'child_process':  ['app/main/claude-detect.js', 'app/main/claude/session.js', 'app/main/evidence/git.js'],
+    'execFile':       ['app/main/claude-detect.js', 'app/main/evidence/git.js'],
+    'spawn(':         ['app/main/claude/session.js'],
   };
   // never, anywhere: nothing in the built packages needs these, and each is a real hazard
   const NEVER = [
@@ -205,8 +212,10 @@ test('capability containment: each privileged capability lives in exactly one mo
     // strip comments — a comment naming a capability is documentation, not code
     const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     for (const b of NEVER) assert.ok(!src.includes(b), `${f} uses a forbidden capability: ${b}`);
-    for (const [tok, owner] of Object.entries(OWNER)) {
-      if (src.includes(tok)) assert.strictEqual(f, owner, `${tok} appears in ${f}; only ${owner} may have it`);
+    for (const [tok, owners] of Object.entries(OWNER)) {
+      if (src.includes(tok)) {
+        assert.ok(owners.includes(f), `${tok} appears in ${f}; only ${owners.join(' / ')} may have it`);
+      }
     }
   }
 
@@ -220,7 +229,7 @@ test('capability containment: each privileged capability lives in exactly one mo
 
   // Packages NOT yet built must not have a half-implementation hiding in the tree.
   const all = files.map((f) => read(f)).join('\n');
-  for (const notYet of ['work_signal', 'evidence_basis', 'change_group', '--allowedTools', '--resume']) {
+  for (const notYet of ['change_group', 'code_block', 'raw_diff']) {
     const inCode = all.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     assert.ok(!inCode.includes(notYet), `a later WBS package leaked into app/: ${notYet}`);
   }
