@@ -125,3 +125,15 @@
    a truncated intent is a different sentence. */
 .sc02 .histname { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
 .sc02 .histfacts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* WBS-05 · 오래됨 — a STATEMENT OF FACT, so it is neutral. `16` reserves red for failure and
+   amber fill for 부분; an aged Brief is neither. Dashed 알 수 없음 would be wrong too: what
+   changed is KNOWN, it is the answers that may no longer match. */
+.sc02 .staleband {
+  border: 1px solid var(--line2); background: var(--card2);
+  border-radius: var(--r-inner); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+/* A refresh that failed over a Brief that still works. The band says so; the answers below it
+   are the old ones and stay exactly as they were. */
+.sc02 .failband.soft { border-style: dashed; }

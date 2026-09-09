@@ -319,3 +319,50 @@ test('visual test writes to an untracked path unless goldens are explicitly upda
   const ignore = read('.gitignore');
   assert.match(ignore, /^tmp-visual\/$/m, 'tmp-visual/ is not gitignored — test output would be committed');
 });
+
+test('every copy key the renderer NAMES actually exists', () => {
+  /* The provenance test above checks that every Korean STRING came from Canon 18. It cannot see
+   * the opposite failure: a screen naming a key `copy.js` does not have. That renders `undefined`
+   * — or, for a button, an empty label nobody can click.
+   *
+   * Both happened and both shipped. `sc03.js`'s 원하던 결과가 아니에요 panel and `sc04.js`'s
+   * 사용 불가 / 원문 복사 were committed against keys that did not exist; so were the Brief's
+   * `failTitle` and `failNote`, which meant the 프로젝트를 읽지 못했어요 band drew a blank title.
+   * A string test cannot catch a missing string. */
+  const copySrc = read('app/renderer/copy.js');
+  const files = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
+      const rel = path.join(dir, e.name);
+      if (e.isDirectory()) walk(rel);
+      else if (/\.js$/.test(e.name) && e.name !== 'copy.js') files.push(rel);
+    }
+  })(path.join('app', 'renderer'));
+  assert.ok(files.length >= 6, `expected the renderer tree, found ${files.length}`);
+
+  /* The blocks of `copy.js`, brace-matched, so a key is looked up in ITS OWN block. */
+  const block = (name) => {
+    const at = copySrc.indexOf(`  ${name}: {`);
+    if (at === -1) return null;
+    let depth = 0;
+    for (let i = copySrc.indexOf('{', at); i < copySrc.length; i++) {
+      if (copySrc[i] === '{') depth += 1;
+      else if (copySrc[i] === '}' && --depth === 0) return copySrc.slice(at, i + 1);
+    }
+    return null;
+  };
+
+  const missing = [];
+  for (const f of files) {
+    const src = stripComments(read(f));
+    for (const m of src.matchAll(/\bC\.([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/g)) {
+      const [, group, key] = m;
+      const b = block(group);
+      if (!b) { missing.push(`${f}: C.${group} (no such block)`); continue; }
+      /* `q[0]` style indexing and nested objects both appear, so the test is that the KEY is
+       * declared somewhere in the block — not where, and not what it holds. */
+      if (!new RegExp(`(^|[{\\s,])${key}\\s*:`, 'm').test(b)) missing.push(`${f}: C.${group}.${key}`);
+    }
+  }
+  assert.deepStrictEqual(missing, [], `the renderer names copy keys that do not exist:\n  ${missing.join('\n  ')}`);
+});

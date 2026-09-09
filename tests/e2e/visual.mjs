@@ -397,6 +397,20 @@ const results = await cdp(async ({ send, evalJs }) => {
                  chip: n.querySelector('.chip')?.textContent ?? null,
                  text: n.innerText })))`);
   out.briefText = await evalJs(`document.querySelector('[data-card="brief"]')?.innerText ?? null`);
+
+  /* ── WBS-05 · fold · stale · refresh ────────────────────────────────────────────────────
+   * D-132: a FIRST open is large, so the Brief is unfolded here and 접기 collapses it to its
+   * header. Nothing about this is automatic — every one of these is a button. */
+  out.briefFoldedFirst = await evalJs('JSON.stringify(window.__brief())');
+  out.briefAnswersVisible = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
+  await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '접기')?.click()`);
+  await sleep(300);
+  out.briefFoldedAfter = await evalJs('JSON.stringify(window.__brief())');
+  out.briefAnswersFolded = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
+  out.briefHeadFolded = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.innerText ?? null`);
+  await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '펼치기')?.click()`);
+  await sleep(300);
+  out.briefAnswersUnfolded = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
   /* 다시 읽기 — a user-requested re-read (D-132). It is also what makes the narrative pass
    * observable: the first interpretation happens before the window is ready to be asked. */
   await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.includes('다시 읽기'))?.click()`);
@@ -567,6 +581,12 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업으로'))?.click()`);
   await sleep(600);
   out.screenAfterReader = await evalJs('window.__screen()');
+  /* WBS-05 · 오래됨. The project gains a top-level folder while the reader is open, which is a
+   * STRUCTURAL change and therefore moves `source_hash` (`19` §C1 ⑤ — a body edit does not).
+   * Returning to SC-02 re-asks, and the answer must be announced, not acted on. */
+  fs.mkdirSync(path.join(SEED, 'server'), { recursive: true });
+  fs.writeFileSync(path.join(SEED, 'server', 'index.js'), 'export const port = 3000;\n');
+
   /* …and on to SC-02, which is where the rest of the run continues from. */
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(600);
@@ -632,6 +652,26 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.animating = await evalJs('document.getAnimations().filter(a => a.playState === "running").length');
   await send('Emulation.setEmulatedMedia', { features: [] });
 
+  step('WBS-05 stale');
+  await sleep(1200);
+  out.staleBand = await evalJs(`document.querySelector('[data-card="brief"] .staleband')?.innerText ?? null`);
+  out.staleState = await evalJs('JSON.stringify(window.__brief())');
+  out.staleHead = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.innerText ?? ''`);
+  out.staleReds = await evalJs(RED_COUNT('[data-card="brief"] .staleband, [data-card="brief"] .staleband *'));
+  out.staleAnswers = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc02-stale-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+
+  /* 이대로 계속 dismisses the announcement and changes NOTHING else — no re-read, same answers. */
+  await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '이대로 계속')?.click()`);
+  await sleep(300);
+  out.staleAfterKeep = await evalJs(`document.querySelector('[data-card="brief"] .staleband')?.innerText ?? null`);
+  out.staleAnswersAfterKeep = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
+
   step('back to picker');
   // 다른 프로젝트 열기 goes back to SC-01, and the project it just opened is now remembered
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트')).click()`);
@@ -673,9 +713,9 @@ const bridge = JSON.parse(results.bridge);
 assert.strictEqual(results.ready, true, 'renderer did not initialise');
 assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.screen}`);
 assert.deepStrictEqual(bridge.keys.sort(),
-  ['boot', 'claudeStatus', 'history', 'interpret', 'onWorkUpdate', 'openPath', 'openProject',
-   'routeIntent', 'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges',
-   'workExplain', 'workGet', 'workReader', 'workSignals', 'workStart'],
+  ['boot', 'brief', 'claudeStatus', 'history', 'interpret', 'onWorkUpdate', 'openPath',
+   'openProject', 'routeIntent', 'versions', 'workAllow', 'workAnswer', 'workCancel',
+   'workChanges', 'workExplain', 'workGet', 'workReader', 'workSignals', 'workStart'],
   'renderer API surface is not exactly the declared one');
 assert.strictEqual(bridge.require, 'undefined', 'require leaked into the renderer');
 assert.strictEqual(bridge.process, 'undefined', 'process leaked into the renderer');
@@ -769,6 +809,43 @@ assert.ok(!briefRows[3].text.includes('nobody-read-this'),
 assert.ok(chip(2).includes('확인됨') && !chip(2).includes('못함'), `q3 chip was ${chip(2)}`);
 assert.strictEqual(results.briefConfirmedHaveSource, 0,
   '`20`: every 확인됨 answer carries the source that backs it');
+
+/* ── WBS-05 · fold ────────────────────────────────────────────────────────────────────────
+ * D-132: a FIRST open is large. Folding is a button, and it collapses to the header — which
+ * keeps the two things the user can still do. Nothing here happens on its own. */
+assert.strictEqual(JSON.parse(results.briefFoldedFirst).folded, false,
+  'a first open started folded — D-132 makes it large');
+assert.strictEqual(results.briefAnswersVisible, 6);
+assert.strictEqual(JSON.parse(results.briefFoldedAfter).folded, true, '접기 did nothing');
+assert.strictEqual(results.briefAnswersFolded, 0, 'a folded Brief still drew its six answers');
+assert.ok(results.briefHeadFolded.includes('펼치기'), 'a folded Brief cannot be reopened');
+assert.ok(results.briefHeadFolded.includes('다시 읽기'), '다시 읽기 vanished when folded');
+/* …and it appears exactly ONCE, wherever it is. Two identical buttons in one card make the
+ * reader choose between the same thing twice. */
+assert.strictEqual((results.staleBand.match(/다시 읽기/g) || []).length, 1);
+assert.ok(results.briefHeadFolded.includes('읽은 시점'),
+  'a folded Brief must still say WHEN it was read — that is what makes it a cached Brief');
+assert.strictEqual(results.briefAnswersUnfolded, 6, '펼치기 did not bring the answers back');
+
+/* ── WBS-05 · 오래됨 ──────────────────────────────────────────────────────────────────────
+ * A top-level folder appeared while the reader was open — a STRUCTURAL change, so `source_hash`
+ * moved (`19` §C1 ⑤; a body edit does not). Returning to SC-02 announces it. */
+assert.ok(results.staleBand, 'the project changed and the Brief said nothing about it');
+assert.ok(results.staleBand.includes('바뀌었'), `the stale line reads wrong: ${results.staleBand}`);
+assert.ok(!results.staleBand.includes('0일'), 'the same-day case printed "0일 전에 읽은 내용이에요"');
+/* Both routes are offered, and NEITHER of them happened on its own (D-132). */
+assert.ok(results.staleBand.includes('다시 읽기'), 'no way to act on the announcement');
+assert.strictEqual((results.staleHead.match(/다시 읽기/g) || []).length, 0,
+  '다시 읽기 is drawn twice — the header keeps it while the band already offers it');
+assert.ok(results.staleBand.includes('이대로 계속'), 'no way to dismiss it');
+/* 오래됨 is a fact, not a failure: `16` keeps red for failure only. */
+assert.strictEqual(results.staleReds, 0, 'an aged Brief was painted as a failure');
+/* …and it did NOT re-read: the Brief is still the one that was folded on the way in. */
+assert.strictEqual(JSON.parse(results.staleState).folded, true,
+  'something re-read the project without being asked — D-132 forbids it');
+assert.strictEqual(results.staleAfterKeep, null, '이대로 계속 left the announcement on screen');
+assert.strictEqual(results.staleAnswersAfterKeep, results.staleAnswers,
+  '이대로 계속 changed the Brief instead of only dismissing the notice');
 assert.strictEqual(results.animating, 0,
   'an animation is still running under prefers-reduced-motion: reduce');
 

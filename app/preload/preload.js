@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('juqode', {
   /** WBS-03 — read the project's deterministic facts. Only called when nothing is stored. */
   interpret: (projectId) => ipcRenderer.invoke('juqode:interpret', projectId),
 
+  /** WBS-05 — the Brief as it stands, and whether it has aged. Reads; never re-reads. */
+  brief: (projectId) => ipcRenderer.invoke('juqode:brief', projectId),
+
   /** WBS-09 — is Claude Code usable right now, and if not, why. Never carries credentials. */
   claudeStatus: () => ipcRenderer.invoke('juqode:claude-detect'),
 

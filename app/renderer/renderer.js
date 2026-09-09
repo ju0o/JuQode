@@ -18,7 +18,11 @@ const state = { project: null, interpretation: null, recent: [], store: { ok: fa
                  * screen is re-rendered on every click — a re-render is the navigation. */
                 reader: null, readerGroup: 0, readerRaw: false, readerBlock: null,
                 /* A request the product composed for the user to send, or edit, or discard. */
-                prefill: null };
+                prefill: null,
+                /* WBS-05 · the Brief's own state. `briefFolded` is set by `toWorkbench` when a
+                 * project is REOPENED with an interpretation already there — D-132: 다시 열기 →
+                 * Brief 접힌 채로. */
+                stale: null, briefFolded: false, refreshFailed: null, narrative: null };
 
 const nav = {
   /* `opts.intent` prefills the request field — WBS-19's correction path arrives that way. It is
@@ -26,6 +30,12 @@ const nav = {
   toWorkbench(project, interpretation = null, opts = {}) {
     state.project = project;
     state.interpretation = interpretation;
+    /* D-132: opening a project that already HAS an interpretation shows the Brief folded — the
+     * user has read it before, and the screen's subject is the next request. A first open has
+     * no interpretation yet, so it stays large. */
+    state.briefFolded = Boolean(interpretation);
+    state.stale = null;
+    state.refreshFailed = null;
     state.workSnapshot = null;
     state.reader = null; state.readerGroup = 0; state.readerRaw = false;
     state.prefill = opts.intent ?? null;
@@ -93,6 +103,8 @@ window.__work    = () => (state.workSnapshot
       signals: state.workSnapshot.signalCount }
   : null);
 window.__narrative = () => state.narrative ?? null;
+window.__brief = () => ({ folded: state.briefFolded, stale: state.stale,
+                          refreshFailed: state.refreshFailed });
 window.__reader  = () => (state.reader
   ? { groups: state.reader.groups.map((g) => ({ title: g.title, explainable: g.explainable,
         confidence: g.confidence, files: g.files.map((f) => f.file),

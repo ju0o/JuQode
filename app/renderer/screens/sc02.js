@@ -65,7 +65,44 @@ export function renderSC02(root, api, nav, state) {
    * contains, and the other three say 확인 못함 (`11`: 부분 해석은 실패가 아니다). */
   const brief = card('wide2', 'brief');
   colL.appendChild(brief);
-  renderBrief(brief, state.interpretation);
+
+  /* WBS-05 · the Brief's own controls. Re-rendering IS the interaction — the same pattern the
+   * other screens use — so every one of these hands state back and redraws. */
+  const paint = () => renderBrief(brief, state.interpretation, {
+    stale: state.stale,
+    folded: state.briefFolded,
+    refreshFailed: state.refreshFailed,
+    onFold: () => { state.briefFolded = !state.briefFolded; paint(); },
+    onReread: () => {
+      /* `19` §C1 ⑤ · D-132: the ONLY thing that starts a re-read. It is not automatic, and the
+       * old Brief stays on screen while the new one is being taken. */
+      state.refreshFailed = null;
+      api.interpret(p.id).then((r) => {
+        if (r?.ok) {
+          state.interpretation = r.interpretation;
+          state.narrative = r.narrative ?? null;
+          state.refreshFailed = r.refreshFailed ?? null;
+          /* A re-read that succeeded is not stale by definition; one that failed did not move
+           * the hash either, so the verdict is dropped in both cases and re-asked on next open. */
+          state.stale = null;
+          state.briefFolded = false;
+        }
+        paint();
+      });
+    },
+  });
+  paint();
+
+  if (state.interpretation) {
+    /* WBS-05 · has it AGED? A read-only check — it re-runs the deterministic scan and compares
+     * `source_hash`, and asks no model. `19` §C1 ⑤: announced, never acted on. */
+    api.brief(p.id).then((r) => {
+      if (!r?.ok || !r.stale?.changed) return;
+      state.stale = r.stale;
+      paint();
+    });
+  }
+
   if (!state.interpretation) {
     api.interpret(p.id).then((r) => {
       /* `r.ok === false` means the REQUEST failed (no store, unknown project, a handler that
@@ -78,7 +115,7 @@ export function renderSC02(root, api, nav, state) {
        * It is not drawn: the Brief shows the ANSWERS and their chips, which is what the reader
        * needs. This is for the run log and the e2e, the way `__work` carries counts. */
       state.narrative = r?.narrative ?? null;
-      renderBrief(brief, state.interpretation);
+      paint();
     });
   }
 

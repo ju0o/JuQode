@@ -38,6 +38,19 @@ export const C = {
     interpreting: '프로젝트를 읽고 있어요',
     interpretingHint: '읽는 동안에도 요청할 수 있어요.',
     readFiles:    '지금 읽는 파일',
+    /* WBS-05 · every one of these is a USER action. `19` §C1 ⑤ and D-132 forbid an automatic
+     * re-read, so `reread` is the only thing that starts one and `stale` only ANNOUNCES.
+     *
+     * `stale` carries an example number — `18` writes "3일" — and `19` §C1 ⑤ asks for that
+     * style with the real number. `brief.js` substitutes the digit and leaves every character
+     * of the approved sentence alone. See CANON_FINDINGS CF-16. */
+    reread:    '다시 읽기',
+    fold:      '접기',
+    unfold:    '펼치기',
+    stale:     '3일 전에 읽은 내용이에요. 그 뒤로 프로젝트가 바뀌었을 수 있어요.',
+    staleKeep: '이대로 계속',
+    failTitle: '프로젝트를 읽지 못했어요',
+    failNote:  '요청과 Quick Command, 터미널은 그대로 쓸 수 있어요.',
     partial:  "여섯 가지 중 일부는 확인하지 못했어요. 나머지는 '확인 못함'으로 남겨 두었어요.",
     failTitle: '프로젝트를 읽지 못했어요',
     failNote:  '요청과 Quick Command, 터미널은 그대로 쓸 수 있어요.',
@@ -153,6 +166,11 @@ export const C = {
       cancelled_partial: '취소했어요 · 바뀐 곳이 남아 있어요',
       cancelled_none:    '취소했어요 · 바뀐 것은 없어요',
     },
+    /* `15` WBS-18: a 부분 완료 result needs BOTH lists, and these are their labels. They were
+     * named by `sc03.js` and never declared, so the result card drew two empty headings over
+     * the two lists that are the whole point of the 부분 state. */
+    done:        '한 것',
+    notDone:     '못 한 것',
     readChanges: '변경 읽기',
     noChanges:   '바뀐 파일이 없어요',
     unwanted:    '원하던 결과가 아니에요',
@@ -280,6 +298,15 @@ export const C = {
      * the schema instead of on screen. These are files the SCAN read, so the reader can open
      * them; that is the whole difference between 예상됨 and 확인 못함 here. */
     briefCites:       '근거로 읽은 파일',
+    /* WBS-05 · a refresh that could not read the folder. `18` has `brief.failTitle` and
+     * `brief.failNote` for a project that never read, and nothing for the case where an OLD
+     * Brief is still on screen underneath — which is the whole point of the state. */
+    briefRefreshKept: '아래는 지난번에 읽은 내용이에요. 그대로 남겨 두었어요.',
+    /* `18` brief.stale is written as `3일 전에 읽은 내용이에요…` — it presumes the read is a day
+     * or more old. Staleness is really about the HASH, not the age, so a project can change
+     * minutes after it was read; "0일 전에 읽은 내용이에요" is not Korean anyone writes. This
+     * states the same fact for that case. CANON_FINDINGS CF-16. */
+    briefStaleToday:  '읽은 뒤로 프로젝트가 바뀌었어요.',
     /* `18` has `reader.copy` for the button; it has no key for what the button says afterwards. */
     readerCopied:     '복사했어요',
     readerCopyFailed: '복사하지 못했어요',

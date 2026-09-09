@@ -8,7 +8,7 @@
  * is why `18` can stay the single source even though a Brief answer is generated content.
  */
 import { C } from '../copy.js';
-import { el } from '../dom.js';
+import { el, btn } from '../dom.js';
 
 const CHIP = { confirmed: ['ok', C.brief.chips.ok], expected: ['part', C.brief.chips.exp], unconfirmed: ['unk', C.brief.chips.no] };
 
@@ -16,7 +16,33 @@ const CHIP = { confirmed: ['ok', C.brief.chips.ok], expected: ['part', C.brief.c
  * translated, not erased. The scan returns the errno; this is the only place it becomes words. */
 const FAIL = { EACCES: C.gap.briefFailNoAccess, EPERM: C.gap.briefFailNoAccess, ENOENT: C.gap.briefFailGone };
 
-export function renderBrief(card, interp) {
+/**
+ * `18` brief.stale is written with an EXAMPLE number in it — "3일 전에 읽은 내용이에요." — and
+ * `19` §C1 ⑤ asks for that STYLE with the real number ("`3일 전 내용` 식 사실 표기"). So the
+ * approved sentence is kept verbatim and its number is substituted, the same way
+ * `reader.evidenceGapPaths` substitutes Canon's own `{paths}`. See CANON_FINDINGS CF-16.
+ */
+function staleLine(days) {
+  if (!Number.isFinite(days)) return C.brief.stale;
+  /* Canon's sentence presumes a read a day or more old. A hash can move minutes after the read,
+   * and `0일 전에 읽은 내용이에요` is not a sentence — so the same-day case says the fact plainly. */
+  if (days < 1) return C.gap.briefStaleToday;
+  /* Only the DIGIT is replaced, so no Korean is written here — the sentence on screen is
+   * Canon's, character for character, with its example number swapped for the real one. */
+  return C.brief.stale.replace('3', String(days));
+}
+
+/**
+ * @param {HTMLElement} card
+ * @param {object|null} interp
+ * @param {object} [opts]
+ * @param {{changed:boolean, days:number|null}|null} [opts.stale]  WBS-05's verdict, never a re-read
+ * @param {boolean} [opts.folded]      D-132: a reopened project starts folded
+ * @param {() => void} [opts.onFold]
+ * @param {() => void} [opts.onReread]
+ * @param {string|null} [opts.refreshFailed]  a refresh that could not read the folder
+ */
+export function renderBrief(card, interp, opts = {}) {
   card.innerHTML = '';
   const head = el('div', 'chead');
   head.appendChild(el('span', 'ct', C.brief.title));
@@ -25,6 +51,16 @@ export function renderBrief(card, interp) {
    * fresh one; the stale JUDGEMENT is WBS-05, the timestamp is not. */
   if (interp?.created_at) {
     head.appendChild(el('span', 'xs mut2', `${C.brief.at} ${when(interp.created_at)}`));
+  }
+  /* WBS-05 · 다시 읽기 and 접기/펼치기. Both are USER actions — `19` §C1 ⑤ and D-132 forbid an
+   * automatic re-read, so this button is the only thing that starts one. */
+  /* …but not twice. When the 오래됨 band is up it carries 다시 읽기 as its own call to action,
+   * and two identical buttons in one card make the reader choose between the same thing. */
+  if (interp && opts.onReread && !opts.stale?.changed) {
+    head.appendChild(btn('btn sm ghost', C.brief.reread, opts.onReread));
+  }
+  if (interp && opts.onFold) {
+    head.appendChild(btn('btn sm ghost', opts.folded ? C.brief.unfold : C.brief.fold, opts.onFold));
   }
   card.appendChild(head);
 
@@ -42,6 +78,31 @@ export function renderBrief(card, interp) {
     card.appendChild(band);
     return;
   }
+
+  /* WBS-05 · 오래됨. A STATEMENT OF FACT, not a warning and not a failure: `19` §C1 ⑤ says the
+   * hash changed, so the project moved since this was read. Nothing re-reads on its own — the
+   * card says what it knows and offers the two things the user can do (D-132). */
+  if (opts.stale?.changed) {
+    const band = el('div', 'staleband');
+    band.appendChild(el('div', 'sm', staleLine(opts.stale.days)));
+    const acts = el('div', 'row-acts');
+    if (opts.onReread) acts.appendChild(btn('btn sm', C.brief.reread, opts.onReread));
+    acts.appendChild(btn('btn sm ghost', C.brief.staleKeep, () => band.remove()));
+    band.appendChild(acts);
+    card.appendChild(band);
+  }
+
+  /* A refresh that could not read the folder. The Brief below it is the OLD one, still true as
+   * of when it was read — `21` WBS-05: 갱신 실패 시 이전 해석이 살아남는다. */
+  if (opts.refreshFailed) {
+    const band = el('div', 'failband soft');
+    band.appendChild(el('div', 't', C.brief.failTitle));
+    band.appendChild(el('div', 'sm', FAIL[opts.refreshFailed] ?? C.gap.briefFailOther));
+    band.appendChild(el('div', 'xs mut', C.gap.briefRefreshKept));
+    card.appendChild(band);
+  }
+
+  if (opts.folded) return;                 // D-132: folded shows the header and nothing more
 
   /* 부분 해석 — amber, because `16` §2 assigns amber to 부분 and this is the state the user
    * is always in until the narrative layer exists. Grey would put it in no state at all. */

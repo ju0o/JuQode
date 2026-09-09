@@ -36,6 +36,13 @@ const { answers, statusOf } = require('./interpret/answers');
  * process could not be found after reconciliation (WBS-34 writes `ended_unknown` for those).
  * Anything that ended states its outcome, however it ended.
  */
+/** Whole days between an ISO stamp and now. Floor, so "1일 전" means at least a day. */
+function daysSince(iso) {
+  const t = Date.parse(iso ?? '');
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+}
+
 function orientationOf(works) {
   if (!works.length) return 'idle';
   if (works.some((w) => w.status !== 'ended')) return 'running';
@@ -122,6 +129,18 @@ function makeHandlers(deps) {
         finally { narrating.delete(projectId); }
       }
 
+      /* `21` WBS-05: 갱신 실패 시 이전 해석이 살아남는다. `saveInterpretation` retires the
+       * current row and inserts a new one, so writing a failed scan over a good Brief would
+       * REPLACE six answers the user could still read with a card saying nothing was read.
+       * A refresh that could not read the folder is a failed REFRESH, not a failed project. */
+      const existing = repo.currentInterpretation(db(), projectId);
+      if (scanned.failed && existing) {
+        return { ok: true,
+                 interpretation: { ...existing, failedCode: null },
+                 refreshFailed: scanned.failed,
+                 narrative: { skipped: true } };
+      }
+
       const saved = repo.saveInterpretation(db(), projectId, {
         status: statusOf(scanned, list),
         sourceHash: scanned.sourceHash,
@@ -137,6 +156,31 @@ function makeHandlers(deps) {
                narrative: narrated ? { filled: narrated.filled, grounded: narrated.grounded,
                                        reason: narrated.reason, detail: narrated.detail ?? null }
                                    : { skipped: true } };
+    },
+
+    /* WBS-05 · the Brief as it stands, plus whether it has AGED — and neither is a write.
+     *
+     * `19` §C1 ⑤: staleness is derived from `source_hash`, which covers the manifests and the
+     * shape of the tree, and from nothing else. The check re-runs the DETERMINISTIC scan only:
+     * it is bounded (`19` §C1 ③) and asks no model, which is what makes it cheap enough to do
+     * on every open. There is NO auto re-read — the verdict is announced and the user decides
+     * (D-132). */
+    'juqode:brief': (_e, projectId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const row = db().prepare('select * from project where id = ?').get(projectId);
+      if (!row) return { ok: false, reason: 'no-project' };
+
+      const current = repo.currentInterpretation(db(), projectId);
+      if (!current) return { ok: true, interpretation: null, stale: null };
+
+      const now = scan(row.path);
+      /* A scan that cannot read the folder says nothing about whether the Brief has aged. */
+      /* `currentInterpretation` returns the ROW, so these are the column names `20` uses. */
+      const changed = !now.failed && Boolean(current.source_hash) && now.sourceHash !== current.source_hash;
+      return { ok: true,
+               interpretation: current,
+               stale: { changed, days: daysSince(current.created_at), at: current.created_at } };
     },
 
     /* One probe at a time. Each call spawns up to two `claude` processes held for up to 8 s. */
