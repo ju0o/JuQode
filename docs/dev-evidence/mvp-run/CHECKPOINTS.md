@@ -644,3 +644,30 @@ evidence pair always answers, so the flow cannot reach it. Source-level checks p
 cover it, and the gap is stated rather than papered over.
 
 Next eligible: WBS-32/33 · the DV-11 decision.
+
+## Batch 23 QA · the tests were writing into the user's real application data
+
+Report: `BATCH-23-QA.md`. 1 HIGH. 502 tests.
+
+`JUQODE_DB` relocated the store; `evidenceStore` derives from `app.getPath('userData')` and did
+not. So every e2e run left a bare git repository per project in the developer's own
+`~/.config/juqode/evidence` — **201 had accumulated**, unbounded, with nothing to clean them up.
+That is directly against this run's own constraint that tests use disposable scratch storage,
+and the failure is invisible: the suite passes either way and the only symptom is a directory
+quietly growing in someone's home.
+
+Fixed by relocating `userData` itself rather than adding a variable per path — the store, the
+evidence and the Chromium profile all follow one `JUQODE_USER_DATA`, set before
+`app.whenReady()`. Three checks, each looking at something different: the e2e OBSERVES that its
+own temp directory received a written evidence store; a unit test checks the relocation happens
+before anything reads a path; and it checks each harness relocates as many times as it launches
+the app, because one missed spawn would pass everything else.
+
+The existing 201 directories were left alone — there is no way to tell this run's test residue
+from the user's own app runs, and deleting under their home is their call. `BATCH-23-QA.md`
+records where they are and that removing the `evidence` directory is safe.
+
+Third time this run a string scan was fooled by a file DESCRIBING what it does not do (this
+one's own comment named `app.getPath('userData')`). Recorded as a rule: strip comments first.
+
+Next eligible: WBS-32/33 · the DV-11 decision.

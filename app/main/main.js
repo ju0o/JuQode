@@ -16,6 +16,18 @@ const repo = require('./db/repo');
 const supervisor = require('./work/supervisor');
 const { makeHandlers } = require('./ipc');
 
+/* A test run must not write into the user's real application data.
+ *
+ * MEASURED: `JUQODE_DB` relocated the store, but `evidenceStore` derives from
+ * `app.getPath('userData')` and did not — so every e2e run left a bare git repository per
+ * project in the developer's own `~/.config/juqode/evidence`. 201 of them had accumulated,
+ * with no upper bound and nothing to clean them up.
+ *
+ * Relocating `userData` moves ALL of it — the store, the evidence, the Chromium profile — with
+ * one variable, instead of adding a second one per path that gets forgotten the same way. It
+ * must happen before `app.whenReady()`, so it is the first thing this file does. */
+if (process.env.JUQODE_USER_DATA) app.setPath('userData', process.env.JUQODE_USER_DATA);
+
 /* One instance. A second launch focuses the existing window rather than opening a second one. */
 if (!app.requestSingleInstanceLock()) {
   app.quit();

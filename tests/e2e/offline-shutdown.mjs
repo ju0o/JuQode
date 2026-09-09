@@ -15,6 +15,14 @@ import os from 'node:os';
 
 /* Isolated store per run: a test must never touch the user's real juqode.db. */
 const DB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-e2e-')), 'juqode.db');
+/* The app's WHOLE data directory, relocated for the test run.
+ *
+ * `JUQODE_DB` moved the store; the evidence stores are derived from `userData` and were not,
+ * so every run left a bare git repository per project in the developer's own
+ * `~/.config/juqode/evidence` — 201 of them had piled up before anyone counted. One variable
+ * moves all of it, including the Chromium profile, so nothing this test does touches the real
+ * application data. */
+const USER_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-userdata-'));
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ELECTRON = path.join(ROOT, 'node_modules', '.bin', 'electron');
@@ -29,7 +37,7 @@ const alive = () => {
 function run(env = {}, args = []) {
   return new Promise((resolve) => {
     const p = spawn('xvfb-run', ['-a', ELECTRON, '.', '--no-sandbox', ...args],
-      { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, ...env }, detached: true });
+      { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA, ...env }, detached: true });
     p.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
     let out = '';
     p.stdout.on('data', (d) => { out += d; });
@@ -62,7 +70,7 @@ results.reducedMotionBoot = { exit: rm.code };
 assert.strictEqual(alive(), '0', `orphans left before shutdown test: ${alive()}`);
 
 const term = spawn('xvfb-run', ['-a', ELECTRON, '.', '--no-sandbox'],
-  { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB }, detached: true });
+  { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA }, detached: true });
 await sleep(6000);
 const before = alive();
 process.kill(-term.pid, 'SIGTERM');

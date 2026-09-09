@@ -315,3 +315,39 @@ test('the CSP the renderer ships with forbids every outbound direction', () => {
     assert.ok(csp[1].includes(rule), `the CSP lost ${rule}`);
   }
 });
+
+test('a test run cannot write into the real application data directory', () => {
+  /* MEASURED: `JUQODE_DB` relocated the store, but `evidenceStore` is derived from
+   * `app.getPath('userData')` and was not relocated — so every e2e run left a bare git
+   * repository per project in the developer's own `~/.config/juqode/evidence`. 201 of them had
+   * accumulated, unbounded, with nothing to clean them up.
+   *
+   * One variable moves ALL of it. This checks the mechanism exists and that every harness uses
+   * it, because the failure is invisible: the tests pass either way, and the only symptom is a
+   * directory growing in someone's home. */
+  const main = read('app/main/main.js');
+  assert.match(main, /if \(process\.env\.JUQODE_USER_DATA\) app\.setPath\('userData', process\.env\.JUQODE_USER_DATA\);/,
+    'main.js cannot relocate userData');
+  /* ORDER, on the code — the comment above the fix names `app.getPath('userData')` while
+   * explaining it, which is the third time in this run that a scan has been fooled by a file
+   * describing the thing it does not do. */
+  const code = main.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  /* Before anything reads a path from it — `app.setPath` after `whenReady` is too late. */
+  assert.ok(code.indexOf('JUQODE_USER_DATA') < code.indexOf('requestSingleInstanceLock'),
+    'userData is relocated after the app has already started');
+  assert.ok(code.indexOf('JUQODE_USER_DATA') < code.indexOf("app.getPath('userData')"),
+    'a path is read from userData before it is relocated');
+
+  for (const f of ['tests/e2e/visual.mjs', 'tests/e2e/boot.test.mjs', 'tests/e2e/offline-shutdown.mjs']) {
+    const src = read(f);
+    assert.ok(/JUQODE_USER_DATA: USER_DATA/.test(src), `${f} does not relocate userData`);
+    assert.ok(/const USER_DATA = fs\.mkdtempSync\(/.test(src),
+      `${f} points userData somewhere that is not a fresh temp directory`);
+    /* Every spawn in the file must carry it — one that does not is one that writes to the
+     * real directory, and it would pass every other assertion in the suite. */
+    const spawns = [...src.matchAll(/JUQODE_DB: [A-Za-z]+/g)].length;
+    const relocs = [...src.matchAll(/JUQODE_USER_DATA: USER_DATA/g)].length;
+    assert.strictEqual(relocs, spawns,
+      `${f} launches the app ${spawns} times but relocates userData ${relocs} times`);
+  }
+});

@@ -23,6 +23,14 @@ const require = createRequire(import.meta.url);
  *   2. SC-02 is reachable without a native folder dialog, which cannot be driven headlessly */
 const DB_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-e2e-'));
 const DB = path.join(DB_DIR, 'juqode.db');
+/* The app's WHOLE data directory, relocated for the test run.
+ *
+ * `JUQODE_DB` moved the store; the evidence stores are derived from `userData` and were not,
+ * so every run left a bare git repository per project in the developer's own
+ * `~/.config/juqode/evidence` — 201 of them had piled up before anyone counted. One variable
+ * moves all of it, including the Chromium profile, so nothing this test does touches the real
+ * application data. */
+const USER_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-userdata-'));
 const SEED = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-seed-')));
 
 /* A small but REAL project, so the Brief has something it can actually confirm. It also
@@ -338,7 +346,7 @@ for (const port of [PORT, PORT + 1]) {
 
 const app = spawn('xvfb-run', ['-a', path.join(ROOT, 'node_modules', '.bin', 'electron'), '.',
   '--no-sandbox', `--remote-debugging-port=${PORT}`],
-  { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB,
+  { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA,
       JUQODE_CLAUDE_BIN: FAKE_CLI, JUQODE_INTERPRET_DELAY_MS: '2500' } });
 app.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
 const stopApp = () => { try { process.kill(-app.pid, 'SIGKILL'); } catch { /* already gone */ } };
@@ -1179,6 +1187,22 @@ const results = await cdp(async ({ send, evalJs }) => {
     `the drawer did not carry the user's sentence (${d.phrase})`);
 }
 
+/* The test run wrote its evidence into ITS OWN directory.
+ *
+ * `JUQODE_DB` moved the store and `evidenceStore` derives from `userData`, which it did not
+ * move — so every run of this file used to leave a bare git repository per project in the
+ * developer's own `~/.config/juqode/evidence`. This asserts the relocation actually took
+ * effect, rather than asserting that the variable was passed. */
+{
+  const ev = path.join(USER_DATA, 'evidence');
+  assert.ok(fs.existsSync(ev), `the app did not use ${USER_DATA} — evidence went somewhere else`);
+  const stores = fs.readdirSync(ev);
+  assert.ok(stores.length >= 1, 'the relocated evidence directory is empty');
+  /* …and it really is an evidence store, not an empty directory that happens to exist. */
+  assert.ok(fs.readdirSync(path.join(ev, stores[0])).length > 0,
+    'the evidence store was created but never written to');
+}
+
 step('cdp done — stopping app');
 stopApp();
 await sleep(400);
@@ -1911,7 +1935,7 @@ console.log(JSON.stringify(results, null, 2));
   const PORT2 = PORT + 1;
   const app2 = spawn('xvfb-run', ['-a', path.join(ROOT, 'node_modules', '.bin', 'electron'), '.',
     '--no-sandbox', `--remote-debugging-port=${PORT2}`],
-    { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: bad } });
+    { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: bad, JUQODE_USER_DATA: USER_DATA } });
   const stop2 = () => { try { process.kill(-app2.pid, 'SIGKILL'); } catch { /* gone */ } };
   process.on('exit', stop2);
   await sleep(4000);
