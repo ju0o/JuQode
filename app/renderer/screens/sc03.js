@@ -416,11 +416,46 @@ function resultCard(snap, api, nav, state) {
   /* `15` SC-04 entry: SC-03 `변경 읽기`. It is the PRIMARY action here — a finished Work's next
    * question is what it actually changed, and reading that is the product's whole argument. */
   acts.appendChild(btn('btn sm pri', C.work.readChanges, () => nav.toReader(snap)));
+  acts.appendChild(btn('btn sm', C.work.unwanted, () => {
+    /* Open the panel in place rather than navigating: `15` puts the Unwanted-result state on
+     * SC-03, and a user who is not sure yet must be able to go on reading. */
+    if (card.querySelector('[data-el="unwanted"]')) return;
+    card.insertBefore(unwantedPanel(snap, nav, state), acts);
+  }));
   acts.appendChild(btn('btn sm', C.work.toBench, () => nav.toWorkbench(state.project, state.interpretation)));
   card.appendChild(acts);
 
   card.appendChild(el('div', 'xs mut2 foot', C.rules.noRollback));
   return card;
+}
+
+/**
+ * WBS-19 · 원하던 결과가 아니라면.
+ *
+ * D-115: there is no undo button, and the panel SAYS SO before offering anything. What it
+ * offers is a new Work — which goes through the intent field, the D-117 guard and the evidence
+ * basis again, exactly like any other request. `21` WBS-19's acceptance is explicit that a
+ * correction is a NEW Work and that this screen has no rollback control.
+ *
+ * The prefilled sentence quotes the user's OWN words. JuQode does not paraphrase the request it
+ * is about to resend, and it does not promise the change will be restored — nothing can.
+ */
+function unwantedPanel(snap, nav, state) {
+  const panel = el('div', 'card c-wide unwanted');
+  panel.setAttribute('data-el', 'unwanted');
+  panel.appendChild(el('div', 'ct', C.work.unwantedTitle));
+  panel.appendChild(el('p', 'sm', C.work.unwantedBody));
+
+  const acts = el('div', 'row-acts');
+  acts.appendChild(btn('btn sm pri', C.work.correction, () => {
+    /* Straight to the intent field with the sentence already in it — and NOT submitted. The
+     * user sends it, because `12` treats submitting as consent to change files. */
+    nav.toWorkbench(state.project, state.interpretation,
+                    { intent: C.gap.correctionIntent(snap.work.intent) });
+  }));
+  acts.appendChild(btn('btn sm ghost rec', C.work.readMore, () => nav.toReader(snap)));
+  panel.appendChild(acts);
+  return panel;
 }
 
 function head(title, right) {

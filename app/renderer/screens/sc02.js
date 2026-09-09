@@ -88,6 +88,10 @@ export function renderSC02(root, api, nav, state) {
   field.setAttribute('data-el', 'intent');
   field.placeholder = C.intent.ph;
   field.rows = 2;
+  /* WBS-19 · a correction arrives with the request already written. It is NOT sent — `12` treats
+   * 보내기 as consent to change files, so the sentence sits here for the user to send, edit, or
+   * delete. Consumed once, so a later return to the workbench is not haunted by it. */
+  if (state.prefill) { field.value = state.prefill; state.prefill = null; }
   intent.appendChild(field);
 
   const consequence = el('div', 'consequence');

@@ -16,14 +16,19 @@ const state = { project: null, interpretation: null, recent: [], store: { ok: fa
                 workSnapshot: null, screen: 'SC-01',
                 /* SC-04's own selection. It lives here rather than in the screen because the
                  * screen is re-rendered on every click — a re-render is the navigation. */
-                reader: null, readerGroup: 0, readerRaw: false, readerBlock: null };
+                reader: null, readerGroup: 0, readerRaw: false, readerBlock: null,
+                /* A request the product composed for the user to send, or edit, or discard. */
+                prefill: null };
 
 const nav = {
-  toWorkbench(project, interpretation = null) {
+  /* `opts.intent` prefills the request field — WBS-19's correction path arrives that way. It is
+   * NOT submitted: `12` treats sending as consent to change files, so the user presses 보내기. */
+  toWorkbench(project, interpretation = null, opts = {}) {
     state.project = project;
     state.interpretation = interpretation;
     state.workSnapshot = null;
     state.reader = null; state.readerGroup = 0; state.readerRaw = false;
+    state.prefill = opts.intent ?? null;
     state.screen = 'SC-02';
     renderSC02(root, api, nav, state);
   },

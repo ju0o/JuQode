@@ -156,6 +156,13 @@ export const C = {
     readChanges: '변경 읽기',
     noChanges:   '바뀐 파일이 없어요',
     unwanted:    '원하던 결과가 아니에요',
+    /* WBS-19 · `15` SC-03 Unwanted result. D-115: there is NO undo button, and the body says so
+     * before offering the only thing that exists — a new Work. It also refuses to promise that
+     * the new Work restores anything, because nothing can promise that. */
+    unwantedTitle: '원하던 결과가 아니라면',
+    unwantedBody:  '되돌리기 버튼은 없어요. 방금 읽은 변경 설명을 바탕으로 새 작업을 요청할 수 있어요. 원래 그대로 돌아간다고 약속하진 못해요.',
+    correction:    '고치는 작업 요청',
+    readMore:      '먼저 변경 더 읽기',
     raw:         '자세한 출력 보기',
     resubmit:    '▸ 다시 보내기',
     remainTitle: '남은 변경을 다 확인하지 못했어요',
@@ -275,6 +282,10 @@ export const C = {
      * it as `변경 3개`, which is what SC-03's result card already says. */
     historyChanged:   (n) => `변경 ${n}개`,
     historyRunning:   '진행 중',
+    /* The prefilled correction intent. `15` writes it as `"○○ 변경을 다시 수정해줘"`; `18` has
+     * no key for the sentence itself, only for the button that produces it. The user's OWN words
+     * are what is quoted — JuQode does not paraphrase the request it is about to resend. */
+    correctionIntent: (intent) => `${intent} — 이 작업의 결과가 원하던 것이 아니에요. 다시 고쳐 주세요.`,
     /* A read the main process refused. `18` has SC-01's 저장소 copy and nothing for this — the
      * screen still has to SAY it rather than going blank (12 §16). */
     readerUnavailable: '이 변경을 지금 불러오지 못했어요.',
@@ -286,6 +297,10 @@ export const C = {
      * it as `변경 3개`, which is what SC-03's result card already says. */
     historyChanged:   (n) => `변경 ${n}개`,
     historyRunning:   '진행 중',
+    /* The prefilled correction intent. `15` writes it as `"○○ 변경을 다시 수정해줘"`; `18` has
+     * no key for the sentence itself, only for the button that produces it. The user's OWN words
+     * are what is quoted — JuQode does not paraphrase the request it is about to resend. */
+    correctionIntent: (intent) => `${intent} — 이 작업의 결과가 원하던 것이 아니에요. 다시 고쳐 주세요.`,
 
     /* Brief ANSWER bodies. `18` is a dictionary of fixed UI strings; a Brief answer is
      * generated from what the scan found, so `18` cannot carry it and does not try. These are
