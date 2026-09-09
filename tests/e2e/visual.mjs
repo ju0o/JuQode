@@ -522,6 +522,26 @@ const results = await cdp(async ({ send, evalJs }) => {
   /* ── History (WBS-20) ─────────────────────────────────────────────────────────────────
    * SC-02's History was empty-only until now, which meant `15`'s `변경 보기` entry into SC-04
    * did not exist and a finished Work could only be reached while it was still on screen. */
+  /* ── WBS-19 · 원하던 결과가 아니라면 ─────────────────────────────────────────────────
+   * D-115: no undo button anywhere, and the panel says so before offering the only thing that
+   * exists — a NEW Work, which goes through the guard and the evidence basis again. */
+  step('unwanted');
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
+  await sleep(600);
+  await evalJs(`[...document.querySelectorAll('[data-el="history-row"] button')].find(b => b.textContent.includes('결과 보기'))?.click()`);
+  await sleep(1200);
+  await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.includes('원하던 결과가 아니에요'))?.click()`);
+  await sleep(400);
+  out.unwantedText = await evalJs(`document.querySelector('[data-el="unwanted"]')?.innerText ?? null`);
+  out.unwantedReds = await evalJs(RED_COUNT('[data-el="unwanted"], [data-el="unwanted"] *'));
+  /* No rollback control on this screen — `21` WBS-19 states it as an acceptance row. */
+  out.sc03Rollback = await evalJs(`[...document.querySelectorAll('.sc03 button')].map(b => b.textContent).join(' | ')`);
+  await evalJs(`[...document.querySelectorAll('[data-el="unwanted"] button')].find(b => b.textContent.includes('고치는 작업 요청'))?.click()`);
+  await sleep(900);
+  out.afterCorrection = await evalJs('window.__screen()');
+  out.correctionIntent = await evalJs(`document.querySelector('[data-el="intent"]')?.value ?? null`);
+  out.correctionWorkCount = await evalJs(`document.querySelectorAll('[data-el="history-row"]').length`);
+
   step('history');
   await sleep(1200);                       // the list is filled by an async read of the store
   out.historyRows   = await evalJs(`document.querySelectorAll('[data-el="history-row"]').length`);
@@ -821,6 +841,25 @@ assert.strictEqual(results.historyReds, 0, 'History renders red for a Work that 
 /* Both destinations `15` names, for a Work that is not the one on screen. */
 assert.strictEqual(results.historyToReader, 'SC-04', `변경 보기 did not reach SC-04 (${results.historyToReader})`);
 assert.strictEqual(results.historyToWork, 'SC-03', `결과 보기 did not reach SC-03 (${results.historyToWork})`);
+
+/* ── WBS-19 · the correction path ─────────────────────────────────────────────────────── */
+assert.ok(results.unwantedText, '원하던 결과가 아니에요 opened no panel');
+assert.ok(results.unwantedText.includes('되돌리기 버튼은 없어요'),
+  `the panel does not say there is no undo: ${results.unwantedText}`);
+assert.ok(results.unwantedText.includes('원래 그대로 돌아간다고 약속하진 못해요'),
+  'the panel promises a restoration it cannot deliver');
+assert.strictEqual(results.unwantedReds, 0, 'the correction panel renders red — wanting something else is not a failure');
+/* D-115 · `21` WBS-19: this screen has no rollback control at all. */
+assert.ok(!/되돌리기|롤백|undo|revert/i.test(results.sc03Rollback),
+  `SC-03 offers a rollback control: ${results.sc03Rollback}`);
+
+assert.strictEqual(results.afterCorrection, 'SC-02', '고치는 작업 요청 did not return to the workbench');
+assert.ok(results.correctionIntent && results.correctionIntent.includes('README.md 의 첫 줄을 바꿔줘'),
+  `the correction does not quote the user's own words: ${results.correctionIntent}`);
+/* Prefilled, NOT sent: `12` treats 보내기 as consent to change files, so a Work must not have
+   started on the user's behalf. */
+assert.strictEqual(results.correctionWorkCount, 1,
+  'the correction started a Work by itself — sending is the user\'s act');
 
 assert.ok(results.sc02CardCount >= 3, `the overlap check saw ${results.sc02CardCount} cards — it proves nothing`);
 assert.strictEqual(results.sc02Overlaps, 0, 'SC-02 draws cards on top of each other');

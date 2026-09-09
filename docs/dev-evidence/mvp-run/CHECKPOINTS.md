@@ -187,3 +187,23 @@ never have caught it.
 
 Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs) · WBS-19 (06, 07, 08) ·
 WBS-34 (21, 11) · WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
+
+## Batch 07 QA — WBS-19 문구 누락
+
+`sc03.js` 의 `원하던 결과가 아니에요` 패널(WBS-19)과 `sc04.js` 의 사용 불가 · 원문 복사가
+**`copy.js` 에 없는 키를 참조한 채 커밋돼 있었다.** 화면이 그 자리에 닿는 순간 `undefined` 를
+그린다. 유닛 스위트가 이것을 못 잡는 이유는 렌더러 문구 검사가 *존재하는* 문자열의 출처만
+확인하고, *참조되는데 없는* 키는 보지 않기 때문이다.
+
+WBS-19 은 이로써 IMPLEMENTED — 되돌리기 버튼은 없고(D-115), 본문이 그 사실을 먼저 말하고,
+프리필된 문장은 사용자 본인의 말을 인용하며 **제출하지 않는다**(제출은 `12` 에서 파일 변경에
+대한 동의다).
+
+| Package | State |
+|---|---|
+| WBS-19 Unwanted result → correction Work | IMPLEMENTED |
+
+341 tests · e2e 3종. 뮤턴트 13/13 killed(배치 06 QA 수정분 재검증).
+
+Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs) · WBS-34 (21, 11) ·
+WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
