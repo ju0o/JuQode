@@ -2,6 +2,7 @@ import { renderSC01 } from './screens/sc01.js';
 import { renderSC02 } from './screens/sc02.js';
 import { renderSC03 } from './screens/sc03.js';
 import { renderSC04 } from './screens/sc04.js';
+import { mountDrawer } from './screens/td01.js';
 
 /* window.juqode is the entire renderer-visible surface (see app/preload/preload.js).
  * If the preload failed, fail loudly rather than silently degrading. */
@@ -22,7 +23,11 @@ const state = { project: null, interpretation: null, recent: [], store: { ok: fa
                 /* WBS-05 · the Brief's own state. `briefFolded` is set by `toWorkbench` when a
                  * project is REOPENED with an interpretation already there — D-132: 다시 열기 →
                  * Brief 접힌 채로. */
-                stale: null, briefFolded: false, refreshFailed: null, narrative: null };
+                stale: null, briefFolded: false, refreshFailed: null, narrative: null,
+                /* TD-01 · the drawer and its Quick Command card. It lives OUTSIDE `#root`, so
+                 * its state survives every screen render — `15`: 닫으면 화면 상태가 보존된다. */
+                drawerOpen: false, qcPhrase: '', qcCard: null, qcRun: null,
+                qcDiscover: null, qcOutputOpen: false, toWork: null };
 
 const nav = {
   /* `opts.intent` prefills the request field — WBS-19's correction path arrives that way. It is
@@ -71,6 +76,44 @@ const nav = {
 
 await nav.toPicker();
 
+/* TD-01 · mounted ONCE, over whatever screen is up. `15`: the drawer covers the bottom of the
+ * current screen and closing it preserves what is underneath — so it cannot be a child of
+ * `#root`, which every screen render clears. */
+const drawer = mountDrawer(api, state, () => {
+  /* A card can hand a phrase back to the Work path (미인식 · 모호함 → Claude Code 작업). That
+   * is a NAVIGATION, and it belongs to the router rather than to the drawer. */
+  if (state.toWork && state.project) {
+    const intent = state.toWork;
+    state.toWork = null;
+    state.drawerOpen = false;
+    drawer.paint();
+    nav.toWorkbench(state.project, state.interpretation, { intent });
+  }
+});
+
+/* A Quick Command's live tail. Its own channel — a QC update is not a Work update. */
+api.onQcUpdate?.((u) => {
+  if (!u || !state.qcRun || u.runId !== state.qcRun.runId) return;
+  state.qcRun = { ...state.qcRun, ...u };
+  drawer.paint();
+});
+
+/* `15` §0: the terminal toggle is on every screen's top bar, and `` Ctrl+` `` opens it. */
+window.addEventListener('keydown', (e) => {
+  if (e.key !== '`' || !(e.ctrlKey || e.metaKey)) return;
+  if (!state.project) return;                 // there is no project cwd to open it in yet
+  e.preventDefault();
+  state.drawerOpen = !state.drawerOpen;
+  drawer.paint();
+});
+
+/* The top-bar toggle each screen draws calls this. */
+window.__toggleDrawer = () => {
+  if (!state.project) return;
+  state.drawerOpen = !state.drawerOpen;
+  drawer.paint();
+};
+
 /* A running session pushes its state here. The screen follows the SIGNALS — it never polls,
  * because a poll would put a clock where `15` allows only observed facts. */
 api.onWorkUpdate?.((snapshot) => {
@@ -105,6 +148,13 @@ window.__work    = () => (state.workSnapshot
 window.__narrative = () => state.narrative ?? null;
 window.__brief = () => ({ folded: state.briefFolded, stale: state.stale,
                           refreshFailed: state.refreshFailed });
+window.__drawer = () => ({ open: state.drawerOpen, phrase: state.qcPhrase,
+                           card: state.qcCard ? { kind: state.qcCard.route?.kind ?? null,
+                                                  id: state.qcCard.route?.id ?? null,
+                                                  available: state.qcCard.available ?? null,
+                                                  reason: state.qcCard.reason ?? null } : null,
+                           run: state.qcRun ? { state: state.qcRun.state, code: state.qcRun.code ?? null,
+                                                ended: Boolean(state.qcRun.ended) } : null });
 window.__reader  = () => (state.reader
   ? { groups: state.reader.groups.map((g) => ({ title: g.title, explainable: g.explainable,
         confidence: g.confidence, files: g.files.map((f) => f.file),

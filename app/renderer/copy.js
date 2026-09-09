@@ -249,6 +249,56 @@ export const C = {
     kinds: { add: '추가', modify: '수정', delete: '삭제', rename: '이름 변경', unblocked: '나누지 못함' },
   },
 
+  /* TD-01 · the drawer and Quick Command. Every key here is `18` §TD-01 VERBATIM. The banner is
+   * the one string that can never be hidden or shortened: it is the product saying, on screen,
+   * that this is not isolation (`19` §S, Q-03). */
+  term: {
+    title:           '터미널',
+    banner:          '여기서 치는 명령은 내 컴퓨터에서 내 권한으로 바로 실행돼요.',
+    hint:            '보조 도구 · 어떤 흐름에도 꼭 필요하지는 않아요',
+    close:           '닫기',
+    unavailable:     '터미널을 열 수 없어요',
+    unavailableBody: '터미널을 시작하지 못했어요. 같은 내용은 다른 곳에서도 볼 수 있어요.',
+    altQc:           '▸ Quick Command 출력으로 확인',
+    altRaw:          '▸ Raw Diff로 확인',
+    mock:            'JuQode mock shell — 실제 셸이 아니에요.',
+  },
+
+  qc: {
+    kicker:        'Quick Command',
+    notClaude:     'Claude Code 작업이 아니에요 — JuQode가 정해진 규칙대로 실행해요',
+    understood:    '이해한 것',
+    action:        '실행할 명령',
+    meaning:       '하는 일',
+    run:           '실행',
+    cancel:        '취소',
+    rule:          '명령은 정해진 규칙에서만 나와요 — AI가 명령을 지어내지 않아요',
+    ok:            '끝났어요',
+    failed:        '실행이 실패했어요',
+    running:       '계속 실행 중',
+    stopReq:       '멈춤 요청함',
+    stopped:       '멈췄어요',
+    unknownEnd:    '끝났는지 확인할 수 없어요',
+    unavailable:   '지금 안 됨',
+    notFail:       '실패 아님',
+    stop:          '멈추기',
+    output:        '출력 보기',
+    fold:          '출력 접기',
+    full:          '출력 전체 보기',
+    terminal:      '▸ 터미널에서 보기',
+    rerun:         '▸ 다시 실행',
+    toWork:        '▸ Claude Code 작업으로 요청',
+    leave:         '켜 둔 채로 다음 요청',
+    unrec:         '바로 할 수 있는 동작은 아니에요',
+    unrecBody:     '정해진 Quick Command에 없어요. 짐작해서 실행하지는 않아요.',
+    discover:      '▸ 할 수 있는 것 보기',
+    discoverTitle: '무엇을 말할 수 있나요?',
+    available:     '가능',
+    notAvailable:  '지금은 안 돼요',
+    longNote:      '끄기 전까지 계속 켜져 있는 동작이에요.',
+    exit:          '종료 코드',
+  },
+
   theme: {
     label:  '테마',
     light:  '밝게',
@@ -307,6 +357,46 @@ export const C = {
      * minutes after it was read; "0일 전에 읽은 내용이에요" is not Korean anyone writes. This
      * states the same fact for that case. CANON_FINDINGS CF-16. */
     briefStaleToday:  '읽은 뒤로 프로젝트가 바뀌었어요.',
+
+    /* TD-01 · the SIX rules' explanation sentences — 이해한 것 · 실행할 명령 · 하는 일.
+     *
+     * `19` §C4 requires the card to explain before it runs, and `18` gives the three LABELS and
+     * none of the six sentences: they live in Canon's own planning evidence
+     * (`../evidence/planning/q02-q03-quick-command-validation.md` §1), which is where these are
+     * transcribed from. `18` needs them — CANON_FINDINGS CF-18. */
+    qcUnderstood: {
+      'qc.dev.start':     '개발 서버를 켜 달라는 요청으로 이해했어요.',
+      'qc.dev.stop':      '개발 서버를 꺼 달라는 요청으로 이해했어요.',
+      'qc.build':         '프로젝트를 빌드해 달라는 요청으로 이해했어요.',
+      'qc.test':          '테스트를 돌려 달라는 요청으로 이해했어요.',
+      'qc.git.status':    '지금 어떤 파일이 바뀌었는지 Git 상태를 보여 달라는 요청으로 이해했어요.',
+      'qc.terminal.open': '터미널을 열어 달라는 요청으로 이해했어요.',
+    },
+    qcMeaning: {
+      'qc.dev.start':     '프로젝트를 브라우저에서 볼 수 있게 로컬 서버를 띄워요. 끄기 전까지 계속 돌아요.',
+      'qc.dev.stop':      '브라우저에서 보던 로컬 서버가 멈춰요. 파일은 바뀌지 않아요. 다시 켤 수 있어요.',
+      'qc.build':         '소스 코드를 배포용 결과물로 묶어요. 소스 파일은 바뀌지 않아요. 끝나면 성공/실패와 실제 출력을 보여드려요.',
+      'qc.test':          '프로젝트에 적힌 자동 검사들을 실행해서 통과/실패를 확인해요. 소스 파일은 바뀌지 않아요.',
+      'qc.git.status':    '마지막 커밋 이후 새로 만들어졌거나 바뀌었거나 지워진 파일 목록을 보여줘요. 아무것도 바꾸지 않아요.',
+      'qc.terminal.open': '여기에 직접 명령을 칠 수 있어요. 여기서 치는 명령은 JuQode가 아니라 사용자 본인이 실행하는 것이고, 컴퓨터에서 사용자 권한으로 그대로 돌아요.',
+    },
+    /* The 사용 불가 reasons, keyed by what `availability()` returned. Same source. */
+    qcWhy: {
+      no_script:         '이 프로젝트 package.json 에 그 스크립트가 없어서 정해진 방법을 몰라요. 방법을 지어내지 않아요.',
+      no_package_json:   '프로젝트 루트에 package.json 이 없어요. 지금 Quick Command 는 Node 프로젝트만 지원해요.',
+      already_running:   '개발 서버가 이미 돌고 있어요. 다시 켜려면 먼저 꺼 주세요.',
+      not_running:       'JuQode 가 켠 개발 서버가 지금 없어요. JuQode 밖에서 켠 서버는 JuQode 가 끄지 않아요.',
+      placeholder_script: 'package.json 의 test 스크립트가 npm 기본 자리표시자예요 — 실제 테스트가 없어요.',
+      not_git:           '이 프로젝트 폴더는 Git 저장소가 아니에요.',
+      unknown_rule:      '정해진 Quick Command 가 아니에요.',
+    },
+    /* Two readings, and the second is always a Work. `15` TD-01 has no key for the sentence. */
+    qcAmbiguous:   '두 가지로 읽을 수 있어서 실행하지 않았어요. 어느 쪽인지 골라 주세요.',
+    qcAsWork:      '▸ Claude Code 작업으로 보내기',
+    qcRunningFor:  (cmd) => `실행 중 · ${cmd}`,
+    /* `15` TD-01 groups the discoverability list (`실행 · 빌드/테스트 · 확인 · 터미널`). Those
+     * labels collide with approved keys that mean something else — `실행` is `18`'s RUN BUTTON —
+     * so the panel lists the six flat rather than duplicating Canon copy for a heading. */
     /* `18` has `reader.copy` for the button; it has no key for what the button says afterwards. */
     readerCopied:     '복사했어요',
     readerCopyFailed: '복사하지 못했어요',

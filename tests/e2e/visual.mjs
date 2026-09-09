@@ -692,6 +692,65 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.animating = await evalJs('document.getAnimations().filter(a => a.playState === "running").length');
   await send('Emulation.setEmulatedMedia', { features: [] });
 
+  /* ── TD-01 · the terminal drawer and Quick Command ──────────────────────────────────────
+   * `15`: the drawer opens over the current screen, its banner can never be closed, and typing
+   * ROUTES rather than runs — `19` §C4's explain-then-confirm is two round trips by design. */
+  step('TD-01');
+  out.drawerBefore = await evalJs('JSON.stringify(window.__drawer())');
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.trim() === '터미널')?.click()`);
+  await sleep(400);
+  out.drawerOpen   = await evalJs('JSON.stringify(window.__drawer())');
+  out.drawerBanner = await evalJs(`document.querySelector('[data-el="banner"]')?.innerText ?? null`);
+  /* The drawer is a SIBLING of #root — a child would be destroyed by the screen it sits over. */
+  out.drawerOutsideRoot = await evalJs(`(() => {
+    const d = document.querySelector('[data-el="drawer"]');
+    return Boolean(d) && !document.getElementById('root').contains(d); })()`);
+  out.drawerScreen = await evalJs('window.__screen()');
+
+  /* Typing a recognised phrase EXPLAINS it. Nothing has run. */
+  await evalJs(`(() => { const f = document.querySelector('[data-el="qc-input"]'); f.value = '테스트 돌려줘'; })()`);
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
+  await sleep(600);
+  out.qcCard      = await evalJs(`document.querySelector('[data-el="qc-card"]')?.innerText ?? null`);
+  out.qcCardKind  = await evalJs(`document.querySelector('[data-el="qc-card"]')?.getAttribute('data-kind') ?? null`);
+  out.qcState     = await evalJs('JSON.stringify(window.__drawer())');
+  out.qcRanYet    = await evalJs(`document.querySelector('[data-el="qc-run"]') !== null`);
+  out.qcReds      = await evalJs(RED_COUNT('.td01 *'));
+
+  /* 미인식 is a BRANCH, not an error — neutral, and it offers the Work path. */
+  await evalJs(`(() => { const f = document.querySelector('[data-el="qc-input"]'); f.value = 'rm -rf 해줘'; })()`);
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
+  await sleep(600);
+  out.qcUnrec     = await evalJs(`document.querySelector('[data-el="qc-card"]')?.innerText ?? null`);
+  out.qcUnrecKind = await evalJs(`document.querySelector('[data-el="qc-card"]')?.getAttribute('data-kind') ?? null`);
+  out.qcUnrecReds = await evalJs(RED_COUNT('[data-el="qc-card"], [data-el="qc-card"] *'));
+
+  /* 모호함 names both readings and runs nothing. */
+  await evalJs(`(() => { const f = document.querySelector('[data-el="qc-input"]'); f.value = '서버 좀 정리해줘'; })()`);
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
+  await sleep(600);
+  out.qcAmbigKind = await evalJs(`document.querySelector('[data-el="qc-card"]')?.getAttribute('data-kind') ?? null`);
+  out.qcAmbig     = await evalJs(`document.querySelector('[data-el="qc-card"]')?.innerText ?? null`);
+
+  /* 할 수 있는 것 보기 — every rule, and why each one cannot run. */
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.includes('할 수 있는 것'))?.click()`);
+  await sleep(600);
+  out.qcDiscover = await evalJs(`document.querySelector('[data-el="qc-discover"]')?.innerText ?? null`);
+  out.qcDiscoverRows = await evalJs(`document.querySelectorAll('[data-el="qc-discover"] .td01-rule').length`);
+
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `td01-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+
+  /* 닫기 preserves the screen beneath. */
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '닫기')?.click()`);
+  await sleep(300);
+  out.drawerClosed = await evalJs('JSON.stringify(window.__drawer())');
+  out.screenAfterDrawer = await evalJs('window.__screen()');
+
   step('WBS-05 stale');
   await sleep(1200);
   out.staleBand = await evalJs(`document.querySelector('[data-card="brief"] .staleband')?.innerText ?? null`);
@@ -867,6 +926,51 @@ assert.strictEqual((results.staleBand.match(/다시 읽기/g) || []).length, 1);
 assert.ok(results.briefHeadFolded.includes('읽은 시점'),
   'a folded Brief must still say WHEN it was read — that is what makes it a cached Brief');
 assert.strictEqual(results.briefAnswersUnfolded, 6, '펼치기 did not bring the answers back');
+
+/* ── TD-01 · the drawer, and Quick Command ────────────────────────────────────────────────── */
+assert.strictEqual(JSON.parse(results.drawerBefore).open, false, '`15`: the drawer starts 닫힘');
+assert.strictEqual(JSON.parse(results.drawerOpen).open, true, '터미널 did not open the drawer');
+assert.strictEqual(results.drawerScreen, 'SC-02',
+  'opening the drawer navigated — `15` says it sits OVER the current screen');
+/* A child of `#root` would be destroyed by the next screen render, and `15` requires the screen
+ * beneath to be preserved. */
+assert.strictEqual(results.drawerOutsideRoot, true, 'the drawer is inside #root');
+
+/* `19` §S · Q-03: the banner is the product saying it does not isolate. It is drawn always. */
+assert.strictEqual(results.drawerBanner,
+  '여기서 치는 명령은 내 컴퓨터에서 내 권한으로 바로 실행돼요.',
+  'the one line that may never be hidden is missing or reworded');
+
+/* `19` §C4: 항상 설명 후 확인. Typing produced an EXPLANATION and ran nothing. */
+assert.strictEqual(results.qcCardKind, 'explained');
+assert.ok(results.qcCard.includes('이해한 것'), 'the card does not say what it understood');
+assert.ok(results.qcCard.includes('npm run test'), 'the card does not show the command it would run');
+assert.ok(results.qcCard.includes('하는 일'), 'the card does not say what the command does');
+assert.ok(results.qcCard.includes('JUQODE'), '`15` §0: the card must name who acts');
+assert.strictEqual(results.qcRanYet, false, 'typing a phrase RAN it — explain-then-confirm is gone');
+assert.strictEqual(JSON.parse(results.qcState).run, null);
+assert.strictEqual(results.qcReds, 0, 'the drawer renders red with nothing failed');
+
+/* 미인식 — neutral, and it offers the Work path. `19` §C4: the product does not claim to have
+ * detected anything; it recognises six things and declines the rest. */
+assert.strictEqual(results.qcUnrecKind, 'unrecognized');
+assert.strictEqual(results.qcUnrecReds, 0, '미인식 was painted as a failure — `15` says neutral');
+assert.ok(results.qcUnrec.includes('짐작해서 실행하지는 않아요'),
+  'the card does not say that it will not guess');
+assert.ok(results.qcUnrec.includes('작업으로 보내기'), 'there is no route to the Work path');
+assert.ok(!/위험|감지|차단/.test(results.qcUnrec),
+  'the card claims it DETECTED something — q02 §5.7: that teaches the user the rest is safe');
+
+/* 모호함 — both readings named, nothing run. */
+assert.strictEqual(results.qcAmbigKind, 'ambiguous');
+assert.ok(results.qcAmbig.includes('골라'), 'the ambiguity does not ask the user to choose');
+
+/* 할 수 있는 것 보기 — the closed set, with a reason on every one that cannot run. */
+assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not the closed six');
+
+/* 닫기 preserves the screen beneath (`15`). */
+assert.strictEqual(JSON.parse(results.drawerClosed).open, false);
+assert.strictEqual(results.screenAfterDrawer, 'SC-02', 'closing the drawer changed the screen');
 
 /* ── WBS-29 · the five state vocabularies, measured against each other ──────────────────────
  * `16` §2.1 keeps these apart, and `12` §16 turns one pair into a product promise: 사용 불가 is

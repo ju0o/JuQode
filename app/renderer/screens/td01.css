@@ -1,0 +1,82 @@
+/* TD-01 · Terminal Drawer.
+ *
+ * `15`: 290 px, slides up over the current screen with a 12 % scrim; closing preserves the
+ * screen beneath. The drawer is a sibling of `#root`, not a child — every screen render clears
+ * `#root`, and a drawer inside it would be destroyed by the screen it is supposed to sit over.
+ */
+.td01-host { position: fixed; inset: 0; pointer-events: none; z-index: 40; }
+.td01-host[data-open="true"] { pointer-events: auto; }
+/* The scrim is what makes the screen beneath read-only-looking without hiding it. */
+.td01-host.open::before {
+  content: ""; position: absolute; inset: 0;
+  background: rgb(0 0 0 / 12%);
+}
+
+.td01 {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: min(40vh, 420px);
+  display: flex; flex-direction: column;
+  background: var(--card); border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 28px rgb(0 0 0 / 10%);
+  animation: td01-up var(--d-base) var(--ease) both;
+}
+@keyframes td01-up { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.td01-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line);
+}
+.td01-title { font-weight: 700; letter-spacing: .02em; }
+.td01-head .grow { flex: 1; }
+
+/* `19` §S · Q-03 — always visible, never closable. It states that this is NOT isolation, so it
+   is not styled as a warning to be dismissed: it is a standing fact about the product. */
+.td01-banner {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  background: var(--grey); color: var(--ink2);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px; line-height: 17px;
+}
+
+.td01-qc { flex: 1 1 auto; overflow: auto; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.td01-qclabel { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.td01-qclabel .kicker { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--juq); }
+
+/* `15`: the Quick Command field is natural language and is VISUALLY DISTINCT from a shell line.
+   It reads like the request field on SC-02, not like a terminal. */
+.td01-qcrow { display: flex; gap: 8px; align-items: stretch; }
+.td01-qcinput {
+  flex: 1; font: inherit; font-size: 13px;
+  padding: 9px 12px;
+  border: 1px solid var(--line2); border-radius: var(--r-inner);
+  background: var(--board); color: var(--ink);
+}
+.td01-qcinput:focus-visible { outline: 2px solid var(--juq); outline-offset: 1px; }
+
+.td01-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.td01-card .ct { font-weight: 600; }
+.td01-actor { align-self: flex-start; font-size: 10px; letter-spacing: .06em; font-weight: 600; }
+/* 미인식 is NEUTRAL — `15` says so explicitly, and `19` §C4 explains why: the product recognises
+   six things and declines the rest; it does not claim to have detected anything. */
+.td01-card[data-kind="unrecognized"] { border-color: var(--line2); }
+.td01-card[data-kind="ambiguous"]    { border-color: var(--unk); border-style: dashed; }
+
+.td01-field { display: flex; gap: 10px; align-items: baseline; }
+.td01-field .k { flex: 0 0 auto; min-width: 5.5em; }
+.td01-field .v { min-width: 0; overflow-wrap: anywhere; }
+
+.td01-readings { display: flex; gap: 8px; flex-wrap: wrap; }
+.td01-runhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.td01-output {
+  margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 17px;
+  white-space: pre; overflow-x: auto; max-height: 40vh; overflow-y: auto;
+  background: var(--card2); border: 1px solid var(--line);
+  border-radius: var(--r-inner); padding: 8px 10px;
+}
+
+.td01-rule { display: flex; align-items: center; gap: 8px; }
+.td01-rule .grow { flex: 1; }
+.td01-why { padding-left: 2px; }
+.td01-discover { align-self: flex-start; }

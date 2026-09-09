@@ -40,6 +40,9 @@ export function renderSC02(root, api, nav, state) {
   bar.appendChild(id);
   bar.appendChild(el('span', 'grow'));
   bar.appendChild(btn('btn sm ghost nodrag', C.nav.otherProject, () => nav.toPicker()));
+  /* `15` §0 · TD-01: the terminal toggle is on every screen's top bar. The drawer itself lives
+   * outside `#root`, so this only flips a flag the router owns. */
+  bar.appendChild(btn('btn sm ghost nodrag', C.term.title, () => window.__toggleDrawer?.()));
   mountThemeToggle(bar, C.theme);
   shell.appendChild(bar);
 
