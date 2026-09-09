@@ -230,3 +230,25 @@ History's order to be deterministic, so `worksFor` breaks millisecond ties on `r
 
 Next eligible: WBS-25 (TD-01 terminal drawer — WBS-22's card and `qc.terminal.open` need it) ·
 WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
+
+### 동시 작업 — 이 브랜치에 두 세션이 붙어 있었다
+
+배치 07~08 구간에서 `dev/mvp-autonomous-v01` 에 **두 개의 에이전트 세션이 동시에** 커밋했다.
+`1ad31c4` · `92f5149` · `f24bfac` 는 다른 세션의 것이고, `2e5bceb` · `38da688` 는 이쪽이다.
+
+관측된 결과:
+
+- **같은 패키지를 두 번 구현했다.** 둘 다 WBS-34 를 했다. 최종 트리에는 구현이 하나만 남았고
+  중복 정의도 중복 테스트 이름도 없다(확인함). 낭비지 손상은 아니다.
+- **`git add -A` 로 남의 작업을 내 커밋에 쓸어 담았다.** `38da688` 에 들어간
+  `app/main/interpret/narrate.js` (181줄, WBS-04) 는 이쪽 세션이 쓴 것이 아니다. 되돌리지
+  않았다 — 커밋된 상태가 작업 중인 파일을 지우는 것보다 안전하다.
+- **남의 증거 문서를 덮어썼다.** `BATCH-08.md` 가 그것이다. `f24bfac` 에서 복원해 두 절을
+  합쳤다.
+- 이쪽이 계속 겪은 "파일이 내가 읽은 것과 다르다" 는 현상의 정체가 이것이었다 —
+  `git.js` 의 인덱스 블록, `sc04.js` 의 `when`/`OUTCOME`, `ipc.js` 의 `orientationOf`,
+  `repo.js` 의 `rowid` 동률 처리. 전부 다른 세션의 편집이었다.
+
+**한 브랜치에 두 자율 세션을 붙이면 안 된다.** 붙일 거라면 `git add -A` 대신 경로를 지정해
+커밋하고, 매 커밋 전에 `git log` 로 새 커밋이 들어왔는지 확인해야 한다. 이 런의 남은 구간은
+그렇게 한다.
