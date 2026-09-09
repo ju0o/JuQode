@@ -142,3 +142,15 @@ body {
 
 details > summary { cursor: pointer; }
 details > summary:hover { color: var(--ink); }
+
+/* WBS-35 · Agent Presence. Used on SC-02 and SC-03, so it lives here rather than in either
+ * screen's sheet. The canvas is a fixed 56 px square (`16` §125) and never scales with the
+ * card — a presence that grew with its container would be reporting the layout, not the mode. */
+[data-card="presence"] .pbody {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 6px 0 2px;
+}
+[data-card="presence"] canvas { display: block; width: 56px; height: 56px; }
+[data-card="presence"] .plabel {
+  font-size: 12px; color: var(--ink2); text-align: center; overflow-wrap: anywhere;
+}

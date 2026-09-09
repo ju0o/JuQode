@@ -376,3 +376,33 @@ states have rendered evidence for the first time.
 
 Next eligible: WBS-35 (Agent Presence) · WBS-36/37/38 (theme, screen differentiation, 다음 행동)
 · DV-11's pty decision · WBS-32/33 (need humans and Windows).
+
+## Batch 13 · WBS-35
+
+Report: `BATCH-13.md`. Canon findings raised: CF-19 (and the duplicated CF-18 entry removed).
+
+| Package | State |
+|---|---|
+| WBS-35 Agent Presence component | IMPLEMENTED |
+
+469 tests, three e2e files. The Presence card is on SC-02 and SC-03 and appears in the
+light/dark screenshots for both.
+
+The acceptance's hard half — **no mode reachable by a timer alone** — is held structurally:
+there is no timer in the component at all, `setMode` is the only writer of the mode, and the two
+quiet modes arrive already decided from `livenessOf()`, which `17` exempts by name. The
+precedence (waiting-on-the-user before liveness) exists for the same reason: a Work waiting for
+a permission is supposed to be silent, so letting `quiet` win would move the mode on elapsed
+time and nothing else.
+
+Two things were found by measurement rather than by reading. The prototype's point count painted
+the sphere SOLID at 56 px, hiding both rings — which made `input` and `permission` the same
+still frame, the exact thing the second ring exists to prevent; the cloud was thinned and the
+screenshots re-checked. And a mutation showed SC-02 could map a HISTORY ROW straight to a mode,
+announcing 최근 활동이 보여요 for a Work that was stopped waiting for the user; `activity` now
+requires a positive liveness verdict, and the e2e measures SC-02's mode while a Work is actually
+`permission_waiting`.
+
+Next eligible: WBS-36 (light/dark theme completeness) · WBS-37 (screen differentiation ·
+transitions) · WBS-38 (다음 행동 ≠ NEXT) · DV-11's pty decision · WBS-32/33 (need humans and
+Windows).

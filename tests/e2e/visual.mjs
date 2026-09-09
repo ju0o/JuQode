@@ -564,7 +564,11 @@ const results = await cdp(async ({ send, evalJs }) => {
   /* the guard: a second submit while this Work is open must be refused, not queued */
   step('guard');
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
-  await sleep(500);
+  await sleep(900);
+  /* WBS-35 · SC-02's presence with a LIVE Work — the Work above is still `permission_waiting`.
+   * SC-02 holds no snapshot, so it has to fetch one; a History row would say only `running` and
+   * could never produce this mode. This is the assertion that SC-02 asks the right question. */
+  out.sc02PresenceLive = await evalJs(`document.querySelector('[data-card="presence"] canvas')?.getAttribute('data-mode')`);
   await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 오류 고쳐줘'; })()`);
   await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
   await sleep(1500);
@@ -721,7 +725,42 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(800);
 
+  /* WBS-35 · Agent Presence. Measured on the real canvas, because every claim this component
+   * makes is about what is PAINTED — a source assertion cannot tell a breathing sphere from a
+   * still one. `shot()` reads the canvas back as pixels. */
+  const PRESENCE = `document.querySelector('[data-card="presence"] canvas')`;
+  const shot = `${PRESENCE}.toDataURL()`;
+  out.presenceMode  = await evalJs(`${PRESENCE}?.getAttribute('data-mode')`);
+  out.presenceAria  = await evalJs(`${PRESENCE}?.getAttribute('aria-label')`);
+  out.presenceLabel = await evalJs(`document.querySelector('[data-card="presence"] .plabel')?.textContent`);
+  out.presenceBox   = await evalJs(`JSON.stringify((() => { const r = ${PRESENCE}?.getBoundingClientRect(); return r ? [Math.round(r.width), Math.round(r.height)] : null; })())`);
+  /* A blank canvas would satisfy every other check here. Count the pixels that are not fully
+   * transparent, so "it drew something" is a measurement. */
+  out.presenceInk = await evalJs(`(() => {
+    const c = ${PRESENCE}; if (!c) return null;
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++;
+    return n; })()`);
+  /* The idle breath is the product's ONE continuous motion (`16` §1). Two frames apart must
+   * differ, or the exemption is being claimed for something that does not move. */
+  const a1 = await evalJs(shot);
+  await sleep(700);
+  out.presenceMoved = (await evalJs(shot)) !== a1;
+
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  /* The loop keeps running; under reduced motion it simply paints the same frame every time.
+   * One settle-length pause lets the easing finish landing before the two shots are compared. */
+  await sleep(300);
+  const r1 = await evalJs(shot);
+  await sleep(700);
+  out.presenceStill = (await evalJs(shot)) === r1;
+  out.presenceStillMode = await evalJs(`${PRESENCE}?.getAttribute('data-mode')`);
+  out.presenceStillInk = await evalJs(`(() => {
+    const c = ${PRESENCE};
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++;
+    return n; })()`);
+
   await evalJs(`document.querySelectorAll('.fade-in').forEach(n => { n.classList.remove('fade-in'); void n.offsetWidth; n.classList.add('fade-in'); })`);
   await sleep(150);
   out.animating = await evalJs('document.getAnimations().filter(a => a.playState === "running").length');
@@ -900,7 +939,8 @@ assert.ok(Math.abs(results.centreOffset) <= 40,
 assert.strictEqual(results.recentRows, 2, 'the seeded projects did not reach SC-01 from the store');
 assert.strictEqual(results.screenAfterOpen, 'SC-02', `opening a project did not reach SC-02 (got ${results.screenAfterOpen})`);
 assert.strictEqual(JSON.parse(results.openedProject).path, SEED, 'SC-02 is showing a different project than the one opened');
-assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(), ['brief', 'history', 'intent', 'stream'],
+assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(),
+  ['brief', 'history', 'intent', 'presence', 'stream'],
   'SC-02 board is not the cards this package builds — nothing a later package owns may be drawn');
 /* WBS-03 — the Brief is six answers, and a 확인됨 chip must name the file it rests on (D-114). */
 const interp = JSON.parse(results.interp);
@@ -1173,6 +1213,31 @@ assert.strictEqual(results.staleAnswersAfterKeep, results.staleAnswers,
 assert.strictEqual(results.animating, 0,
   'an animation is still running under prefers-reduced-motion: reduce');
 
+/* ── WBS-35 · Agent Presence, measured ─────────────────────────────────────────────────────
+ * SC-02 with no Work open. `21` WBS-35: no mode is reachable by a timer alone, so after all
+ * this session's waiting the mode is still the one no signal has moved. */
+assert.strictEqual(results.sc02PresenceLive, 'permission',
+  `SC-02 showed ${results.sc02PresenceLive} for a Work that is waiting on a permission — a History `
+  + 'row only says `running`, so this is what proves SC-02 asks for the snapshot');
+assert.strictEqual(results.presenceMode, 'idle',
+  `the presence drifted to ${results.presenceMode} with no Work and no signal`);
+assert.ok(results.presenceLabel && results.presenceLabel.trim(),
+  '`16` §9 requires a label in every mode and the card has none');
+assert.ok(results.presenceAria && results.presenceAria.includes(results.presenceLabel),
+  'the canvas has no accessible name — the mode is invisible to a screen reader');
+assert.deepStrictEqual(JSON.parse(results.presenceBox), [56, 56],
+  '`16` §125: the presence canvas is 56 px and does not scale with its card');
+assert.ok(results.presenceInk > 200,
+  `the presence canvas is blank (${results.presenceInk} painted pixels)`);
+assert.ok(results.presenceMoved,
+  'the idle breath does not move — `16` §1 exempts it as the one continuous motion, and it is not there');
+assert.ok(results.presenceStill,
+  'the presence keeps animating under prefers-reduced-motion: reduce');
+assert.strictEqual(results.presenceStillMode, 'idle',
+  'turning motion off changed the MODE, which no rendering setting may do');
+assert.ok(results.presenceStillInk > 200,
+  `reduced motion left a blank frame instead of a static one (${results.presenceStillInk} pixels)`);
+
 /* WBS-09 through the bridge, against the FIXTURE CLI — so this asserts our code, not the host's. */
 const claude = JSON.parse(results.claude);
 assert.strictEqual(claude.available, true, 'detection did not reach the fixture CLI');
@@ -1353,7 +1418,7 @@ assert.strictEqual(results.sc02Clipped2, 0, 'an SC-02 card clips its own content
 assert.ok(results.nextSlot && results.nextSlot.includes('Claude Code가 아직 다음 단계를 보내지 않았어요'),
   `NEXT slot: ${results.nextSlot}`);
 assert.ok(results.liveness && !/\d+\s*%/.test(results.liveness), 'the liveness line shows a percentage');
-assert.deepStrictEqual(JSON.parse(results.sc03Cards).sort(), ['about', 'steps', 'work'],
+assert.deepStrictEqual(JSON.parse(results.sc03Cards).sort(), ['about', 'presence', 'steps', 'work'],
   '`15` SC-03 requires the right rail 이 Work 에 대해 alongside the Work and Steps');
 assert.strictEqual(results.sc03Overflow, 0);
 assert.strictEqual(results.sc03Clipped, 0, 'an SC-03 card is clipping its own content');

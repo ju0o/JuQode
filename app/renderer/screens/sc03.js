@@ -12,6 +12,7 @@
 import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { mountThemeToggle } from '../design/theme.js';
+import { presenceCard, modeFor } from '../presence.js';
 
 /* The schema's outcome codes → the class that paints them and `18`'s own title key.
  * `cancelled_nochange` is a NEUTRAL chip (`15`): the 사용 불가 grey means "지금 안 됨 · 실패
@@ -58,6 +59,10 @@ export function renderSC03(root, api, nav, state) {
   }
 
   board.appendChild(workCard(snap, api, nav, state));
+  /* WBS-35 · `15` SC-03 board: Presence is S and sits beside the Work card. Its mode is a
+   * pure function of the snapshot the screen is already drawing, so it can never disagree
+   * with the chip and the panels above it. */
+  board.appendChild(presenceCard(modeFor(snap)));
   board.appendChild(stepsCard(snap));
   board.appendChild(aboutCard(snap, api));
   if (snap.status === 'ended') board.appendChild(resultCard(snap, api, nav, state));

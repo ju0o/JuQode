@@ -196,6 +196,13 @@ export const C = {
     paths:    ['▸ 프로젝트 설명 읽기', '▸ Quick Command 쓰기', '▸ 터미널로 직접 확인'],
     resubmit: '▸ 해결한 뒤 다시 보내기',
   },
+  /* WBS-35 · Agent Presence (`18` §presence). Three keys, and only three — the nine mode
+   * labels are NOT in `18`; they are in `gap.presenceLabel` with the reason. */
+  presence: {
+    title:  'Claude Code',
+    kicker: 'Claude Code',
+    hint:   '모양은 지금 상태만 나타내요. 진행 정도를 뜻하지 않아요.',
+  },
   next: {
     label:     '다음 행동',
     gloss:     'JuQode가 드리는 선택 — Claude Code가 알린 일이 아니에요',
@@ -331,6 +338,27 @@ export const C = {
    *                        supplies only the 로그인 필요 sentence.
    */
   gap: {
+    /* WBS-35 · the nine Agent Presence mode labels. `16` §9 requires a label in every mode and
+     * `15` §42 names the nine, but `18` carries only `presence.title/kicker/hint` — no label for
+     * any mode. The words below are transcribed from the Canon visual prototype's own LABEL
+     * table (`../JuQode-Private/docs/visual/visual-design.html`, `JQPresenceLabel`), which is
+     * the only place they are written down. Filed as CANON_FINDINGS CF-19.
+     *
+     * SEVEN of the nine are here. The other two are strings `18` already carries under other
+     * keys, so they are wired to those keys below the object rather than copied — a second
+     * literal of an approved string is a second thing to drift. */
+    presenceLabel: {
+      idle:       '대기 중',
+      activity:   '최근 활동이 보여요',
+      input:      '답을 기다리고 있어요',
+      permission: '허용을 기다리고 있어요',
+      nosignal:   '잠시 새 활동이 보이지 않아요',
+      unknown:    '지금은 상태를 확인할 수 없어요',
+      complete:   '작업이 끝났어요',
+    },
+    /* The canvas's accessible name. A canvas has no text, so without this the mode is invisible
+     * to a screen reader even though `16` §9 requires the label to be always present. */
+    presenceAria: (label) => `Agent 상태: ${label}`,
     /* SC-04 states `18` has no key for. Each one is a state the SCREEN has and the dictionary
      * does not, so it is marked rather than dressed up as approved copy. */
     readerRawClose:   'Raw Diff 닫기',
@@ -550,3 +578,14 @@ export const C = {
     storeBody:     '기존 파일을 그대로 두었어요. 지운 것은 없어요. 프로젝트를 열려면 이 문제를 먼저 해결해야 해요.',
   }
 };
+
+/* WBS-35 · the two presence labels `18` DOES carry, taken from their approved keys.
+ *
+ * `cancelled` is `18` `qc.stopped` (멈췄어요) — filed under TD-01 for a Quick Command that was
+ * stopped, and it is the dictionary's words for exactly this state. `failure` is
+ * `work.resultTitle.failed` (끝내지 못했어요), SC-03's own failure title.
+ *
+ * Referencing them rather than re-typing them is the point: an approved string that exists
+ * twice in this file can be edited once and be wrong in the other place. */
+C.gap.presenceLabel.cancelled = C.qc.stopped;
+C.gap.presenceLabel.failure = C.work.resultTitle.failed;

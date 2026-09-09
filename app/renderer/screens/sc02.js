@@ -24,6 +24,7 @@ import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
+import { presenceCard, setPresenceMode, modeFor } from '../presence.js';
 
 export function renderSC02(root, api, nav, state) {
   root.innerHTML = '';
@@ -211,6 +212,13 @@ export function renderSC02(root, api, nav, state) {
   stream.appendChild(el('div', 'sm mut', C.work.empty));
   colL.appendChild(stream);
 
+  /* WBS-35 · Agent Presence — S, above History (`15` §0 Board). SC-02 holds no Work snapshot,
+   * so it opens at 대기 중 and is corrected once the store answers. It never GUESSES a mode
+   * from the History row: a row says `running`, and `running` alone cannot tell 활동 from
+   * 답을 기다리는 중 from 새 활동 없음. Those come from the snapshot or not at all. */
+  colR.appendChild(presenceCard('idle'));
+  fillPresence(api, state);
+
   /* History — M (cols 5–6). WBS-20: every Work this project started, newest first. `12`
    * F-C2-04 — it never disappears, and a failed or cancelled Work stays in it. */
   const hist = card('m', 'history');
@@ -229,6 +237,30 @@ export function renderSC02(root, api, nav, state) {
   root.appendChild(shell);
 
   return { shell, board, field };
+}
+
+/**
+ * WBS-35 · SC-02's presence mode.
+ *
+ * The one live Work, asked for by id. A History row carries `status` and `outcome` and nothing
+ * about liveness, permissions or a pending question — so a mode derived from the row would be
+ * claiming `활동` for a Work that is actually waiting for the user to answer. The snapshot is
+ * the only thing that knows, so the row is used for nothing but the id.
+ */
+async function fillPresence(api, state) {
+  const project = state.project;
+  const r = await api.history(project.id);
+  const live = r?.ok ? r.works.find((w) => w.status !== 'ended') : null;
+  let mode = 'idle';
+  if (live) {
+    const snap = (await api.workGet(live.id))?.work;
+    /* A live Work whose snapshot could not be fetched is NOT 대기 중. `idle` says nothing is
+     * happening, and something is — we just cannot see what. That is `unknown`. */
+    mode = snap ? modeFor(snap) : 'unknown';
+  }
+  /* The answer describes the project this started for. If the user has moved on, it is about
+   * something they are no longer looking at. */
+  if (state.screen === 'SC-02' && state.project === project) setPresenceMode(mode);
 }
 
 /**
