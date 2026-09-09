@@ -1,7 +1,9 @@
 'use strict';
 /* WBS-21 · repositories. One function per thing the product actually does today.
  * `20` / `docs/data/schema.sql` own the shape; nothing here re-declares it. */
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const now = () => new Date().toISOString();
 
@@ -181,14 +183,36 @@ const basisFor = (db, workId, phase) => {
  */
 const HEAD_LIMIT = 256 * 1024;              // `20`: the bounded head that goes on screen
 
-function saveDiff(db, workId, { file, patch, displayable = true }) {
-  const head = patch.length > HEAD_LIMIT ? patch.slice(0, HEAD_LIMIT) : patch;
+/**
+ * D-129 · the head goes on screen, the WHOLE patch goes to a blob file. Writing only the head
+ * and the word `truncated` destroyed the tail: the raw view Canon promises for a large change
+ * had nothing to fall back to, and the change could never be read in full again.
+ *
+ * @param {string|null} blobDir the JuQode-owned evidence store; without one the tail is lost
+ *   and `unified_ref` says so rather than pretending a reference exists.
+ */
+function saveDiff(db, workId, { file, patch, displayable = true }, blobDir = null) {
+  const over = Buffer.byteLength(patch, 'utf8') > HEAD_LIMIT;
+  const head = over ? patch.slice(0, HEAD_LIMIT) : patch;
+  let ref = null;
+  if (over) {
+    ref = 'truncated';
+    if (blobDir) {
+      try {
+        const dir = path.join(blobDir, 'diffs');
+        fs.mkdirSync(dir, { recursive: true });
+        const name = `${createHash('sha256').update(patch).digest('hex')}.patch`;
+        fs.writeFileSync(path.join(dir, name), patch);
+        ref = `diffs/${name}`;
+      } catch { /* the head is still true; `truncated` stays the honest answer */ }
+    }
+  }
   db.prepare(`insert into raw_diff (id, work_id, file, displayable, unified_head, unified_ref, before_hash, after_hash)
               values (?, ?, ?, ?, ?, ?, ?, ?)
               on conflict(work_id, file) do update set displayable = excluded.displayable,
-                                                       unified_head = excluded.unified_head`)
-    .run(randomUUID(), workId, file, displayable ? 1 : 0, head,
-         patch.length > HEAD_LIMIT ? 'truncated' : null, null, null);
+                                                       unified_head = excluded.unified_head,
+                                                       unified_ref  = excluded.unified_ref`)
+    .run(randomUUID(), workId, file, displayable ? 1 : 0, head, ref, null, null);
 }
 
 const diffsFor = (db, workId) =>
@@ -196,7 +220,10 @@ const diffsFor = (db, workId) =>
     file: d.file,
     displayable: Boolean(d.displayable),
     patch: d.unified_head ?? '',
-    truncated: d.unified_ref === 'truncated',
+    truncated: d.unified_ref != null,
+    /* The blob holding the whole patch, relative to the evidence store — null when it was not
+     * written, which is a different fact from "not truncated". */
+    ref: d.unified_ref && d.unified_ref !== 'truncated' ? d.unified_ref : null,
   }));
 
 /* ── WBS-18 · the result, and what each part of it is worth (D-114) ────────────────
@@ -218,7 +245,11 @@ function saveResult(db, workId, result) {
     const item = db.prepare('insert into result_item (id, work_id, kind, ord, text) values (?, ?, ?, ?, ?)');
     const seen = { done: 0, not_done: 0 };
     for (const it of result.items) {
-      item.run(randomUUID(), workId, it.kind, seen[it.kind]++, JSON.stringify({ data: it.data ?? null }));
+      /* `confidence` too: `20` has no column for it on an item, so it rides in `text` with the
+       * data. Dropping it on write made every item come back unmarked, and `18` §0.9 says the
+       * mark is what the reader checks — an unmarked item reads as a bare assertion. */
+      item.run(randomUUID(), workId, it.kind, seen[it.kind]++,
+               JSON.stringify({ data: it.data ?? null, confidence: it.confidence ?? null }));
     }
     db.exec('commit');
   } catch (e) {
@@ -232,13 +263,18 @@ function resultFor(db, workId) {
   const row = db.prepare('select * from work_result where work_id = ?').get(workId);
   if (!row) return null;
   const parse = (t) => { try { return JSON.parse(t); } catch { return {}; } };
+  /* The outcome lives on `work`, not on `work_result` — but `verify()`'s both-lists rule reads
+   * `result.outcome`, so a result read back from the DB was checked against `undefined` and
+   * the rule never ran on a persisted result at all. */
+  const work = db.prepare('select outcome from work where id = ?').get(workId);
   return {
+    outcome: work?.outcome ?? null,
     summary: row.summary || null,
     whatFailed: row.what_failed ? parse(row.what_failed) : null,
     claims: db.prepare('select * from result_claim where work_id = ? order by ord').all(workId)
       .map((c) => ({ confidence: c.confidence, ...parse(c.text) })),
     items: db.prepare("select * from result_item where work_id = ? order by kind, ord").all(workId)
-      .map((i) => ({ kind: i.kind, ...parse(i.text) })),
+      .map((i) => ({ kind: i.kind, ...parse(i.text) })),   // confidence comes back out of `text`
   };
 }
 

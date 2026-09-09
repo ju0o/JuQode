@@ -137,6 +137,34 @@ test('a rename is claimed ONLY when it is derivable (A-14)', () => {
   assert.strictEqual(renamed.name, 'newName');
 });
 
+test('the old name still existing means it is an add, not a rename', () => {
+  const before = 'export function oldName(a) {\n  return a + 1;\n}\n';
+  const after = 'export function oldName(a) {\n  return a + 1;\n}\n\nexport function newName(a) {\n  return a + 1;\n}\n';
+  const file = B.splitDiff(diffOf('src/r3.ts', before, after))[0];
+  const blocks = B.blocksFor(file, { before, after }).blocks;
+  assert.ok(!blocks.some((x) => x.change === 'rename'),
+    'the old name is still there, so nothing was renamed — a copy is not a rename');
+  assert.deepStrictEqual(only(blocks, 'add'), ['newName']);
+});
+
+test('a rename is not claimed across different declaration kinds', () => {
+  const before = 'export function thing(a) {\n  return a;\n}\n';
+  const after = 'export const thing2 = (a) => {\n  return a;\n};\n';
+  const file = B.splitDiff(diffOf('src/r4.ts', before, after))[0];
+  assert.ok(!B.blocksFor(file, { before, after }).blocks.some((x) => x.change === 'rename'),
+    'a function became an arrow constant — same body is not enough to call that a rename');
+});
+
+test('a rename is never claimed when only one side could be parsed', () => {
+  const before = 'export function oldName(a) {\n  return a + 1;\n}\n';
+  const after = 'export function newName(a) {\n  return a + 1;\n}\n';
+  const file = B.splitDiff(diffOf('src/r5.ts', before, after))[0];
+  /* with no before source there is nothing to have been renamed FROM */
+  const oneSided = B.blocksFor(file, { after });
+  assert.ok(!oneSided.blocks.some((x) => x.change === 'rename'),
+    'a rename was claimed with only one side of the comparison');
+});
+
 test('a rename whose BODY also changed falls back to 삭제 + 추가', () => {
   const before = 'export function oldName(a) {\n  return a + 1;\n}\n';
   const after = 'export function newName(a) {\n  return a + 999;\n}\n';
@@ -148,14 +176,41 @@ test('a rename whose BODY also changed falls back to 삭제 + 추가', () => {
   assert.deepStrictEqual(only(blocks, 'delete'), ['oldName']);
 });
 
-test('a change outside every declaration is a hunk block, and does not vanish', () => {
-  const before = "import a from 'a';\nexport function fn() { return 1; }\n";
-  const after = "import a from 'a';\nimport b from 'b';\nexport function fn() { return 1; }\n";
+test('a hunk block carries ONLY the lines no declaration claimed', () => {
+  /* The bug this replaces emitted a hunk block per hunk whenever ANY line fell outside a
+   * declaration, duplicating lines a declaration already owned. The buggy version also set the
+   * `outsideDeclaration` flag, so asserting the flag proved nothing — the LINES are the fix. */
+  const before = "import a from 'a';\n\nexport function fn() {\n  return 1;\n}\n";
+  const after = "import a from 'a';\nimport b from 'b';\n\nexport function fn() {\n  return 99;\n}\n";
   const file = B.splitDiff(diffOf('src/i.ts', before, after))[0];
   const blocks = B.blocksFor(file, { before, after }).blocks;
+
   const hunks = blocks.filter((x) => x.kind === 'hunk');
+  const fn = blocks.find((x) => x.name === 'fn');
   assert.ok(hunks.length > 0, 'a module-level change produced no block at all');
-  assert.ok(hunks.every((h) => h.outsideDeclaration), 'a hunk block claimed lines a declaration owns');
+  assert.ok(fn, 'the changed function produced no block');
+  assert.ok(hunks.every((h) => h.outsideDeclaration));
+
+  const hunkLines = new Set(hunks.flatMap((h) => h.afterLines));
+  assert.ok(hunkLines.size > 0, 'the hunk block carries no lines at all');
+  for (const l of fn.afterLines) {
+    assert.ok(!hunkLines.has(l), `line ${l} is claimed by both fn and a hunk block`);
+  }
+});
+
+test('before- and after-side line numbers are kept APART', () => {
+  /* Pooling them put a deleted line from the old file into the same list as an added line from
+   * the new one, so a block reported lines that do not both exist in any single version. The
+   * fixture inserts a line ABOVE the declaration so the two sides genuinely differ. */
+  const before = 'export function fn() {\n  return 1;\n}\n';
+  const after = "import x from 'x';\n\nexport function fn() {\n  return 2;\n}\n";
+  const file = B.splitDiff(diffOf('src/pool.ts', before, after))[0];
+  const fn = B.blocksFor(file, { before, after }).blocks.find((b) => b.name === 'fn');
+
+  assert.deepStrictEqual(fn.afterLines, [4], 'the after-side line the change landed on');
+  assert.deepStrictEqual(fn.beforeLines, [2], 'the before-side line it replaced');
+  assert.ok(!fn.afterLines.some((l) => fn.beforeLines.includes(l)),
+    'the two sides were pooled — the block reports lines from two different files as one list');
 });
 
 test('a file we cannot parse goes to hunks WHOLE — no invented units', () => {
@@ -205,9 +260,15 @@ test('binary and oversized files are undisplayable, and say so', () => {
   const bin = B.splitDiff('diff --git a/i.png b/i.png\nGIT binary patch\nliteral 10\n')[0];
   assert.strictEqual(B.blocksFor(bin, {}).note, 'undisplayable');
 
-  const big = 'x'.repeat(B.MAX_DISPLAY_BYTES + 1);
+  /* Pinned to Canon's literal number, not to the constant under test — a fixture sized from
+   * the constant passes for any value it is given. */
+  assert.strictEqual(B.MAX_DISPLAY_BYTES, 1024 * 1024, '`19` §C5-B: Raw-only above 1 MiB');
+  const big = 'x'.repeat(1024 * 1024 + 1);
   const f = B.splitDiff(diffOf('src/huge.ts', 'a\n', 'b\n'))[0];
   assert.strictEqual(B.blocksFor(f, { before: big, after: big }).note, 'too-large');
+  /* Either side being oversized is enough — the pair has to be readable, not just one of them. */
+  assert.strictEqual(B.blocksFor(f, { before: big, after: 'a\n' }).note, 'too-large');
+  assert.strictEqual(B.blocksFor(f, { before: 'a\n', after: big }).note, 'too-large');
 });
 
 test('the segmenter never asks anything — it only reads the diff', () => {
@@ -218,6 +279,54 @@ test('the segmenter never asks anything — it only reads the diff', () => {
   for (const forbidden of ['claude', 'session.run', 'spawn(', 'fetch(', 'execFile']) {
     assert.ok(!src.includes(forbidden), `the segmenter reaches for ${forbidden} — a unit must be derived, not asked for`);
   }
+});
+
+test('a hunk header is read exactly as git wrote it', () => {
+  /* The arithmetic is exported and was only ever exercised transitively, so an off-by-one on
+   * the deleted side, a swapped before/after start, or a path taken from the `a/` side were
+   * all invisible. This reads a literal hunk and states every number. */
+  const f = B.splitDiff([
+    'diff --git a/old.ts b/new.ts',
+    '@@ -10,4 +20,5 @@',
+    ' ctx',
+    '-old',
+    '+new',
+    '+extra',
+    ' ctx',
+    '\\ No newline at end of file',
+  ].join('\n'))[0];
+
+  assert.strictEqual(f.path, 'new.ts', 'a block belongs to the AFTER path — a rename would attribute it wrongly');
+  assert.strictEqual(f.hunks[0].beforeStart, 10);
+  assert.strictEqual(f.hunks[0].afterStart, 20);
+  assert.deepStrictEqual(B.changedLines(f.hunks[0]), [21, 22], 'after-side line numbers');
+  assert.deepStrictEqual(B.deletedLines(f.hunks[0]), [11], 'before-side line numbers');
+  assert.ok(!B.changedLines(f.hunks[0]).includes(24), '"\\ No newline at end of file" is not a line');
+});
+
+test('a hunk with no count, and one that is a pure addition or deletion', () => {
+  const one = B.splitDiff('diff --git a/x.ts b/x.ts\n@@ -1 +1 @@\n-a\n+b\n')[0];
+  assert.strictEqual(one.hunks[0].beforeCount, 1, '`@@ -1 +1 @@` means one line, not zero');
+  assert.deepStrictEqual(B.changedLines(one.hunks[0]), [1]);
+  assert.deepStrictEqual(B.deletedLines(one.hunks[0]), [1]);
+
+  const added = B.splitDiff('diff --git a/x.ts b/x.ts\n@@ -0,0 +1,2 @@\n+one\n+two\n')[0];
+  assert.deepStrictEqual(B.changedLines(added.hunks[0]), [1, 2]);
+  assert.deepStrictEqual(B.deletedLines(added.hunks[0]), []);
+
+  const removed = B.splitDiff('diff --git a/x.ts b/x.ts\n@@ -5,2 +4,0 @@\n-five\n-six\n')[0];
+  assert.deepStrictEqual(B.changedLines(removed.hunks[0]), []);
+  assert.deepStrictEqual(B.deletedLines(removed.hunks[0]), [5, 6]);
+});
+
+test('line lists are deduplicated and in order', () => {
+  const before = 'export function fn() {\n  const a = 1;\n  const b = 2;\n  return a + b;\n}\n';
+  const after = 'export function fn() {\n  const a = 9;\n  const b = 8;\n  return a + b;\n}\n';
+  const f = B.splitDiff(diffOf('src/o.ts', before, after))[0];
+  const fn = B.blocksFor(f, { before, after }).blocks.find((b) => b.name === 'fn');
+  assert.deepStrictEqual(fn.afterLines, [...new Set(fn.afterLines)].sort((x, y) => x - y),
+    'the line list is unsorted or has duplicates');
+  assert.ok(fn.afterLines.length >= 2);
 });
 
 /* ───────────────────────── WBS-18 · the result ───────────────────────── */
@@ -268,13 +377,41 @@ test('a 부분 result carries BOTH lists — 된 것 and 안 된 것', () => {
   assert.strictEqual(notDone.data.target, 'x.ts', 'the refusal must say what it was about');
 });
 
-test('a partial result missing a list is caught, not shipped', () => {
-  const r = result.build({
-    state: finished({ outcome: 'partial', denials: [] }),
-    changes: { known: true, files: [] },
-    signals: [],
+test('each acceptance rule is checked on its own, not only all at once', () => {
+  /* A check that reports only when everything is wrong cannot tell you which rule broke —
+   * and deleting any ONE of the three used to pass the whole suite. */
+  const noDone = result.build({
+    state: finished({ outcome: 'partial', denials: [{ tool: 'Edit', resolved: false, input: {} }] }),
+    changes: { known: true, files: [] }, signals: [],
   });
-  assert.ok(result.verify(r).length > 0, 'a partial result with neither list passed verification');
+  assert.deepStrictEqual(result.verify(noDone), ['partial result has no 된 것 list']);
+
+  const noNotDone = result.build({
+    state: finished({ outcome: 'partial', denials: [] }),
+    changes: { known: true, files: ['a.ts'] }, signals: [],
+  });
+  assert.deepStrictEqual(result.verify(noNotDone), ['partial result has no 안 된 것 list']);
+
+  assert.deepStrictEqual(
+    result.verify({ claims: [{ kind: 'x', confidence: 'confirmed', sourceRef: null }], items: [], outcome: 'complete' }),
+    ['claim x is 확인됨 with no source']);
+});
+
+test('a claim that cannot name its evidence is DOWNGRADED, not shipped as 확인됨', () => {
+  /* `verify` was called only by the tests, so it guarded nothing in the product: an
+   * unsupported 확인됨 would have reached the screen, and the chip is a promise. */
+  const { result: out, problems } = result.buildChecked({
+    state: finished(), changes: { known: true, files: ['a.ts'] }, signals: [],
+  });
+  assert.deepStrictEqual(problems, [], 'the ordinary path must not report a problem');
+
+  const broken = result.buildChecked({
+    state: finished(), changes: { known: true, files: ['a.ts'] }, signals: [],
+  });
+  broken.result.claims.push({ kind: 'invented', confidence: 'confirmed', sourceRef: null, data: null });
+  const rechecked = result.verify(broken.result);
+  assert.ok(rechecked.length > 0, 'an unsupported 확인됨 was not detected');
+  assert.ok(out.claims.every((c) => c.confidence !== 'confirmed' || c.sourceRef));
 });
 
 test('a failure says which terminal signal it was, and invents nothing else', () => {

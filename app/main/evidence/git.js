@@ -271,6 +271,26 @@ function diff(root, store, beforeRef, afterRef) {
   return git(['diff-tree', '-p', '-U3', '--no-color', beforeRef, afterRef], { cwd: root, env, raw: true });
 }
 
+/**
+ * The paths that differ between two bases, from git plumbing rather than from the patch text.
+ *
+ * `diff --git a/… b/…` is NOT parseable: a directory named `a b` puts a second ` b/` in the
+ * line, and a non-ASCII path — the ordinary case for this product — is C-quoted and matches no
+ * bare `a/` at all. `-z` gives NUL-separated raw bytes, exactly as `ls-files` does above.
+ * Order matches `diff-tree -p`, so the two can be zipped.
+ */
+function changedPaths(root, store, beforeRef, afterRef) {
+  const env = {
+    GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
+  };
+  const out = git(['diff-tree', '-r', '-z', '--name-only', '--no-color', beforeRef, afterRef],
+                  { cwd: root, env, raw: true });
+  /* `diff-tree` leads with the commit id line when given commits; `-z` makes that line
+   * NUL-terminated too. Drop any entry that is a bare 40-hex id. */
+  return out.split('\0').filter((p) => p && !/^[0-9a-f]{40}$/.test(p));
+}
+
 /** The paths in a basis tree — used by the tests to prove no secret is in it. */
 const treePaths = (root, store, ref) => git(['ls-tree', '-r', '--name-only', ref], {
   cwd: root,
@@ -280,4 +300,4 @@ const treePaths = (root, store, ref) => git(['ls-tree', '-r', '--name-only', ref
   },
 }).split('\n').filter(Boolean);
 
-module.exports = { capture, diff, fileAt, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };
+module.exports = { capture, diff, changedPaths, fileAt, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };

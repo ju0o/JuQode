@@ -25,9 +25,13 @@ const OUTCOMES = ['complete', 'partial', 'failed', 'cancelled_partial', 'cancell
  * @param {object} o.state         the reducer's final state
  * @param {{known:boolean, files:string[]}} o.changes  the evidence pair's answer
  * @param {object[]} o.signals     every persisted signal, in order
- * @returns {{summary:string|null, whatFailed:string|null,
- *            claims:{text:string, confidence:string, sourceRef:string|null}[],
- *            items:{kind:'done'|'not_done', text:string}[]}}
+ * Neither a claim nor an item carries a SENTENCE — they carry a `kind` and a structured
+ * `data`, and the renderer composes the Korean so `18` stays the single copy source (CF-6).
+ *
+ * @returns {{summary:string|null, whatFailed:object|null,
+ *            claims:{kind:string, data:object|null,
+ *                    confidence:'confirmed'|'expected'|'unconfirmed', sourceRef:string|null}[],
+ *            items:{kind:'done'|'not_done', data:object|null, confidence:string}[]}}
  */
 function build({ state, changes, signals = [] }) {
   const claims = [];
@@ -89,17 +93,44 @@ function build({ state, changes, signals = [] }) {
 
 const targetOf = (d) => d?.input?.file_path ?? d?.input?.path ?? d?.input?.command ?? d?.input?.url ?? null;
 
-/** `21` WBS-18: a 확인됨 claim must name the evidence it rests on. */
+/**
+ * `21` WBS-18's acceptance, checked. Each condition is separate so a single failure is named
+ * on its own — a check that only reports when everything is wrong at once cannot tell you
+ * which rule broke.
+ */
 function verify(result) {
   const problems = [];
   for (const c of result.claims) {
     if (c.confidence === 'confirmed' && !c.sourceRef) problems.push(`claim ${c.kind} is 확인됨 with no source`);
   }
-  if (result.outcome === 'partial') {
+  /* `cancelled_partial` is a 부분 card too — `15` gives it the same two lists. Naming only
+   * 'partial' here let the cancel path ship a 부분 완료 card with neither list, which is the
+   * one thing WBS-18's acceptance row rules out. */
+  if (result.outcome === 'partial' || result.outcome === 'cancelled_partial') {
     if (!result.items.some((i) => i.kind === 'done')) problems.push('partial result has no 된 것 list');
     if (!result.items.some((i) => i.kind === 'not_done')) problems.push('partial result has no 안 된 것 list');
   }
   return problems;
 }
 
-module.exports = { build, verify, OUTCOMES };
+/**
+ * Build, then ENFORCE. `verify` used to be called only by the tests, which made it a guard
+ * that guarded nothing: a 확인됨 claim with no source would have reached the screen, and the
+ * chip is a promise the user is invited to check.
+ *
+ * A claim that cannot name its evidence is not refused — it is DOWNGRADED to 확인 못함, which
+ * is what it always was. Refusing the whole result would hide the rest of what was measured.
+ *
+ * @returns {{result:object, problems:string[]}}
+ */
+function buildChecked(input) {
+  const result = build(input);
+  const problems = verify(result);
+  if (!problems.length) return { result, problems };
+
+  result.claims = result.claims.map((c) =>
+    (c.confidence === 'confirmed' && !c.sourceRef) ? { ...c, confidence: 'unconfirmed' } : c);
+  return { result, problems };
+}
+
+module.exports = { build, buildChecked, verify, OUTCOMES };

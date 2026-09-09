@@ -32,17 +32,46 @@ function ts() {
 }
 
 /**
+ * Git C-quotes a path that is not plain ASCII, and wraps it in quotes: `"a/\352\262\260..."`.
+ * A Korean filename is the ordinary case for this product, not the exotic one.
+ */
+function unquotePath(raw) {
+  if (!raw.startsWith('"')) return raw;
+  const inner = raw.slice(1, raw.endsWith('"') ? -1 : undefined);
+  const bytes = [];
+  for (let i = 0; i < inner.length; i++) {
+    if (inner[i] !== '\\') { bytes.push(inner.charCodeAt(i)); continue; }
+    const oct = /^[0-7]{3}/.exec(inner.slice(i + 1));
+    if (oct) { bytes.push(parseInt(oct[0], 8)); i += 3; continue; }
+    const esc = { n: 10, t: 9, r: 13, '"': 34, '\\': 92 }[inner[i + 1]];
+    bytes.push(esc ?? inner.charCodeAt(i + 1)); i += 1;
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+/**
  * Split a unified diff into per-file entries with their hunks.
+ *
+ * The header is parsed only for the FILE BOUNDARY. Which path a hunk belongs to comes from the
+ * caller's own file list where one is given (`--name-only -z` from git plumbing) — because
+ * `diff --git a/… b/…` cannot be split reliably: a directory named `a b` puts a second ` b/`
+ * in the line, and a non-ASCII path is quoted and does not match a bare `a/` at all. When the
+ * header IS the only source, it is unquoted and split from the right.
+ *
  * The app generates the diff itself at a fixed `-U3` (D-127: S2 block identity depends on the
  * context width, so the width cannot be left to whoever produced the patch).
+ *
+ * @param {string} patch
+ * @param {string[]} [names] the file paths, in patch order, from `diff-tree --name-only -z`
  */
-function splitDiff(patch) {
+function splitDiff(patch, names = null) {
   const files = [];
   let current = null;
+  let seen = 0;
   for (const line of String(patch ?? '').split('\n')) {
-    const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
-    if (header) {
-      current = { path: header[2], hunks: [], binary: false, lines: [] };
+    if (line.startsWith('diff --git ')) {
+      current = { path: names?.[seen] ?? headerPath(line), hunks: [], binary: false, lines: [] };
+      seen += 1;
       files.push(current);
       continue;
     }
@@ -64,12 +93,49 @@ function splitDiff(patch) {
   return files;
 }
 
-/** The after-side line numbers a hunk actually touched (added or context around a change). */
+/**
+ * Last resort when no name list was given — the caller's `diff-tree -z` list is the real
+ * authority (see `splitDiff`).
+ *
+ * Splitting on the LAST ` b/` is wrong for the same reason splitting on the first one is: a
+ * path like `a b/c.js` puts ` b/` INSIDE both halves, and `diff --git a/a b/c.js b/a b/c.js`
+ * then yields `c.js`. What is actually true of the header is that the two halves are IDENTICAL
+ * whenever the change is not a rename — and this app's diff runs without `-M`, so it never is.
+ * Split by that arithmetic first; only fall back to a search when the halves really differ.
+ */
+function headerPath(line) {
+  const rest = line.slice('diff --git '.length);
+  if (rest.startsWith('"')) {
+    /* `"a/x" "b/x"` — two quoted halves */
+    const close = rest.indexOf('" "');
+    if (close !== -1) return unquotePath(rest.slice(close + 2)).replace(/^b\//, '');
+  }
+  if (rest.startsWith('a/')) {
+    const n = (rest.length - 5) / 2;              // 'a/' + P + ' b/' + P
+    if (Number.isInteger(n) && n > 0
+        && rest.slice(2 + n, 5 + n) === ' b/' && rest.slice(2, 2 + n) === rest.slice(5 + n)) {
+      return rest.slice(5 + n);
+    }
+  }
+  const cut = rest.lastIndexOf(' b/');
+  if (cut === -1) return rest.replace(/^a\//, '');
+  return unquotePath(rest.slice(cut + 1)).replace(/^b\//, '');
+}
+
+/** The after-side line numbers a hunk ADDED. Context advances the counter and nothing more. */
 function changedLines(hunk) {
   const out = [];
   let afterLine = hunk.afterStart;
   for (const l of hunk.lines) {
-    if (l.startsWith('+')) { out.push(afterLine); afterLine += 1; continue; }
+    /* `\ No newline at end of file` is a NOTE about the previous line, not a line. Counting it
+     * put every later number one too high — a block then claimed a line the file does not have,
+     * and the line that really changed was claimed by nobody. Files without a trailing newline
+     * are ordinary. */
+    if (l.startsWith('\\')) continue;
+    /* D-127: 공백 줄만 바뀐 곳은 블록을 만들지 않는다. The line still ADVANCES the counter —
+     * it exists in the file — it just does not claim a block. Reformatting a file otherwise
+     * produced a block for every declaration it touched and nothing to read inside them. */
+    if (l.startsWith('+')) { if (l.slice(1).trim() !== '') out.push(afterLine); afterLine += 1; continue; }
     if (l.startsWith('-')) continue;                 // no after-side line
     afterLine += 1;
   }
@@ -81,7 +147,8 @@ function deletedLines(hunk) {
   const out = [];
   let beforeLine = hunk.beforeStart;
   for (const l of hunk.lines) {
-    if (l.startsWith('-')) { out.push(beforeLine); beforeLine += 1; continue; }
+    if (l.startsWith('\\')) continue;                // see changedLines
+    if (l.startsWith('-')) { if (l.slice(1).trim() !== '') out.push(beforeLine); beforeLine += 1; continue; }
     if (l.startsWith('+')) continue;
     beforeLine += 1;
   }
@@ -89,14 +156,25 @@ function deletedLines(hunk) {
 }
 
 /**
- * Named declarations in a source file, innermost first, with their line ranges.
- * @returns {{name:string, kind:string, start:number, end:number, depth:number}[]|null}
- *   null when the file cannot be parsed cleanly — the caller then uses S2 for the whole file.
+ * Every named declaration in a source file, with its line range and nesting depth.
+ *
+ * The order is the PARSE order — outermost first, since the walk is pre-order. It is not
+ * innermost-first, and nothing here may rely on the order: `innermost()` is what picks the
+ * containing declaration, and it does so by depth and span.
+ *
+ * @returns {{name:string, kind:string, start:number, end:number, depth:number, body:string}[]|null}
+ *   null when the file cannot be parsed, or cannot be walked — the caller then uses S2 whole.
  */
 function declarations(source, fileName) {
   const T = ts();
   if (!T) return null;
-  const sf = T.createSourceFile(fileName, source, T.ScriptTarget.Latest, true);
+  /* Both the parse and the walk below are recursive, so a VALID file nested deeply enough
+   * throws `RangeError: Maximum call stack size exceeded` — measured at 20 000 nested parens,
+   * inside `createSourceFile` itself. Uncaught, that escaped to the IPC boundary and took the
+   * whole change reader down for one file. S2-whole is what an unparseable file gets too. */
+  let sf;
+  try { sf = T.createSourceFile(fileName, source, T.ScriptTarget.Latest, true); }
+  catch { return null; }
   /* `parseDiagnostics` is not public API but it is what tells us the parse was clean. A block
    * derived from a broken parse is a unit nobody can trust, so the file goes to S2 whole. */
   if (sf.parseDiagnostics?.length) return null;
@@ -111,13 +189,13 @@ function declarations(source, fileName) {
         name, kind: T.SyntaxKind[node.kind],
         start: lineOf(node.getStart(sf)), end: lineOf(node.getEnd()),
         depth,
-        body: bodyText(sf, node, name),
+        body: bodyText(T, sf, node, name),
       });
       depth += 1;
     }
     node.forEachChild((child) => walk(child, depth));
   };
-  sf.forEachChild((child) => walk(child, 0));
+  try { sf.forEachChild((child) => walk(child, 0)); } catch { return null; }
   return out;
 }
 
@@ -128,19 +206,56 @@ function declaredName(T, node) {
   const named = (n) => (n && T.isIdentifier(n) ? n.text : null);
   if (T.isFunctionDeclaration(node) || T.isClassDeclaration(node)) return named(node.name);
   if (T.isMethodDeclaration(node) || T.isPropertyDeclaration(node)) return named(node.name);
+  /* 메서드 also means the accessor pair and the constructor. A getter is where a class's
+   * behaviour most often changes, and it was landing in the module-level hunk block. */
+  if (T.isGetAccessorDeclaration(node) || T.isSetAccessorDeclaration(node)) return named(node.name);
+  if (T.isConstructorDeclaration(node)) return 'constructor';
   if (T.isInterfaceDeclaration(node) || T.isTypeAliasDeclaration(node) || T.isEnumDeclaration(node)) return named(node.name);
-  if (T.isVariableDeclaration(node) && node.initializer
-      && (T.isArrowFunction(node.initializer) || T.isFunctionExpression(node.initializer)
-          || T.isClassExpression(node.initializer))) {
-    return named(node.name);
+  /* `const handler = { onSave: () => {...} }` — the arrow IS the unit a person points at, and
+   * `19` §C5-B's 화살표 함수 상수 does not stop at the module level. Without this the change
+   * was attributed to whatever contained the object, or to no declaration at all. */
+  if (T.isPropertyAssignment(node) && isFunctionLike(T, node.initializer)) return named(node.name);
+  if (T.isVariableDeclaration(node)) {
+    if (isFunctionLike(T, node.initializer)) return named(node.name);
+    /* `export const` is on `19` §C5-B's list in its own right — the exported config object is
+     * a unit whether or not it holds a function. A private local const is not. */
+    if (isExported(T, node)) return named(node.name);
   }
   return null;
 }
 
-/** The declaration's text with its NAME removed — the hash a rename is derived from (A-14). */
-function bodyText(sf, node, name) {
-  const text = sf.text.slice(node.getStart(sf), node.getEnd());
-  return text.split(name).join('\u0000NAME\u0000').replace(/\s+/g, ' ').trim();
+const isFunctionLike = (T, n) => Boolean(n) &&
+  (T.isArrowFunction(n) || T.isFunctionExpression(n) || T.isClassExpression(n));
+
+/** `export const x = …` — the modifier sits on the VariableStatement, two levels up. */
+function isExported(T, decl) {
+  const stmt = decl.parent?.parent;
+  if (!stmt || !T.isVariableStatement(stmt)) return false;
+  return Boolean(stmt.modifiers?.some((m) => m.kind === T.SyntaxKind.ExportKeyword));
+}
+
+/**
+ * The declaration's text with its NAME removed — the hash a rename is derived from (A-14).
+ *
+ * Replacement is by IDENTIFIER TOKEN, from the AST, not by substring. `text.split(name)` tore
+ * `function` apart when the declaration was named `f`, so two unrelated one-letter functions
+ * hashed alike and the reader claimed a rename that never happened. A word-boundary regex is
+ * no better: `\b` is ASCII-only, and a Korean identifier is the ordinary case here.
+ */
+function bodyText(T, sf, node, name) {
+  const start = node.getStart(sf);
+  const spans = [];
+  const scan = (n) => {
+    if (T.isIdentifier(n) && n.text === name) spans.push([n.getStart(sf) - start, n.getEnd() - start]);
+    n.forEachChild(scan);
+  };
+  try { scan(node); } catch { /* same depth ceiling as the walk — fall back to the raw text */ }
+
+  let text = sf.text.slice(start, node.getEnd());
+  for (const [a, b] of spans.sort((x, y) => y[0] - x[0])) {
+    text = text.slice(0, a) + '\u0000NAME\u0000' + text.slice(b);
+  }
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -154,14 +269,25 @@ function blocksFor(file, sources = {}) {
   const ext = path.extname(file.path).toLowerCase();
 
   if (file.binary) return { strategy: 'S2', blocks: [], note: 'undisplayable' };
-  const size = Math.max(sources.after?.length ?? 0, sources.before?.length ?? 0);
+  /* BYTES. `String.length` counts UTF-16 code units, so a 1 MiB Korean file measured ~350 K
+   * and went to S1; `19` §C5-B's threshold is a size on disk. */
+  const bytes = (t) => (t == null ? 0 : Buffer.byteLength(t, 'utf8'));
+  const size = Math.max(bytes(sources.after), bytes(sources.before));
   if (size > MAX_DISPLAY_BYTES) return { strategy: 'S2', blocks: [], note: 'too-large' };
 
   if (S1_EXT.has(ext)) {
+    /* No file content to parse is not a parse failure either — a non-Git basis cannot produce
+     * before/after text at all, and calling that `parse-failed` blamed the user's file. */
+    if (sources.after == null && sources.before == null) {
+      return { strategy: 'S2', blocks: hunkBlocks(file), note: 'no-source' };
+    }
     const semantic = semanticBlocks(file, sources);
     if (semantic) return { strategy: 'S1', blocks: semantic, note: null };
-    /* A parse we cannot trust is not a reason to invent units — the file goes to S2 whole. */
-    return { strategy: 'S2', blocks: hunkBlocks(file), note: 'parse-failed' };
+    /* A parse we cannot trust is not a reason to invent units — the file goes to S2 whole.
+     * `no-parser` is a DIFFERENT fact from `parse-failed`: one says this file has a syntax
+     * error, the other says JuQode shipped without the compiler. Reporting the install problem
+     * as a defect in the user's code sends them to debug the wrong thing. */
+    return { strategy: 'S2', blocks: hunkBlocks(file), note: ts() ? 'parse-failed' : 'no-parser' };
   }
 
   return {
@@ -280,11 +406,14 @@ const innermost = (decls, line) => {
   return best;
 };
 
-const hunkBlocks = (file) => file.hunks.map((h, i) => ({
-  name: null, kind: 'hunk', change: 'modify', ord: i,
-  afterLines: changedLines(h), beforeLines: deletedLines(h),
-  beforeStart: h.beforeStart, afterStart: h.afterStart,
-}));
+const hunkBlocks = (file) => file.hunks
+  .map((h, i) => ({
+    name: null, kind: 'hunk', change: 'modify', ord: i,
+    afterLines: changedLines(h), beforeLines: deletedLines(h),
+    beforeStart: h.beforeStart, afterStart: h.afterStart,
+  }))
+  /* Same D-127 rule one level up: a hunk left with no claiming line changed only whitespace. */
+  .filter((b) => b.afterLines.length || b.beforeLines.length);
 
 module.exports = { splitDiff, blocksFor, declarations, changedLines, deletedLines, isUnblocked,
                    MAX_DISPLAY_BYTES, UNBLOCKED_EXT, S1_EXT };

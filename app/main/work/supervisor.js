@@ -235,15 +235,13 @@ function changes(db, workId, project, store = null) {
   const after = repo.basisFor(db, workId, 'after');
   if (!before || !after) return { known: false, files: [] };
   if (before.kind === 'git_tree') {
-    /* The store path is passed in, not read from the live map: a finished Work is removed from
-     * that map, and History has to be able to answer 변경 n개 for a Work that ended. The caller
-     * derives the path from the project, which a restart also can. */
+    /* The caller's store path is PREFERRED over the live map, and the map is only the fallback:
+     * a finished Work is removed from that map, and History has to answer 변경 n개 for a Work
+     * that ended. The caller derives the path from the project, which a restart also can. */
     store = store ?? live.get(workId)?.store;
     if (!store) return { known: false, files: [] };
     try {
-      const patch = gitEvidence.diff(project.path, store, before.ref, after.ref);
-      const files = [...new Set([...patch.matchAll(/^diff --git a\/(\S+)/gm)].map((m) => m[1]))];
-      return { known: true, files };
+      return { known: true, files: gitEvidence.changedPaths(project.path, store, before.ref, after.ref) };
     } catch { return { known: false, files: [] }; }
   }
 
@@ -312,12 +310,30 @@ function finishResult(db, workId, project, store) {
   if (!work || work.status !== 'ended') return null;
   saveDiffs(db, workId, project, store);
   const entry = entryFor(db, workId) ?? { state: initial() };
-  const built = resultBuilder.build({
+  /* `saveResult` deletes and reinserts, so a SECOND call overwrites the first. On the cancel
+   * path there is always a second: `confirmCancel` writes the result from the live state and
+   * releases, then the child's own exit fires this again — with the entry gone, `entryFor`
+   * rebuilds a bare state and the rewrite lands 된 것 없음 · 안 된 것 없음 under a 부분 완료
+   * card, which is exactly what WBS-18's acceptance row forbids. So: an EXISTING result is
+   * never replaced by one rebuilt from the row. A Work that ended while the app was gone has
+   * no result yet, and still gets one. */
+  if (entry.hydrated) {
+    const written = repo.resultFor(db, workId);
+    if (written) return written;
+  }
+  const { result, problems } = resultBuilder.buildChecked({
     state: { ...entry.state, outcome: work.outcome },
     changes: changes(db, workId, project, store),
     signals: repo.signalsFor(db, workId),
   });
-  return repo.saveResult(db, workId, built);
+  /* An invariant we broke is a fact about this Work, so it goes on the record rather than into
+   * a log the user cannot see. `buildChecked` has already downgraded any sourceless 확인됨 to
+   * 확인 못함; a missing 된 것/안 된 것 list it can only REPORT, which is why this is written
+   * whatever the problem was. */
+  if (problems.length) {
+    writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW, payload: JSON.stringify({ resultProblems: problems }) });
+  }
+  return repo.saveResult(db, workId, result);
 }
 
 /**
@@ -328,14 +344,19 @@ function saveDiffs(db, workId, project, store) {
   const before = repo.basisFor(db, workId, 'before');
   const after = repo.basisFor(db, workId, 'after');
   if (!before || !after || before.kind !== 'git_tree' || !store || !project?.path) return;
-  let patch;
-  try { patch = gitEvidence.diff(project.path, store, before.ref, after.ref); } catch { return; }
-  for (const file of blocks.splitDiff(patch)) {
+  let patch, names;
+  try {
+    patch = gitEvidence.diff(project.path, store, before.ref, after.ref);
+    /* The SAME list `changes()` reports. Two parsers reading one patch is how the 확인됨 claim
+     * and the change reader came to disagree on every quoted, spaced and renamed path. */
+    names = gitEvidence.changedPaths(project.path, store, before.ref, after.ref);
+  } catch { return; }
+  for (const file of blocks.splitDiff(patch, names)) {
     repo.saveDiff(db, workId, {
       file: file.path,
       patch: file.lines.join('\n'),
       displayable: !file.binary,
-    });
+    }, store);
   }
 }
 
@@ -347,13 +368,20 @@ function blocksFor(db, workId, project, store) {
   const before = repo.basisFor(db, workId, 'before');
   const after = repo.basisFor(db, workId, 'after');
   return repo.diffsFor(db, workId).map((d) => {
-    const file = blocks.splitDiff(`diff --git a/${d.file} b/${d.file}\n${d.patch}`)[0];
+    /* The path is given, not re-parsed out of the header this line writes: `d.file` came from
+     * git plumbing and may hold a space or a non-ASCII byte that no header regex survives. */
+    const file = blocks.splitDiff(`diff --git a/x b/x\n${d.patch}`, [d.file])[0];
     if (!file) return { file: d.file, strategy: 'S2', blocks: [], note: 'unreadable' };
     const sources = (before && after && project?.path && store && before.kind === 'git_tree')
       ? { before: gitEvidence.fileAt(project.path, store, before.ref, d.file),
           after: gitEvidence.fileAt(project.path, store, after.ref, d.file) }
       : {};
-    return { file: d.file, ...blocks.blocksFor(file, sources) };
+    const out = blocks.blocksFor(file, sources);
+    /* A patch over the head limit was split into blocks from the part we KEPT, and the result
+     * looked complete. The note is what stops the reader believing the change ends there;
+     * `d.ref` is where the whole patch actually is (D-129). */
+    if (d.truncated) return { file: d.file, ...out, note: 'truncated', ref: d.ref };
+    return { file: d.file, ...out };
   });
 }
 
