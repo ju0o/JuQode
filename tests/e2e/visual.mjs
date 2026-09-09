@@ -753,9 +753,10 @@ const bridge = JSON.parse(results.bridge);
 assert.strictEqual(results.ready, true, 'renderer did not initialise');
 assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.screen}`);
 assert.deepStrictEqual(bridge.keys.sort(),
-  ['boot', 'brief', 'claudeStatus', 'history', 'interpret', 'onWorkUpdate', 'openPath',
-   'openProject', 'routeIntent', 'versions', 'workAllow', 'workAnswer', 'workCancel',
-   'workChanges', 'workExplain', 'workGet', 'workReader', 'workSignals', 'workStart'],
+  ['boot', 'brief', 'claudeStatus', 'history', 'interpret', 'onQcUpdate', 'onWorkUpdate',
+   'openPath', 'openProject', 'qcList', 'qcRoute', 'qcRun', 'qcRuns', 'qcStop', 'routeIntent',
+   'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges', 'workExplain', 'workGet',
+   'workReader', 'workSignals', 'workStart'],
   'renderer API surface is not exactly the declared one');
 assert.strictEqual(bridge.require, 'undefined', 'require leaked into the renderer');
 assert.strictEqual(bridge.process, 'undefined', 'process leaked into the renderer');

@@ -572,3 +572,195 @@ test('the displayed command and the executed argv describe the same thing', () =
       `${rule.id}: the card says "${a.data.command}" and the spawn runs "${a.data.argv.join(' ')}"`);
   }
 });
+
+/* ───────── the drawer's main-process surface — `15` TD-01 · `19` §C4 ───────── */
+
+const { openDb } = require(path.join(R, 'app/main/db/db.js'));
+const repo = require(path.join(R, 'app/main/db/repo.js'));
+const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+
+function qcBench(files = { 'package.json': pkg({ test: 'node -e "console.log(1)"', build: 'node -e "process.exit(2)"' }) }) {
+  const dir = project(files);
+  const db = openDb(':memory:');
+  const proj = repo.openProject(db, dir, path.basename(dir));
+  const pushed = [];
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x',
+                           push: () => {}, pushQc: (u) => pushed.push(u) });
+  return { dir, db, project: proj, h, pushed };
+}
+
+test('routing explains and runs NOTHING', () => {
+  /* `19` §C4: 항상 설명 후 확인. The explanation is its own round trip, so nothing can be
+   * started by typing — only by confirming. */
+  const b = qcBench();
+  const r = b.h['juqode:qc-route'](null, b.project.id, '테스트 돌려줘');
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.route.id, 'qc.test');
+  assert.strictEqual(r.available, true);
+  assert.strictEqual(r.data.command, 'npm run test');
+  /* …and no row exists, because nothing ran (`20` F-12). */
+  assert.deepStrictEqual(repo.qcRunsFor(b.db, b.project.id), []);
+});
+
+test('미인식 and 모호함 are cards, not rows', () => {
+  const b = qcBench();
+  const un = b.h['juqode:qc-route'](null, b.project.id, 'rm -rf 해줘');
+  assert.strictEqual(un.route.kind, 'unrecognized');
+  assert.ok(!un.rule, 'an unrecognised phrase was given a rule');
+
+  const am = b.h['juqode:qc-route'](null, b.project.id, '서버 좀 정리해줘');
+  assert.strictEqual(am.route.kind, 'ambiguous');
+  assert.deepStrictEqual(am.route.readings, ['qc.dev.stop', 'work']);
+  assert.deepStrictEqual(repo.qcRunsFor(b.db, b.project.id), [], 'a card became history');
+});
+
+test('an unavailable rule explains WHY and still does not run', () => {
+  const b = qcBench({ 'package.json': pkg({}) });          // no scripts at all
+  const r = b.h['juqode:qc-route'](null, b.project.id, '빌드 해줘');
+  assert.strictEqual(r.route.id, 'qc.build');
+  assert.strictEqual(r.available, false);
+  assert.strictEqual(r.reason, 'no_script');
+
+  return b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘').then((run) => {
+    assert.strictEqual(run.ok, false);
+    assert.strictEqual(run.reason, 'unavailable');
+    assert.strictEqual(run.detail, 'no_script');
+    assert.deepStrictEqual(repo.qcRunsFor(b.db, b.project.id), [], 'a refused run became history');
+  });
+});
+
+test('a rule id outside the closed six is refused before anything is looked up', async () => {
+  const b = qcBench();
+  for (const id of ['qc.rm.rf', 'rm', '', null, 42, '../../etc/passwd']) {
+    const r = await b.h['juqode:qc-run'](null, b.project.id, id, 'x');
+    assert.strictEqual(r.ok, false, `${JSON.stringify(id)} was accepted`);
+    assert.strictEqual(r.reason, 'unknown-rule');
+  }
+});
+
+test('a run that succeeds becomes a row with its code and its output', async () => {
+  const b = qcBench();
+  const started = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
+  assert.strictEqual(started.ok, true);
+  assert.ok(started.pid > 0);
+  assert.strictEqual(started.command, 'npm run test');
+
+  /* Wait for the push that says it ended, rather than for a clock. */
+  await new Promise((res) => {
+    const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
+  });
+
+  const [row] = repo.qcRunsFor(b.db, b.project.id);
+  assert.strictEqual(row.rule_id, 'qc.test');
+  assert.strictEqual(row.status, 'success');
+  assert.strictEqual(row.exit_code, 0);
+  assert.strictEqual(row.phrase, '테스트 돌려줘', 'the user\'s own words are what the row is named by');
+  assert.ok(row.output_head.includes('1'), 'the output was not kept');
+});
+
+test('a run that fails says so, with the code — never as success', async () => {
+  /* `07` §8.1 · `19` §C4: 종료 코드 숨기지 않음. */
+  const b = qcBench();
+  await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘');
+  await new Promise((res) => {
+    const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
+  });
+  const [row] = repo.qcRunsFor(b.db, b.project.id);
+  assert.strictEqual(row.status, 'failed');
+  assert.strictEqual(row.exit_code, 2);
+});
+
+test('two Quick Commands cannot run at once in one project', async () => {
+  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setTimeout(()=>{},5000)"', test: 'node -e "1"' }) });
+  const first = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.start', '서버 켜줘');
+  assert.strictEqual(first.ok, true);
+  assert.strictEqual(first.kind, 'long_running');
+
+  const second = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
+  assert.strictEqual(second.ok, false);
+  assert.strictEqual(second.reason, 'already-running');
+
+  /* `20` `qc_status` separates `running` from `long_running`, and `15` TD-01 shows 계속 실행 중
+   * for the second — never 완료. The ROW is what a restart reads, so the row has to carry it. */
+  assert.strictEqual(repo.qcRunning(b.db, b.project.id).status, 'long_running',
+    'a long-running command was recorded as an ordinary one');
+
+  b.h['juqode:qc-stop'](null, b.project.id);
+  await new Promise((res) => {
+    const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
+  });
+});
+
+test('a running dev server makes 켜기 사용 불가 and 끄기 가능 — from the handle, not a guess', async () => {
+  /* `19` §C4: only a server JuQode ITSELF started can be stopped, and `already_running` names
+   * the pid so the user can see WHICH process the product means. */
+  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setTimeout(()=>{},5000)"' }) });
+  const stopBefore = b.h['juqode:qc-stop'](null, b.project.id);
+  assert.strictEqual(stopBefore.ok, false);
+  assert.strictEqual(stopBefore.reason, 'not-running', 'something offered to stop a server nobody started');
+
+  await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.start', '서버 켜줘');
+
+  const again = b.h['juqode:qc-route'](null, b.project.id, '개발 서버 켜줘');
+  assert.strictEqual(again.available, false);
+  assert.strictEqual(again.reason, 'already_running');
+  assert.ok(again.data.pid > 0, 'the reason did not name the process it is about');
+
+  const off = b.h['juqode:qc-route'](null, b.project.id, '개발 서버 꺼줘');
+  assert.strictEqual(off.available, true, '끄기 is unavailable while a server JuQode started is up');
+
+  b.h['juqode:qc-stop'](null, b.project.id);
+  await new Promise((res) => {
+    const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
+  });
+  const [row] = repo.qcRunsFor(b.db, b.project.id);
+  assert.strictEqual(row.status, 'stopped', 'a stopped server was recorded as finished');
+});
+
+test('the discoverability list names every rule and why each cannot run', () => {
+  /* `15` TD-01: 전부 사용 불가 여도 이유와 함께 나열한다. */
+  const b = qcBench({ });                                    // no package.json, no .git
+  const r = b.h['juqode:qc-list'](null, b.project.id);
+  assert.strictEqual(r.rules.length, 6, 'the list is the closed set');
+  for (const rule of r.rules) {
+    if (rule.available) continue;
+    assert.ok(rule.reason, `${rule.id} is unavailable and says nothing about why`);
+  }
+  /* …and the terminal is always available, so "all unavailable" is not the only shape tested. */
+  assert.strictEqual(r.rules.find((x) => x.id === 'qc.terminal.open').available, true);
+});
+
+test('a Quick Command whose process vanished becomes 확인 불가, not success', () => {
+  /* WBS-34 for QC rows. `20`: exit_code STAYS NULL — nobody observed one. */
+  const b = qcBench();
+  const id = repo.beginQcRun(b.db, b.project.id, {
+    phrase: '서버 켜줘', ruleId: 'qc.dev.start', command: 'npm run dev', status: 'long_running' });
+  assert.deepStrictEqual(repo.reconcileQcRuns(b.db, () => true), [], 'a live run was closed');
+
+  assert.deepStrictEqual(repo.reconcileQcRuns(b.db), [id]);
+  const row = repo.qcRun(b.db, id);
+  assert.strictEqual(row.status, 'unknown');
+  assert.strictEqual(row.exit_code, null, 'an exit code was invented for a process nobody saw end');
+});
+
+test('a running TEST is not a dev server', async () => {
+  /* The handle answers "is a dev server up?", and only a `qc.dev.start` handle may. Treating any
+   * live Quick Command as a server would offer to stop a test run under the 개발 서버 끄기 card
+   * — and would mark 켜기 as 이미 실행 중 while nothing was serving anything. */
+  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setTimeout(()=>{},5000)"',
+                                            test: 'node -e "setTimeout(()=>{},5000)"' }) });
+  const started = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
+  assert.strictEqual(started.ok, true);
+
+  const off = b.h['juqode:qc-route'](null, b.project.id, '개발 서버 꺼줘');
+  assert.strictEqual(off.available, false, 'a running test was offered as a server to stop');
+  assert.strictEqual(off.reason, 'not_running');
+
+  const on = b.h['juqode:qc-route'](null, b.project.id, '개발 서버 켜줘');
+  assert.strictEqual(on.reason, null, 'a running test made 서버 켜기 look already-running');
+
+  b.h['juqode:qc-stop'](null, b.project.id);
+  await new Promise((res) => {
+    const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
+  });
+});

@@ -25,6 +25,14 @@ contextBridge.exposeInMainWorld('juqode', {
   /** WBS-05 — the Brief as it stands, and whether it has aged. Reads; never re-reads. */
   brief: (projectId) => ipcRenderer.invoke('juqode:brief', projectId),
 
+  /* WBS-22 · TD-01 — Quick Commands. `19` §C4: 항상 설명 후 확인, so recognising and running are
+   * two separate calls and nothing can be started by typing. */
+  qcRoute: (projectId, phrase) => ipcRenderer.invoke('juqode:qc-route', projectId, phrase),
+  qcList:  (projectId) => ipcRenderer.invoke('juqode:qc-list', projectId),
+  qcRun:   (projectId, ruleId, phrase) => ipcRenderer.invoke('juqode:qc-run', projectId, ruleId, phrase),
+  qcStop:  (projectId) => ipcRenderer.invoke('juqode:qc-stop', projectId),
+  qcRuns:  (projectId) => ipcRenderer.invoke('juqode:qc-runs', projectId),
+
   /** WBS-09 — is Claude Code usable right now, and if not, why. Never carries credentials. */
   claudeStatus: () => ipcRenderer.invoke('juqode:claude-detect'),
 
@@ -59,4 +67,12 @@ contextBridge.exposeInMainWorld('juqode', {
     ipcRenderer.on('juqode:work-update', handler);
     return () => ipcRenderer.removeListener('juqode:work-update', handler);
   },
+  /** WBS-22 — a Quick Command's live tail. Same shape: the listener owns its own removal, and
+   * the raw IpcRendererEvent never reaches the renderer (it carries `sender`). */
+  onQcUpdate: (fn) => {
+    const handler = (_e, update) => fn(update);
+    ipcRenderer.on('juqode:qc-update', handler);
+    return () => ipcRenderer.removeListener('juqode:qc-update', handler);
+  },
+
 });

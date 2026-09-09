@@ -16,6 +16,9 @@ const claude = require('./claude-detect');
 const supervisor = require('./work/supervisor');
 const explain = require('./change/explain');
 const narrate = require('./interpret/narrate');
+const qcRules = require('./qc/rules');
+const qcAvail = require('./qc/availability');
+const qcRun = require('./qc/run');
 const { classify } = require('./router/intent');
 const { scan } = require('./interpret/scan');
 const { answers, statusOf } = require('./interpret/answers');
@@ -55,6 +58,13 @@ function orientationOf(works) {
 
 function makeHandlers(deps) {
   const db = () => deps.db();
+  /* The dev server JuQode ITSELF started, or null. `19` §C4: a server the user started in their
+   * own terminal has no handle here and is never signalled. */
+  const devServerOf = (projectId) => {
+    const live = qcLive.get(projectId);
+    if (!live || live.ruleId !== 'qc.dev.start') return null;
+    return { pid: live.handle.pid, startedAt: live.handle.startedAt, command: live.command };
+  };
   const needDb = () => (db() ? null : { ok: false, reason: 'no-store', detail: deps.dbFault?.() ?? null });
 
   /* A workId is a name the renderer supplies, so every channel that takes one checks the Work
@@ -66,6 +76,9 @@ function makeHandlers(deps) {
   let detecting = null;
   /* Projects with an explanation pass in flight — see `juqode:work-explain`. */
   const explaining = new Set();
+  /* WBS-22 · live Quick Command handles, by project. `19` §C4 keeps {pid, started_at} because a
+   * long-running command has to be stoppable, and `07` §8.5 makes a pid alone insufficient. */
+  const qcLive = new Map();
   /* …and with a narrative pass in flight (`19` §C1 ⑦). Both spawn a Claude Code child. */
   const narrating = new Set();
 
@@ -181,6 +194,108 @@ function makeHandlers(deps) {
       return { ok: true,
                interpretation: current,
                stale: { changed, days: daysSince(current.created_at), at: current.created_at } };
+    },
+
+    /* WBS-22 · what a phrase MEANS, and whether it could run. Recognises and explains; runs
+     * NOTHING. `19` §C4: 항상 설명 후 확인 — the explanation is a separate round trip from the
+     * execution, so nothing can be started by typing. */
+    'juqode:qc-route': (_e, projectId, phrase) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const row = db().prepare('select * from project where id = ?').get(projectId);
+      if (!row) return { ok: false, reason: 'no-project' };
+
+      const match = qcRules.match(String(phrase ?? ''));
+      if (match.kind !== 'qc') {
+        /* 미인식 and 모호함 are CARDS, not rows (`20` F-12). Neither is an error: `15` TD-01
+         * paints 미인식 neutral, and an ambiguity names its readings and runs nothing. */
+        return { ok: true, route: match, phrase: String(phrase ?? '') };
+      }
+
+      const rule = qcRules.ruleById(match.id);
+      const avail = qcAvail.availability(match.id, { root: row.path, devServer: devServerOf(projectId) });
+      return { ok: true, route: match, phrase: String(phrase ?? ''),
+               rule: { id: rule.id, kind: rule.kind, risk: rule.risk, stopRule: rule.stopRule ?? null },
+               available: avail.available, reason: avail.reason, data: avail.data };
+    },
+
+    /* WBS-22 · everything the drawer can offer, with why each one can or cannot run right now.
+     * `15` TD-01 지원 동작 알아보기: 전부 사용 불가여도 이유와 함께 나열한다. */
+    'juqode:qc-list': (_e, projectId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const row = db().prepare('select * from project where id = ?').get(projectId);
+      if (!row) return { ok: false, reason: 'no-project' };
+      const dev = devServerOf(projectId);
+      return { ok: true, rules: qcRules.RULES.map((r) => {
+        const a = qcAvail.availability(r.id, { root: row.path, devServer: dev });
+        return { id: r.id, kind: r.kind, risk: r.risk,
+                 available: a.available, reason: a.reason, data: a.data };
+      }) };
+    },
+
+    /* WBS-22 · run it. The caller has seen the explanation and confirmed — `19` §C4 requires
+     * both, and this handler is the only thing that spawns. */
+    'juqode:qc-run': async (_e, projectId, ruleId, phrase) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const row = db().prepare('select * from project where id = ?').get(projectId);
+      if (!row) return { ok: false, reason: 'no-project' };
+      /* The id must be one of the SIX. A renderer that could name any string could ask for a
+       * rule the table does not have, and `20`'s foreign key would be the only thing left. */
+      if (!qcRules.ruleById(ruleId)) return { ok: false, reason: 'unknown-rule' };
+      if (qcLive.has(projectId)) return { ok: false, reason: 'already-running' };
+
+      const rule = qcRules.ruleById(ruleId);
+      const avail = qcAvail.availability(ruleId, { root: row.path, devServer: devServerOf(projectId) });
+      /* Availability is re-checked HERE, not trusted from the card: the project can change
+       * between the explanation and the confirmation, and the card is a snapshot. */
+      if (!avail.available) return { ok: false, reason: 'unavailable', detail: avail.reason, data: avail.data };
+      if (!avail.data.argv) return { ok: false, reason: 'not-executable' };
+
+      const status = rule.kind === 'long_running' ? 'long_running' : 'running';
+      const runId = repo.beginQcRun(db(), projectId, {
+        phrase: String(phrase ?? ''), ruleId, command: avail.data.command, status,
+      });
+
+      const handle = qcRun.start({
+        argv: avail.data.argv, cwd: row.path, kind: rule.kind,
+        onUpdate: (u) => deps.pushQc?.({ runId, projectId, ruleId, ...u }),
+      });
+      qcLive.set(projectId, { runId, ruleId, handle, command: avail.data.command });
+
+      handle.done.then((res) => {
+        qcLive.delete(projectId);
+        repo.endQcRun(db(), runId, {
+          /* `20` `qc_status`: success · failed · stopped · unknown. `07` §8.1 — a signalled
+           * child is `stopped`, never `success`, whatever code it carried. */
+          status: res.state === 'ok' ? 'success' : res.state,
+          exitCode: res.code, outputHead: res.output ?? null,
+          endedAt: res.endedAt, stoppedAt: res.signal ? res.endedAt : null,
+        });
+        deps.pushQc?.({ runId, projectId, ruleId, ...res, ended: true });
+      });
+
+      return { ok: true, runId, pid: handle.pid, startedAt: handle.startedAt,
+               command: avail.data.command, kind: rule.kind };
+    },
+
+    /* WBS-22 · stop the one JuQode started. `19` §C4: JuQode 밖에서 켠 서버는 끄지 않는다 —
+     * there is no handle for one, so there is nothing here that could. */
+    'juqode:qc-stop': (_e, projectId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const live = qcLive.get(projectId);
+      if (!live) return { ok: false, reason: 'not-running' };
+      live.handle.stop();
+      return { ok: true, runId: live.runId };
+    },
+
+    /* WBS-22 · this project's Quick Command history. */
+    'juqode:qc-runs': (_e, projectId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      return { ok: true, runs: repo.qcRunsFor(db(), projectId) };
     },
 
     /* One probe at a time. Each call spawns up to two `claude` processes held for up to 8 s. */

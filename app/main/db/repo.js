@@ -354,6 +354,58 @@ const changeGroupsFor = (db, workId) =>
                        where f.change_group_id = ? order by r.file`).all(g.id).map((r) => r.file),
   }));
 
+/* ── WBS-22 · Quick Command runs ──────────────────────────────────────────────────
+ * `20` F-12: a Quick Command that was only EXPLAINED does not become a row — the same rule a
+ * Work that never started obeys. 미인식 and 지금 안 됨 are cards, not history. A row exists
+ * exactly when something was actually spawned.
+ */
+function beginQcRun(db, projectId, { phrase, ruleId, command, status, startedAt }) {
+  const id = randomUUID();
+  db.prepare(`insert into quick_command_run
+                (id, project_id, phrase, rule_id, command, status, started_at, created_at)
+              values (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, projectId, phrase, ruleId, command, status, startedAt ?? now(), now());
+  return id;
+}
+
+/**
+ * The run, once it ended. `19` §C4: 종료 코드·stderr 숨기지 않음 — the code is written as the
+ * code, including when it is null because the program never started.
+ */
+function endQcRun(db, id, { status, exitCode = null, outputHead = null, outputRef = null,
+                            endedAt = null, stoppedAt = null }) {
+  db.prepare(`update quick_command_run
+                 set status = ?, exit_code = ?, output_head = ?, output_ref = ?,
+                     ended_at = ?, stopped_at = ?
+               where id = ?`)
+    .run(status, exitCode, outputHead, outputRef, endedAt ?? now(), stoppedAt, id);
+}
+
+const qcRunsFor = (db, projectId, limit = 20) =>
+  db.prepare(`select * from quick_command_run where project_id = ?
+              order by created_at desc, rowid desc limit ?`).all(projectId, limit);
+
+const qcRun = (db, id) => db.prepare('select * from quick_command_run where id = ?').get(id) ?? null;
+
+/** The one still going, if any. `19` §C4: only a server JuQode itself started can be stopped. */
+const qcRunning = (db, projectId) =>
+  db.prepare(`select * from quick_command_run
+              where project_id = ? and status in ('running','long_running')
+              order by created_at desc, rowid desc limit 1`).get(projectId) ?? null;
+
+/**
+ * WBS-34 · a run whose process is gone. `20` says it plainly: it becomes `unknown`, and the
+ * exit code STAYS NULL — nobody observed one. Whatever output was captured is kept.
+ */
+function reconcileQcRuns(db, isAlive = () => false) {
+  const stranded = db.prepare("select * from quick_command_run where status in ('running','long_running')").all()
+    .filter((r) => !isAlive(r));
+  const stmt = db.prepare("update quick_command_run set status = 'unknown', ended_at = ? where id = ?");
+  const at = now();
+  for (const r of stranded) stmt.run(at, r.id);
+  return stranded.map((r) => r.id);
+}
+
 /* ── WBS-12 · Steps — only what Claude Code actually declared (D-107) ── */
 function upsertStep(db, workId, { ord, title, state }) {
   const at = now();
@@ -432,6 +484,7 @@ module.exports = {
   upsertStep, stepsFor,
   saveResult, resultFor,
   saveDiff, diffsFor, pruneDiffs,
+  beginQcRun, endQcRun, qcRunsFor, qcRun, qcRunning, reconcileQcRuns,
   saveChangeGroups, changeGroupsFor,
   reconcileLostWorks, reconcileInterpretations, processFor,
 };

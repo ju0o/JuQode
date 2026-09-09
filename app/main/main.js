@@ -75,12 +75,19 @@ if (!app.requestSingleInstanceLock()) {
     if (!snap) return;
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:work-update', snap);
   };
+  /* WBS-22 · a Quick Command's live tail. Its own channel, because TD-01 is a drawer over
+   * whatever screen is up — a QC update is not a Work update and must not redraw one. */
+  const pushQc = (u) => {
+    if (!u) return;
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:qc-update', u);
+  };
 
   const handlers = makeHandlers({
     db: () => db,
     dbFault: () => dbFault,
     evidenceStore: (projectId) => path.join(evidenceRoot(), projectId),
     push: pushUpdate,
+    pushQc,
     windowFor: (e) => BrowserWindow.fromWebContents(e.sender),
     versions: () => ({
       app: app.getVersion(),
