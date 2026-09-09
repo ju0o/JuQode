@@ -22,8 +22,27 @@ function openProject(db, absPath, name) {
 }
 
 /** SC-01 recent list (A-8 — Founder-pending, and SC-01 is complete without it). */
+/**
+ * `15` SC-01 · UF-RETURN: each recent row carries its LAST Work — the intent as the user typed
+ * it, and the outcome.
+ *
+ * A left join to the newest `work` per project, and nothing more: a row whose project has never
+ * had a Work carries `null`, which the screen renders as nothing rather than as an empty
+ * summary. `20` orders Works by `started_at`, so "last" means last STARTED — a Work that is
+ * still running is the last one, which is exactly what a returning user needs to see.
+ */
 function recentProjects(db, limit = 8) {
-  return db.prepare('select * from project order by last_opened_at desc limit ?').all(limit);
+  return db.prepare(`
+    select p.*,
+           w.intent  as last_work_intent,
+           w.status  as last_work_status,
+           w.outcome as last_work_outcome
+      from project p
+      left join work w
+        on w.id = (select id from work where project_id = p.id
+                    order by started_at desc, rowid desc limit 1)
+     order by p.last_opened_at desc
+     limit ?`).all(limit);
 }
 
 /* ── WBS-03 · interpretation ──────────────────────────────────────────────────────

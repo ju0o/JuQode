@@ -1116,6 +1116,19 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트')).click()`);
   await sleep(700);
   out.screenAfterBack = await evalJs('window.__screen()');
+  /* `15` SC-01 · UF-RETURN: a recent row carries its LAST Work — the intent as typed, plus the
+   * outcome. This run has ended several Works in the seeded project, so the top row has one. */
+  out.recentLast = await evalJs(`document.querySelector('[data-el="recent-row"] .recentlast')?.innerText ?? null`);
+  /* `15` SC-01's return state has its own picture: the first shot is taken before any Work
+   * exists, so it cannot show this. */
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(250);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc01-return-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await sleep(200);
   out.recentAfterBack = await evalJs('document.querySelectorAll(\'[data-el="recent-row"]\').length');
   out.recentTopAfterBack = await evalJs(`document.querySelector('[data-el="recent-row"] .path')?.textContent ?? null`);
 
@@ -1864,6 +1877,12 @@ assert.strictEqual(results.guardKeptText, '로그인 오류 고쳐줘',
 assert.strictEqual(results.guardReds, 0, 'the guard card is rendered as a failure');
 
 assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기 did not return to SC-01');
+assert.ok(results.recentLast, 'a recent row carries no last-Work summary (`15` UF-RETURN)');
+assert.ok(results.recentLast.includes('마지막 작업'),
+  `the summary is not labelled: ${results.recentLast}`);
+assert.ok(results.recentLast.includes('README.md 의 첫 줄을 바꿔줘'),
+  `the summary does not quote the user's own request: ${results.recentLast}`);
+
 assert.strictEqual(results.recentAfterBack, 2, 'the recent list lost a row on return');
 assert.ok(results.recentTopAfterBack && results.recentTopAfterBack.endsWith(path.basename(SEED)),
   'the just-opened project is not at the top of the recent list — the list was not re-read');

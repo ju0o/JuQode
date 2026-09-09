@@ -443,6 +443,16 @@ function resultCard(snap, api, nav, state) {
     card.appendChild(box);
   }
 
+  /* `15` SC-03 Remaining-unknown (UF-REMAIN-UNKNOWN) — dashed, never red.
+   *
+   * The result already carries a `changes-unknown` CLAIM, which says the evidence pair could
+   * not tell. That is the fact; this is the STATE `15` builds on it, and it is a different
+   * thing: a claim row explains, a state offers the three ways out. Without it a user whose
+   * cancel left an unknown remainder was told so and given nothing to do about it. */
+  if ((snap.result?.claims ?? []).some((c) => c.kind === 'changes-unknown')) {
+    card.appendChild(remainPanel(snap, nav, state));
+  }
+
   /* WBS-38 · these are D-136's own examples of 다음 행동 — 변경 내용 보기 · 프로젝트로 돌아가기.
    * They are JuQode's offer, and the block says so; Claude's NEXT lives on the Steps card and
    * is text, not buttons. */
@@ -462,6 +472,31 @@ function resultCard(snap, api, nav, state) {
 
   card.appendChild(el('div', 'xs mut2 foot', C.rules.noRollback));
   return card;
+}
+
+/**
+ * `15` SC-03 Remaining-unknown. Dashed and neutral — `12` §16: not knowing is not failing.
+ *
+ * Three ways out, and each goes somewhere real. `▸ 터미널` is the third in `15`'s list and is
+ * the shared top-bar control, so it is offered here as the same action rather than as a second
+ * one that does something slightly different.
+ */
+function remainPanel(snap, nav, state) {
+  const panel = el('div', 'panel unk');
+  panel.setAttribute('data-el', 'remain-unknown');
+  panel.appendChild(el('div', 'sm t', C.work.remainTitle));
+  panel.appendChild(el('div', 'xs mut', C.work.remainBody));
+  const acts = el('div', 'row-acts');
+  acts.appendChild(btn('btn sm ghost rec', C.work.remainRead, () => nav.toReader(snap)));
+  acts.appendChild(btn('btn sm ghost rec', C.work.terminal, () => window.__toggleDrawer?.()));
+  acts.appendChild(btn('btn sm ghost rec', C.work.remainNew, () => {
+    /* A NEW Work, through the intent field — like every correction (D-115). The sentence is
+     * prefilled and NOT submitted: `12` treats sending as consent to change files. */
+    nav.toWorkbench(state.project, state.interpretation,
+                    { intent: C.gap.correctionIntent(snap.work.intent) });
+  }));
+  panel.appendChild(acts);
+  return panel;
 }
 
 /**

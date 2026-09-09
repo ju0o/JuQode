@@ -93,6 +93,13 @@ async function pick(db, win, remember = () => {}) {
   return openPath(db, chosen);
 }
 
-const recent = (db) => recentProjects(db);
+/* `15` SC-01 · UF-RETURN. The store hands back the join's columns; the screen gets an object or
+ * `null`, so a project with no Work cannot render a summary made of undefineds. */
+const recent = (db) => recentProjects(db).map((p) => ({
+  ...p,
+  lastWork: p.last_work_intent == null ? null : {
+    intent: p.last_work_intent, status: p.last_work_status, outcome: p.last_work_outcome,
+  },
+}));
 
 module.exports = { inspect, openPath, pick, recent };

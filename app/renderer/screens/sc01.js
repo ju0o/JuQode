@@ -130,6 +130,17 @@ function storeCard(reason) {
   return n;
 }
 
+/* The schema's outcome codes → `18`'s own title keys. Same table as SC-02's History and
+ * SC-03's result; `cancelled_nochange` is NEUTRAL — the user stopped it, which is not 지금 안 됨. */
+const LAST_OUTCOME = {
+  complete:           { cls: 'ok',   key: 'complete' },
+  partial:            { cls: 'part', key: 'partial' },
+  failed:             { cls: 'fail', key: 'failed' },
+  cancelled_partial:  { cls: 'part', key: 'cancelled_partial' },
+  cancelled_nochange: { cls: '',     key: 'cancelled_none' },
+  ended_unknown:      { cls: 'unk',  key: null },
+};
+
 function recentRow(p, onOpen) {
   const row = el('button', 'recentrow');
   row.type = 'button';
@@ -137,5 +148,19 @@ function recentRow(p, onOpen) {
   row.addEventListener('click', onOpen);
   row.appendChild(el('span', 'nm', p.name));
   row.appendChild(el('span', 'xs mut path', p.path));
+  /* `15` SC-01 · UF-RETURN: the row says what was last DONE here, so a returning user
+   * recognises the project by its work rather than by its folder name. Drawn only when there
+   * IS a last Work — an empty summary would be a row saying nothing at greater length. */
+  if (p.lastWork) {
+    const last = el('div', 'xs mut recentlast');
+    last.appendChild(el('span', 'lbl', C.sc01.lastWork));
+    last.appendChild(el('span', 'val', p.lastWork.intent));
+    const o = LAST_OUTCOME[p.lastWork.outcome];
+    /* Running is not an outcome. A Work that has not ended gets the waiting chip, never one of
+     * the five terminal titles. */
+    if (p.lastWork.status !== 'ended') last.appendChild(el('span', 'chip wait', C.gap.historyRunning));
+    else if (o) last.appendChild(el('span', `chip ${o.cls}`, C.work.resultTitle[o.key] ?? C.work.unknownTitle));
+    row.appendChild(last);
+  }
   return row;
 }

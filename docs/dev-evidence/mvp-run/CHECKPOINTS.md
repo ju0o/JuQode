@@ -616,3 +616,31 @@ drawer banner's 안전 안내 label, and TD-01's empty Quick Command state. Seve
 instead, each with its reason in the report.
 
 Next eligible: the PENDING list · WBS-32/33 · the DV-11 decision.
+
+## Batch 22 · emptying the PENDING list
+
+Report: `BATCH-22.md`. No new Canon findings. 501 tests.
+
+Batch 21's PENDING list — `18` copy with no screen behind it — went from seven to four, and the
+four that remain are states the product **cannot enter** until DV-11 is decided (`15` TD-01's
+지금 안 됨 is a SHELL that failed to start, and there is no shell yet).
+
+Drawn: `15` SC-01 · UF-RETURN's last-Work summary on each recent row (last by `started_at`, so a
+running Work is the one shown; a running Work gets the waiting chip, never one of the five
+terminal titles; a project with no Work draws nothing rather than an empty summary), and `15`
+SC-03's Remaining-unknown panel — dashed and neutral, with `15`'s three ways out. That state had
+the CLAIM but not the STATE: a user whose cancel left an unconfirmed remainder was told so and
+offered nothing.
+
+Deliberately NOT drawn: `work.ago`. A relative time is only true while it keeps refreshing, and
+the only push that could refresh it is a 15 s tick — so `12초 전` would stand while it had been
+27. A per-second redraw with no signal behind it is what this product refuses everywhere else,
+and it would buy a fact the wall clock already states exactly and never gets wrong. The duration
+IS on screen where it carries a decision: 2분 동안 새 활동이 보이지 않아요, refreshed by the tick
+that judges it. The PENDING note now records that decision rather than a to-do.
+
+The Remaining-unknown panel has no rendered evidence: the e2e's project is a git repo whose
+evidence pair always answers, so the flow cannot reach it. Source-level checks plus two mutants
+cover it, and the gap is stated rather than papered over.
+
+Next eligible: WBS-32/33 · the DV-11 decision.

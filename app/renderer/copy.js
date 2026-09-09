@@ -180,7 +180,12 @@ export const C = {
     readMore:      '먼저 변경 더 읽기',
     raw:         '자세한 출력 보기',
     resubmit:    '▸ 다시 보내기',
+    /* `15` SC-03 Remaining-unknown (UF-REMAIN-UNKNOWN). Dashed, never red: not being able to
+     * tell what is left is 확인 못함, and `16` §2.1 keeps red for failure alone. */
     remainTitle: '남은 변경을 다 확인하지 못했어요',
+    remainBody:  '취소할 때 일부 파일 상태를 읽지 못했어요. 확인된 부분만 아래에서 읽을 수 있어요.',
+    remainRead:  '▸ 확인된 변경 읽기',
+    remainNew:   '▸ 새 작업으로 정리 요청',
   },
   rules: {
     noFake:     '진행률이나 남은 시간은 짐작해서 보여 드리지 않아요.',

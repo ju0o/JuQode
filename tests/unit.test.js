@@ -453,18 +453,23 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
    * A key that is DELETED rather than rendered must be justified in the batch report; two were
    * (gap.notBuiltPaths · gap.notBuiltTerminal, both of which had become false). */
   const PENDING = new Set([
-    /* `15` SC-01 recent row: `마지막 Work · <intent>`. Needs the last Work per recent project,
-     * which `juqode:boot` does not return yet. */
-    'sc01.lastWork',
-    /* `15` SC-03 남은 변경 확인 불가 — a state, not a label. */
-    'work.remainTitle',
-    /* `15` SC-03 liveness line: `마지막 관측: 파일 수정 · 12초 전`. The screen shows the
-     * wall-clock time; the relative half is not drawn. */
+    /* `15` SC-03 liveness line: `마지막 관측: 파일 수정 · 12초 전`.
+     *
+     * DECIDED, not pending. A relative time is only true while it keeps refreshing, and the
+     * only push that could refresh it is `watchQuiet`'s 15 s tick — so `12초 전` would be shown
+     * when it had been 27. `17` M-06 asks for a second-by-second tick; a per-second redraw with
+     * no signal behind it is the thing this product refuses everywhere else, and it would buy a
+     * fact the wall-clock timestamp already states exactly and never gets wrong.
+     *
+     * The duration IS on screen where it carries a decision: `18` `work.nosignalTitle` —
+     * 2분 동안 새 활동이 보이지 않아요 — and that panel is refreshed by the tick that judges it.
+     * See BATCH-22. */
     'work.ago',
-    /* `15` TD-01 터미널 지금 안 됨 — the drawer has no unavailable state yet. */
-    'term.unavailableBody', 'term.altQc', 'term.altRaw',
-    /* DV-11. The mock shell line has nowhere to go until the pty decision is made. */
-    'term.mock',
+    /* DV-11, all four. `15` TD-01's 지금 안 됨 state is a SHELL that failed to start — and
+     * there is no shell until the pty decision is made, so there is nothing that can fail.
+     * `term.mock` names the mock shell, which is one of the three options that decision picks
+     * between. Rendering any of these now would be drawing a state the product cannot enter. */
+    'term.unavailableBody', 'term.altQc', 'term.altRaw', 'term.mock',
     /* `출력 전체 보기` needs a full output to show. `20` bounds `quick_command_run.output_head`
      * at 64 KB and puts the rest behind `output_ref`; nothing writes one yet, and what the head
      * keeps is a genuine PREFIX with the rest gone (see `qc/run.js`). A button that opened the

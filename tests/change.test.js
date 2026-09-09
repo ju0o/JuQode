@@ -449,6 +449,33 @@ test('the observed-tools count is the caller\'s measurement, never derived from 
     'result.js still reads a signal list');
 });
 
+test('`15` SC-03 남은 변경 확인 불가 is a STATE, not just a claim row', () => {
+  /* UF-REMAIN-UNKNOWN. The result already carried a `changes-unknown` CLAIM — the fact that the
+   * evidence pair could not tell. `15` builds a dashed panel on top of it with three ways out,
+   * and that panel did not exist: a user whose cancel left an unknown remainder was told so and
+   * given nothing to do about it.
+   *
+   * NOTE: this state has no RENDERED evidence yet — the e2e's project is a git repo whose
+   * evidence pair always answers, so the flow cannot reach it. Recorded in BATCH-22. */
+  const src = fs.readFileSync(path.join(R, 'app/renderer/screens/sc03.js'), 'utf8');
+  assert.ok(/if \(\(snap\.result\?\.claims \?\? \[\]\)\.some\(\(c\) => c\.kind === 'changes-unknown'\)\) \{/.test(src),
+    'the panel is not driven by the claim the builder actually produces');
+  const panel = /function remainPanel\(snap, nav, state\) \{([\s\S]*?)\n\}/.exec(src);
+  assert.ok(panel, 'remainPanel is gone');
+  /* Dashed and NEUTRAL. `12` §16: not knowing is not failing, and `16` §2.1 keeps red for
+   * failure alone. */
+  assert.ok(/el\('div', 'panel unk'\)/.test(panel[1]), 'the panel is not the dashed unknown one');
+  assert.ok(!/fail/.test(panel[1]), 'the panel is painted as a failure');
+  /* `15` names three ways out and `18` carries all three. */
+  for (const key of ['C.work.remainRead', 'C.work.terminal', 'C.work.remainNew']) {
+    assert.ok(panel[1].includes(key), `the panel does not offer ${key}`);
+  }
+  /* …and the new Work goes through the intent field, NOT submitted — `12` treats sending as
+   * consent to change files, and D-115 says a correction is a new Work like any other. */
+  assert.ok(panel[1].includes('nav.toWorkbench'), '정리 요청 does not go through the request field');
+  assert.ok(!panel[1].includes('workStart'), '정리 요청 starts a Work without the user sending it');
+});
+
 test('a 부분 result draws BOTH lists, and the unmeasurable one says 확인 못함', () => {
   /* `15` 부분 완료 needs 된 것 AND 안 된 것. The 된 것 list came only from the evidence pair,
    * and the renderer drew it only when both lists had content — so when the pair could not tell
