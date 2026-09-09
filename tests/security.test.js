@@ -243,3 +243,75 @@ test('nothing in the app reads the user\'s shell or git credentials', () => {
     }
   }
 });
+
+/* ── WBS-33 · the two release rules that do not need Windows ───────────────────────────────
+ *
+ * `21` WBS-33's failure list names 텔레메트리·크래시 리포팅 코드가 빌드에 들어감, and its
+ * acceptance says the product does not add telemetry or crash reporting — because `02` §2 puts
+ * cloud dependency outside the MVP, not because a WBS decided it. The rest of WBS-33 needs
+ * Windows and a signing certificate; these two are testable here and now, and they are the ones
+ * that catch a regression BEFORE a build exists rather than after.
+ */
+
+test('no telemetry or crash-reporting dependency is declared', () => {
+  const pkg = JSON.parse(read('package.json'));
+  const declared = Object.keys({ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}),
+                                 ...(pkg.optionalDependencies ?? {}) });
+  const TELEMETRY = ['sentry', 'bugsnag', 'rollbar', 'mixpanel', 'amplitude', 'posthog',
+                     'segment', 'datadog', 'newrelic', 'appcenter', 'analytics', 'telemetry'];
+  for (const d of declared) {
+    for (const t of TELEMETRY) {
+      assert.ok(!d.toLowerCase().includes(t),
+        `${d} is a telemetry or crash-reporting dependency — \`02\` §2 puts cloud dependency outside the MVP`);
+    }
+  }
+  /* …and the check can see what it claims to: a name from the list would be caught. */
+  assert.ok(TELEMETRY.some((t) => '@sentry/electron'.includes(t)));
+});
+
+test('no code enables crash reporting or calls out to a network', () => {
+  /* The offline e2e already boots the app with no network and counts zero external requests.
+   * That measures the app as it is TODAY; this measures the code, so a newly added call is
+   * caught when it is written rather than when someone happens to run the offline boot.
+   *
+   * `net.request`, `fetch`, `XMLHttpRequest` and Electron's `crashReporter` are the four ways
+   * out. The renderer's CSP already sets `connect-src 'none'`, which stops the middle two in
+   * the renderer — but not in the main process, which has no CSP. */
+  const files = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
+      const rel = path.join(dir, e.name);
+      if (e.isDirectory()) walk(rel);
+      else if (/\.(js|mjs|cjs)$/.test(e.name)) files.push(rel);
+    }
+  })('app');
+  assert.ok(files.length >= 20, `expected the app tree, found ${files.length} files`);
+
+  const OUT = [
+    [/\bcrashReporter\b/, 'Electron crashReporter'],
+    [/\bnet\.request\s*\(/, 'electron net.request'],
+    [/\bfetch\s*\(/, 'fetch'],
+    [/\bXMLHttpRequest\b/, 'XMLHttpRequest'],
+    [/\bnew WebSocket\s*\(/, 'WebSocket'],
+    [/require\(['"]https?['"]\)/, "require('http(s)')"],
+    [/from ['"]node:https?['"]/, "import node:http(s)"],
+  ];
+  for (const f of files) {
+    const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const [re, name] of OUT) {
+      assert.ok(!re.test(src), `${f} uses ${name} — the product makes no network calls`);
+    }
+  }
+});
+
+test('the CSP the renderer ships with forbids every outbound direction', () => {
+  /* The other half of the same rule, on the surface that loads content. If this weakens, the
+   * code scan above is the only thing left, and a scan cannot see what a page pulls in. */
+  const html = read('app/renderer/index.html');
+  const csp = /content="([^"]*)"/.exec(html.slice(html.indexOf('Content-Security-Policy')));
+  assert.ok(csp, 'index.html has no CSP');
+  for (const rule of ["default-src 'none'", "connect-src 'none'", "base-uri 'none'",
+                      "form-action 'none'", "script-src 'self'", "style-src 'self'"]) {
+    assert.ok(csp[1].includes(rule), `the CSP lost ${rule}`);
+  }
+});

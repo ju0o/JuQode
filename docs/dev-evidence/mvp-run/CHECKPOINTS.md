@@ -569,3 +569,23 @@ programs run. Colour is gone and stdout/stderr order becomes an approximation, w
 main process, nor node-pty itself (the capability-containment test forbids it).
 
 Next eligible: WBS-32/33 (need humans and Windows) · the DV-11 decision itself.
+
+## Batch 20 · WBS-33's two testable release rules
+
+No separate report — the change is three tests in `tests/security.test.js`. 499 tests.
+
+`21` WBS-33 depends on WBS-32 and needs Windows and a signing certificate, so it stays NOT
+STARTED. But two of its four named failure cases need neither, and both were untested:
+
+- **텔레메트리·크래시 리포팅 코드가 빌드에 들어감.** `02` §2 puts cloud dependency outside the
+  MVP — a rule the WBS explicitly says it did not invent for itself. Now checked in two places:
+  no declared dependency whose name carries a telemetry vendor, and no code that uses Electron's
+  `crashReporter`, `net.request`, `fetch`, `XMLHttpRequest`, `WebSocket` or `node:http(s)`.
+- **the CSP the renderer ships with.** The offline e2e boots with no network and counts zero
+  external requests — that measures the app as it is today. The code and CSP scans catch a new
+  outbound call when it is WRITTEN, which is the only moment it is cheap.
+
+Four mutants, all killed: a `@sentry/electron` devDependency, a `fetch(` in `ipc.js`, a
+`crashReporter` require in `main.js`, and `connect-src https:` in the CSP.
+
+Next eligible: WBS-32/33 proper (need humans, Windows and a certificate) · the DV-11 decision.
