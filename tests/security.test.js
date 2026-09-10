@@ -353,3 +353,60 @@ test('a test run cannot write into the real application data directory', () => {
       `${f} launches the app ${spawns} times but relocates userData ${relocs} times`);
   }
 });
+
+/* ── `enforceLocalOnly`, driven rather than read ──────────────────────────────────────────── */
+
+test('the offline guard blocks what leaves and passes what does not', () => {
+  /* FOUND BY MUTATION: every `||` in the local-scheme list could be flipped to `&&` — making
+   * the guard cancel EVERY request, including the app's own `file:` load — and the unit suite
+   * passed. Nothing here ever called the handler; the tests read the source and the e2e only
+   * ever counted requests that were blocked.
+   *
+   * A guard that is too strict is not "safe": it is an app that does not start, and it would
+   * have shipped as one. Spike A finding O-1 is why this exists at the session layer at all —
+   * `--proxy-server` blocks the renderer and not main-process `net.fetch`. */
+  const { enforceLocalOnly } = require(path.join(R, 'app/main/security.js'));
+
+  /* A session double: the real one is Electron's, and the only thing this needs from it is the
+   * one registration call. Driving the handler is the point — a mock that returned a canned
+   * answer would be testing the mock. */
+  let handler = null;
+  const session = { webRequest: { onBeforeRequest: (fn) => { handler = fn; } } };
+  const read = enforceLocalOnly(session);
+  assert.strictEqual(typeof handler, 'function', 'the guard registered nothing');
+
+  const ask = (url) => {
+    let got = null;
+    handler({ url }, (r) => { got = r; });
+    assert.ok(got, `the guard never answered for ${url}`);
+    return got.cancel;
+  };
+
+  /* The app's OWN loads must go through. This is the half the mutation showed nobody checked. */
+  for (const url of ['file:///app/renderer/index.html', 'devtools://devtools/bundled/x.js',
+                     'data:text/css,body{}', 'blob:file:///abc', 'about:blank']) {
+    assert.strictEqual(ask(url), false, `the guard cancelled the app's own ${url}`);
+  }
+
+  /* …and everything else is cancelled, whatever it dresses itself as. */
+  for (const url of ['https://example.test/x', 'http://127.0.0.1:9/x', 'ws://example.test',
+                     'wss://example.test', 'ftp://example.test', 'chrome-extension://abc/x',
+                     'FILE:///not-lowercase', ' file:///leading-space', 'xfile:///prefix']) {
+    assert.strictEqual(ask(url), true, `the guard let ${url} out`);
+  }
+
+  /* A request with no URL at all is not local. `details.url || ''` makes it the empty string,
+   * which starts with none of the schemes — the safe answer, and worth pinning. */
+  let none = null;
+  handler({}, (r) => { none = r; });
+  assert.strictEqual(none.cancel, true, 'a request with no URL was allowed');
+
+  /* What it recorded, which is what the e2e asserts a zero of. */
+  assert.strictEqual(read.count(), 10, `the guard counted ${read.count()} blocks`);
+  assert.ok(read().includes('https://example.test/x'));
+  /* Bounded: a renderer can drive this, and an unbounded array in the main process is an
+   * allocation it controls. The COUNT keeps going; the list stops. */
+  for (let i = 0; i < 200; i++) ask(`https://example.test/${i}`);
+  assert.strictEqual(read().length, 100, 'the attempt list is unbounded');
+  assert.strictEqual(read.count(), 210, 'the count stopped when the list did');
+});

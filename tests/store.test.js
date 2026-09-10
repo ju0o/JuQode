@@ -305,11 +305,12 @@ test('a failure carries technical detail for the disclosure, and only that', () 
 /* ─────────────────────────── WBS-09 · Claude Code detection ─────────────────────────── */
 
 /** Write a fake `claude` that prints the given outputs. Never runs the real CLI. */
-function fakeClaude(dir, { version = '2.1.266 (Claude Code)', auth = '{"loggedIn":true}', authExit = 0, versionExit = 0, hang = false, ignoreTerm = false } = {}) {
+function fakeClaude(dir, { version = '2.1.266 (Claude Code)', auth = '{"loggedIn":true}', authExit = 0, versionExit = 0, hang = false, ignoreTerm = false, versionStderr = '' } = {}) {
   const f = path.join(dir, 'claude');
   const lines = [
     '#!/bin/sh',
     ignoreTerm ? 'trap "" TERM' : '',
+    versionStderr ? `if [ "$1" = "--version" ]; then echo '${versionStderr}' 1>&2; exit ${versionExit}; fi` : '',
     `if [ "$1" = "--version" ]; then echo '${version}'; exit ${versionExit}; fi`,
     'if [ "$1" = "auth" ]; then',
     hang ? '  sleep 30' : '',
@@ -408,6 +409,51 @@ test('a CLI that fails to start at all is reported as an error, with its own wor
   const r = await withBin(fakeClaude(tmp(), { versionExit: 3, version: 'boom' }), () => claude.detect());
   assert.strictEqual(r.available, false);
   assert.strictEqual(r.reason, 'error');
+});
+
+test('a version probe that DIES on a signal is 응답 없음, not an error', async () => {
+  /* FOUND BY MUTATION: `if (v.err.killed || v.err.signal)` had no test — the existing
+   * `no-response` case comes from the DEADLINE race in `detect()`, which never reaches this
+   * branch inside `probe()`.
+   *
+   * The distinction matters on screen. `19` §C3 / `15` SC-02 separate 설치되지 않음 ·
+   * 로그인 필요 · 응답 없음, and a CLI killed by the OS (OOM, a policy agent, a crash) has not
+   * "errored" in a way whose stderr means anything — there is usually none. Calling it `error`
+   * would put an empty 자세한 내용 보기 in front of the user. */
+  const dir = tmp();
+  const f = path.join(dir, 'claude');
+  /* Kills ITSELF, so `execFile` reports `signal` rather than an exit code. */
+  fs.writeFileSync(f, '#!/bin/sh\nif [ "$1" = "--version" ]; then kill -9 $$; fi\nexit 1\n', { mode: 0o755 });
+  const r = await withBin(f, () => claude.detect());
+  assert.strictEqual(r.available, false);
+  assert.strictEqual(r.reason, 'no-response',
+    `a CLI killed by a signal was reported as ${r.reason}`);
+  /* …and nothing about the version survives a probe that never printed one. */
+  assert.ok(!r.version, `a version was reported from a probe that died: ${r.version}`);
+});
+
+test('the error detail is the CLI\'s OWN stderr, not our description of it', async () => {
+  /* FOUND BY MUTATION: `cap(v.stderr || v.err.message)` could become `&&` and nothing noticed,
+   * because the test above asserts the REASON and never looks at the detail.
+   *
+   * `18` §0.7 puts machine words behind 자세한 내용 보기 rather than in a sentence — but they
+   * have to be THERE, and they have to be the CLI's. Our own wrapper message ("Command failed
+   * with exit code 3") tells the user nothing they can act on. */
+  const r = await withBin(fakeClaude(tmp(), { versionExit: 3, versionStderr: 'claude: unsupported libc' }),
+    () => claude.detect());
+  assert.strictEqual(r.reason, 'error');
+  assert.ok(r.detail, 'the error carries no detail at all');
+  assert.ok(r.detail.includes('unsupported libc'),
+    `the detail is not the CLI's own stderr: ${JSON.stringify(r.detail)}`);
+  /* …and ONLY the CLI's. Node's own wrapper message repeats the stderr, so "contains it" is
+   * satisfied by both — the assertion that separates them is that our sentence is NOT there.
+   * `Command failed: /path/to/claude --version` tells the user about our plumbing. */
+  assert.ok(!/Command failed/.test(r.detail),
+    `the detail is our wrapper message rather than the CLI's: ${JSON.stringify(r.detail)}`);
+  /* …and it is bounded — a CLI that prints a novel does not become a card. */
+  const long = await withBin(fakeClaude(tmp(), { versionExit: 3, versionStderr: 'x'.repeat(3000) }),
+    () => claude.detect());
+  assert.ok(long.detail.length <= 400, `the detail is ${long.detail.length} characters`);
 });
 
 /* ─────────────────────────── the bridge ─────────────────────────── */

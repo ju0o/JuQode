@@ -696,3 +696,28 @@ test('an interpretation the app died inside becomes 실패, with its answers unt
   /* …and a finished interpretation is never touched. */
   assert.deepStrictEqual(repo.reconcileInterpretations(db), []);
 });
+
+test('statusOf: 확인 못한 답이 하나라도 있으면 부분 해석, 없으면 해석됨', () => {
+  /* FOUND BY MUTATION: `list.some((a) => a.confidence !== 'confirmed')` could be inverted and
+   * every test passed — each of them scans a project whose answers are MIXED, so both the rule
+   * and its inverse produce `partial` there. Nothing ever asserted `interpreted`.
+   *
+   * `11` F-C1-02: 부분 해석은 실패가 아니다, and the distinction is what SC-02 announces. Driven
+   * as data because a real project with all six answers confirmed may not exist — q1..q5 need
+   * files that say so — and a rule should not be untestable because reality is usually messy. */
+  const scan = { failed: false };
+  const a = (confidence) => ({ confidence });
+
+  assert.strictEqual(statusOf(scan, [a('confirmed'), a('confirmed')]), 'interpreted');
+  assert.strictEqual(statusOf(scan, [a('confirmed'), a('unconfirmed')]), 'partial');
+  assert.strictEqual(statusOf(scan, [a('confirmed'), a('expected')]), 'partial',
+    '예상됨 is not 확인됨 — a guess does not complete an interpretation');
+  assert.strictEqual(statusOf(scan, [a('unconfirmed')]), 'partial');
+  /* An empty list confirms nothing, but it also contradicts nothing: `some` on it is false, so
+   * this is `interpreted`. Written down because it is surprising, and because a future reader
+   * should see that it was considered rather than overlooked. */
+  assert.strictEqual(statusOf(scan, []), 'interpreted');
+  /* A failed scan wins over everything — `19` §C1: 읽지 못한 것은 부분이 아니라 실패다. */
+  assert.strictEqual(statusOf({ failed: true }, [a('confirmed')]), 'failed');
+  assert.strictEqual(statusOf({ failed: true }, [a('unconfirmed')]), 'failed');
+});

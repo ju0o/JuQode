@@ -35,6 +35,7 @@ exists it is recorded as a Linux measurement and is **not** carried across.
 | DV-5 | Code signing judged from the PE certificate table | WBS-33 | `19` §V signing NOT VALIDATED | IMPLEMENTED_PENDING_VALIDATION | `Get-AuthenticodeSignature` in the harness |
 | DV-6 | ConPTY: create · output · resize · exit · cleanup | WBS-00 · WBS-25 | `19` §C6 PTY NOT VALIDATED | IMPLEMENTED_PENDING_VALIDATION | `scripts/windows-spikes.mjs` (refuses to run off win32) |
 | DV-7 | Windows process spawn · cancel · process tree · orphans | WBS-00 · WBS-23 · WBS-24 | `19` §C4 | IMPLEMENTED_PENDING_VALIDATION | `scripts/windows-spikes.mjs` |
+| DV-12 | `claude-detect.js` 의 Windows 실행 파일 해석 — `PATHEXT` · `COMSPEC` · `.cmd`/`.bat` 래퍼 | WBS-09 | `19` §D1 | IMPLEMENTED_PENDING_VALIDATION | 아래 |
 | DV-8 | Theme contrast, all six OS-preference × toggle combinations, on Windows | WBS-36 | `16` §2.1 · D-135 | IMPLEMENTED_PENDING_VALIDATION | `verify-windows.ps1` → theme matrix |
 | DV-9 | Claude Code resolved from PATH on Windows (`claude.cmd`, PATHEXT, `cmd.exe` routing) | WBS-09 | `21` WBS-09 · D-125 | IMPLEMENTED_PENDING_VALIDATION | run the app on Windows with an npm-global Claude Code and confirm 설치되지 않음 is NOT reported |
 | DV-10 | `fs.realpathSync.native` canonicalises CASE on NTFS, so one folder is one `project` row | WBS-02 · WBS-21 | `20` `project.path` unique | IMPLEMENTED_PENDING_VALIDATION | open the same folder twice on Windows with different casing; expect one row |
@@ -91,3 +92,21 @@ Linux 실측). 결정을 바꿀 만한 수치 하나: 파이프 셸에는 `/dev/
 git 자격증명 프롬프트가 **물어보지도 못하고 실패한다.** 그리고 닫힌 stdin 은 정지가 아니라
 **조용한 빈 답**이다 — 화면에 아무 이상이 안 보인다. 반대로 정지(그룹 시그널)와 stdin 으로
 답하기는 이미 된다. **Windows 는 재지 않았고 이 재료는 Windows 에 대해 아무 말도 하지 않는다.**
+
+## DV-12 · Windows 실행 파일 해석은 Linux 에서 도달할 수 없다
+
+배치 26 의 돌연변이 스윕이 `claude-detect.js` 에서 살아남은 것 여섯 중 **넷**을 이렇게 표시했다.
+전부 `process.platform === 'win32'` 뒤에 있다:
+
+- `resolveBin()` 의 `if (process.platform !== 'win32') return 'claude';` — Linux 는 여기서 끝난다
+- `PATHEXT || '.COM;.EXE;.BAT;.CMD'` 의 기본값
+- `PATH || ''` 의 기본값
+- `.cmd`/`.bat` 을 `COMSPEC || 'cmd.exe'` 로 감싸 실행하는 경로
+
+**Linux 에서는 실행되지 않으므로 Linux 테스트로 죽일 수 없다.** 죽이려고 `process.platform` 을
+가짜로 바꾸면 검사하는 것은 그 가짜지 Windows 가 아니다 — DV-6 · DV-7 과 같은 이유로, 이 런은
+**측정할 수 없는 것을 측정했다고 말하지 않는다.**
+
+Windows 에서 확인해야 할 것: `claude.cmd` 가 `PATH` 에 있을 때 탐지가 그것을 찾는가 ·
+`PATHEXT` 가 비표준일 때도 찾는가 · `.cmd` 래퍼가 `cmd.exe` 를 통해 실제로 실행되는가 ·
+`COMSPEC` 이 비어 있을 때 기본값이 동작하는가. `scripts/windows-spikes.mjs` 가 붙을 자리다.

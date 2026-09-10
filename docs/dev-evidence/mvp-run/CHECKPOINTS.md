@@ -735,3 +735,34 @@ for the outcome — focus read as `BODY`, and a second Electron's renderer read 
 poll to a bounded deadline and fail in the words of what actually did not happen.
 
 Next eligible: finish the sweep over the remaining main-process files · WBS-32/33 · DV-11.
+
+## Batch 26 QA · mutation sweep, stage two (security · evidence · session · detection)
+
+Report: `BATCH-26-QA.md`. Deferred added: **DV-12**. 525 tests, three e2e files.
+
+The worst of it: **nobody had ever called the offline guard.** Any `||` in `security.js`'s
+local-scheme list could be flipped to `&&` — making it cancel every request including the app's
+own `file:` load — and the unit suite passed. The existing checks read the source, and the e2e
+only counted requests that were BLOCKED. A guard that is too strict is not "safe": it is an app
+that does not start, and it could have shipped as one. The handler is now driven directly, with
+the app's own five schemes asserted to pass and nine shapes of outbound asserted to be cancelled.
+
+Three in the evidence layer. The excluded-path ledger could walk into `.git` (which would report
+git's own churn as "an excluded file changed" on every Work). Its size comparison — deliberate
+belt-and-braces beside the mtime one, because D-126a must never MISS a change to something the
+product may not read — was carried by the OR in every test. And `manifest.diff`'s unreadable
+branch had never been reached at all: no test ever produced an entry with `unreadable: true`,
+which is the branch that exists because `null !== null` made a file that grew read as unchanged.
+The non-Git basis also still had the root-unreadable hole `git.js` was fixed for.
+
+`stop()`'s SECOND guard — the one inside the grace timer — could not be reached without waiting,
+and it is the worse of the two: SIGKILL to a process GROUP whose pid has since been recycled
+takes an unrelated tree down. Driven now with an injected `graceMs`, both directions.
+
+Five survivors remain in `claude-detect.js` and all five sit behind `process.platform ===
+'win32'`. They cannot be killed from Linux, and faking `process.platform` would test the fake.
+Recorded as **DV-12** rather than papered over, for the same reason as DV-6 and DV-7.
+
+Next eligible: the sweep's remaining files (`change/blocks.js`, `change/explain.js`,
+`work/supervisor.js`, `interpret/scan.js`, `interpret/narrate.js`, `router/intent.js`) ·
+WBS-32/33 · DV-11.

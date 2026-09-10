@@ -25,7 +25,7 @@ const G = require(path.join(R, 'app/main/evidence/git.js'));
 const M = require(path.join(R, 'app/main/evidence/manifest.js'));
 const { ledger, ledgerDiff, isSecretName, isExcludedPath, pathspec } = require(path.join(R, 'app/main/evidence/exclude.js'));
 const { toSignal, reduce, replay, initial, openPermission, openPermissions, KIND } = require(path.join(R, 'app/main/work/reducer.js'));
-const { allowSpec, grantedSignal, run } = require(path.join(R, 'app/main/claude/session.js'));
+const { allowSpec, grantedSignal, run, stop } = require(path.join(R, 'app/main/claude/session.js'));
 
 const MARK = 'JUQODE_SYNTHETIC_SECRET';   // synthetic, clearly labelled; never a real credential
 
@@ -465,6 +465,44 @@ test('an excluded file that changes is DETECTED, without being read', () => {
     'a same-size edit to an excluded file went unnoticed');
 });
 
+test('ledgerDiff reports a change that only the SIZE shows', () => {
+  /* FOUND BY MUTATION: `prev.size !== e.size || prev.mtimeNs !== e.mtimeNs` — the size half
+   * could be inverted and every test still passed, because the file tests all change the mtime
+   * too and the OR carries them.
+   *
+   * The two halves are deliberately belt-and-braces (D-126a: the ledger must never MISS a
+   * change to something it is not allowed to read), so the redundant one needs its own check.
+   * Driven as data, because producing a real size-only change means defeating the filesystem's
+   * own timestamping — which would be testing the filesystem, not the ledger. */
+  const at = (path, size, mtimeNs) => ({ path, size, mtimeNs });
+  assert.deepStrictEqual(
+    ledgerDiff([at('.env', 10, '111')], [at('.env', 20, '111')]),
+    [{ path: '.env', change: 'modified' }], 'a size change with an unchanged mtime was missed');
+  assert.deepStrictEqual(
+    ledgerDiff([at('.env', 10, '111')], [at('.env', 10, '222')]),
+    [{ path: '.env', change: 'modified' }], 'an mtime change with an unchanged size was missed');
+  /* …and nothing is reported when nothing moved. A ledger that cried every time would train
+   * the user to ignore it, which is the same failure as silence. */
+  assert.deepStrictEqual(ledgerDiff([at('.env', 10, '111')], [at('.env', 10, '111')]), []);
+});
+
+test('the ledger never walks into `.git`', () => {
+  /* FOUND BY MUTATION: `child === '.git' || child.endsWith('/.git')` could become `&&`, which
+   * matches nothing, and the suite passed. `.git` is the repository's own store — it is not
+   * the user's project, and an evidence ledger that reported git's internal churn as "an
+   * excluded file changed" would say it on every single Work. */
+  const { dir } = repo({ '.env': `${MARK}=x\n` });
+  fs.mkdirSync(path.join(dir, '.git/juq'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.git/juq/leak.pem'), 'not-a-real-key\n');
+  fs.mkdirSync(path.join(dir, 'vendor/inner/.git'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'vendor/inner/.git/deep.pem'), 'not-a-real-key\n');
+
+  const paths = ledger(dir).map((e) => e.path);
+  assert.ok(paths.includes('.env'), 'the ledger stopped covering .env');
+  assert.deepStrictEqual(paths.filter((p) => p.includes('.git')), [],
+    `the ledger walked into a .git directory: ${paths.join(' · ')}`);
+});
+
 test('the ledger reports additions and removals too', () => {
   const { dir } = repo({ '.env': `${MARK}=x\n` });
   const before = ledger(dir);
@@ -564,6 +602,69 @@ test('non-Git projects get a basis too, with the same exclusions', () => {
     'a deleted file is a change too');
 
   assert.strictEqual(M.capture(dir, { maxBytes: 1 })?.error, 'too-large', 'the size cap does nothing');
+
+  /* FOUND BY MUTATION: `bytes > maxBytes` could become `>=` and nothing noticed. The cap is a
+   * CEILING — a project that is exactly at it is inside it, and refusing there would refuse a
+   * project for measuring precisely what it is allowed to. */
+  const total = M.capture(dir).files.reduce((n, f) => n + f.size, 0);
+  assert.ok(total > 0, 'the fixture measures nothing');
+  assert.ok(!M.capture(dir, { maxBytes: total })?.error,
+    `a project of exactly ${total} bytes was refused by a ${total}-byte cap`);
+  assert.strictEqual(M.capture(dir, { maxBytes: total - 1 })?.error, 'too-large',
+    'one byte over the cap was accepted');
+});
+
+test('the non-Git basis refuses an unreadable ROOT, and says which path', { skip: process.getuid?.() === 0 && 'root' }, () => {
+  /* FOUND BY MUTATION, and it is the same hole as `git.js`'s — in the OTHER evidence mechanism.
+   * `detail: rel || '.'` names the path that could not be read, and the root's `rel` is the
+   * empty string. Without the fallback the refusal card would name nothing.
+   *
+   * Every existing manifest test made a readable tree, so the `catch` around `readdirSync` was
+   * never reached at all. */
+  const dir = tempDir('juqode-manifest-unreadable-');
+  fs.mkdirSync(path.join(dir, 'src'));
+  fs.writeFileSync(path.join(dir, 'src/a.js'), '1\n');
+  fs.chmodSync(dir, 0o111);
+  try {
+    const r = M.capture(dir);
+    assert.strictEqual(r.error, 'unreadable-path', 'an unreadable root produced a basis');
+    assert.strictEqual(r.detail, '.', `the refusal names ${JSON.stringify(r.detail)}`);
+    assert.ok(r.code, 'the refusal carries no errno for 자세한 내용 보기');
+  } finally { fs.chmodSync(dir, 0o700); }
+
+  /* …and a subdirectory nobody can read is named as itself, not as the root. */
+  const dir2 = tempDir('juqode-manifest-unreadable2-');
+  fs.mkdirSync(path.join(dir2, 'priv'), { recursive: true });
+  fs.writeFileSync(path.join(dir2, 'a.js'), '1\n');
+  fs.chmodSync(path.join(dir2, 'priv'), 0o000);
+  try {
+    const r = M.capture(dir2);
+    assert.strictEqual(r.error, 'unreadable-path');
+    assert.strictEqual(r.detail, 'priv');
+  } finally { fs.chmodSync(path.join(dir2, 'priv'), 0o700); }
+});
+
+test('a file nobody can read is reported as UNKNOWN, never as unchanged', () => {
+  /* FOUND BY MUTATION: `prev.size !== f.size` inside the unreadable branch could be inverted
+   * and nothing noticed — no test ever produced a manifest entry with `unreadable: true`.
+   *
+   * The branch exists because an unreadable file has `sha256: null` on BOTH sides and
+   * `null !== null` is false, so a file that went from 10 bytes to 29 read as unchanged. `19`
+   * §E and D-114: what we could not read is 확인 못함, and a size that moved is a change even
+   * when the content is not ours to compare. */
+  const at = (path, size, extra = {}) => ({ path, size, sha256: null, ...extra });
+  const before = { files: [at('x.bin', 10, { unreadable: true })] };
+  assert.deepStrictEqual(M.diff(before, { files: [at('x.bin', 29, { unreadable: true })] }),
+    [{ path: 'x.bin', change: 'modified', unreadable: true }],
+    'an unreadable file that grew was reported as unchanged');
+  assert.deepStrictEqual(M.diff(before, { files: [at('x.bin', 10, { unreadable: true })] }),
+    [{ path: 'x.bin', change: 'unknown', unreadable: true }],
+    'an unreadable file of the same size was settled as unchanged — nobody knows that');
+  /* One side unreadable is enough to reach the branch: a file that BECAME unreadable is not
+   * evidence that it stayed the same. */
+  assert.deepStrictEqual(
+    M.diff({ files: [{ path: 'x.bin', size: 10, sha256: 'aa' }] }, { files: [at('x.bin', 10, { unreadable: true })] }),
+    [{ path: 'x.bin', change: 'unknown', unreadable: true }]);
 });
 
 test('each basis gets its own copied index, so the two phases cannot share one', () => {
@@ -1203,4 +1304,65 @@ test('a capture never reads the user\'s index — the basis starts empty', () =>
   G.capture(dir, store, 'before');
   assert.deepStrictEqual(fs.readFileSync(userIndex), before,
     'the user\'s own index was modified — D-126a exists to prevent exactly that');
+});
+
+/* ── `stop()` never signals a pid that is no longer ours ──────────────────────────────────── */
+
+test('stopping a child that has already ended signals nothing', () => {
+  /* FOUND BY MUTATION: both guards in `stop()` could be weakened and the suite passed —
+   * nothing ever called it with a dead child, or with no child at all.
+   *
+   * `07` §8.5: a pid is REUSABLE. `process.kill(-pid, …)` on a child that already exited is a
+   * signal to whatever process group now holds that number, which on a busy machine is an
+   * unrelated process tree. Not signalling is always safe; signalling the wrong thing is not
+   * recoverable. */
+  const sent = [];
+  const realKill = process.kill;
+  process.kill = (pid, sig) => { sent.push([pid, sig]); };
+  try {
+    /* Already exited. */
+    stop({ pid: 4242, exitCode: 0, signalCode: null, once: () => {} });
+    /* Already signalled. */
+    stop({ pid: 4243, exitCode: null, signalCode: 'SIGTERM', once: () => {} });
+    /* No child at all — a cancel pressed after the handle was dropped. */
+    stop(null);
+    stop(undefined);
+    assert.deepStrictEqual(sent, [], `stop() signalled ${JSON.stringify(sent)} for a child that was gone`);
+
+    /* …and it DOES signal one that is still running, or the test above proves nothing. */
+    stop({ pid: 4244, exitCode: null, signalCode: null, once: () => {} });
+    assert.deepStrictEqual(sent, [[-4244, 'SIGTERM']],
+      'stop() did not signal the process group of a live child');
+  } finally { process.kill = realKill; }
+});
+
+test('the SIGKILL escalation re-checks before it fires', async () => {
+  /* FOUND BY MUTATION, and it is the SECOND guard — the one inside the grace timer. The first
+   * is checked above; this one only runs after the grace has elapsed, so a test that does not
+   * wait cannot reach it.
+   *
+   * `07` §8.5 again, and worse here: SIGTERM went out five seconds ago and the child has since
+   * exited. The pid is free to be reused, and SIGKILL to a recycled process GROUP takes an
+   * unrelated tree down with no warning and no recovery. */
+  const sent = [];
+  const realKill = process.kill;
+  process.kill = (pid, sig) => { sent.push([pid, sig]); };
+  try {
+    /* Alive when `stop` is called, gone by the time the grace expires — the ordinary case: the
+     * child obeyed the SIGTERM. */
+    const child = { pid: 5150, exitCode: null, signalCode: null, once: () => {} };
+    stop(child, { graceMs: 20 });
+    assert.deepStrictEqual(sent, [[-5150, 'SIGTERM']]);
+    child.exitCode = 0;                       // it stopped, as asked
+    await new Promise((r) => setTimeout(r, 80));
+    assert.deepStrictEqual(sent, [[-5150, 'SIGTERM']],
+      'SIGKILL was sent to a pid whose process had already exited');
+
+    /* …and a child that IGNORED the SIGTERM does get killed, or the check above is vacuous. */
+    sent.length = 0;
+    stop({ pid: 5151, exitCode: null, signalCode: null, once: () => {} }, { graceMs: 20 });
+    await new Promise((r) => setTimeout(r, 80));
+    assert.deepStrictEqual(sent, [[-5151, 'SIGTERM'], [-5151, 'SIGKILL']],
+      'a child that ignored SIGTERM was never escalated');
+  } finally { process.kill = realKill; }
 });
