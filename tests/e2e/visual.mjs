@@ -207,7 +207,10 @@ const GOLDEN = path.join(ROOT, 'docs', 'dev-evidence', 'screens');
 const UPDATE = process.argv.includes('--update-golden') || process.env.JUQODE_UPDATE_GOLDEN === '1';
 const OUT = UPDATE ? GOLDEN : path.join(ROOT, 'tmp-visual');
 fs.mkdirSync(OUT, { recursive: true });
-const PORT = 9223;
+/* One CDP port pair per run. `JUQODE_E2E_PORT` lets several copies of this file run at once —
+ * a mutation sweep does exactly that, and two runs sharing 9223 fail each other rather than
+ * failing on the mutation, which silently turns a survivor into a "kill". */
+const PORT = Number(process.env.JUQODE_E2E_PORT || 9223);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -938,6 +941,28 @@ const results = await cdp(async ({ send, evalJs }) => {
   const a1 = await evalJs(shot);
   await sleep(700);
   out.presenceMoved = (await evalJs(shot)) !== a1;
+
+  /* D-135 names Agent Presence among the things that must keep their meaning in BOTH themes,
+   * and the presence resolves its colour from a token through a cache keyed on the theme.
+   * FOUND BY MUTATION: inverting that cache's invalidation left the presence painted in the
+   * previous theme's colour for the rest of the session, and nothing noticed — every pixel
+   * check here was taken under one theme. */
+  out.presenceTint = await evalJs(`(async () => {
+    const c = document.querySelector('[data-card="presence"] canvas');
+    const ink = () => {
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 40) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+      return n ? [Math.round(r / n), Math.round(g / n), Math.round(b / n), n] : null;
+    };
+    const out = {};
+    for (const theme of ['light', 'dark']) {
+      document.documentElement.setAttribute('data-theme', theme);
+      for (let i = 0; i < 20; i++) await new Promise(r => requestAnimationFrame(r));
+      out[theme] = ink();
+    }
+    document.documentElement.setAttribute('data-theme', '');
+    return JSON.stringify(out); })()`);
 
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
 
@@ -1690,6 +1715,20 @@ assert.deepStrictEqual(JSON.parse(results.presenceBox), [56, 56],
   '`16` §125: the presence canvas is 56 px and does not scale with its card');
 assert.ok(results.presenceInk > 200,
   `the presence canvas is blank (${results.presenceInk} painted pixels)`);
+{
+  const t = JSON.parse(results.presenceTint);
+  assert.ok(t.light && t.dark, 'the presence painted nothing in one of the themes');
+  /* Different colour, not merely a different number of pixels — the token behind the mode is
+   * what changes, and `16` §2.1 says the meaning is fixed while the value follows the theme. */
+  const dist = Math.abs(t.light[0] - t.dark[0]) + Math.abs(t.light[1] - t.dark[1]) + Math.abs(t.light[2] - t.dark[2]);
+  assert.ok(dist > 60,
+    `the presence is the same colour in both themes (${t.light.slice(0, 3)} vs ${t.dark.slice(0, 3)}) `
+    + '— D-135 requires it to follow the theme');
+  /* …and it is still DRAWN in both, not merely different by having vanished. */
+  assert.ok(t.light[3] > 200 && t.dark[3] > 200,
+    `the presence nearly disappeared in one theme: ${t.light[3]} vs ${t.dark[3]} pixels`);
+}
+
 assert.ok(results.presenceMoved,
   'the idle breath does not move — `16` §1 exempts it as the one continuous motion, and it is not there');
 assert.ok(results.presenceStill,

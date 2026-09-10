@@ -856,3 +856,33 @@ the number; it is that each one carries its reason.
 
 Next eligible: WBS-32 (needs people) · WBS-33 (needs Windows and a certificate) · DV-11's pty
 decision. All three are outside what this run can measure.
+
+## Batch 30 QA · renderer mutation sweep — the claims the screen makes
+
+Report: `BATCH-30-QA.md`. No new Canon findings. 542 tests, three e2e files.
+
+Every sweep so far was `app/main`. The renderer is what the user sees, and two of this run's
+worst findings were there. Renderer mutants are judged by the unit suite AND the visual e2e —
+the first pass judged them by the e2e alone and reported as survivors the mutants the unit
+suite kills, and two workers shared CDP port 9223 and failed each other rather than failing on
+the mutation. Both fixed; that is the fifth defect found in the sweep tooling itself.
+
+Three product findings, and all three share a shape: **being wrong raises nothing.**
+
+The drawer's per-project clearing — the batch-12 HIGH where a Quick Command card confirmed in
+one project would RUN in another — had no test at all; inverting the comparison so it clears
+when the project is the SAME passed everything. It is now driven the way a user does it, through
+the picker.
+
+The presence resolves its colour from a token through a theme-keyed cache, and inverting that
+cache's invalidation left it painted in the previous theme's colour forever. Nothing noticed
+because every pixel check was taken under one theme — while D-135 names Agent Presence among the
+things that must keep working in both. Measured now in light and dark: `[73,58,142]` vs
+`[180,165,242]`, the two values of `--claude`.
+
+And a live update for a DIFFERENT Work could overwrite the snapshot being held off-screen, which
+would put another Work's changes on the SC-04 a user opened for this one — silently, because
+that screen deliberately does not redraw.
+
+Next eligible: the rest of the renderer sweep (`sc02`/`sc03`/`sc04`/`td01`, 68 sites) ·
+WBS-32/33 · DV-11.

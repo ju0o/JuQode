@@ -212,7 +212,10 @@ api.onWorkUpdate?.((snapshot) => {
   /* SC-04 reads a change that has ALREADY happened, so a live update must not redraw it out
    * from under the reader. It refreshes when they navigate, which is when it can be right. */
   if (state.screen !== 'SC-03' || state.workSnapshot?.work?.id !== snapshot.work.id) {
-    state.workSnapshot = state.workSnapshot?.work?.id === snapshot.work.id ? snapshot : state.workSnapshot;
+    /* Only the Work this screen is HOLDING. A push for a different Work must not overwrite it:
+     * SC-04 reads a change that has already happened, and swapping the snapshot under it would
+     * put another Work's changes on a screen the user opened for this one. */
+    if (state.workSnapshot?.work?.id === snapshot.work.id) state.workSnapshot = snapshot;
     return;
   }
   state.workSnapshot = snapshot;

@@ -128,3 +128,22 @@ test('a morph that would say nothing does not run', () => {
   /* …and neither does one from a zero-sized element. */
   assert.ok(/r\.width > 0 && r\.height > 0 \? r : null/.test(SRC));
 });
+
+/* ── a push for another Work never lands on the screen you are looking at ─────────────────── */
+
+test('an off-screen snapshot is replaced only for the Work being held', () => {
+  /* FOUND BY MUTATION: `state.workSnapshot?.work?.id === snapshot.work.id ? snapshot : …`
+   * could be inverted, so a push for a DIFFERENT Work would overwrite the one being held and
+   * the matching one would be thrown away.
+   *
+   * SC-04 reads a change that has ALREADY happened, and the router deliberately does not redraw
+   * it out from under the reader. Swapping the snapshot underneath would put another Work's
+   * changes on a screen the user opened for this one — and it would do it silently, because
+   * the screen does not re-render. */
+  const src = read('app/renderer/renderer.js');
+  assert.ok(/if \(state\.workSnapshot\?\.work\?\.id === snapshot\.work\.id\) state\.workSnapshot = snapshot;/.test(src),
+    'the held snapshot is replaced without checking which Work the push is about');
+  /* …and only when the screen is NOT the one showing it — the SC-03 path redraws instead. */
+  const guard = /if \(state\.screen !== 'SC-03' \|\| state\.workSnapshot\?\.work\?\.id !== snapshot\.work\.id\) \{/;
+  assert.ok(guard.test(src), 'the live-update guard no longer distinguishes the screen in view');
+});
