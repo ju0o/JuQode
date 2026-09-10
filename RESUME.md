@@ -1,8 +1,8 @@
 # RESUME — JuQode Autonomous MVP Long Run V2
 
-**마지막 체크포인트:** `758af26` · 브랜치 `dev/mvp-autonomous-v01` (푸시 완료)
-**작업 트리:** clean · 백그라운드 프로세스 없음
-**주의:** `git stash@{0}` 에 **미완성 e2e 작업**이 들어 있다 (§3 을 반드시 먼저 읽을 것)
+**마지막 체크포인트:** 배치 34 · 브랜치 `dev/mvp-autonomous-v01`
+**작업 트리:** clean · 백그라운드 프로세스 없음 · **stash 없음** (배치 33 의 미완 작업은 풀렸다)
+**스위트:** unit 572/572 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
 
 ---
 
@@ -12,17 +12,14 @@
 CONTINUE THE SAME JUQODE AUTONOMOUS MVP LONG RUN.
 Do NOT restart planning. Do NOT create a new run. Do NOT reset the branch.
 Current remote branch: dev/mvp-autonomous-v01
-Last checkpoint: 758af26 (Batch 33 — renderer sweep). Working tree was clean.
+Last checkpoint: batch 34 (WBS-25 shell line · sweep re-measure). Working tree clean, all suites green.
 
-Read RESUME.md first. §3 is the blocker — there is unfinished e2e work in git stash
-and one RED assertion to fix before anything else.
+Read RESUME.md first. There is NO blocker this time — §3 is a queue, not a wall.
 
 Queue, in order:
-  1. §3 — e2e 스택을 되살리고 `the drawer did not reopen in the second project` 를 고친다.
-     그것이 초록이 되어야 배치 33 의 나머지가 커밋될 수 있다.
-  2. §4 — td01 생존자 9개 (긴 실행 · 이미 실행 중 · 실패 상태).
-  3. §5 — 스윕 재실행으로 실제 kill 수를 측정한다. 지금까지는 측정한 적이 없다.
-  4. §6 — WBS-32(사람 검증) · DV-11 PM 판정 · Windows 재실행 데이터(DV-13/14/15/16).
+  1. §3 — 살아 있는 뮤턴트 16개. td01 4개는 "화면에서 안 눌러 본 버튼" 이고 싸다.
+  2. §4 — 셸 줄의 남은 구멍: 도달 못 한 사용 불가 카드 · busy 경로 · 세션이 스스로 끝나는 경우.
+  3. §5 — WBS-32(사람 검증) · DV-13~16(Windows). 둘 다 PM 이 "나중" 으로 판정했다.
 
 Keep the same operating loop: IMPLEMENT → TEST → PRODUCT QA → TECHNICAL/SECURITY QA →
 TEST ADVERSARY → VISUAL QA when UI changes → FIX → RETEST → MUTATION / NEGATIVE CHECK →
@@ -33,115 +30,108 @@ Continue now.
 
 ---
 
-## 2. 이번 세션에 한 일
+## 2. 이번 세션에 한 일 (배치 34)
 
 | 커밋 | 내용 |
 |---|---|
-| `bcacd91` | 뮤테이션 스윕 러너를 저장소로 옮김 (`scripts/mutate/`) — 스크래치패드에 뒀다가 재부팅에 날아갔다 |
-| `952d68b` | **WBS-33** 서명되지 않은 빌드 배너 (CF-21) |
-| `2f90f32` | **DV-11** 판정 재료 한 장 + PM 판정란 |
-| `758af26` | **배치 33** 렌더러 스윕 완주 · 모호함 카드 중복 버튼 수정 · `hasEvidenceGap` 순수 함수 |
+| `70345ef` | 배치 33 e2e 패치 초록으로 — 막고 있던 단언 하나의 **진짜** 원인 |
+| `6e11da6` | td01 생존자용 픽스처 + 네 상태 e2e · 스윕 러너에 `ONLY=` 재측정 모드 |
+| `2935e47` | DV-11 PM 판정 기록 (파이프 셸 GO · 동반 조건 4개) |
+| `b0d338c` | **WBS-25** 셸 명령줄 — 메인 프로세스 (`app/main/term/session.js`) |
+| `f5c7547` | 같은 것의 결함 둘 (끝난 줄이 이름을 잃음 · 프로젝트 전환 시 종료) |
+| `7f6630c` | **WBS-25** 화면 + CF-22 + `BATCH-34-QA.md` |
 
-스윕 결과: **68개 중 33개 죽고 35개 생존** (sc02 11 · sc03 8 · sc04 7 · td01 9).
-전체 기록은 `docs/dev-evidence/mvp-run/BATCH-33-QA.md`.
+전체 기록: `docs/dev-evidence/mvp-run/BATCH-34-QA.md`.
+
+**스윕 재측정 (처음):** 배치 33 생존자 35 → **6 사라짐**(코드가 다시 쓰였다) · **13 사살** ·
+**16 생존**. 현재 트리 62 사이트 중 46 사망 = **74%** (배치 33 시점 49%).
 
 ---
 
-## 3. ⚠️ 먼저 할 일 — stash 에 있는 e2e 작업과 빨간 단언 하나
+## 3. 살아 있는 뮤턴트 16개 — 다음 배치의 재료
 
-```bash
-git stash list          # stash@{0}: batch-33 e2e work in progress
-git stash pop           # tests/e2e/visual.mjs 만 들어 있다
-node tests/e2e/visual.mjs
-```
+원본은 `.mutate-work/results.json` (재측정 결과) 와 `docs/dev-evidence/mvp-run/BATCH-33-sweep.json`
+(배치 33 원본, 저장소에 있다 — 스크래치패드에서 한 번 날렸다).
 
-**현재 상태: 빨간불.** 실패하는 단언은 `the drawer did not reopen in the second project`
-(`tests/e2e/visual.mjs`, 검색어 `drawerAfterSwitch`).
-
-- **제품 결함이 아니다.** 내가 바꾼 "프로젝트 전환" 행 선택 때문이다.
-- 원래는 `[...recent-row].at(-1).click()` 이었다. Work 두 개짜리 세 번째 프로젝트(SEED3)를
-  픽스처에 심으면서 그 위치가 다른 프로젝트를 가리키게 됐다.
-- 세 번 고쳐 봤고 셋 다 실패했다: ① SEED2 를 이름으로 고르기 ② "현재와 다른 프로젝트"
-  고르기 ③ ②에서 SEED3 제외. **아직 원인을 못 잡았다.**
-- **다음에 할 일:** 그 단계에서 전환 **전/후의 프로젝트 경로와 `window.__drawer()` 를 모두
-  찍어서** 어느 프로젝트로 갔고 드로어가 왜 닫혔는지 먼저 본다. 추측하지 말 것 —
-  세 번의 실패가 전부 추측이었다.
-
-같은 내용이 `docs/dev-evidence/mvp-run/BATCH-33-e2e-PENDING.patch` 에도 있다 (563줄).
-stash 가 없어졌으면 그 패치를 적용하면 된다.
-
-### stash 안에 들어 있는 것 (전부 실제 구멍을 막는 단언들)
-
-| 대상 | 무엇을 막는가 |
+| 파일 | 개수 |
 |---|---|
-| Shift+Enter | 이 파일의 모든 제출이 버튼 클릭이라 keydown 핸들러 커버리지가 0이었다. `&&`→`||` 면 **평범한 타이핑이 Work 를 시작한다** |
-| SC-03 패널 불변식 | 8개 지점에서 스냅샷+패널을 채집해 ⟺ 검사. 생존자 5개가 여기 |
-| SC-04 블록 스코핑 | `f.file === scoped` 를 `!==` 로 뒤집으면 **고른 파일만 빼고 전부** 보여준다 (D-118 반전) |
-| SC-02 모호함 카드 | 커버리지가 아예 없었다. §2 의 중복 버튼 수정을 검증하는 테스트가 여기 있다 |
-| 오래됨 부정 케이스 | `&&` 면 멀쩡한 프로젝트가 오래됨 상태를 갖는다 |
-| History `더 보기` 부재 | `>=0` 이면 빈 목록 위에 "0개 더" 가 뜬다. SEED3 픽스처가 이걸 위한 것 |
-| 최근 목록 행 선택 | 위치 → 이름. **위치는 정체성이 아니다** (§5 교훈) |
-| presence 캔버스 폴링 | 고정 sleep → bounded polling |
+| `td01.js` | 5 |
+| `sc02.js` | 4 |
+| `sc04.js` | 4 |
+| `sc03.js` | 3 |
 
-**주의: `app/renderer/screens/sc02.js` 의 중복 버튼 수정은 이미 커밋됐지만 전용 e2e 테스트는
-이 stash 안에 있다.** 즉 지금 그 수정은 단위 스위트로만 검증된 상태다.
+**td01 넷은 싸다 — 전부 "카드는 그렸는데 버튼을 눌러 본 적이 없다":**
+- 모호함 카드에서 **읽기를 고르는** 버튼 (`id === 'work'` · `x.id === id`)
+- 실행 중 카드의 **멈추기** 버튼 (`x.id === 'qc.dev.stop'`) — 배치 34 는 `서버 꺼줘` 로
+  라우팅해서 껐고 버튼은 안 눌렀다
+- 실패 카드 재실행 버튼의 강조 클래스 (`r.state === 'failed' ? ' rec' : ''`)
 
----
+**다섯 번째는 동등 뮤턴트로 보인다** (`already_running && r.data?.pid` → `||`). 관찰 가능한
+차이를 못 찾았고, 못 찾았다고 적혀 있다. 죽이지 못한 것을 죽였다고 하지 말 것.
 
-## 4. td01 생존자 9개 — 손대지 않았다
-
-전부 드로어 QC 카드의 **도달하지 못한 상태**들이다: `r.kind === 'long_running'` ·
-`r.reason === 'already_running'` · `r.state === 'failed'` · `id === 'qc.terminal.open'`.
-
-이유: 픽스처의 `dev` 스크립트가 `vite` 인데 설치돼 있지 않아 즉시 죽는다.
-**제안:** 픽스처의 `dev` 를 `node -e "setInterval(()=>{},1000)"` 같은 장수 명령으로 바꾸면
-긴 실행 · 이미 실행 중 상태가 실제로 도달 가능해지고, `build: 'vite build'` 는 실패 상태용으로
-그대로 둔다. (`tests/e2e/visual.mjs` 의 `scripts:` 줄)
-
----
-
-## 5. 이번에 비싸게 배운 것 — 반드시 지킬 것
-
-- **위치는 정체성이 아니다.** 픽스처 프로젝트 하나를 추가했더니 `[1]` 번째 행이 다른
-  프로젝트를 가리켰고, 이후 전 단계가 엉뚱한 저장소에서 돌다가 **400줄 떨어진 곳에서**
-  "Agent Presence 캔버스가 없다"로 터졌다. 목록에서 무언가를 고를 때는 이름/경로로 고른다.
-- **`evalJs` 템플릿 리터럴 안 주석에 백틱을 쓰지 말 것.** 리터럴이 조기 종료된다. 두 번 당했다.
-- **기존 테스트의 관찰 지점과 단언 사이에 새 단계를 끼워 넣지 말 것.** 그 테스트가 보려던
-  상태를 파괴한다. 드로어는 토글이 아니라 **상태로** 열고 닫는다.
-- **전제조건을 단언하라.** 이번에 내 테스트의 결함 네 개가 조용히 통과하지 않고 터진 것은
-  전부 전제조건 단언 덕이었다 (`hidden===0` · `f.ok===true` · 프로젝트 경로 등).
-- **e2e 로 도달 불가능한 규칙은 순수 함수로 뺀다.** `killPlan` · `launchArgv` ·
-  `hasEvidenceGap` 이 그 패턴이다.
-- **`pkill -f` / `pgrep -f` 금지** (자기 셸을 죽인다). pidfile 또는 `pgrep -x` + `/proc/<pid>/cmdline` 확인.
-- nohup 백그라운드의 `$!` 는 **래퍼 bash** 의 pid 다. python 은 그 자식이다. 둘 다 정리할 것.
+재측정 방법:
+```bash
+rm -rf .mutate-work    # 트리가 바뀌면 워커 사본은 새로 떠야 한다
+ONLY=docs/dev-evidence/mvp-run/BATCH-33-sweep.json W=2 \
+  python3 scripts/mutate/sweep-renderer.py app/renderer/screens/{sc02,sc03,sc04,td01}.js
+```
+29개에 약 40분(2워커). e2e 타임아웃은 900s 다 — **타임아웃은 kill 로 세어진다.** 정직한
+실행 시간보다 낮은 천장은 모든 뮤턴트를 가짜 kill 로 만든다.
 
 ---
 
-## 6. 남은 MVP 큐 전체
+## 4. 셸 줄(WBS-25)에 남은 구멍 — 알고 남긴 것
+
+- **`15` TD-01 의 지금 안 됨 카드(셸이 시작되지 않음)는 그렸지만 도달해 본 적이 없다.**
+  이 픽스처는 셸 시작 실패를 만들 수 없다. `JUQODE_TERM_SHELL` 같은 테스트 어포던스로
+  없는 셸을 가리키게 하는 것이 가장 싼 길로 보인다(`JUQODE_SIGNATURE_EXE` 와 같은 패턴).
+- **busy 경로**(앞 줄이 도는 동안 보낸 줄)는 단위로만 검사된다. 화면 문구는 미검증.
+- **세션이 스스로 끝나는 경우**(사용자가 `exit` 를 친다)는 `termEnded` 칩이 있지만 e2e 가
+  도달하지 않는다. 다음 줄을 치면 새로 열리는 재개 경로도 마찬가지다.
+- **마커 천장:** 명령이 마커 문자열을 스스로 출력하면 줄이 끝난 것으로 읽힌다. 난수로 추측을
+  막았을 뿐이다. 별도 파일 서술자가 답이지만 셸마다 다르다.
+- **Windows:** `shellFor()` 의 Windows 갈래는 **자리표시다.** `$?`/`printf` 마커는 cmd.exe
+  에서 그대로 돌지 않는다. 재기 전까지 Windows 에 대해 아무 말도 하지 말 것.
+
+---
+
+## 5. 남은 MVP 큐 전체
 
 | | 상태 |
 |---|---|
-| 배치 33 e2e 마무리 | **막힘 — §3** |
-| td01 생존자 9개 | 미착수 — §4 에 방법 |
-| 스윕 재실행(실제 kill 측정) | 테스트가 커밋돼야 의미가 있다 |
-| WBS-33 | **완료** (`952d68b`) — 단 DV-16(실제 패키징 exe 검증) 대기 |
-| DV-11 | 판정 재료 완료 (`2f90f32`) — **PM 판정 대기**, 권고는 파이프 셸 + 네 가지 동반 조건 |
-| WBS-32 (사람 검증) | 미착수 — 비개발자 테스터 필요 |
-| DV-13/14/15/16 | 사용자 Windows 재실행 대기 |
+| 배치 33 e2e 마무리 | **완료** (`70345ef`) |
+| td01 생존자 9개 | **완료** (`6e11da6`) — 4개는 다른 경로로 아직 산다 (§3) |
+| 스윕 재실행(실제 kill 측정) | **완료** — 49% → 74% |
+| WBS-25 셸 명령줄 | **완료** (Linux) · Windows 미검증 |
+| DV-11 | **판정됨 · 구현됨** |
+| WBS-33 | 완료 (`952d68b`) — DV-16(실제 패키징 exe 검증) 대기 |
+| WBS-32 (사람 검증) | 미착수 — PM: 나중 |
+| DV-13/14/15/16 | 사용자 Windows 재실행 대기 — PM: 나중. 파이프 셸 검증도 여기 붙는다 |
 
-## 7. 스윕 도구 (이제 저장소에 있다)
+---
 
-```bash
-rm -rf .mutate-work    # 워커 사본은 트리가 바뀌면 새로 떠야 한다
-W=2 python3 scripts/mutate/sweep-renderer.py app/renderer/screens/sc02.js …
-```
-2워커 기준 68개에 약 70분. **스윕이 도는 동안 대상 파일을 편집하지 말 것** —
-러너가 매 뮤턴트마다 원본을 다시 읽고 단언한다.
+## 6. 비싸게 배운 것 — 계속 유효
 
-## 8. 이 런의 보안 제약 (계속 유효)
+- **추측하지 말고 찍어라.** 배치 33 이 세 번 틀린 원인을 `results.json` 한 번이 잡았다.
+  이제 `visual.mjs` 는 단언 전에 관측값 전부를 `tmp-visual/results.json` 에 남긴다.
+- **위치는 정체성이 아니다.** 목록에서 고를 때는 이름/경로로.
+- **관찰 지점과 단언 사이에 단계를 끼워 넣지 말 것.**
+- **전이 상태를 고정 지연으로 관찰하려 하지 말 것.** `멈춤 요청함` 은 700ms 뒤에 이미
+  `멈췄어요` 였다. 관찰 가능한 것을 단언하고, 거짓이 되는 상태가 아님을 단언한다.
+- **타임아웃은 kill 로 세어진다.** 스윕 천장이 실행 시간보다 낮으면 전부 가짜 kill 이다.
+- **없어진 코드는 죽인 것이 아니다.** 재측정은 사이트를 인덱스가 아니라 자기 자신으로 맞추고,
+  사라진 것은 GONE 으로 보고한다.
+- **`evalJs` 템플릿 리터럴 안 주석에 백틱 금지.**
+- **`pkill -f` / `pgrep -f` 금지** (자기 셸을 죽인다). pidfile 또는 `pgrep -x`.
+- **VISUAL QA 는 진짜로 본다.** 배치 34 의 레이아웃 결함 둘은 단언 전부 통과 상태에서
+  스크린샷으로만 보였다.
+
+## 7. 이 런의 보안 제약 (계속 유효)
 
 - 실제 자격증명/사용자 비밀/사설 토큰 커밋 금지. 합성 픽스처 마커는 합성이라고 명시할 때만.
 - 사용자의 실제 프로젝트를 절대 수정하지 않는다.
-- 제외 경로 변경 보고는 **메타데이터만** (D-126a). 내용을 읽어 확인하지 않는다.
+- 제외 경로 변경 보고는 **메타데이터만** (D-126a).
 - 측정하지 않은 것을 측정했다고 말하지 않는다 — 특히 Windows.
 - **빨간 스위트를 푸시하지 않는다.**
+- 셸 줄에 **차단 목록을 만들지 말 것** (`19` §C4). `tests/term.test.js` 가 그것을 검사한다 —
+  걸러내는 척하는 제품은 걸러내지 못한 것을 안전하다고 가르친다.

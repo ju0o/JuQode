@@ -45,7 +45,7 @@
 | 22 | Quick Command rules & explanation | IMPLEMENTED | `main/qc/rules.js` · `availability.js` | `qc` · `unit` |
 | 23 | Quick Command execution & result | IMPLEMENTED | `main/qc/run.js` · `renderer/screens/td01.js` | `qc` · `e2e/visual` |
 | 24 | Long-running Quick Command | IMPLEMENTED | `main/qc/run.js` · `td01.js` | `qc` · `e2e/visual` |
-| 25 | Terminal drawer (pty) | **PARTIAL — DV-11** | `renderer/screens/td01.js` · `td01.css` | `e2e/visual` |
+| 25 | Terminal drawer (pty) | IMPLEMENTED — 파이프 셸 (DV-11 GO) · **Windows 미검증** | `main/term/session.js` · `renderer/screens/td01.js` · `td01.css` | `term` · `e2e/visual` |
 | 26 | Change Groups (explanation layer) | IMPLEMENTED | `main/change/explain.js` | `explain` · `narrate` · `security` · `e2e/visual` |
 | 27 | Code Blocks (segmentation) | IMPLEMENTED | `main/change/blocks.js` | `change` |
 | 28 | Raw Diff view & change-scoped reader | IMPLEMENTED | `renderer/screens/sc04.js` | `e2e/visual` |
@@ -60,12 +60,16 @@
 | 37 | 화면 구성 차별화 · 전환 모션 | IMPLEMENTED | `renderer/transition.js` · `renderer.js` | `transition` · `e2e/visual` |
 | 38 | 다음 행동 강조 (≠ NEXT) | IMPLEMENTED | `renderer/nextaction.js` | `nextaction` · `e2e/visual` |
 
-## 끝나지 않은 것, 셋
+## WBS-25 — 셸 명령줄 (DV-11 **판정됨 · 파이프 셸 GO** · PM · 2026-09-10 · 배치 34 구현)
 
-### WBS-25 — 셸 명령줄 (DV-11 **판정됨 · 파이프 셸 GO** · PM · 2026-09-10)
+**구현됐다.** `main/term/session.js` 가 프로젝트당 장수 파이프 셸 하나를 들고, TD-01 이 서랍
+바닥에 `$` 프롬프트를 고정한다. 동반 조건 네 개는 구현의 일부로 들어갔다 — 한계 고지 · 능력
+한계를 실패로 그리지 않기 · 색과 순서 고지 · 줄 사이 상태 유지. 마지막 것은 e2e 가 실제 앱에서
+`cd ..` 뒤의 `pwd` 로 실측한다. 자세한 것은 `BATCH-34-QA.md` §4.
 
-서랍은 있다. 상시 배너 · Quick Command 칸 · 카드 열 가지 상태 · 실행기 전부 있다. 없는 것은
-**사용자가 직접 명령을 치는 줄** 하나이고, 그것은 pty 결정을 필요로 한다.
+**Windows 는 여전히 미검증이다.** `shellFor()` 의 Windows 갈래는 자리표시이고, `$?`/`printf`
+마커는 cmd.exe 에서 그대로 돌지 않는다. 아래 두 문단은 **판정 이전의 근거**로 남긴다 — 무엇을
+알고 결정했는지가 결정만큼 중요하다.
 
 `19` §C6 REC-010 이 스스로 미검증이라고 적어 두었고(`Real T1 must validate: pty libraries per
 runtime; Windows ConPTY`), 이 저장소의 능력 격리 검사가 `node-pty` 를 금지 목록에 두었고,
@@ -77,8 +81,9 @@ REC-010 자신이 긴 Quick Command 는 서랍 pty 가 **아니라** 자기 자�
 
 **판정 (PM · 2026-09-10): 파이프 셸 GO**, `DV-11-DECISION.md` §4 의 동반 조건 네 개와 함께.
 node-pty 는 능력 격리 검사와 미검증 OS 때문에 배제, mock 은 Primary Action 을 미구현으로
-남기므로 배제. 위 두 문단은 판정 이전의 근거로 그대로 둔다 — 무엇을 알고 결정했는지가
-결정만큼 중요하다. 남은 것은 구현이고, 조건 네 개는 구현의 일부지 후속 과제가 아니다.
+남기므로 배제.
+
+## 끝나지 않은 것, 둘
 
 ### WBS-32 — 실제 프로젝트 도그푸드
 

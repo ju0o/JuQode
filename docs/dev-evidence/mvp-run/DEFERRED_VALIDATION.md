@@ -69,7 +69,12 @@ A WBS package whose only outstanding item is a DV entry is recorded
 the specific reason, never with "Windows".
 
 
-## DV-11 · TD-01 의 셸 명령줄 — **판정됨: 파이프 셸 GO** (PM · 2026-09-10)
+## DV-11 · TD-01 의 셸 명령줄 — **판정됨 · 구현됨** (PM · 2026-09-10 · 배치 34)
+
+**구현 상태:** `app/main/term/session.js` + TD-01 의 셸 줄. Linux 에서 e2e 로 실측된다
+(`cd` 가 줄 사이에 남는다 · 종료 코드 · stderr · 세션 정지). **Windows 는 여전히 미검증** —
+`shellFor()` 의 Windows 갈래는 자리표시이고 마커 프로토콜은 cmd.exe 에서 그대로 돌지 않는다.
+그 검증은 DV-13~16 과 같은 줄에 선다.
 
 **판정:** 파이프 셸. `DV-11-DECISION.md` §4 의 동반 조건 네 개를 전부 승인받았다 —
 ① 한계를 화면에서 말한다 ② 그 실패를 빨강으로 그리지 않는다 ③ 색 없음·순서 근사도 고지한다
