@@ -123,9 +123,12 @@ function failCard(res, onRetry, onOther) {
   n.appendChild(el('div', 't', C.sc01.failTitle));
   n.appendChild(el('div', 'sm', REASON[res?.reason] ?? C.gap.failUnknown));
 
+  /* `16` §2.1: 초록 ▸ 는 복구 동작이다 — 그리고 이 카드의 두 버튼이 정확히 그것이다(사용자가
+   * 고르지 않은 상태에서 빠져나오는 길). 위 주석이 이 화면의 색 문법으로 그렇게 적어 두고도
+   * 표시가 붙어 있지 않아, 빨간 카드 안에서 나가는 길만 회색이었다. */
   const acts = el('div', 'row-acts');
-  if (res?.path) acts.appendChild(btn('btn sm', C.sc01.retry, onRetry));
-  acts.appendChild(btn('btn sm', C.sc01.other, onOther));
+  if (res?.path) acts.appendChild(btn('btn sm rec', C.sc01.retry, onRetry));
+  acts.appendChild(btn('btn sm rec', C.sc01.other, onOther));
   n.appendChild(acts);
 
   if (res?.detail) {

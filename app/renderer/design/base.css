@@ -142,6 +142,15 @@ body {
 /* recovery / secondary action rows */
 .row-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
 
+/* `16` §2.1: green ▸ is a RECOVERY action — a way out of a state the user did not choose —
+   and never navigation. Three screens say so in their own comments and every one of them marks
+   its recovery buttons `rec`, but NO stylesheet defined the class: the grammar lived in the
+   markup and never reached the screen. Found by a mutation sweep, which flipped which button
+   carried the marker and nothing on screen changed, because nothing on screen ever did.
+   Colour only — these are ghost buttons, and a fill would make a recovery read as a primary. */
+.btn.rec { color: var(--rec); }
+.btn.rec:hover { color: var(--rec); background: var(--recbg); border-color: var(--recline); }
+
 details > summary { cursor: pointer; }
 details > summary:hover { color: var(--ink); }
 

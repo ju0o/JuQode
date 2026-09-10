@@ -544,6 +544,16 @@ function refusalCard(r, api, nav, state, project, { phrase = '', resubmit = null
       d.appendChild(el('div', 'xs mono mut', r.detail.stderr));
       n.appendChild(d);
     }
+    /* …and a way forward. `15` gives every refusal a recovery path and `18` has carried
+     * `startFail.resubmit` all along — the card rendered a title, a reason and a disclosure and
+     * then stopped, leaving the user with nothing to press. Nothing started, so re-sending is
+     * the whole recovery: `19` §C4's 시작되지 않은 작업은 기록에 남지 않는다 means there is no
+     * state to undo first. */
+    if (resubmit) {
+      const row = el('div', 'row-acts');
+      row.appendChild(btn('btn sm ghost rec', C.startFail.resubmit, resubmit));
+      n.appendChild(row);
+    }
     return n;
   }
 

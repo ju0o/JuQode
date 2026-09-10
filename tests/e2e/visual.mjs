@@ -1858,6 +1858,29 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.unavailActions = await evalJs(`JSON.stringify([...document.querySelectorAll('[data-el="unavailable"] button')].map(b => b.textContent))`);
   out.unavailReds = await evalJs(RED_COUNT('[data-el="unavailable"], [data-el="unavailable"] *'));
   out.unavailKeptText = await evalJs(`document.querySelector('[data-el="intent"]').value`);
+  /* `16` §2.1 의 초록 ▸ 가 화면에 실제로 있는지, 그리고 읽을 수 있는지. 클래스만 붙고 스타일이
+   * 없던 자리라 — 문법이 마크업에만 있고 화면에는 없었다 — 색과 대비를 둘 다 잰다.
+   * 대비는 AA(4.5:1) 기준이고, 두 테마 모두에서 잰다: 한쪽 테마에만 정의된 토큰은 이 저장소가
+   * 이미 한 번 출시한 실패다. */
+  out.recContrast = {};
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    out.recContrast[theme] = await evalJs(`(() => {
+      const b = [...document.querySelectorAll('[data-el="unavailable"] .btn.rec')][0];
+      if (!b) return null;
+      const lum = (c) => { const [r,g,bl] = c.match(/\\d+/g).slice(0,3).map(Number)
+        .map(v => { v/=255; return v <= .03928 ? v/12.92 : Math.pow((v+.055)/1.055, 2.4); });
+        return .2126*r + .7152*g + .0722*bl; };
+      const fg = getComputedStyle(b).color;
+      let el = b, bg = 'rgba(0, 0, 0, 0)';
+      while (el && bg === 'rgba(0, 0, 0, 0)') { bg = getComputedStyle(el).backgroundColor; el = el.parentElement; }
+      const l1 = lum(fg), l2 = lum(bg);
+      return JSON.stringify({ fg, bg,
+        ratio: Math.round(((Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05)) * 100) / 100 }); })()`);
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await sleep(150);
   /* Every one of the four must actually GO somewhere. The drawer one is the easiest to prove
    * and the one D-134 changed, so it is the one measured: it opens the drawer CARRYING the
    * sentence the user already typed. */
@@ -2135,6 +2158,11 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(600);
   out.failCard = await evalJs(`document.querySelector('[data-el="fail"]')?.innerText ?? null`);
   out.failActions = await evalJs(`document.querySelectorAll('[data-el="fail"] .row-acts button').length`);
+  /* `16` §2.1 · 이 화면의 색 문법: 빨강은 열 수 없는 폴더, **초록 ▸ 는 나가는 길**. 카드가
+   * 빨간데 나가는 길만 회색이면 문법이 반만 적용된 것이다. */
+  out.failActionColours = await evalJs(`JSON.stringify(
+    [...document.querySelectorAll('[data-el="fail"] .row-acts button')]
+      .map(b => [b.className, getComputedStyle(b).color]))`);
   out.failReds = await evalJs(RED_COUNT('[data-el="fail"], [data-el="fail"] *'));
   out.failStillSC01 = await evalJs('window.__screen()');
   for (const theme of ['light', 'dark']) {
@@ -2171,6 +2199,10 @@ fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 2
   assert.ok(results.startFailCard.includes('exited before emitting anything')
             || results.startFailCard.includes('자세한 출력 보기'),
     `the card hides what the process said: ${results.startFailCard}`);
+  /* …그리고 나가는 길이 있다. 제목 · 이유 · 접힌 출력만 있고 **누를 것이 하나도 없는** 카드였다.
+   * 시작된 것이 없으므로 되돌릴 상태도 없다 — 다시 보내기가 복구의 전부다. */
+  assert.ok(results.startFailCard.includes('다시 보내기'),
+    `the start-failed card leaves the user with nothing to press: ${results.startFailCard}`);
 }
 
 /* ── `15` SC-02 Unavailable State ──────────────────────────────────────────────────────── */
@@ -2187,6 +2219,20 @@ fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 2
   assert.deepStrictEqual(acts,
     ['▸ 프로젝트 설명 읽기', '▸ Quick Command 쓰기', '▸ 터미널로 직접 확인', '▸ 해결한 뒤 다시 보내기'],
     `the four recovery paths are not four buttons: ${JSON.stringify(acts)}`);
+  /* `16` §2.1 · 초록 ▸ 는 복구 동작이다 — 그리고 그것이 **화면에 있어야** 문법이다.
+   * 이 클래스에는 스타일이 없었다: 세 화면이 주석으로 규칙을 적고 마크업이 표시까지 하면서
+   * 아무 색도 나오지 않았다. 두 테마에서 색이 다르고, 둘 다 읽을 수 있어야 한다. */
+  for (const [theme, raw] of Object.entries(results.recContrast)) {
+    const c = raw ? JSON.parse(raw) : null;
+    assert.ok(c, `${theme}: 사용 불가 카드에 복구 버튼이 없다 — 검사할 것이 없다`);
+    assert.ok(c.ratio >= 4.5, `${theme}: recovery ▸ contrast ${c.ratio}:1 is below AA (${c.fg} on ${c.bg})`);
+  }
+  {
+    const light = JSON.parse(results.recContrast.light), dark = JSON.parse(results.recContrast.dark);
+    assert.notStrictEqual(light.fg, dark.fg,
+      `the recovery green is the same in both themes (${light.fg}) — one of them is undefined`);
+  }
+
   /* UF-RULE-NOQUEUE: the submitted text is kept, never queued and never thrown away. */
   assert.strictEqual(results.unavailKeptText, '로그인 오류 고쳐줘',
     'the submitted text was lost when the Work was refused');
@@ -3491,6 +3537,15 @@ assert.ok(results.failCard, 'a deleted folder produced no failure card at all');
 assert.ok(results.failCard.includes('이 폴더는 열 수 없어요'), `failure card headline is wrong: ${results.failCard}`);
 assert.ok(results.failCard.includes('폴더가 없어요'), 'the failure card does not name the reason');
 assert.strictEqual(results.failActions, 2, `15 asks for 2 recovery actions, found ${results.failActions}`);
+{
+  /* 두 버튼 다 복구 동작으로 표시되고, 둘 다 같은 초록을 쓴다. */
+  const acts = JSON.parse(results.failActionColours);
+  for (const [cls] of acts) {
+    assert.match(cls, /\brec\b/, `a way out of the failure is not marked as a recovery action: ${cls}`);
+  }
+  assert.strictEqual(new Set(acts.map(([, c]) => c)).size, 1,
+    `the two ways out are painted differently: ${JSON.stringify(acts)}`);
+}
 assert.ok(results.failReds > 0, 'the one red on SC-01 is not rendered red');
 
 console.log(JSON.stringify(results, null, 2));
