@@ -1,7 +1,8 @@
 # RESUME — JuQode Autonomous MVP Long Run V2
 
-**마지막 체크포인트:** `a6337dd` · 브랜치 `dev/mvp-autonomous-v01` (푸시 완료)
-**작성 시각:** 2026-09-10 · 작업 트리 clean · 백그라운드 프로세스 없음 (전부 정리됨)
+**마지막 체크포인트:** `758af26` · 브랜치 `dev/mvp-autonomous-v01` (푸시 완료)
+**작업 트리:** clean · 백그라운드 프로세스 없음
+**주의:** `git stash@{0}` 에 **미완성 e2e 작업**이 들어 있다 (§3 을 반드시 먼저 읽을 것)
 
 ---
 
@@ -11,145 +12,108 @@
 CONTINUE THE SAME JUQODE AUTONOMOUS MVP LONG RUN.
 Do NOT restart planning. Do NOT create a new run. Do NOT reset the branch.
 Current remote branch: dev/mvp-autonomous-v01
-Last checkpoint: a6337dd (Batch 31 — Windows fixes). Working tree was clean.
+Last checkpoint: 758af26 (Batch 33 — renderer sweep). Working tree was clean.
 
-Read RESUME.md first, then resume the queue in this order:
+Read RESUME.md first. §3 is the blocker — there is unfinished e2e work in git stash
+and one RED assertion to fix before anything else.
 
-  1. 렌더러 뮤테이션 스윕 마무리 — sc02/sc03/sc04/td01, 68 sites. 미완이다 (아래 §3).
-  2. WBS-33 잔여 — 서명되지 않은 빌드 배너 UI (§4). PM 이 다음 큐로 지정했다.
-  3. 사용자가 Windows verify-windows.ps1 재실행 데이터를 주면 DV-13/14/15 판정,
-     그리고 DV-11(pty) 트레이드오프를 PM 에게 요약 보고 (§5). PM 이 GO 를 낼 예정.
+Queue, in order:
+  1. §3 — e2e 스택을 되살리고 `the drawer did not reopen in the second project` 를 고친다.
+     그것이 초록이 되어야 배치 33 의 나머지가 커밋될 수 있다.
+  2. §4 — td01 생존자 9개 (긴 실행 · 이미 실행 중 · 실패 상태).
+  3. §5 — 스윕 재실행으로 실제 kill 수를 측정한다. 지금까지는 측정한 적이 없다.
+  4. §6 — WBS-32(사람 검증) · DV-11 PM 판정 · Windows 재실행 데이터(DV-13/14/15/16).
 
 Keep the same operating loop: IMPLEMENT → TEST → PRODUCT QA → TECHNICAL/SECURITY QA →
 TEST ADVERSARY → VISUAL QA when UI changes → FIX → RETEST → MUTATION / NEGATIVE CHECK →
 CHECKPOINT COMMIT → CONTINUE.
-Windows-only requirements remain DEFERRED_VALIDATION and must not globally stop unrelated work.
-Do not return after the next WBS or batch. Continue now.
+Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
+Continue now.
 ```
 
 ---
 
-## 2. 직전에 한 일 — 배치 31 (커밋 `a6337dd`, 푸시됨)
+## 2. 이번 세션에 한 일
 
-사용자가 Windows PC 에서 `scripts/verify-windows.ps1` 을 실제로 돌린 로그를 보내왔고,
-보고된 실패 6개를 전부 원인까지 추적해 고쳤다. 전체 기록: `docs/dev-evidence/mvp-run/BATCH-31-QA.md`.
-
-**핵심 결론 (사용자 질문에 대한 답):** 보고된 6개 중 **어느 것도 `session.js` spawn 버그와
-관련이 없다.** 그 버그는 Work 를 시작할 때만 발현하고, 하네스는 Work 를 시작하지 않는다.
-
-| 고친 것 | 파일 |
+| 커밋 | 내용 |
 |---|---|
-| `tests/*.test.js` 글롭을 cmd.exe 가 안 펼침 → 따옴표로 node 가 펼치게 | `package.json` |
-| e2e 3종이 POSIX 전용 → OS 별 launch/kill/count 를 한 곳에 | `tests/e2e/launch.mjs` (신규) + 3종 |
-| `Stop-Process` 가 `.cmd` 껍데기만 죽임 → `taskkill /T`, 단계 사이 Sweep(누수는 기록) | `scripts/verify-windows.ps1` |
-| line 243 StrictMode 종료 오류 → `.Contains('status')` | `scripts/verify-windows.ps1` |
-| spikes 가 이유 없이 죽음 → 크래시에도 부분 증거를 쓰고 하네스가 이유를 보고 | `scripts/windows-spikes.mjs` |
-| **제품 결함:** Windows 에서 취소가 아무 프로세스도 안 죽임 → `killPlan()` + `taskkill /T` | `app/main/claude/session.js` |
-| **제품 결함:** `.cmd` 을 cmd.exe 로 안 감쌈 → `launchArgv()` 공유 | `app/main/claude-detect.js` · `session.js` |
+| `bcacd91` | 뮤테이션 스윕 러너를 저장소로 옮김 (`scripts/mutate/`) — 스크래치패드에 뒀다가 재부팅에 날아갔다 |
+| `952d68b` | **WBS-33** 서명되지 않은 빌드 배너 (CF-21) |
+| `2f90f32` | **DV-11** 판정 재료 한 장 + PM 판정란 |
+| `758af26` | **배치 33** 렌더러 스윕 완주 · 모호함 카드 중복 버튼 수정 · `hasEvidenceGap` 순수 함수 |
 
-측정: unit `546/546` · e2e 전부 PASS(리눅스) · PowerShell `PARSE OK` (pwsh 7.6.6) ·
-line 243 격리 재현 후 수정 확인.
+스윕 결과: **68개 중 33개 죽고 35개 생존** (sc02 11 · sc03 8 · sc04 7 · td01 9).
+전체 기록은 `docs/dev-evidence/mvp-run/BATCH-33-QA.md`.
 
 ---
 
-## 3. 다음 작업 ① — 렌더러 뮤테이션 스윕 마무리 (미완)
+## 3. ⚠️ 먼저 할 일 — stash 에 있는 e2e 작업과 빨간 단언 하나
 
-**상태: 미완. 68개 중 완주한 회차가 없다.** 최신 회차(`sweepui5`)는 사용자 이석으로
-시작 20초 만에 안전 종료했고, 그 이전 회차(`sweepui4`)는 30/68 에서 끊겼다 —
-게다가 그것은 배치 31 **이전** 트리 기준이라 다시 돌려야 한다.
-
-대상 4파일 · 68 sites:
-`app/renderer/screens/sc02.js` · `sc03.js` · `sc04.js` · `td01.js`
-
-**도구 위치 (이 세션 스크래치패드 — 재부팅하면 사라진다):**
-```
-/tmp/claude-1000/-home-skkse12-Desktop-Projects-Team-JuQode/bc9a37d4-.../scratchpad/
-  gen.py       # 파일 하나의 뮤테이션 사이트 열거 (tests/src.js 로 주석 제거한 CODE 기준)
-  sweepui.py   # 렌더러 스윕 러너 (unit 먼저, 그 다음 visual e2e)
-```
-사라졌으면 이전 세션 스크래치패드에 원본이 있다:
-`.../2d34b13d-e94d-46fe-b67e-1ea9d7f13eda/scratchpad/{gen.py,sweepui.py}`
-
-**재실행 명령:**
 ```bash
-SP=<이 세션 scratchpad>
-rm -rf $SP/sweepui                      # 워커 사본은 반드시 새로 뜬다 (배치 31 이 트리를 바꿨다)
-cd $SP && nohup python3 -u sweepui.py \
-  app/renderer/screens/sc02.js app/renderer/screens/sc03.js \
-  app/renderer/screens/sc04.js app/renderer/screens/td01.js > sweepui6.log 2>&1 &
+git stash list          # stash@{0}: batch-33 e2e work in progress
+git stash pop           # tests/e2e/visual.mjs 만 들어 있다
+node tests/e2e/visual.mjs
 ```
-소요: 2워커 기준 대략 50~70분.
 
-**스윕 중 지켜야 할 것 (실측으로 배운 것들):**
-- **스윕이 도는 동안 위 4개 렌더러 파일을 편집하지 말 것.** 러너가 매 뮤턴트마다 REPO 의
-  원본을 다시 읽어 `orig.count(ctx) == 1` 을 단언한다. 편집하면 그 단언이 깨진다.
-  (`app/main/**` 과 테스트 편집은 안전 — 워커는 자기 사본을 쓴다.)
-- **프로세스를 `pkill -f` / `pgrep -f` 로 찾지 말 것.** 패턴이 내 셸 자신에게도 맞아
-  자기 프로세스 그룹을 죽인다 (이 런에서 3번 당했다). pidfile 을 쓰거나,
-  `pgrep -x python3` + `/proc/<pid>/cmdline` 확인 후 죽인다.
-  전 회차 정리는 `pgrep -x electron` + `readlink /proc/<pid>/cwd` 로 `sweepui/` 아래
-  것만 골라 죽였다 — 그 방법이 안전하다.
-- nohup 백그라운드로 띄우면 `$!` 가 **래퍼 bash** 의 pid 다. python 은 그 자식이다.
-  둘 다 정리해야 한다.
+**현재 상태: 빨간불.** 실패하는 단언은 `the drawer did not reopen in the second project`
+(`tests/e2e/visual.mjs`, 검색어 `drawerAfterSwitch`).
 
----
+- **제품 결함이 아니다.** 내가 바꾼 "프로젝트 전환" 행 선택 때문이다.
+- 원래는 `[...recent-row].at(-1).click()` 이었다. Work 두 개짜리 세 번째 프로젝트(SEED3)를
+  픽스처에 심으면서 그 위치가 다른 프로젝트를 가리키게 됐다.
+- 세 번 고쳐 봤고 셋 다 실패했다: ① SEED2 를 이름으로 고르기 ② "현재와 다른 프로젝트"
+  고르기 ③ ②에서 SEED3 제외. **아직 원인을 못 잡았다.**
+- **다음에 할 일:** 그 단계에서 전환 **전/후의 프로젝트 경로와 `window.__drawer()` 를 모두
+  찍어서** 어느 프로젝트로 갔고 드로어가 왜 닫혔는지 먼저 본다. 추측하지 말 것 —
+  세 번의 실패가 전부 추측이었다.
 
-## 4. 다음 작업 ② — WBS-33 잔여: 서명되지 않은 빌드 배너 (PM 지시)
+같은 내용이 `docs/dev-evidence/mvp-run/BATCH-33-e2e-PENDING.patch` 에도 있다 (563줄).
+stash 가 없어졌으면 그 패치를 적용하면 된다.
 
-**요구 출처 (확인된 것):**
-`21_WBS.md` line 100, WBS-33 위험 열 — **"서명 인증서 없음 → 서명되지 않은 빌드임을
-표시(숨기지 않음)"**. PM 이 인용한 `13` §8 은 절대 제품 규칙(D-105~D-121) 절이다 —
-착수 전에 그 절에서 이 배너를 지배하는 D 번호를 확인해서 배너 문구/색에 인용할 것.
+### stash 안에 들어 있는 것 (전부 실제 구멍을 막는 단언들)
 
-**아직 확인하지 않은 것 (착수 시 먼저 할 일):**
-- 서명 상태가 메인 프로세스에서 렌더러로 **어떤 경로로 가는지** — 기존 `juqode:versions`
-  IPC 에 얹을지 새 채널을 팔지. `app/main/ipc.js` 와 `preload` 표면을 먼저 읽을 것.
-- 판정 근거는 **PE 인증서 테이블**이어야 한다 (빌더 로그가 아니라). 하네스는 이미
-  `Get-AuthenticodeSignature` 로 그렇게 한다 — 앱 런타임에서 같은 사실을 무엇으로 알지
-  결정해야 한다. 리눅스/개발 실행에서는 "서명 없음"이 정상 상태라는 점도 처리할 것.
-- 색: `16` §2.1 색 문법상 **red 는 실패 전용**이다. 서명되지 않은 빌드는 실패가 아니라
-  **사실 고지**이므로 red 를 쓰면 안 된다. amber FILL(부분)/OUTLINE(대기)도 의미가 다르다.
-  착수 전에 `16` §2.1 을 다시 읽고 어떤 토큰이 맞는지 정할 것 — 여기서 틀리면 그 자체가 결함이다.
-- 문구는 `18_KOREAN_UX_COPY.md` 에 이미 있는지 먼저 찾을 것. 없으면 새로 만들되 D-114
-  어휘(확인됨/예상됨/확인 못함)와 충돌하지 않게.
-- UI 변경이므로 **VISUAL QA 필수** — `tests/e2e/visual.mjs` 에 렌더 증거를 추가한다.
+| 대상 | 무엇을 막는가 |
+|---|---|
+| Shift+Enter | 이 파일의 모든 제출이 버튼 클릭이라 keydown 핸들러 커버리지가 0이었다. `&&`→`||` 면 **평범한 타이핑이 Work 를 시작한다** |
+| SC-03 패널 불변식 | 8개 지점에서 스냅샷+패널을 채집해 ⟺ 검사. 생존자 5개가 여기 |
+| SC-04 블록 스코핑 | `f.file === scoped` 를 `!==` 로 뒤집으면 **고른 파일만 빼고 전부** 보여준다 (D-118 반전) |
+| SC-02 모호함 카드 | 커버리지가 아예 없었다. §2 의 중복 버튼 수정을 검증하는 테스트가 여기 있다 |
+| 오래됨 부정 케이스 | `&&` 면 멀쩡한 프로젝트가 오래됨 상태를 갖는다 |
+| History `더 보기` 부재 | `>=0` 이면 빈 목록 위에 "0개 더" 가 뜬다. SEED3 픽스처가 이걸 위한 것 |
+| 최근 목록 행 선택 | 위치 → 이름. **위치는 정체성이 아니다** (§5 교훈) |
+| presence 캔버스 폴링 | 고정 sleep → bounded polling |
+
+**주의: `app/renderer/screens/sc02.js` 의 중복 버튼 수정은 이미 커밋됐지만 전용 e2e 테스트는
+이 stash 안에 있다.** 즉 지금 그 수정은 단위 스위트로만 검증된 상태다.
 
 ---
 
-## 5. 다음 작업 ③ — Windows 재실행 데이터가 오면
+## 4. td01 생존자 9개 — 손대지 않았다
 
-사용자가 `verify-windows.ps1` 을 다시 돌려 DV-11/13/14/15 데이터를 줄 예정이다.
+전부 드로어 QC 카드의 **도달하지 못한 상태**들이다: `r.kind === 'long_running'` ·
+`r.reason === 'already_running'` · `r.state === 'failed'` · `id === 'qc.terminal.open'`.
 
-받으면 판정할 것:
-- **DV-13** — e2e 3종이 Windows 에서 통과하는가 (`launch.mjs` 는 리눅스에서만 측정됐다)
-- **DV-14** — 패키징된 exe 로딩 실패가 정말 단일 인스턴스 잠금 때문이었는가.
-  누수를 없앴으니 이번엔 깨끗한 조건에서 나온다. 여전히 실패하면 **다른 원인**이고,
-  그때는 `files: ["app/**/*", "package.json"]` 과 ASAR/userData 경로를 봐야 한다.
-- **DV-15** — spikes 가 왜 죽었는가. 하네스가 이제 종료 코드와 마지막 6줄을 보고한다.
+이유: 픽스처의 `dev` 스크립트가 `vite` 인데 설치돼 있지 않아 즉시 죽는다.
+**제안:** 픽스처의 `dev` 를 `node -e "setInterval(()=>{},1000)"` 같은 장수 명령으로 바꾸면
+긴 실행 · 이미 실행 중 상태가 실제로 도달 가능해지고, `build: 'vite build'` 는 실패 상태용으로
+그대로 둔다. (`tests/e2e/visual.mjs` 의 `scripts:` 줄)
 
-### PM 에게 보고할 DV-11 트레이드오프 요약 (초안 — 데이터 오면 확정)
+---
 
-PM 이 "파이프 셸이 sudo/ssh/git 자격증명을 못 받는다는 실측이 이미 있으니 그쪽으로 결론
-나면 GO" 라고 했다. 그 실측은 `docs/dev-evidence/mvp-run/DV-11-PIPE-SHELL-SPIKE.md` 에 있다.
+## 5. 이번에 비싸게 배운 것 — 반드시 지킬 것
 
-| | 얻는 것 | 잃는 것 | 이 런에서 검증 가능한가 |
-|---|---|---|---|
-| **node-pty** | 진짜 터미널 — `/dev/tty` · 색 · 순서 · 작업 제어 | 네이티브 모듈(Electron 버전마다 재빌드) · **이 저장소의 능력 격리 검사가 금지** · Windows ConPTY 미검증 | **아니오** |
-| **파이프 셸** | 네이티브 모듈 없음 · 정지는 이미 됨 · stdin 으로 답 가능 | `sudo`/`ssh`/자격증명 **불가** · 색 없음 · 순서 근사 · 세션 상태 직접 관리 | **예 (Linux)**. Windows 미검증 |
-| **mock** (`18` `term.mock`) | 아무것도 실행 안 하니 아무것도 안 틀림 · 문구 존재 | 셸 줄이 없다 — `15` TD-01 요구가 남는다 | 예 |
-
-결정적 사실 하나: `sudo`/`ssh`/git 자격증명 프롬프트는 **stdin 을 읽지 않는다.**
-`/dev/tty` 를 직접 연다. 그래서 파이프 셸에서는 **멈추지 않고, 틀린 답을 받는다** —
-사용자가 답할 기회조차 없이 실패한다.
-
-**파이프 셸로 GO 할 경우 반드시 함께 가야 하는 조건 (PM 에게 명시할 것):**
-제품이 화면에서 그 한계를 **말해야 한다.** "sudo/ssh/자격증명 프롬프트는 이 터미널에서
-답할 수 없습니다" 를 사용자가 그 명령을 치기 전에, 또는 실패한 직후에 알아야 한다.
-그렇지 않으면 D-114 의 "확인 못함"을 제품이 "실패"로 위장하는 셈이 된다.
-
-**아직 안 잰 것 (GO 문서에 그대로 남길 것):** Windows 의 파이프 셸도 ConPTY 도 안 쟀다.
-Electron 메인 프로세스 안에서 같은 결과가 나오는지도 별개 측정이다. node-pty 는 능력
-격리 검사가 금지해서 실제로 들여보지 않았다.
+- **위치는 정체성이 아니다.** 픽스처 프로젝트 하나를 추가했더니 `[1]` 번째 행이 다른
+  프로젝트를 가리켰고, 이후 전 단계가 엉뚱한 저장소에서 돌다가 **400줄 떨어진 곳에서**
+  "Agent Presence 캔버스가 없다"로 터졌다. 목록에서 무언가를 고를 때는 이름/경로로 고른다.
+- **`evalJs` 템플릿 리터럴 안 주석에 백틱을 쓰지 말 것.** 리터럴이 조기 종료된다. 두 번 당했다.
+- **기존 테스트의 관찰 지점과 단언 사이에 새 단계를 끼워 넣지 말 것.** 그 테스트가 보려던
+  상태를 파괴한다. 드로어는 토글이 아니라 **상태로** 열고 닫는다.
+- **전제조건을 단언하라.** 이번에 내 테스트의 결함 네 개가 조용히 통과하지 않고 터진 것은
+  전부 전제조건 단언 덕이었다 (`hidden===0` · `f.ok===true` · 프로젝트 경로 등).
+- **e2e 로 도달 불가능한 규칙은 순수 함수로 뺀다.** `killPlan` · `launchArgv` ·
+  `hasEvidenceGap` 이 그 패턴이다.
+- **`pkill -f` / `pgrep -f` 금지** (자기 셸을 죽인다). pidfile 또는 `pgrep -x` + `/proc/<pid>/cmdline` 확인.
+- nohup 백그라운드의 `$!` 는 **래퍼 bash** 의 pid 다. python 은 그 자식이다. 둘 다 정리할 것.
 
 ---
 
@@ -157,15 +121,27 @@ Electron 메인 프로세스 안에서 같은 결과가 나오는지도 별개 �
 
 | | 상태 |
 |---|---|
-| 렌더러 스윕 (sc02/sc03/sc04/td01, 68) | **미완 — 다시 돌려야 함** (§3) |
-| WBS-33 서명 배너 UI | **다음 큐** (§4) |
-| WBS-32 (사람 검증) | 미착수 — 비개발자 테스터 필요, 절차는 이전 보고 참조 |
-| DV-11 (pty 제품 결정) | PM 판단 대기 (§5) |
-| DV-13/14/15 | 사용자 Windows 재실행 대기 |
+| 배치 33 e2e 마무리 | **막힘 — §3** |
+| td01 생존자 9개 | 미착수 — §4 에 방법 |
+| 스윕 재실행(실제 kill 측정) | 테스트가 커밋돼야 의미가 있다 |
+| WBS-33 | **완료** (`952d68b`) — 단 DV-16(실제 패키징 exe 검증) 대기 |
+| DV-11 | 판정 재료 완료 (`2f90f32`) — **PM 판정 대기**, 권고는 파이프 셸 + 네 가지 동반 조건 |
+| WBS-32 (사람 검증) | 미착수 — 비개발자 테스터 필요 |
+| DV-13/14/15/16 | 사용자 Windows 재실행 대기 |
 
-## 7. 이 런의 보안 제약 (계속 유효)
+## 7. 스윕 도구 (이제 저장소에 있다)
 
-- 실제 자격증명/사용자 비밀/사설 토큰 커밋 금지. 합성 픽스처 마커는 **합성이라고 명시할 때만**.
-- 사용자의 실제 프로젝트를 절대 수정하지 않는다. 런타임 실험은 일회용 스크래치 저장소에서.
+```bash
+rm -rf .mutate-work    # 워커 사본은 트리가 바뀌면 새로 떠야 한다
+W=2 python3 scripts/mutate/sweep-renderer.py app/renderer/screens/sc02.js …
+```
+2워커 기준 68개에 약 70분. **스윕이 도는 동안 대상 파일을 편집하지 말 것** —
+러너가 매 뮤턴트마다 원본을 다시 읽고 단언한다.
+
+## 8. 이 런의 보안 제약 (계속 유효)
+
+- 실제 자격증명/사용자 비밀/사설 토큰 커밋 금지. 합성 픽스처 마커는 합성이라고 명시할 때만.
+- 사용자의 실제 프로젝트를 절대 수정하지 않는다.
 - 제외 경로 변경 보고는 **메타데이터만** (D-126a). 내용을 읽어 확인하지 않는다.
 - 측정하지 않은 것을 측정했다고 말하지 않는다 — 특히 Windows.
+- **빨간 스위트를 푸시하지 않는다.**
