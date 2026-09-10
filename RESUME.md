@@ -17,10 +17,11 @@ Last checkpoint: batch 35 (renderer mutants: zero survivors). Working tree clean
 Read RESUME.md first. There is NO blocker.
 
 Queue, in order:
-  1. §4 — 셸 줄의 남은 구멍: 도달 못 한 사용 불가 카드 · busy 경로 · 세션이 스스로 끝나는 경우.
-  2. §3 — `rec` 클래스 정리(CSS 가 없다) · 원한다면 메인 프로세스 스윕 재측정.
+  1. §3 — 문구 검사의 구멍: 미사용 키를 `\b<key>\b` 로 찾아서 **이름이 겹치면 통과**한다
+     (`startFail.resubmit` 이 그렇게 숨어 있었다). 전체 경로로 찾도록 고칠 것.
+  2. §4 — 남은 것: 마커 천장 · Windows 자리표시. 둘 다 알고 남긴 것이다.
   3. §5 — WBS-32(사람 검증) · DV-13~16(Windows). 둘 다 PM 이 "나중" 으로 판정했다.
-살아 있는 렌더러 뮤턴트는 0 이다 — §3 은 더 이상 큐가 아니다.
+살아 있는 렌더러 뮤턴트는 0 이다. 셸 줄(WBS-25)도 Linux 에서는 구멍이 닫혔다.
 
 Keep the same operating loop: IMPLEMENT → TEST → PRODUCT QA → TECHNICAL/SECURITY QA →
 TEST ADVERSARY → VISUAL QA when UI changes → FIX → RETEST → MUTATION / NEGATIVE CHECK →
@@ -56,7 +57,7 @@ Continue now.
 
 | | |
 |---|---|
-| `td01.js` 5 | 5 사살 |
+| `td01.js` | 5 사살 · 이후 전체 스윕에서 15개 중 12 사살 → 나머지 처리 후 13개 전부 커버 |
 | `sc02.js` 4 | 2 사살 · 2 GONE(순수 함수 추출) |
 | `sc03.js` 3 | 1 사살 · 2 GONE(도달 불가 분기 삭제) |
 | `sc04.js` 4 | 4 사살 |
@@ -64,10 +65,15 @@ Continue now.
 
 목록 원본은 `BATCH-34-sweep.json` · `BATCH-33-sweep.json` (둘 다 저장소에 있다).
 
-**남은 것 하나:** `btn ... rec` 는 렌더러 네 화면에서 15번 쓰이는데 **어떤 CSS 도 `.rec` 를
-정의하지 않는다.** 복구 동작 표시가 화면에서 아무 차이도 만들지 않는다. 색을 주는 것은
-`16` §2.1 색 문법에 걸리는 디자인 결정이고 지우는 것은 네 화면 변경이라, 적어 두고 넘겼다
-(`BATCH-35-QA.md` §3).
+**`rec` 클래스는 칠했다** (`BATCH-35-QA.md` §3): `16` §2.1 의 초록 ▸ 가 처음으로 화면에
+올라갔다. 대비 실측 6.96(밝게) · 7.36(어둡게), 두 테마 색이 다른 것도 단언한다. 칠하고 나서
+SC-01 의 나가는 길 둘에 표시가 없던 것과, **시작 실패 카드에 누를 것이 하나도 없던 것**을
+찾아 같이 고쳤다.
+
+**새로 발견한 구멍 하나 — 다음 큐:** 문구 검사가 미사용 키를 `\b<key>\b` 로 찾는다. 키 이름이
+겹치면(`startFail.resubmit` · `work.resubmit` · `unavailable.resubmit`) 하나만 쓰여도 셋 다
+사용됨으로 통과한다. 그래서 렌더되지 않는 컨트롤이 하나 숨어 있었다. 전체 경로로 찾도록
+고치면 같은 종류가 더 나올 수 있다.
 
 **배치 35 가 비싸게 배운 것 둘:**
 - **조용히 건너뛰는 길이 검사는 검사가 아니다.** sc04 뮤턴트 셋이 첫 시도에서 살아남았다 —
