@@ -69,7 +69,15 @@ A WBS package whose only outstanding item is a DV entry is recorded
 the specific reason, never with "Windows".
 
 
-## DV-11 · TD-01 의 셸 명령줄 — pty 결정이 필요하다
+## DV-11 · TD-01 의 셸 명령줄 — **판정됨: 파이프 셸 GO** (PM · 2026-09-10)
+
+**판정:** 파이프 셸. `DV-11-DECISION.md` §4 의 동반 조건 네 개를 전부 승인받았다 —
+① 한계를 화면에서 말한다 ② 그 실패를 빨강으로 그리지 않는다 ③ 색 없음·순서 근사도 고지한다
+④ 줄 사이 셸 상태를 유지한다(장수 셸 하나). 조건이 빠진 GO 는 원칙 위반이므로 구현의 일부다.
+
+**여전히 재지 않은 것 — 판정이 바꾸지 않는다:** Windows(ConPTY 도, Windows 의 파이프 셸도),
+Electron 메인 프로세스 안에서의 같은 실측. 아래 본문은 판정 이전의 재료로 그대로 남긴다.
+
 
 `15` TD-01 은 서랍 안에 **셸 명령줄**을 요구하고(사용자가 직접 명령을 친다), `19` §C6 REC-010 은
 프로젝트당 pty 하나를 말한다. 같은 절이 **"Real T1 must validate: pty libraries per runtime;

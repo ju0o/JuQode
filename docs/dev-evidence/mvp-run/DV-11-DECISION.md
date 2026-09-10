@@ -117,8 +117,12 @@ mock 은 요구를 미구현으로 남기고, node-pty 는 이 런에서 검증�
 
 | | |
 |---|---|
-| 판정 | ☐ 파이프 셸 GO · ☐ mock · ☐ node-pty · ☐ 보류 |
-| 판정자 · 일시 | |
-| §4 동반 조건 승인 | ☐ 1 ☐ 2 ☐ 3 ☐ 4 |
+| 판정 | **☑ 파이프 셸 GO** · ☐ mock · ☐ node-pty · ☐ 보류 |
+| 판정자 · 일시 | PM · 2026-09-10 |
+| §4 동반 조건 승인 | ☑ 1 ☑ 2 ☑ 3 ☑ 4 (권고안 그대로, 네 조건 전부) |
 
-판정이 기록되면 `DEFERRED_VALIDATION.md` 의 DV-11 행과 `WBS-LEDGER.md` 를 같이 갱신한다.
+`DEFERRED_VALIDATION.md` 의 DV-11 행과 `WBS-LEDGER.md` 의 WBS-25 를 이 판정으로 갱신했다.
+
+**판정이 바꾸지 않는 것:** §6 이 아직 재지 않았다고 적은 세 가지는 그대로 미측정이다 —
+Windows(ConPTY 도 파이프 셸도), Electron 메인 프로세스 안에서의 같은 실측, node-pty 실물.
+GO 는 Linux 실측 위에서 내려졌고, 이 문서의 어떤 줄도 Windows 에 적용된다고 말하지 않는다.
