@@ -149,6 +149,54 @@ test('a run that started and returned IS observed, and the citation is that resu
                                   { diffs, signals }).groups[0].confidence, 'confirmed');
 });
 
+test('a result that belongs to a DIFFERENT tool does not stand in for the run', () => {
+  /* FOUND BY MUTATION: `b.type === 'tool_result' && runIds.has(b.tool_use_id)` could become
+   * `||`, so any tool_result at all would satisfy a Work that had merely STARTED a Bash.
+   *
+   * The existing tests cannot see it: the "only edited" case has no Bash use, so `runIds` is
+   * empty and the function returns before this line. What is needed is a run that started and
+   * a result that came back for something ELSE — the ordinary shape of a test that is still
+   * going while the model edits another file. */
+  const { diffs } = bench();
+  const signals = [
+    bashUse('tu_run'),                                    // npm test started…
+    { id: 'u2', kind: KIND.TOOL_USE,
+      payload: JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_edit', name: 'Edit', input: {} }] } }) },
+    toolResult('tu_edit', 's-edit'),                      // …and the EDIT came back, not the run
+  ];
+  const o = E.observedRun(signals);
+  assert.strictEqual(o.observed, false,
+    'an unrelated tool result was read as the run returning');
+  assert.strictEqual(o.sourceRef, null);
+  assert.strictEqual(
+    E.groupsFrom(JSON.stringify([{ title: 'T', confidence: 'confirmed', files: ['a.ts'] }]),
+                 { diffs, signals }).groups[0].confidence, 'expected',
+    'a group was left 확인됨 on a run nobody saw finish');
+
+  /* …and the SAME signals plus the run's own result do observe it — otherwise the check above
+   * would pass for a function that always answered false. */
+  const withRun = [...signals, toolResult('tu_run', 's-run')];
+  assert.deepStrictEqual(E.observedRun(withRun), { observed: true, sourceRef: 'signal:s-run' });
+});
+
+test('a two-file group is titled by both files, not by "외 0개"', () => {
+  /* FOUND BY MUTATION: `names.length <= 2` could become `<`, and exactly two files then took
+   * the other branch — `a.ts · b.ts 외 0개`. A title is a FACT about the change; one that
+   * counts to zero is a sentence nobody wrote on purpose, and the boundary is the only place
+   * it appears. */
+  const { diffs } = bench();
+  const title = (files) => E.groupsFrom(JSON.stringify([{ confidence: 'unconfirmed', files }]),
+                                        { diffs, signals: [] }).groups[0].title;
+  assert.strictEqual(title(['a.ts']), 'a.ts');
+  assert.strictEqual(title(['a.ts', 'b.ts']), 'a.ts · b.ts');
+
+  /* …and three DOES summarise, so the branch is real rather than dead. */
+  const three = bench({ 'a.ts': '+1\n', 'b.ts': '+2\n', 'c.ts': '+3\n' });
+  const t3 = E.groupsFrom(JSON.stringify([{ confidence: 'unconfirmed', files: ['a.ts', 'b.ts', 'c.ts'] }]),
+                          { diffs: three.diffs, signals: [] }).groups[0].title;
+  assert.strictEqual(t3, 'a.ts · b.ts 외 1개');
+});
+
 test('an unparseable signal payload contributes nothing rather than throwing', () => {
   assert.strictEqual(E.observedRun([{ id: 'x', kind: KIND.TOOL_USE, payload: 'not json' }]).observed, false);
   assert.strictEqual(E.observedRun([{ id: 'x', kind: KIND.TOOL_USE, payload: null }]).observed, false);
@@ -314,6 +362,43 @@ test('the pass runs, and what it returns is persisted', async () => {
   assert.strictEqual(back.length, 1);
   assert.strictEqual(back[0].title, '인증 갱신');
   assert.deepStrictEqual(back[0].files, ['a.ts', 'b.ts']);
+});
+
+test('a 확인됨 group leaves its citation on the record — and only a 확인됨 one', async () => {
+  /* FOUND BY MUTATION: `groups.filter((g) => g.confidence === 'confirmed' && g.sourceRef)` had
+   * no test at all — both halves could be inverted and nothing noticed.
+   *
+   * CF-13: `20`'s `change_group` has no column for a citation, so a 확인됨 group read back from
+   * the database cites nothing, and D-114 says a 확인됨 claim names its evidence. The pointer
+   * goes on the record as a signal instead. That record is the only place the citation exists,
+   * so a filter that put the WRONG groups in it — or none — would leave 확인됨 on screen with
+   * nothing behind it and no way to find that out afterwards. */
+  const { db, project, workId } = bench();
+  /* A real run, observed: one group may be 확인됨, the other says 예상됨 itself. */
+  repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), ...bashUse('tu_x') });
+  repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), ...toolResult('tu_x', 's-run') });
+
+  const bin = fakeCli(JSON.stringify([
+    { title: '테스트 통과', what: 'x', confidence: 'confirmed', files: ['a.ts'] },
+    { title: '문서', what: 'y', confidence: 'expected', files: ['b.ts'] },
+  ]));
+  const out = await E.explain(db, workId, { bin, cwd: project.path });
+  assert.strictEqual(out.ok, true);
+
+  const notes = repo.signalsFor(db, workId)
+    .map((sig) => { try { return JSON.parse(sig.payload ?? 'null'); } catch { return null; } })
+    .filter((v) => v && v.changeGroupCitations)
+    .flatMap((v) => v.changeGroupCitations);
+  assert.strictEqual(notes.length, 1,
+    `the record carries ${notes.length} citations for one 확인됨 group`);
+  assert.strictEqual(notes[0].title, '테스트 통과',
+    '예상됨 was recorded as though it had a citation');
+  /* The citation points at the persisted tool_result ROW — `addSignal` assigns its own id, so
+   * the reference is resolvable in the store rather than in the fixture. */
+  const runRow = repo.signalsFor(db, workId).find((sig) => sig.kind === 'tool_result');
+  assert.ok(runRow, 'the run result was not persisted');
+  assert.strictEqual(notes[0].sourceRef, `signal:${runRow.id}`,
+    'the citation does not point at the run that was observed');
 });
 
 test('a pass that says nothing at all leaves every change 설명 못함', async () => {

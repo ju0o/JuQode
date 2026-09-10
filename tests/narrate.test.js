@@ -202,6 +202,89 @@ test('the prompt carries the facts and the file list, and no secret', () => {
   assert.ok(prompt.length <= N.PROMPT_BUDGET, `prompt was ${prompt.length}`);
 });
 
+test('q6 is only rewritten when there IS a q6 row shaped like one', () => {
+  /* FOUND BY MUTATION: `i !== -1 && Array.isArray(answers[i].data?.questions)` could become
+   * `||`, and then a q6 row whose `questions` is not a list would be rewritten anyway —
+   * `.filter` on a non-array throws, and `merge()` throwing loses the whole narrative pass for
+   * a Brief that was otherwise fine (`19` §C1 ⑥: 서술 실패는 Brief 의 실패가 아니다).
+   *
+   * Neither shape appears in the ordinary fixtures: `answers.js` always produces a q6 row with
+   * an array. This is about surviving a row that came from somewhere else — an older schema, a
+   * hand-written fixture, a future change to the facts layer. */
+  const narrativeRow = (q) => ({ q, kind: 'narrative', confidence: 'unconfirmed', data: {} });
+  const said = JSON.stringify([{ q: 1, text: '할 일을 적는 앱', cites: ['README.md'] }]);
+  const opts = { readFiles: ['README.md'] };
+
+  /* No q6 row at all — nothing to rewrite, and nothing thrown. */
+  let out;
+  assert.doesNotThrow(() => { out = N.merge(said, { deterministic: [narrativeRow(1)], ...opts }); });
+  assert.strictEqual(out.filled, 1);
+
+  /* A q6 row whose `questions` is NOT a list. */
+  const odd = [narrativeRow(1), { q: 6, kind: 'unknown', confidence: 'confirmed', data: { questions: 'what' } }];
+  assert.doesNotThrow(() => { out = N.merge(said, { deterministic: odd, ...opts }); });
+  assert.deepStrictEqual(out.answers[1].data.questions, 'what',
+    'a q6 row that is not a list was rewritten anyway');
+
+  /* …and the ordinary shape IS rewritten, or the two checks above are about nothing. */
+  const ok = [narrativeRow(1), { q: 6, kind: 'unknown', confidence: 'confirmed', data: { questions: ['what', 'run'] } }];
+  out = N.merge(said, { deterministic: ok, ...opts });
+  assert.deepStrictEqual(out.answers[1].data.questions, ['run'],
+    'an answered question was still listed as unanswered');
+});
+
+test('a null or non-object entry in the response is skipped, not dereferenced', () => {
+  /* FOUND BY MUTATION: `if (!a || typeof a !== 'object') continue;` could become `&&`, and then
+   * `null` no longer skips — `a.q` throws, and `merge()` throwing loses the narrative pass.
+   *
+   * `[null, {...}]` is exactly what a model emits when it drops an item it decided not to
+   * answer, and `19` §C1 ⑥ says a bad response costs the Brief nothing. */
+  const rows = [{ q: 1, kind: 'narrative', confidence: 'unconfirmed', data: {} }];
+  const opts = { readFiles: ['README.md'] };
+  for (const junk of [null, 0, 'text', true, []]) {
+    const said = JSON.stringify([junk, { q: 1, text: '할 일을 적는 앱', cites: ['README.md'] }]);
+    let out;
+    assert.doesNotThrow(() => { out = N.merge(said, { deterministic: rows, ...opts }); },
+      `an entry of ${JSON.stringify(junk)} was dereferenced`);
+    assert.strictEqual(out.filled, 1, `${JSON.stringify(junk)} cost the good answer`);
+  }
+});
+
+test('the prompt hands over the MEASURED answers, and only those', () => {
+  /* FOUND BY MUTATION. Two ways the same sentence could go wrong and no test noticed:
+   *
+   *   · `deterministic.filter((r) => r.confidence === 'confirmed')` inverted — the model would
+   *     be handed the answers the facts layer could NOT establish, under a heading that calls
+   *     them 측정된 사실. `19` §C1: 이 사실만 근거로 삼으세요. Handing it 확인 못함 rows as
+   *     facts is asking it to build on nothing and telling it that nothing is something.
+   *   · `measured || '(측정된 사실이 없어요)'` becoming `&&` — the prompt would say there are no
+   *     measured facts WHILE HAVING THEM, so the model would answer from the file list alone.
+   *
+   * Both produce a plausible-looking prompt, which is why neither showed up anywhere else. */
+  const rows = [
+    { q: 3, kind: 'tech', confidence: 'confirmed', data: { runtime: 'node' } },
+    { q: 5, kind: 'run', confidence: 'confirmed', data: { scripts: ['dev'] } },
+    { q: 1, kind: 'what', confidence: 'unconfirmed', data: { note: 'NOT-MEASURED-1' } },
+    { q: 2, kind: 'features', confidence: 'expected', data: { note: 'NOT-MEASURED-2' } },
+  ];
+  const prompt = N.promptFor({ deterministic: rows, readFiles: ['README.md'], facts: {} });
+
+  assert.ok(prompt.includes('q3'), 'a measured answer is missing from 측정된 사실');
+  assert.ok(prompt.includes('q5'), 'a measured answer is missing from 측정된 사실');
+  assert.ok(!prompt.includes('NOT-MEASURED-1'),
+    'an unconfirmed answer was handed over as a measured fact');
+  assert.ok(!prompt.includes('NOT-MEASURED-2'),
+    '예상됨 was handed over as a measured fact — a guess is not evidence');
+  assert.ok(!prompt.includes('측정된 사실이 없어요'),
+    'the prompt says there are no measured facts while carrying two');
+
+  /* …and when there really are none, it SAYS so — an empty heading reads as a truncated
+   * prompt, and the model fills silence. */
+  const empty = N.promptFor({ deterministic: [rows[2]], readFiles: ['README.md'], facts: {} });
+  assert.ok(empty.includes('측정된 사실이 없어요'),
+    'a prompt with no measured facts left the heading empty');
+});
+
 test('a project with thousands of read files still produces a bounded prompt', () => {
   const b = bench();
   const many = Array.from({ length: 20000 }, (_, i) => `src/very/deep/path/file-${i}.ts`);

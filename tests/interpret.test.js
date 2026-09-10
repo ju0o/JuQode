@@ -507,6 +507,43 @@ for (const [input, route, rule] of ROUTES) {
   });
 }
 
+test('the TIER says which pass answered, and the synonym pass is really second', () => {
+  /* FOUND BY MUTATION: `pass === 'direct'` appears twice — once to decide whether synonyms are
+   * applied and once to label the tier — and both could be inverted with the whole suite
+   * passing. The corpus above asserts the ROUTE and prints the tier in its failure message;
+   * nothing ever asserted it.
+   *
+   * The tier is not decoration. `20` records it with the run, and `19` §C4 leaves synonym
+   * detection UNVALIDATED — so which pass answered is exactly the thing a wrong guess has to be
+   * traceable through afterwards. */
+  assert.strictEqual(classify('서버 켜줘').tier, 'pattern',
+    'a phrase that matches directly was credited to the synonym pass');
+  assert.strictEqual(classify('dev 서버 켜줘').tier, 'synonym+pattern',
+    'a phrase that only matches after substitution was credited to the direct pass');
+  assert.strictEqual(classify('npm run dev').tier, 'synonym+pattern');
+  /* Both reach the same rule — the tier is the only thing that separates them. */
+  assert.strictEqual(classify('서버 켜줘').rule, classify('dev 서버 켜줘').rule);
+  /* …and the exact form is labelled as exact, on whichever pass found it. */
+  assert.match(classify('  개발 서버 켜줘  ').tier, /^pattern/);
+});
+
+test('tail stripping repeats until nothing is left to strip', () => {
+  /* FOUND BY MUTATION: the `do … while (s !== prev)` loop could exit after ONE pass and every
+   * test still passed, because the corpus's noisy inputs all clear in one round —
+   * `켜줘!!ㅋㅋ` strips its punctuation and then its laughter and is done.
+   *
+   * ALTERNATING tails need the loop: `켜줘!ㅋ!` is punctuation, laughter, punctuation, and one
+   * pass leaves `켜줘!`, which matches no rule. q02 §2 puts the loop there for exactly this. */
+  const plain = classify('켜줘');
+  const noisy = classify('켜줘!ㅋ!');
+  assert.strictEqual(noisy.route, plain.route,
+    `켜줘!ㅋ! routed as ${noisy.route} while 켜줘 routed as ${plain.route}`);
+  assert.deepStrictEqual(noisy.options, plain.options);
+  /* …and `normalize` itself gets there, which is the function the loop is in. */
+  assert.strictEqual(normalize('켜줘!ㅋ!'), normalize('켜줘'));
+  assert.strictEqual(normalize('돌려줘~ㅎ~ㅋ.'), normalize('돌려줘'));
+});
+
 test('no rule token is shell-shaped — the table itself cannot be poisoned', () => {
   /* The dangerous-input list below is thirteen hand-picked strings, so adding `rm` to a rule's
    * verbs was invisible to it. The property the title claims is structural, so check it

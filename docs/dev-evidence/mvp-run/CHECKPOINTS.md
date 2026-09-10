@@ -766,3 +766,38 @@ Recorded as **DV-12** rather than papered over, for the same reason as DV-6 and 
 Next eligible: the sweep's remaining files (`change/blocks.js`, `change/explain.js`,
 `work/supervisor.js`, `interpret/scan.js`, `interpret/narrate.js`, `router/intent.js`) ·
 WBS-32/33 · DV-11.
+
+## Batch 27 QA · mutation sweep, stage three — and a bug in the sweep itself
+
+Report: `BATCH-27-QA.md`. No new Canon findings. 533 tests, three e2e files.
+
+**The sweep was reporting killed mutants as survivors.** A mutant that makes a test file HANG is
+cut off by `--test-timeout` at the FILE level, which prints `not ok 1 - tests/x.test.js` and
+still prints `# fail 0` — and the sweep's verdict was "killed if `# fail 0` is absent". It reads
+the exit code now. The same misreading was visible in batch 25's `not ok 7 - tests/loop.test.js`
+and was not chased then. A checking tool needs checking too.
+
+(It was also leaking orphans: the timeout killed the parent `node --test` and not its per-file
+children, and twelve `node tests/qc.test.js` processes had been running for 38 minutes. Own
+process group now, killed as a group.)
+
+The three files it swept are the ones that turn a model's output into the product's claims, and
+the worst finding is in the narrative prompt: the filter that selects MEASURED answers could be
+inverted, handing the model the answers the facts layer could not establish under a heading that
+calls them 측정된 사실 — and the placeholder could be flipped so the prompt says there are no
+measured facts while carrying them. Both produce a plausible-looking prompt, which is why
+nothing else caught them.
+
+Also: a tool result belonging to a DIFFERENT tool could stand in for the run that a 확인됨 group
+rests on; a two-file group could be titled `a.ts · b.ts 외 0개`; the citation record that CF-13
+makes the only home for a 확인됨 group's evidence had no test at all; the routing TIER — which
+`20` records and `19` §C4 leaves unvalidated, so it is what a wrong synonym guess is traced
+through — was printed in failure messages and never asserted; the tail-stripping loop could run
+once instead of to a fixed point; and `qc.readings.map((r) => (r === 'work' ? 'work' : r))` was
+an identity dressed as a rule, deleted.
+
+Twelve survivors remain and every one is equivalent or unreachable, each with its reason written
+down in the report rather than left as a number.
+
+Next eligible: the sweep's remaining files (`change/blocks.js`, `work/supervisor.js`,
+`interpret/scan.js`) · WBS-32/33 · DV-11.

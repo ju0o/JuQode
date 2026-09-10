@@ -138,8 +138,11 @@ function classify(input) {
   const qc = qcMatch(text);
   if (qc.kind === 'qc') return { route: 'terminal', rule: qc.id, text, tier: `qc:${qc.tier}` };
   if (qc.kind === 'ambiguous') {
-    const options = qc.readings.map((r) => (r === 'work' ? 'work' : r));
-    return { route: 'ambiguous', options, text, tier: `qc:${qc.tier}` };
+    /* The drawer's readings, unchanged. (This used to `.map()` each reading through
+     * `r === 'work' ? 'work' : r`, which returns `r` either way — an identity dressed as a
+     * rule. Found by mutation: inverting the comparison turned every reading into `work`, and
+     * nothing failed, because nothing was checking a no-op.) */
+    return { route: 'ambiguous', options: [...qc.readings], text, tier: `qc:${qc.tier}` };
   }
 
   /* Now — and only now — a change verb decides between the two remaining answers. The order matters: `수정된 파일 확인해줘` is a git.status
