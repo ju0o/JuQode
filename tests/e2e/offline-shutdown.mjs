@@ -4,8 +4,9 @@
  * webRequest layer blocks both. This asserts the app makes zero external requests, and that
  * the shutdown paths leave no orphan (Spike C: killing the parent can strand descendants).
  */
-import { spawn, execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { sweepDisplays } from './xvfb.mjs';
+import { launchArgs, killTree, termTree, countElectron, WIN } from './launch.mjs';
 sweepDisplays();
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -25,23 +26,19 @@ const DB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-e2e-')), 'juq
 const USER_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-userdata-'));
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const ELECTRON = path.join(ROOT, 'node_modules', '.bin', 'electron');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const alive = () => {
-  try {
-    return execSync(`pgrep -f "${ROOT}/node_module[s]/electron" | wc -l`, { encoding: 'utf8' }).trim();
-  } catch { return '0'; }
-};
+const alive = () => countElectron();
 
 function run(env = {}, args = []) {
   return new Promise((resolve) => {
-    const p = spawn('xvfb-run', ['-a', ELECTRON, '.', '--no-sandbox', ...args],
-      { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA, ...env }, detached: true });
+    const [file, argv] = launchArgs(['.', '--no-sandbox', ...args]);
+    const p = spawn(file, argv,
+      { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA, ...env }, detached: !WIN });
     p.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
     let out = '';
     p.stdout.on('data', (d) => { out += d; });
-    const t = setTimeout(() => { try { process.kill(-p.pid, 'SIGKILL'); } catch {} }, 30000);
+    const t = setTimeout(() => killTree(p.pid), 30000);
     p.on('exit', (code, signal) => {
       clearTimeout(t);
       const events = out.split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
@@ -69,19 +66,20 @@ results.reducedMotionBoot = { exit: rm.code };
 /* 3. Clean shutdown: quit path, then SIGTERM, each leaving zero survivors. */
 assert.strictEqual(alive(), '0', `orphans left before shutdown test: ${alive()}`);
 
-const term = spawn('xvfb-run', ['-a', ELECTRON, '.', '--no-sandbox'],
-  { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA }, detached: true });
+const [tfile, targv] = launchArgs(['.', '--no-sandbox']);
+const term = spawn(tfile, targv,
+  { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA }, detached: !WIN });
 await sleep(6000);
 const before = alive();
-process.kill(-term.pid, 'SIGTERM');
+termTree(term.pid);
 await sleep(4000);
 const after = alive();
-try { process.kill(-term.pid, 'SIGKILL'); } catch {}
+killTree(term.pid);
 await sleep(1500);
 
 assert.notStrictEqual(before, '0', 'app never started for the shutdown test');
-assert.strictEqual(after, '0', `SIGTERM left ${after} process(es) behind`);
-results.shutdown = { processesWhileRunning: before, afterSigterm: after };
+assert.strictEqual(after, '0', `graceful terminate left ${after} process(es) behind`);
+results.shutdown = { processesWhileRunning: before, afterGracefulTerminate: after };
 
 console.log(JSON.stringify(results, null, 2));
 console.log('offline + reduced-motion + shutdown: PASS');

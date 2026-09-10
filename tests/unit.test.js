@@ -263,6 +263,10 @@ test('capability containment: each privileged capability lives in exactly one mo
                        'app/main/evidence/git.js', 'app/main/qc/run.js'],
     'execFile':       ['app/main/claude-detect.js', 'app/main/evidence/git.js'],
     'spawn(':         ['app/main/claude/session.js', 'app/main/qc/run.js'],
+    /* the ONLY synchronous spawn in the product: Windows cancel, which has no process group
+       to signal and so must call `taskkill /T` on the child's own pid */
+    'spawnSync(':     ['app/main/claude/session.js'],
+    'taskkill':       ['app/main/claude/session.js'],
   };
   // never, anywhere: nothing in the built packages needs these, and each is a real hazard
   const NEVER = [

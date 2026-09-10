@@ -20,6 +20,30 @@ const OUT = path.resolve('docs/dev-evidence/wbs-01/windows');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const R = { platform: process.platform, node: process.versions.node, utc: new Date().toISOString(), spikes: {} };
 
+function writeResult() {
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'spikes.json'), JSON.stringify(R, null, 2));
+  // the harness also looks for it beside the per-host raw logs
+  for (const d of fs.readdirSync(OUT, { withFileTypes: true })) {
+    if (d.isDirectory() && fs.existsSync(path.join(OUT, d.name, 'raw'))) {
+      fs.writeFileSync(path.join(OUT, d.name, 'raw', 'spikes.json'), JSON.stringify(R, null, 2));
+    }
+  }
+}
+
+/* A crash used to leave the harness with nothing to read and only 'spikes produced no JSON' to
+ * say — which names the symptom and hides the cause. Partial evidence plus the error beats an
+ * empty directory, and an unhandled 'error' event from a spawn is emitted asynchronously, so no
+ * try/catch around the spike bodies can see it. */
+for (const ev of ['uncaughtException', 'unhandledRejection']) {
+  process.on(ev, (e) => {
+    R.abortedBy = { event: ev, error: String(e && e.stack || e) };
+    try { writeResult(); } catch { /* nothing left to do */ }
+    console.error(`windows-spikes.mjs: ${ev}: ${e}`);
+    process.exit(3);
+  });
+}
+
 const ps = (cmd) => {
   try { return execSync(`powershell -NoProfile -Command "${cmd}"`, { encoding: 'utf8' }).trim(); }
   catch (e) { return `ERROR: ${e.message}`; }
@@ -86,6 +110,7 @@ R.spikes.processLifecycle = await (async () => {
     const parent = spawn('powershell.exe',
       ['-NoProfile', '-Command', 'Start-Process -NoNewWindow powershell -ArgumentList \'-NoProfile\',\'-Command\',\'Start-Sleep -Seconds 120\'; Start-Sleep -Seconds 120'],
       { detached: true, stdio: 'ignore' });
+    parent.on('error', (e) => { o.parentSpawnError = String(e); });
     await sleep(4000);
     o.parentPid = parent.pid;
     o.grandchildrenBefore = treeOf(parent.pid);
@@ -120,6 +145,7 @@ R.spikes.processLifecycle = await (async () => {
 
     /* 5. exit codes: does a cancelled child report something distinguishable? */
     const c = spawn('powershell.exe', ['-NoProfile', '-Command', 'Start-Sleep -Seconds 30'], { detached: true, stdio: 'ignore' });
+    c.on('error', (e) => { o.cancelChildSpawnError = String(e); });
     await sleep(2000);
     const code = await new Promise((res) => { c.on('exit', (x, s) => res({ code: x, signal: s })); try { process.kill(c.pid, 'SIGTERM'); } catch {} });
     o.cancelledChildExit = code;
@@ -130,13 +156,5 @@ R.spikes.processLifecycle = await (async () => {
   return o;
 })();
 
-fs.mkdirSync(OUT, { recursive: true });
-const target = path.join(OUT, 'spikes.json');
-fs.writeFileSync(target, JSON.stringify(R, null, 2));
-// the harness also looks for it beside the per-host raw logs
-for (const d of fs.readdirSync(OUT, { withFileTypes: true })) {
-  if (d.isDirectory() && fs.existsSync(path.join(OUT, d.name, 'raw'))) {
-    fs.writeFileSync(path.join(OUT, d.name, 'raw', 'spikes.json'), JSON.stringify(R, null, 2));
-  }
-}
+writeResult();
 console.log(JSON.stringify(R, null, 2));

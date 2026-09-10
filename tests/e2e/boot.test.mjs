@@ -14,6 +14,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import { sweepDisplays } from './xvfb.mjs';
+import { launchArgs, killTree, WIN } from './launch.mjs';
 
 /* Isolated store per run: a test must never touch the user's real juqode.db. */
 const DB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-e2e-')), 'juqode.db');
@@ -27,7 +28,6 @@ const DB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-e2e-')), 'juq
 const USER_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-userdata-'));
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const ELECTRON = path.join(ROOT, 'node_modules', '.bin', 'electron');
 
 sweepDisplays();
 
@@ -36,15 +36,16 @@ function boot(extraArgs = [], env = {}) {
     const t0 = Date.now();
     /* Detached so the whole Electron tree lands in one process group and can actually be
      * stopped; killing xvfb-run alone leaves Electron holding the stdio pipes. */
-    const p = spawn('xvfb-run', ['-a', ELECTRON, '.', '--no-sandbox', ...extraArgs], {
-      cwd: ROOT, detached: true,
+    const [file, argv] = launchArgs(['.', '--no-sandbox', ...extraArgs]);
+    const p = spawn(file, argv, {
+      cwd: ROOT, detached: !WIN,
       env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA, ...env },
     });
     p.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
     let out = '', err = '';
     p.stdout.on('data', (d) => { out += d; });
     p.stderr.on('data', (d) => { err += d; });
-    const kill = setTimeout(() => { try { process.kill(-p.pid, 'SIGKILL'); } catch { /* gone */ } }, 30000);
+    const kill = setTimeout(() => killTree(p.pid), 30000);
     p.on('exit', (code, signal) => {
       clearTimeout(kill);
       const events = out.split('\n').filter(Boolean).flatMap((l) => {

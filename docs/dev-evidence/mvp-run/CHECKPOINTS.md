@@ -886,3 +886,32 @@ that screen deliberately does not redraw.
 
 Next eligible: the rest of the renderer sweep (`sc02`/`sc03`/`sc04`/`td01`, 68 sites) ·
 WBS-32/33 · DV-11.
+
+---
+
+## 배치 31 — Windows 실행 로그 (사용자 제공)
+
+이 런에서 처음으로 **다른 OS 의 실측 로그**가 들어왔다. 사용자가 Windows PC 에서
+`verify-windows.ps1` 을 돌린 결과이고, 여섯 항목이 실패했다.
+
+여섯 개 중 **제품 결함은 0개, 하네스/스크립트 결함이 6개** 였다. 그리고 그 로그를 따라가다
+제품 결함 하나를 별도로 찾았다 — Windows 에서 **취소가 아무 프로세스도 죽이지 않는다**
+(`process.kill(-pid)` 는 Windows 에 그룹이 없어 던진다). `session.js` 의 spawn 버그와 같은
+계열이고, 같은 이유로 리눅스 테스트가 전부 통과하는 동안 아무도 몰랐다.
+
+가장 값비싼 오진은 3번이었다. SC-01 단계가 electron 4개를 남겼고, 앱은 단일 인스턴스 잠금을
+잡으므로, 다음 단계에서 뜬 패키징된 exe 가 **아무 로그도 없이 즉시 종료**했다. 하네스는 그것을
+"패키징 실패"로 적었다. **한 단계의 누수가 다음 단계를 엉뚱한 이유로 실패시킨다** — 그래서
+단계 사이 정리를 넣되, 정리한 사실 자체를 `$Leaks` 에 남겨 누수는 여전히 실패로 보고한다.
+
+사용자 질문에 대한 답: 여섯 개 중 **어느 것도 spawn 버그와 관련이 없다**. 그 버그는 Work 를
+시작할 때만 발현하고 이 하네스는 Work 를 시작하지 않는다. 둘은 독립된 결함이며 둘 다 고쳤다.
+
+line 243 은 리눅스에 PowerShell 7.6.6 을 받아 **격리 재현한 뒤** 고쳤다 — `$R.host` 는
+`status` 가 없는 dictionary 이고, `Set-StrictMode -Version Latest` 아래에서 없는 속성 읽기는
+종료 오류다. 바로 아래 markdown 루프는 이미 `.Contains('status')` 로 묻고 있었다.
+
+spikes 가 왜 죽었는지는 **모른다**. 로그가 사용자 머신에 있고 나는 못 봤다. 추측 대신,
+다음 실행이 스스로 이유를 말하도록 스크립트와 하네스 양쪽을 고쳤다 (DV-15).
+
+Next eligible: 나머지 렌더러 스윕 (`sc02`/`sc03`/`sc04`/`td01`, 68 sites) · WBS-32/33 · DV-11.

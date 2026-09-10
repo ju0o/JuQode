@@ -77,6 +77,37 @@ if ($isServer) {
 }
 if (-not $targetOk) { Write-Warning "This host is OUTSIDE the approved target OS (D-125)." }
 
+# Processes belonging to THIS checkout only. `Get-Process -Name electron` is machine-wide and
+# would count any other Electron app the developer happens to be running.
+function Get-JuQodeProcesses {
+  $mine = @()
+  $mine += @(Get-CimInstance Win32_Process -Filter "Name='electron.exe'" -ErrorAction SilentlyContinue |
+             Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith((Join-Path $Root 'node_modules\electron'), 'OrdinalIgnoreCase') })
+  $mine += @(Get-CimInstance Win32_Process -Filter "Name='JuQode.exe'" -ErrorAction SilentlyContinue |
+             Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith((Join-Path $Root 'dist'), 'OrdinalIgnoreCase') })
+  $mine
+}
+
+# Killing the `cmd.exe` shim that Start-Process gave us leaves the real electron.exe running —
+# that is the leak this harness reported. /T is the documented tree analogue on Windows.
+function Stop-Tree { param([int]$ProcessId)
+  & taskkill /PID $ProcessId /T /F 2>&1 | Out-Null
+}
+
+# A survivor from step N makes step N+1 fail for the wrong reason: the app takes a
+# single-instance lock, so a stray Electron makes the NEXT launch quit silently at startup.
+# Sweep between steps, but RECORD what was swept — a leak stays a reported failure.
+$Leaks = @()
+function Sweep { param([string]$After)
+  $p = @(Get-JuQodeProcesses)
+  if ($p.Count -gt 0) {
+    $script:Leaks += [ordered]@{ after = $After; count = $p.Count; pids = @($p.ProcessId) }
+    Write-Host "    LEAK: $($p.Count) process(es) survived '$After' — killing" -ForegroundColor Red
+    foreach ($x in $p) { Stop-Tree $x.ProcessId }
+    Start-Sleep -Seconds 2
+  }
+}
+
 function Step { param([string]$Name, [scriptblock]$Body)
   Write-Host "`n--- $Name" -ForegroundColor Yellow
   $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -113,8 +144,10 @@ $R.versions = Step 'runtime versions (from the running process)' {
 }
 
 # ---------------------------------------------------------------- tests
-$R.unitTests = Step 'npm test (unit)' {
-  $o = & npm test 2>&1 | Tee-Object (Join-Path $RawDir 'unit.log')
+# `npm test` is unit AND e2e; running it here would run the e2e suite twice and report the
+# result of one step under the name of another.
+$R.unitTests = Step 'npm run test:unit' {
+  $o = & npm run test:unit 2>&1 | Tee-Object (Join-Path $RawDir 'unit.log')
   $pass = ([regex]'# pass (\d+)').Match(($o -join "`n")).Groups[1].Value
   $fail = ([regex]'# fail (\d+)').Match(($o -join "`n")).Groups[1].Value
   if ([int]$pass -lt 1) { throw "no unit tests ran (pass=$pass)" }
@@ -181,8 +214,9 @@ $R.sc01 = Step 'SC-01 render + theme matrix + screenshots (CDP)' {
       ForEach-Object { Move-Item $_.FullName (Join-Path $Out $_.Name) -Force }
     $parsed
   } finally {
-    if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+    if (-not $proc.HasExited) { Stop-Tree $proc.Id }
     Start-Sleep -Seconds 2
+    Sweep 'SC-01 CDP probe'
   }
 }
 
@@ -200,7 +234,14 @@ if (-not $SkipPackage) {
     $code = $LASTEXITCODE
     Remove-Item Env:JUQODE_EXIT_AFTER_LOAD -ErrorAction SilentlyContinue
     $ev = @{}; Get-Content $log | ForEach-Object { try { $o=$_|ConvertFrom-Json; if($o.ev){$ev[$o.ev]=$o} } catch {} }
-    if (-not $ev['did-finish-load']) { throw "packaged exe never finished loading" }
+    if (-not $ev['did-finish-load']) {
+      # The commonest cause is not the build: a surviving Electron from an earlier step holds
+      # the single-instance lock, so this process quits at startup and traces nothing.
+      $n = @(Get-JuQodeProcesses).Count
+      throw ("packaged exe never finished loading (exit $code, $($ev.Keys.Count) trace event(s), " +
+             "$n JuQode/electron process(es) alive). First lines: " +
+             (((Get-Content $log -TotalCount 5) -join ' | ')))
+    }
 
     # signing: read the PE certificate table, never the builder log
     $sig = Get-AuthenticodeSignature $exe
@@ -222,25 +263,37 @@ if (-not $SkipPackage) {
       signed            = ($sig.Status -eq 'Valid')
     }
   }
+  Sweep 'packaged launch'
 }
 
 # ---------------------------------------------------------------- WBS-00 Windows spikes
 $R.spikes = Step 'WBS-00 Windows spikes (ConPTY + process lifecycle)' {
-  & node scripts\windows-spikes.mjs 2>&1 | Tee-Object (Join-Path $RawDir 'spikes.log') | Out-Null
+  $o = & node scripts\windows-spikes.mjs 2>&1 | Tee-Object (Join-Path $RawDir 'spikes.log')
   $p = Join-Path $RawDir 'spikes.json'
-  if (Test-Path $p) { Get-Content $p -Raw | ConvertFrom-Json } else { throw 'spikes produced no JSON' }
+  if (Test-Path $p) { Get-Content $p -Raw | ConvertFrom-Json }
+  else { throw ("spikes produced no JSON (node exited $LASTEXITCODE). Last output: " +
+                (($o | Select-Object -Last 6) -join ' | ')) }
 }
 
 # ---------------------------------------------------------------- orphan check
 $R.orphans = Step 'no JuQode process survives' {
   Start-Sleep -Seconds 3
-  $n = @(Get-Process -Name 'JuQode', 'electron' -ErrorAction SilentlyContinue).Count
-  if ($n -gt 0) { throw "$n JuQode/electron process(es) still running" }
-  [ordered]@{ remaining = 0 }
+  $p = @(Get-JuQodeProcesses)
+  foreach ($x in $p) { Stop-Tree $x.ProcessId }   # never leave the developer's machine dirty
+  if ($p.Count -gt 0) { throw "$($p.Count) JuQode/electron process(es) still running (pids $($p.ProcessId -join ', '))" }
+  if ($Leaks.Count -gt 0) { throw "no survivor at the end, but $($Leaks.Count) step(s) leaked: $(($Leaks | ForEach-Object { $_.after }) -join ', ')" }
+  [ordered]@{ remaining = 0; leaksDuringRun = @() }
 }
+$R.leaks = $Leaks
 
 # ---------------------------------------------------------------- verdict
-$fails = @($R.Keys | Where-Object { $R[$_] -is [System.Collections.IDictionary] -and $R[$_].status -eq 'FAIL' })
+# `$R` also holds plain records (host, leaks) that are dictionaries WITHOUT a status. Under
+# Set-StrictMode -Version Latest, reading `.status` off one of those is a terminating error —
+# which is how a completed run used to die at the very last step. Ask before reading.
+$fails = @($R.Keys | Where-Object {
+  $v = $R[$_]
+  $v -is [System.Collections.IDictionary] -and $v.Contains('status') -and $v['status'] -eq 'FAIL'
+})
 $R.verdict = [ordered]@{
   targetOsValidated = $targetOk -and (-not $isServer) -and ($fails.Count -eq 0)
   osFamily          = $family

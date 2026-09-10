@@ -13,10 +13,19 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 /* Stale Xvfb locks accumulate and eventually starve `xvfb-run -a` — see xvfb.mjs. */
 import { sweepDisplays } from './xvfb.mjs';
+import { launchArgs, killTree, WIN } from './launch.mjs';
 sweepDisplays();
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
+
+/* Starting the app is OS-specific (xvfb-run here, cmd.exe + electron.cmd on Windows) and so is
+ * stopping it; both live in launch.mjs. `detached` is a POSIX process group — on Windows the
+ * tree is killed by pid instead, so asking for one there would only confuse the kill path. */
+const spawnApp = (args, opts) => {
+  const [file, argv] = launchArgs(['.', ...args]);
+  return spawn(file, argv, { ...opts, detached: !WIN });
+};
 
 /* The app under test gets its OWN store, seeded with one project. Two reasons:
  *   1. a test must never touch the user's real juqode.db
@@ -184,6 +193,17 @@ fs.writeFileSync(FAKE_CLI, [
    * SIGTERM — the shape `15` SC-03's 취소 요청했어요 and `07` §8.1's "a cancelled child can
    * still exit 0" are both about. Without it the run could only ever photograph a Work that
    * finished on its own. */
+  /* A third marker makes the session FAIL — `error_max_turns`, which `19` §C3-L names and
+   * which `07` §8.1 is about: the exit code is 0 and `is_error` is false, so the failure can
+   * only be read from the terminal reason. It is also the ONLY red on SC-03, and the colour
+   * grammar had no rendered evidence for it. */
+  `if [ -f ${JSON.stringify(path.join(DB_DIR, 'failing'))} ]; then`,
+  `  echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p","claude_code_version":"9.9.9"}'`,
+  `  echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_f","name":"Read","input":{"file_path":"README.md"}}]}}'`,
+  `  echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_f","is_error":false}]}}'`,
+  `  echo '{"type":"result","subtype":"error_max_turns","is_error":false,"terminal_reason":"max_turns","result":"더 진행하지 못했어요","permission_denials":[]}'`,
+  '  exit 0',
+  'fi',
   `if [ -f ${JSON.stringify(path.join(DB_DIR, 'stubborn'))} ]; then`,
   '  trap "" TERM',
   `  echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p","claude_code_version":"9.9.9"}'`,
@@ -379,7 +399,7 @@ for (const port of [PORT, PORT + 1]) {
   } catch (e) { if (!/fetch failed|aborted|timeout/i.test(e.message)) throw e; }
 }
 
-const app = spawn('xvfb-run', ['-a', path.join(ROOT, 'node_modules', '.bin', 'electron'), '.',
+const app = spawnApp([
   '--no-sandbox', `--remote-debugging-port=${PORT}`],
   { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA,
       /* `15`'s two silence thresholds, shortened so this run can REACH the states they define.
@@ -389,7 +409,7 @@ const app = spawn('xvfb-run', ['-a', path.join(ROOT, 'node_modules', '.bin', 'el
       JUQODE_QUIET_MS: '2500', JUQODE_CANCEL_CONFIRM_MS: '2000',
       JUQODE_CLAUDE_BIN: FAKE_CLI, JUQODE_INTERPRET_DELAY_MS: '2500' } });
 app.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
-const stopApp = () => { try { process.kill(-app.pid, 'SIGKILL'); } catch { /* already gone */ } };
+const stopApp = () => killTree(app.pid);
 process.on('exit', stopApp);
 let appErr = '';
 app.stderr.on('data', (d) => { appErr += d; });
@@ -1247,6 +1267,34 @@ const results = await cdp(async ({ send, evalJs }) => {
     fs.writeFileSync(path.join(OUT, `sc03-partial-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
+  await sleep(900);
+
+  /* ── `15` SC-03 실패 — the ONLY red on the screen ───────────────────────────────────────
+   * `19` §C3-L: the three finish signals are read TOGETHER. This turn exits 0 with
+   * `is_error: false` and `terminal_reason: max_turns` — `07` §8.1's measured shape, where the
+   * exit code says nothing. Until now the colour grammar's red had no rendered evidence on
+   * SC-03 at all: every Work here ended 끝남, 취소 or 부분. */
+  step('failure');
+  fs.writeFileSync(path.join(DB_DIR, 'failing'), '');
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '남은 버튼도 고쳐줘'; })()`);
+  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  await sleep(3000);
+  out.failWork = await evalJs('JSON.stringify(window.__work())');
+  out.failResult = await evalJs(`document.querySelector('.sc03 [data-card="result"]')?.innerText ?? null`);
+  out.failChip = await evalJs(`document.querySelector('.sc03 [data-card="work"] .chip')?.textContent ?? null`);
+  out.failPresence = await evalJs(`document.querySelector('[data-card="presence"] canvas')?.getAttribute('data-mode')`);
+  /* Red is EXPECTED here, and only here. The count proves the grammar is applied, not merely
+   * avoided everywhere. */
+  out.failReds = await evalJs(RED_COUNT('.sc03 [data-card="result"], .sc03 [data-card="result"] *'));
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(250);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc03-failed-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  fs.rmSync(path.join(DB_DIR, 'failing'));
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
 
@@ -2339,6 +2387,28 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
     `the result title is ${JSON.stringify(results.partialCard.split('\n')[0])}`);
 }
 
+/* ── `15` SC-03 실패 — the only red, and it is read from the terminal reason ──────────────── */
+{
+  const w = JSON.parse(results.failWork);
+  assert.strictEqual(w.status, 'ended');
+  /* `19` §C3-L · `07` §8.1: this turn exited 0 with `is_error: false`. Reading either of those
+   * alone reports 완료, and `error_max_turns` is exactly the case that was measured doing so. */
+  assert.strictEqual(w.outcome, 'failed',
+    `a turn that ended on max_turns reported ${w.outcome} — the exit code says nothing`);
+  assert.strictEqual(results.failChip, '끝내지 못했어요',
+    `the chip says ${JSON.stringify(results.failChip)}`);
+  assert.ok(results.failResult && results.failResult.includes('끝내지 못했어요'),
+    `the result card does not say what happened: ${results.failResult}`);
+  /* RED — and this is the ONE state that gets it. Every other red count in this file asserts a
+   * zero, which alone would be satisfied by a product that never uses red at all. */
+  assert.ok(results.failReds >= 1,
+    'a failed Work is not painted as a failure — every other red assertion here is a zero, so '
+    + 'without this one the grammar could be "no red anywhere"');
+  /* `17` P-06 · `16` §9: cancelled and failure share the motion; only failure is red. */
+  assert.strictEqual(results.failPresence, 'failure',
+    `the presence shows ${results.failPresence} for a failed Work`);
+}
+
 assert.ok(results.recentLast, 'a recent row carries no last-Work summary (`15` UF-RETURN)');
 assert.ok(results.recentLast.includes('마지막 작업'),
   `the summary is not labelled: ${results.recentLast}`);
@@ -2347,7 +2417,7 @@ assert.ok(results.recentLast.includes('마지막 작업'),
  * assertion still fails if the row shows something nobody asked for. */
 {
   const SUBMITTED = ['README.md 의 첫 줄을 바꿔줘', '설정 화면을 고쳐줘', '이름을 바꿔줘',
-                     '로그인 오류 고쳐줘', '결제 화면 문구 바꿔줘'];
+                     '남은 버튼도 고쳐줘', '로그인 오류 고쳐줘', '결제 화면 문구 바꿔줘'];
   const quoted = SUBMITTED.some((t) => results.recentLast.includes(t))
     || /고치는 작업/.test(results.recentLast);           // the correction path prefills its own
   assert.ok(quoted, `the summary quotes something nobody submitted: ${results.recentLast}`);
@@ -2379,10 +2449,10 @@ console.log(JSON.stringify(results, null, 2));
   const before = fs.readFileSync(bad);
 
   const PORT2 = PORT + 1;
-  const app2 = spawn('xvfb-run', ['-a', path.join(ROOT, 'node_modules', '.bin', 'electron'), '.',
+  const app2 = spawnApp([
     '--no-sandbox', `--remote-debugging-port=${PORT2}`],
     { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: bad, JUQODE_USER_DATA: USER_DATA } });
-  const stop2 = () => { try { process.kill(-app2.pid, 'SIGKILL'); } catch { /* gone */ } };
+  const stop2 = () => killTree(app2.pid);
   process.on('exit', stop2);
   await sleep(4000);
 

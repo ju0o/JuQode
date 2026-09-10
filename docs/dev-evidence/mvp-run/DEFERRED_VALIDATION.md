@@ -34,11 +34,14 @@ exists it is recorded as a Linux measurement and is **not** carried across.
 | DV-4 | Packaged `.exe` actually launches (PE produced ≠ runs) | WBS-01 · WBS-33 | `19` §V packaging NOT VALIDATED | IMPLEMENTED_PENDING_VALIDATION | `verify-windows.ps1` → launch packaged exe |
 | DV-5 | Code signing judged from the PE certificate table | WBS-33 | `19` §V signing NOT VALIDATED | IMPLEMENTED_PENDING_VALIDATION | `Get-AuthenticodeSignature` in the harness |
 | DV-6 | ConPTY: create · output · resize · exit · cleanup | WBS-00 · WBS-25 | `19` §C6 PTY NOT VALIDATED | IMPLEMENTED_PENDING_VALIDATION | `scripts/windows-spikes.mjs` (refuses to run off win32) |
-| DV-7 | Windows process spawn · cancel · process tree · orphans | WBS-00 · WBS-23 · WBS-24 | `19` §C4 | IMPLEMENTED_PENDING_VALIDATION | `scripts/windows-spikes.mjs` |
+| DV-7 | Windows process spawn · cancel · process tree · orphans | WBS-00 · WBS-23 · WBS-24 | `19` §C4 | IMPLEMENTED_PENDING_VALIDATION | `scripts/windows-spikes.mjs` + `taskkill /T` 가 claude 트리를 실제로 끝내는지 (배치 31) |
 | DV-12 | `claude-detect.js` 의 Windows 실행 파일 해석 — `PATHEXT` · `COMSPEC` · `.cmd`/`.bat` 래퍼 | WBS-09 | `19` §D1 | IMPLEMENTED_PENDING_VALIDATION | 아래 |
 | DV-8 | Theme contrast, all six OS-preference × toggle combinations, on Windows | WBS-36 | `16` §2.1 · D-135 | IMPLEMENTED_PENDING_VALIDATION | `verify-windows.ps1` → theme matrix |
 | DV-9 | Claude Code resolved from PATH on Windows (`claude.cmd`, PATHEXT, `cmd.exe` routing) | WBS-09 | `21` WBS-09 · D-125 | IMPLEMENTED_PENDING_VALIDATION | run the app on Windows with an npm-global Claude Code and confirm 설치되지 않음 is NOT reported |
 | DV-10 | `fs.realpathSync.native` canonicalises CASE on NTFS, so one folder is one `project` row | WBS-02 · WBS-21 | `20` `project.path` unique | IMPLEMENTED_PENDING_VALIDATION | open the same folder twice on Windows with different casing; expect one row |
+| DV-13 | e2e 3종이 Windows 에서 통과하는가 — `launch.mjs` 의 `cmd.exe` 경로 · `taskkill` 정리 · 프로세스 집계 | WBS-01 · WBS-33 | D-125 | IMPLEMENTED_PENDING_VALIDATION | `npm run test:e2e` on Windows (배치 31 에서 리눅스만 측정) |
+| DV-14 | 패키징된 exe 의 로딩 실패가 단일 인스턴스 잠금 때문이었는지 — 누수를 없앤 뒤 재실행 | WBS-33 | `19` §V | UNRESOLVED_NEEDS_RERUN | `verify-windows.ps1` 재실행 (배치 31 이 진단만, 확정 못함) |
+| DV-15 | `windows-spikes.mjs` 가 왜 JSON 없이 죽었는가 | WBS-00 | `19` §C4 · §C6 | UNRESOLVED_NEEDS_RERUN | 하네스가 이제 종료 코드와 마지막 6줄을 보고한다 (배치 31) |
 
 ### Why DV-9 and DV-10 exist
 

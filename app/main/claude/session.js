@@ -14,9 +14,9 @@
  *     `--resume <id> --allowedTools "<tool>(<that input only>)"`, and the scope matters: a bare
  *     `--allowedTools Edit` was measured changing a second, unapproved file.
  */
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const path = require('node:path');
-const { resolveBin } = require('../claude-detect');
+const { resolveBin, launchArgv } = require('../claude-detect');
 const { toSignal } = require('../work/reducer');
 
 /** A Work that never produced a first event is not a Work — `20`: no row, no History entry. */
@@ -107,7 +107,13 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(bin || resolveBin(), args, { cwd, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      /* The SAME launch rule detection uses. On Windows `claude` is a `.cmd` (the npm shim)
+       * and Node cannot spawn one directly since the CVE-2024-27980 mitigation — detection
+       * wrapped it through cmd.exe and this did not, so on a real Windows machine the app
+       * reported Claude Code as available and then failed to start every single Work. */
+      const launch = launchArgv(bin || resolveBin(), args);
+      child = spawn(launch.file, launch.argv,
+                    { cwd, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       /* The user's words, unmodified, and nothing else. A child that exits without reading
        * makes this EPIPE, which is its choice and not an error on our side. */
       child.stdin.on('error', () => {});
@@ -178,20 +184,39 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
   });
 }
 
-/** SIGTERM to the GROUP, then SIGKILL. On POSIX the child is in its own group, so this cannot
- *  reach JuQode. Windows has no process groups and is NOT covered — see the note inside. */
+/**
+ * How to stop the child's whole tree on a given platform, as data so both answers are testable
+ * from either OS.
+ *
+ * POSIX: the child is `detached`, so it owns its process group and a negative pid reaches the
+ * group without ever reaching JuQode. Windows has no process groups at all — `kill(-pid)`
+ * throws there (WBS-00 spike C), and the pid we hold is the `cmd.exe` wrapper, so killing it
+ * alone strands `claude.cmd` and the node process under it. `taskkill /T` is the documented
+ * tree analogue. Without `/F` it only asks a window to close, which a console child ignores,
+ * so on Windows the graceful tier is a courtesy and the escalation is the tier that lands.
+ */
+function killPlan(platform, pid, force) {
+  return platform === 'win32'
+    ? { kind: 'taskkill', argv: ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])] }
+    : { kind: 'group', pid: -pid, signal: force ? 'SIGKILL' : 'SIGTERM' };
+}
+
+/** Graceful stop of the child's tree, escalating to a forced one after `graceMs`. */
 function stop(child, { graceMs = 5000 } = {}) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  /* POSIX only. `detached: true` creates no process group on Windows and `kill(-pid)` throws
-   * there, so the target OS needs `taskkill /T` — NOT VALIDATED here (DV-7). Saying so is the
-   * point: `07` §8.2's group rule is a Linux measurement and does not port by itself. */
-  const group = -child.pid;
-  try { process.kill(group, 'SIGTERM'); } catch { /* already gone */ }
+  const send = (force) => {
+    const plan = killPlan(process.platform, child.pid, force);
+    try {
+      if (plan.kind === 'taskkill') spawnSync('taskkill', plan.argv, { stdio: 'ignore', windowsHide: true });
+      else process.kill(plan.pid, plan.signal);
+    } catch { /* already gone */ }
+  };
+  send(false);
   const hard = setTimeout(() => {
-    /* Re-check before escalating: `07` §8.5 warns that a pid is reusable, and SIGKILL to a
-     * recycled group would kill an unrelated process tree. */
+    /* Re-check before escalating: `07` §8.5 warns that a pid is reusable, and a forced kill of
+     * a recycled group or tree would take an unrelated process with it. */
     if (child.exitCode !== null || child.signalCode !== null) return;
-    try { process.kill(group, 'SIGKILL'); } catch { /* already gone */ }
+    send(true);
   }, graceMs);
   hard.unref?.();
   child.once('exit', () => clearTimeout(hard));
@@ -207,4 +232,4 @@ const grantedSignal = (denial, spec) => ({
   payload: { tool: denial?.tool ?? null, toolUseId: denial?.toolUseId ?? null, scope: spec },
 });
 
-module.exports = { run, stop, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS };
+module.exports = { run, stop, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS };

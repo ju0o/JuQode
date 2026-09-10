@@ -405,6 +405,53 @@ test('a CLI that ignores SIGTERM still produces 응답 없음 instead of hanging
   }
 });
 
+/* ---------------------------------------------------------------- Windows launch + stop
+ *
+ * Both are pure decisions ABOUT a platform, exported so the Windows answer is checkable from
+ * Linux. The bug they pin was real and silent: detection wrapped `claude.cmd` through cmd.exe
+ * and the session spawner did not, so on Windows the app reported Claude Code as available
+ * and then failed to start every single Work. */
+
+test('a Windows .cmd shim is launched through cmd.exe — Node refuses to spawn one directly', () => {
+  const w = claude.launchArgv('C:\\npm\\claude.cmd', ['-p', '--x']);
+  if (process.platform === 'win32') {
+    assert.match(w.file, /cmd\.exe$/i);
+    assert.deepStrictEqual(w.argv, ['/d', '/s', '/c', 'C:\\npm\\claude.cmd', '-p', '--x']);
+  } else {
+    /* off Windows the same shim is just a path: the wrapper is platform-conditional, and
+     * wrapping everywhere would break every POSIX launch */
+    assert.deepStrictEqual(w, { file: 'C:\\npm\\claude.cmd', argv: ['-p', '--x'] });
+  }
+});
+
+test('a plain binary is never wrapped, on any platform', () => {
+  const r = claude.launchArgv('/usr/local/bin/claude', ['-p']);
+  assert.deepStrictEqual(r, { file: '/usr/local/bin/claude', argv: ['-p'] });
+});
+
+test('the user arguments survive the wrapper unchanged and in order', () => {
+  const args = ['-p', '--output-format', 'stream-json', '--allowedTools', 'Read,Edit'];
+  const r = claude.launchArgv('claude.bat', args);
+  assert.deepStrictEqual(r.argv.slice(-args.length), args);
+});
+
+test('cancel reaches the whole tree on both platforms — Windows has no process group', () => {
+  const { killPlan } = require(path.join(R, 'app/main/claude/session.js'));
+
+  /* POSIX: the negative pid is the group the detached child owns. Positive would signal
+   * JuQode's own process, which is the accident the group rule exists to prevent. */
+  assert.deepStrictEqual(killPlan('linux', 4242, false), { kind: 'group', pid: -4242, signal: 'SIGTERM' });
+  assert.deepStrictEqual(killPlan('darwin', 4242, true), { kind: 'group', pid: -4242, signal: 'SIGKILL' });
+
+  /* Windows: `kill(-pid)` throws there, and the pid we hold is the cmd.exe wrapper — without
+   * /T the real claude process and its node child would survive a cancel. */
+  const soft = killPlan('win32', 4242, false);
+  assert.strictEqual(soft.kind, 'taskkill');
+  assert.ok(soft.argv.includes('/T'), 'a Windows cancel that omits /T leaves the tree running');
+  assert.ok(!soft.argv.includes('/F'), 'the first tier must not be forced');
+  assert.deepStrictEqual(killPlan('win32', 4242, true).argv, ['/PID', '4242', '/T', '/F']);
+});
+
 test('a CLI that fails to start at all is reported as an error, with its own words', async () => {
   const r = await withBin(fakeClaude(tmp(), { versionExit: 3, version: 'boom' }), () => claude.detect());
   assert.strictEqual(r.available, false);

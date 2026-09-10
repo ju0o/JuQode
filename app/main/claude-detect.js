@@ -53,13 +53,7 @@ function run(args) {
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
 
-    const bin = resolveBin();
-    /* Since Node's CVE-2024-27980 mitigation a `.cmd`/`.bat` cannot be spawned directly.
-     * Our arguments are compile-time constants, so routing them through cmd.exe carries no
-     * quoting hazard — there is no user input on this path at all. */
-    const viaCmd = process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin);
-    const file = viaCmd ? process.env.COMSPEC || 'cmd.exe' : bin;
-    const argv = viaCmd ? ['/d', '/s', '/c', bin, ...args] : args;
+    const { file, argv } = launchArgv(resolveBin(), args);
 
     execFile(file, argv, {
       timeout: TIMEOUT_MS,
@@ -112,4 +106,28 @@ async function probe() {
 
 const cap = (s) => String(s).trim().slice(0, 400);
 
-module.exports = { detect, resolveBin };
+/**
+ * How to actually launch the resolved binary.
+ *
+ * Since Node's CVE-2024-27980 mitigation a `.cmd`/`.bat` cannot be spawned directly, and on
+ * Windows `claude` IS a `.cmd` (the npm shim). Our arguments are compile-time constants and the
+ * user's words go on stdin, so routing through cmd.exe carries no quoting hazard — there is no
+ * user input on this path at all.
+ *
+ * MEASURED BY A USER on a real Windows machine, and the reason this is a shared function rather
+ * than two: detection did this and `claude/session.js` did NOT. So detection succeeded, the app
+ * reported Claude Code as available, and every Work failed to start — the one shape where the
+ * product says a thing works and then cannot do it. Two places resolving the same binary
+ * differently is the defect; one function is the fix.
+ *
+ * NOT VALIDATED on Windows (DV-12). What is fixed here is the disagreement, which is verifiable
+ * anywhere; whether the wrapping itself is right on the target OS is still a Windows question.
+ */
+function launchArgv(bin, args) {
+  const viaCmd = process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin);
+  return viaCmd
+    ? { file: process.env.COMSPEC || 'cmd.exe', argv: ['/d', '/s', '/c', bin, ...args] }
+    : { file: bin, argv: args };
+}
+
+module.exports = { detect, resolveBin, launchArgv };
