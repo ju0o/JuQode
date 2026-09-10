@@ -801,3 +801,30 @@ down in the report rather than left as a number.
 
 Next eligible: the sweep's remaining files (`change/blocks.js`, `work/supervisor.js`,
 `interpret/scan.js`) · WBS-32/33 · DV-11.
+
+## Batch 28 QA · mutation sweep, stage four (code blocks · project scan)
+
+Report: `BATCH-28-QA.md`. No new Canon findings. 539 tests, three e2e files.
+
+`change/blocks.js` is the file that actually produces "what changed" for the user, and chasing
+its mutants found a defect nothing else would have: **one rename was three cards.** `renames()`
+was concatenated onto the blocks it was derived from, so a single edit produced `newName 추가`,
+`oldName 삭제` and `newName 이름변경` — three things happening where one did, and three units
+where `19` §C5-B counts one. A rename now replaces the pair it came from, carrying both sides'
+line numbers so nothing the pair knew is lost. The same nested loop also let two additions with
+identical bodies each claim the same deletion.
+
+A path that itself contains ` b/` had no test, in the very branch that exists BECAUSE
+`lastIndexOf(' b/')` gets such a path wrong: `a/x b/y.ts b/x b/y.ts` is one file named
+`x b/y.ts`, and reading it wrongly attributes the change to a file that does not exist while the
+file that did change goes unmentioned.
+
+And `facts.entryHints` was collected by the scan and read by no line of the product — a fact
+nobody reads is a claim nobody can check, and it cost a scan of every manifest. Deleted, with a
+test that now enumerates every key the scan collects and requires each to be read.
+
+Fifteen survivors remain, and the report gives each one its reason: most are branches on AST
+shapes the TypeScript compiler does not actually produce, or comparisons whose two sides reach
+the same answer through a different path.
+
+Next eligible: `work/supervisor.js` (52 sites, the last large one) · WBS-32/33 · DV-11.

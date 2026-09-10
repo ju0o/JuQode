@@ -123,6 +123,51 @@ test('an added declaration is 추가, a removed one is 삭제', () => {
   assert.deepStrictEqual(only(blocks, 'delete'), ['gone']);
 });
 
+test('a rename REPLACES the add and delete it was derived from', () => {
+  /* FOUND while writing the multi-declaration test above. `renames()` was CONCATENATED onto the
+   * blocks it was derived from, so one edit produced three:
+   *
+   *     newName 추가 · oldName 삭제 · newName 이름변경
+   *
+   * That tells the reader three things happened when one did, and `19` §C5-B counts one unit,
+   * not three. The pair is not additional evidence for the rename — it is the same fact, stated
+   * before it was understood. */
+  const before = 'export function oldName(a) {\n  return a + 1;\n}\n';
+  const after = 'export function newName(a) {\n  return a + 1;\n}\n';
+  const file = B.splitDiff(diffOf('src/rrep.ts', before, after))[0];
+  const blocks = B.blocksFor(file, { before, after }).blocks;
+
+  assert.deepStrictEqual(blocks.map((b) => [b.name, b.change]), [['newName', 'rename']],
+    `one rename produced ${JSON.stringify(blocks.map((b) => [b.name, b.change]))}`);
+  /* The rename carries BOTH sides' lines, so nothing the pair knew is lost. */
+  assert.ok(blocks[0].afterLines.length, 'the rename lost the added lines');
+  assert.ok(blocks[0].beforeLines.length, 'the rename lost the removed lines');
+});
+
+test('one deletion cannot be renamed into two things', () => {
+  /* Two added declarations with the SAME body as one removed one. Without a claim, both matched
+   * it and the card showed the same deletion becoming two different functions. */
+  const before = 'export function gone(a) {\n  return a + 1;\n}\n';
+  const after = [
+    'export function alpha(a) {',
+    '  return a + 1;',
+    '}',
+    '',
+    'export function beta(a) {',
+    '  return a + 1;',
+    '}',
+    '',
+  ].join('\n');
+  const file = B.splitDiff(diffOf('src/rtwo.ts', before, after))[0];
+  const blocks = B.blocksFor(file, { before, after }).blocks;
+  const claimed = blocks.filter((b) => b.change === 'rename');
+  assert.ok(claimed.length <= 1, `${claimed.length} renames claim the same deletion`);
+  /* …and whichever was not the rename is still reported — an addition does not vanish. */
+  const names = new Set(blocks.map((b) => b.name));
+  assert.ok(names.has('alpha') && names.has('beta'),
+    `an added declaration disappeared: ${JSON.stringify([...names])}`);
+});
+
 test('a rename is claimed ONLY when it is derivable (A-14)', () => {
   /* Same body once the name token is removed, same kind, old name absent from the other side. */
   const before = 'export function oldName(a) {\n  return a + 1;\n}\n';
@@ -132,6 +177,71 @@ test('a rename is claimed ONLY when it is derivable (A-14)', () => {
   assert.ok(renamed, 'a pure rename was not detected');
   assert.strictEqual(renamed.from, 'oldName');
   assert.strictEqual(renamed.name, 'newName');
+});
+
+test('a rename is found among SEVERAL declarations, not just in a file of one', () => {
+  /* FOUND BY MUTATION: `after.find((d) => d.name === a.name && d.kind === a.kind)` could become
+   * `||` and every rename test passed — each of them has exactly ONE declaration per side, so
+   * `find` returns the same node whichever predicate it uses.
+   *
+   * A real file has several. Matching on name OR kind picks whichever function comes first,
+   * whose body is different, and the rename is silently not claimed — the card then says a
+   * function was DELETED and another ADDED, which is a different (and wrong) story about what
+   * the user's change did. */
+  const before = [
+    'export function keepMe(a) {',
+    '  return a * 2;',
+    '}',
+    '',
+    'export function oldName(a) {',
+    '  return a + 1;',
+    '}',
+    '',
+    'export function alsoKeep(b) {',
+    '  return b - 3;',
+    '}',
+    '',
+  ].join('\n');
+  const after = before.replace('oldName', 'newName');
+  const file = B.splitDiff(diffOf('src/rmulti.ts', before, after))[0];
+  const blocks = B.blocksFor(file, { before, after }).blocks;
+
+  const renamed = blocks.find((x) => x.change === 'rename');
+  assert.ok(renamed, `no rename among ${blocks.length} blocks: ${JSON.stringify(blocks.map((b) => [b.name, b.change]))}`);
+  assert.strictEqual(renamed.from, 'oldName');
+  assert.strictEqual(renamed.name, 'newName');
+  /* …and the declarations that did not move are not reported as anything. */
+  assert.deepStrictEqual(blocks.filter((x) => x.change !== 'rename').map((x) => x.name), [],
+    'an untouched declaration was reported as changed');
+});
+
+test('a bare local const is not a unit; an exported one is', () => {
+  /* FOUND BY MUTATION: `isExported` could be made to answer `true` for everything, and both of
+   * its guards could be loosened, with the suite passing throughout.
+   *
+   * `19` §C5-B puts `export const` on the list in its own right — an exported config object is
+   * something a person points at. A private local const is not, and treating every local as a
+   * block would bury the declaration that actually changed under a list of temporaries. */
+  const withLocal = (decl) => [
+    'export function run() {',
+    `  ${decl}`,
+    '  return 1;',
+    '}',
+    '',
+  ].join('\n');
+  const before = withLocal('const helper = 1;');
+  const after = withLocal('const helper = 2;');
+  const file = B.splitDiff(diffOf('src/loc.ts', before, after))[0];
+  const names = B.blocksFor(file, { before, after }).blocks.map((b) => b.name);
+  assert.deepStrictEqual(names, ['run'],
+    `a local const became its own block: ${JSON.stringify(names)}`);
+
+  /* …and an exported const at module level IS one. */
+  const b2 = 'export const CONFIG = { retries: 1 };\n';
+  const a2 = 'export const CONFIG = { retries: 2 };\n';
+  const f2 = B.splitDiff(diffOf('src/cfg.ts', b2, a2))[0];
+  assert.deepStrictEqual(B.blocksFor(f2, { before: b2, after: a2 }).blocks.map((b) => b.name), ['CONFIG'],
+    'an exported const is a unit `19` §C5-B names by itself');
 });
 
 test('the old name still existing means it is an add, not a rename', () => {
@@ -275,6 +385,34 @@ test('the segmenter never asks anything — it only reads the diff', () => {
   for (const forbidden of ['claude', 'session.run', 'spawn(', 'fetch(', 'execFile']) {
     assert.ok(!src.includes(forbidden), `the segmenter reaches for ${forbidden} — a unit must be derived, not asked for`);
   }
+});
+
+test('a path that itself contains " b/" is still read correctly', () => {
+  /* FOUND BY MUTATION: the equal-halves arithmetic in `headerPath` — the branch that exists
+   * BECAUSE `lastIndexOf(' b/')` gets a path wrong — had no test of its own. Both of its `&&`
+   * clauses could be loosened to `||` and everything passed.
+   *
+   * `diff --git a/x b/y b/x b/y` is one file whose name is `x b/y`. Reading it with the last
+   * ` b/` gives `y`, and the card would then attribute a change to a file that does not exist
+   * while the file that DID change goes unmentioned. `19` §C5-B: the unit has to be derivable
+   * from the diff, and a path is the first thing derived. */
+  const odd = 'x b/y.ts';
+  const f = B.splitDiff([`diff --git a/${odd} b/${odd}`, '@@ -1 +1 @@', '-a', '+b'].join('\n'))[0];
+  assert.strictEqual(f.path, odd, `a path containing " b/" was read as ${JSON.stringify(f.path)}`);
+
+  /* The same halves-equal shortcut must NOT fire for a genuine rename, where the halves differ
+   * — that is what the length check and the comparison are for. */
+  const renamed = B.splitDiff(['diff --git a/one.ts b/two.ts', '@@ -1 +1 @@', '-a', '+b'].join('\n'))[0];
+  assert.strictEqual(renamed.path, 'two.ts', 'a rename must be attributed to the AFTER name');
+
+  /* …and a rename where the two names are the same LENGTH, which is where a check on length
+   * alone would break. */
+  const sameLen = B.splitDiff(['diff --git a/aaa.ts b/bbb.ts', '@@ -1 +1 @@', '-a', '+b'].join('\n'))[0];
+  assert.strictEqual(sameLen.path, 'bbb.ts');
+
+  /* A quoted (C-escaped) Korean path, which is the ordinary case for this product. */
+  const ko = B.splitDiff(['diff --git "a/\\355\\225\\234.ts" "b/\\355\\225\\234.ts"', '@@ -1 +1 @@', '-a', '+b'].join('\n'))[0];
+  assert.strictEqual(ko.path, '한.ts', `a quoted Korean path was read as ${JSON.stringify(ko.path)}`);
 });
 
 test('a hunk header is read exactly as git wrote it', () => {

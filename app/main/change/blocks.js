@@ -362,7 +362,19 @@ function semanticBlocks(file, sources) {
     });
   }
 
-  return blocks.concat(renames(before, after, blocks));
+  /* A rename REPLACES the add and the delete it was derived from.
+   *
+   * They used to be concatenated, so one edit produced three blocks — `newName 추가`,
+   * `oldName 삭제` and `newName 이름변경` — telling the reader three things happened when one
+   * did, and counting three units where `19` §C5-B has one. The pair is not additional
+   * evidence for the rename; it is the same fact, stated before it was understood. */
+  const renamed = renames(before, after, blocks);
+  const consumed = new Set();
+  for (const r of renamed) {
+    consumed.add(`add#${r.name}#${r.kind}`);
+    consumed.add(`delete#${r.from}#${r.kind}`);
+  }
+  return blocks.filter((b) => !consumed.has(`${b.change}#${b.name}#${b.kind}`)).concat(renamed);
 }
 
 /**
@@ -375,9 +387,13 @@ function renames(before, after, blocks) {
   const added = blocks.filter((b) => b.change === 'add');
   const removed = blocks.filter((b) => b.change === 'delete');
   const out = [];
+  const claimed = new Set();
   for (const a of added) {
     const aDecl = after.find((d) => d.name === a.name && d.kind === a.kind);
     for (const r of removed) {
+      /* One removed declaration can only have been renamed into ONE thing. Without this, two
+       * added declarations with the same body both claimed the same deletion. */
+      if (claimed.has(r.name)) continue;
       const rDecl = before.find((d) => d.name === r.name && d.kind === r.kind);
       if (!aDecl || !rDecl) continue;
       if (aDecl.kind !== rDecl.kind) continue;
@@ -385,6 +401,8 @@ function renames(before, after, blocks) {
       if (after.some((d) => d.name === rDecl.name)) continue;    // the old name still exists
       out.push({ name: a.name, kind: a.kind, change: 'rename', from: r.name,
                  afterLines: a.afterLines, beforeLines: r.beforeLines });
+      claimed.add(r.name);
+      break;                                   // this addition is accounted for
     }
   }
   return out;

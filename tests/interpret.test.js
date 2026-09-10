@@ -12,6 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
+const { code: srcOf } = require(path.join(__dirname, 'src.js'));
 
 /* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
  * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
@@ -757,4 +758,33 @@ test('statusOf: 확인 못한 답이 하나라도 있으면 부분 해석, 없�
   /* A failed scan wins over everything — `19` §C1: 읽지 못한 것은 부분이 아니라 실패다. */
   assert.strictEqual(statusOf({ failed: true }, [a('confirmed')]), 'failed');
   assert.strictEqual(statusOf({ failed: true }, [a('unconfirmed')]), 'failed');
+});
+
+test('the scan collects no fact that nothing reads', () => {
+  /* FOUND BY MUTATION: `entry: typeof j.main === 'string' ? j.main : null` could be inverted —
+   * so a `package.json` whose `main` is an object would have that object recorded as the entry
+   * point — and nothing anywhere noticed, because `facts.entryHints` was collected and never
+   * read by a single line of the product.
+   *
+   * A fact nobody reads is a claim nobody can check, and it costs a scan of every manifest to
+   * produce. Deleted; this is the check that keeps it from coming back unnoticed. `19` §C1's
+   * six answers take 실행 방법 from the SCRIPTS, which is measured and rendered. */
+  const src = srcOf('app/main/interpret/scan.js');
+  assert.ok(!/entryHints/.test(src), 'scan.js collects entryHints again — is anything reading it?');
+
+  /* …and what the scan DOES collect is what the answers layer consumes. Enumerated from the
+   * facts object rather than listed by hand, so a new key has to be justified here. */
+  const decl = /const facts = \{([^}]*)\}/.exec(src);
+  assert.ok(decl, 'the facts object is gone');
+  const keys = [...decl[1].matchAll(/(\w+):/g)].map((m) => m[1]);
+  assert.deepStrictEqual(keys.sort(),
+    ['ecosystems', 'lockfiles', 'manifests', 'readme', 'scripts', 'topDirs'].sort(),
+    `the scan collects ${JSON.stringify(keys)} — every one must be read by answers.js`);
+  /* Read by the answers layer or by the narrative prompt — `readme` goes to the prompt and
+   * nowhere else, which is a use, not a leftover. */
+  const readers = ['app/main/interpret/answers.js', 'app/main/interpret/narrate.js']
+    .map((f) => srcOf(f)).join('\n');
+  for (const k of keys) {
+    assert.ok(new RegExp(`\\b${k}\\b`).test(readers), `nothing reads facts.${k}`);
+  }
 });

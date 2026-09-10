@@ -72,7 +72,7 @@ const LOCKFILES = [
  */
 function scan(root) {
   const readFiles = [];
-  const facts = { ecosystems: [], manifests: [], scripts: [], lockfiles: [], topDirs: [], readme: null, entryHints: [] };
+  const facts = { ecosystems: [], manifests: [], scripts: [], lockfiles: [], topDirs: [], readme: null };
 
   let walked;
   try {
@@ -104,7 +104,6 @@ function scan(root) {
     if (!facts.ecosystems.includes(eco)) facts.ecosystems.push(eco);
     facts.manifests.push({ file, eco, name: parsed.name ?? null, deps: parsed.deps ?? [] });
     for (const s of parsed.scripts ?? []) facts.scripts.push({ ...s, source: file });
-    if (parsed.entry) facts.entryHints.push({ value: parsed.entry, source: file });
   }
 
   /* A lockfile is evidence by its PRESENCE, and presence is only presence if the entry is a
@@ -235,7 +234,6 @@ function parsePackageJson(text) {
   if (!j || typeof j !== 'object' || Array.isArray(j)) return {};
   return {
     name: typeof j.name === 'string' ? j.name : null,
-    entry: typeof j.main === 'string' ? j.main : null,
     deps: Object.keys({ ...obj(j.dependencies), ...obj(j.devDependencies) }).sort(),
     /* `"scripts": "npm test"` used to yield eight scripts named 0…7 — a string spreads into
      * its characters. Only an object declares scripts. */
