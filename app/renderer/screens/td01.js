@@ -300,7 +300,7 @@ function routeCard(api, state, repaint) {
   card.setAttribute('data-el', 'qc-card');
   /* `15` §0: EVERY card that carries a claim names who acts — including 미인식 and 모호함, which
    * are JuQode's own judgements about the phrase and not Claude Code's. */
-  card.appendChild(el('span', 'chip juq td01-actor', 'JUQODE'));
+  card.appendChild(el('span', 'chip juq td01-actor', C.actor.juq));
 
   if (!r?.ok || r.route?.kind === 'unrecognized') {
     /* 미인식 — NEUTRAL, never red. `15` TD-01 and `19` §C4: not recognising is a branch to the

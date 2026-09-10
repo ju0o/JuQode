@@ -48,6 +48,10 @@
 .sc04-actor {
   align-self: flex-start;
   font-size: 10px; letter-spacing: .06em; font-weight: 600;
+  /* The Claude actor chip takes its caps from the stylesheet (`.actor`, SC-02/SC-03) and its
+     words from `18`. This one hardcoded `JUQODE` into the string instead — a word `18` does not
+     have. Same rule, same place: the dictionary says JuQode, the sheet says how it is set. */
+  text-transform: uppercase;
 }
 .sc04-field { display: flex; gap: 8px; align-items: baseline; }
 .sc04-fieldlabel { flex: 0 0 auto; min-width: 4.5em; letter-spacing: .04em; }

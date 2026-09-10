@@ -62,7 +62,9 @@
 
 .td01-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
 .td01-card .ct { font-weight: 600; }
-.td01-actor { align-self: flex-start; font-size: 10px; letter-spacing: .06em; font-weight: 600; }
+/* Caps from here, words from `18` — see the note on `.sc04-actor`. */
+.td01-actor { align-self: flex-start; font-size: 10px; letter-spacing: .06em; font-weight: 600;
+              text-transform: uppercase; }
 /* 미인식 is NEUTRAL — `15` says so explicitly, and `19` §C4 explains why: the product recognises
    six things and declines the rest; it does not claim to have detected anything. */
 .td01-card[data-kind="unrecognized"] { border-color: var(--line2); }

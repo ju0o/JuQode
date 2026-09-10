@@ -252,7 +252,7 @@ function groupColumn(reader, selected, api, nav, state) {
     if (g.explainable) {
       /* JuQode wrote this, not Claude Code — `15` §0 requires the actor to be named on every
        * card that carries a claim, and the explanation pass is JuQode's own. */
-      card.appendChild(el('span', 'chip juq sc04-actor', 'JUQODE'));
+      card.appendChild(el('span', 'chip juq sc04-actor', C.actor.juq));
       for (const [key, value] of [['what', g.what], ['why', g.why], ['affects', g.affects]]) {
         if (!value) continue;
         const row = el('p', 'sm sc04-field');

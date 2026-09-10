@@ -450,7 +450,9 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
     if (!leaf) continue;
     const depth = leaf[1].length;
     const parents = Object.keys(stack).map(Number).filter((d) => d < depth).sort((a, b) => a - b).map((d) => stack[d]);
-    leaves.push({ parent: parents.at(-1) ?? null, key: leaf[2] });
+    /* The WHOLE path, not the leaf name. See `used()` below. */
+    leaves.push({ parent: parents.at(-1) ?? null, key: leaf[2],
+                  path: ['C', ...parents, leaf[2]].join('.') });
   }
   assert.ok(leaves.length > 100, `only ${leaves.length} copy keys parsed — the parser lost the file`);
 
@@ -458,6 +460,14 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
    * naming them individually would be a list to forget to update. */
   const dynamicParents = new Set(
     [...uses.matchAll(/C(?:\.[A-Za-z_$][\w$]*)*\.([A-Za-z_$][\w$]*)\[/g)].map((m) => m[1]));
+
+  /* …and a parent handed over WHOLE uses all its leaves too: `mountThemeToggle(bar, C.theme)`
+   * reads every one of them, and no `C.theme.label` appears anywhere. Matched by the absence of
+   * a `.` or `[` after the path — that is what makes it the object rather than a way into it. */
+  const wholesale = new Set(
+    [...uses.matchAll(/C(?:\.[A-Za-z_$][\w$]*)+/g)]
+      .filter((m) => !/[.[]/.test(uses[m.index + m[0].length] ?? ''))
+      .map((m) => m[0]));
 
   /* PENDING — `15` elements `18` has copy for and no screen draws yet.
    *
@@ -491,10 +501,47 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
      * keeps is a genuine PREFIX with the rest gone (see `qc/run.js`). A button that opened the
      * same 64 KB again would be lying about what it offers. */
     'qc.full',
+
+    /* ── surfaced when this check started matching WHOLE PATHS (batch 35) ──────────────────
+     * Every one of these was hidden behind a namesake: the leaf name alone was found somewhere
+     * else in the file and the key counted as used. They are written down now, each with what
+     * it would take to render it, rather than left invisible again.
+     *
+     * Duplicates of copy that IS rendered, under a second name. `18` carries both; the screen
+     * can only say it once, and it says it through the key the screen already uses. */
+    'presence.title',      // `presence.kicker` is on the card; a title repeating it is 18 §0.8
+    'work.observed',       // `work.lastSeen` is the liveness label, same words
+    'work.open',           // History uses `history.result`; the guard uses `guard.open`
+    'qc.kicker',           // the drawer's Quick Command label is `term.qcTitle`
+
+    /* Controls `15` names that no screen builds yet. Each is a real backlog item. */
+    'guard.answer',        // 답하기 needs the guard to know the Work is input_waiting; SC-03 owns that
+    'guard.wait',          // DECIDED, not pending: waiting is what happens when nothing is pressed,
+                           // and the text is already kept in the field (see `refusalCard`)
+    'work.now',            // `15` SC-03's label for the step region; the region is drawn unlabelled
+    'work.requested',      // SC-03 shows the intent as the card's heading, without a field label
+    'work.resubmit',       // SC-03's failed result offers 변경 읽기 · 작업대로; re-sending is SC-02's
+    'qc.terminal',         // ▸ 터미널에서 보기 from a QC card — the drawer is already open there
+    'term.out',            // a heading over the drawer's output; the output is unlabelled today
   ]);
 
+  /* The FULL access path — `C.startFail.resubmit`, not `resubmit`.
+   *
+   * MEASURED: the leaf name alone let a key hide behind a namesake. `startFail.resubmit`,
+   * `work.resubmit` and `unavailable.resubmit` share a leaf, only the last is rendered, and all
+   * three passed — so the 시작 실패 card shipped with a title, a reason and NOTHING TO PRESS,
+   * while this check reported the copy for its missing button as used. A guard that can be
+   * satisfied by a different key is not a guard.
+   *
+   * `\b` at the END so `C.qc.run` is not satisfied by `C.qc.running`; no boundary is needed at
+   * the start because the path begins at `C.`. Every use in the renderer is a literal
+   * `C.<path>` — nothing aliases or destructures it, which is what makes this exact. */
+  const used = (path) => new RegExp(`${path.replace(/\./g, '\\.')}\\b`).test(uses);
+
+  const handedOver = (path) => [...wholesale].some((w) => path.startsWith(`${w}.`));
+
   const unused = leaves
-    .filter(({ parent, key }) => !dynamicParents.has(parent) && !new RegExp(`\\b${key}\\b`).test(uses))
+    .filter(({ parent, path }) => !dynamicParents.has(parent) && !handedOver(path) && !used(path))
     .map((u) => `${u.parent ?? 'C'}.${u.key}`)
     .filter((k) => !PENDING.has(k));
   assert.deepStrictEqual(unused, [],
@@ -502,9 +549,10 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
 
   /* …and the PENDING list may not outlive what it names: an entry that HAS been rendered is a
    * stale exemption, and a stale exemption is how an allow-list turns permanent. */
+  const pathOf = new Map(leaves.map((l) => [`${l.parent ?? 'C'}.${l.key}`, l.path]));
   const stale = [...PENDING].filter((k) => {
-    const key = k.split('.').at(-1);
-    return new RegExp(`\\b${key}\\b`).test(uses);
+    const path = pathOf.get(k) ?? `C.${k}`;
+    return used(path) || handedOver(path);
   });
   assert.deepStrictEqual(stale, [], 'PENDING names copy that is now rendered — remove the entry');
 });
