@@ -381,20 +381,27 @@ function ambiguousCard(routed, toWork) {
   n.appendChild(el('div', 'sm t', C.intent.ambiguousTitle));
   n.appendChild(el('div', 'xs mut', C.intent.ambiguousBody));
   const acts = el('div', 'row-acts');
-  let offeredWork = false;
-  for (const opt of routed.options ?? []) {
-    if (opt === 'work') { acts.appendChild(btn('btn sm', C.intent.toWork, toWork)); offeredWork = true; }
-  }
-  /* Both readings are named in words even where only one is choosable yet — the copy promises
-   * "어느 쪽인지 골라 주세요. JuQode가 대신 정하지 않아요", and a disabled control on one side
-   * would mean JuQode had in fact chosen. */
-  /* Both readings are choosable now that the drawer exists — a named reading with no control
-   * behind it would have meant JuQode had in fact chosen. */
-  for (const opt of (routed.options ?? []).filter((o) => o !== 'work')) {
-    if (opt !== 'terminal' && !String(opt).startsWith('qc')) continue;
+  const options = routed.options ?? [];
+
+  /* Every reading gets a control — the copy promises "어느 쪽인지 골라 주세요. JuQode가 대신
+   * 정하지 않아요", and a named reading with no control behind it would mean JuQode had in
+   * fact chosen. There are exactly two destinations, so there are exactly two controls.
+   *
+   * ONE terminal control, however many Quick Command rules matched. `실행해줘` routes to
+   * `['qc.dev.start','qc.build','qc.test','work']` (`19` §C4 — a verb with no object), and a
+   * button per option drew 터미널 열기 THREE times, all opening the same drawer with the same
+   * phrase. That is not three readings named; it is one control drawn three times, while the
+   * card's own sentence says the user is choosing between readings. Found by mutation: five
+   * flips across the two loops this replaces all survived, because no test had ever rendered
+   * this card at all.
+   *
+   * Work is always offered: the router omits it when two full rules match (`19` §C4 line 122),
+   * and a card with no way out to a Work would leave the user with only the reading JuQode
+   * happened to match. */
+  acts.appendChild(btn('btn sm', C.intent.toWork, toWork));
+  if (options.some((o) => o === 'terminal' || String(o).startsWith('qc'))) {
     acts.appendChild(btn('btn sm', C.intent.openTerm, () => window.__openDrawerWith?.(routed.phrase ?? '')));
   }
-  if (!offeredWork) acts.appendChild(btn('btn sm', C.intent.toWork, toWork));
   /* `15` UF-INTENT-REPHRASE: the third way out is to say it differently. The text is already in
    * the field (nothing is ever queued or thrown away), so this dismisses the card and puts the
    * cursor back where the user can edit — `18` `intent.rephrase`. */

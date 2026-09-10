@@ -228,7 +228,10 @@ api.onWorkUpdate?.((snapshot) => {
 /* Test hooks. Read-only: they expose state, they never mutate it. */
 window.__screen  = () => document.querySelector('[data-screen]')?.getAttribute('data-screen') ?? null;
 window.__theme   = () => document.documentElement.getAttribute('data-theme');
-window.__project = () => (state.project ? { name: state.project.name, path: state.project.path } : null);
+/* `id` is here so a test can ask the store the same question the screen asked — without it a
+ * probe silently gets `no-project` back and asserts against `undefined`. */
+window.__project = () => (state.project
+  ? { id: state.project.id, name: state.project.name, path: state.project.path } : null);
 window.__interp  = () => (state.interpretation
   ? { status: state.interpretation.status,
       answers: state.interpretation.answers.map((a) => ({ q: a.q, kind: a.kind, confidence: a.confidence, sourceRef: a.sourceRef })),
@@ -238,6 +241,9 @@ window.__claude  = () => state.claude;
 window.__work    = () => (state.workSnapshot
   ? { id: state.workSnapshot.work.id, intent: state.workSnapshot.work.intent,
       status: state.workSnapshot.status, outcome: state.workSnapshot.outcome,
+      /* SC-03's state panels are conditioned on liveness as well as status, so a test that
+       * cannot see it cannot check when a panel must be ABSENT. */
+      liveness: state.workSnapshot.liveness ?? null,
       steps: state.workSnapshot.steps.length,
       permission: state.workSnapshot.permission?.tool ?? null,
       signals: state.workSnapshot.signalCount }
@@ -258,6 +264,11 @@ window.__reader  = () => (state.reader
         confidence: g.confidence, files: g.files.map((f) => f.file),
         blocks: g.files.flatMap((f) => f.blocks.map((b) => b.name ?? b.kind)),
         notes: g.files.map((f) => f.note) })),
-      selected: state.readerGroup, raw: state.readerRaw, block: state.readerBlock }
+      selected: state.readerGroup, raw: state.readerRaw, block: state.readerBlock,
+      /* D-126a · METADATA ONLY — whether a gap is KNOWN and how many paths it names. The
+       * contents of an excluded file are never read, so nothing here can carry one. A test
+       * cannot check that the card is ABSENT when there is no gap without seeing this. */
+      gap: { known: Boolean(state.reader.evidenceGap?.known),
+             paths: state.reader.evidenceGap?.paths?.length ?? 0 } }
   : null);
 window.__ready   = true;

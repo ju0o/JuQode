@@ -202,9 +202,24 @@ function header(snap) {
  * When a ledger is missing the card is not drawn at all — claiming "no excluded file changed"
  * on evidence that cannot prove it is exactly the overclaim this layer exists to prevent.
  */
+/**
+ * Is there an excluded-path change to REPORT? Pure, and exported, so all four combinations can
+ * be pinned without a DOM — the e2e can only reach the states its fixture produces, and every
+ * Work it reads has a gap, so the ABSENT half of this rule was unreachable there. Two mutations
+ * survived on exactly that half: `||` widened to `&&` draws the card, and its sentence
+ * 증거에 담기지 않은 변경이 있어요, for a Work with no gap at all.
+ *
+ * `known: false` means the ledger could not be compared. That is NOT "nothing was excluded" —
+ * claiming no excluded file changed on evidence that cannot prove it is the overclaim D-126a
+ * exists to prevent, so it draws nothing rather than a reassurance.
+ */
+export function hasEvidenceGap(gap) {
+  return Boolean(gap?.known) && (gap.paths?.length ?? 0) > 0;
+}
+
 function evidenceGapCard(reader) {
   const gap = reader?.evidenceGap;
-  if (!gap?.known || !gap.paths?.length) return null;
+  if (!hasEvidenceGap(gap)) return null;
 
   const card = el('section', 'card c-wide sc04-gap');
   card.setAttribute('data-el', 'evidence-gap');
