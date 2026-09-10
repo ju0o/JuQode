@@ -533,3 +533,18 @@ test('no test reads product source without going through tests/src.js', () => {
   assert.ok(!code('app/renderer/presence.js').includes('setInterval'),
     'code() does not strip comments — every check built on it is reading prose');
 });
+
+test('the suite cannot hang — every test has a deadline', () => {
+  /* MEASURED during a mutation sweep: a mutant left `await r.done` waiting forever and the run
+   * sat there. `node --test` has NO default per-test timeout, so a hang is not a failure — it
+   * is a CI job that never reports, and the diagnosis is "it was slow" rather than "this test
+   * did not finish".
+   *
+   * This repository has already been burned once by a suite that failed in ways nobody could
+   * read (see `tests/tmp.js`), and the lesson was the same: make the failure legible. */
+  const pkg = JSON.parse(read('package.json'));
+  assert.match(pkg.scripts['test:unit'], /--test-timeout=\d+/,
+    'the unit suite has no per-test deadline — a hung test hangs the run');
+  const ms = Number(/--test-timeout=(\d+)/.exec(pkg.scripts['test:unit'])[1]);
+  assert.ok(ms >= 20_000 && ms <= 300_000, `the deadline is ${ms} ms — too tight to be safe, or too loose to help`);
+});

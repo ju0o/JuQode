@@ -328,6 +328,20 @@ async function cdp(sendFn) {
     if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails));
     return r.result?.result?.value;
   };
+  /* The renderer is LOADED before anything is asked of it.
+   *
+   * `pageTarget` waits for the debugger target, which exists as soon as the window does — the
+   * module graph may still be loading behind it. Under load that difference showed up as
+   * `window.__screen is not a function`, which reads as a product failure and is not one. The
+   * wait is bounded, so a renderer that never loads still fails, and says so in those words. */
+  const loaded = await evalJs(`(async () => {
+    for (let i = 0; i < 200; i++) {
+      if (typeof window.__screen === 'function') return true;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    return false; })()`);
+  if (!loaded) throw new Error('the renderer never finished loading (window.__screen is missing after 10s)');
+
   try { return await sendFn({ send, evalJs }); } finally { ws.close(); }
 }
 
@@ -885,8 +899,17 @@ const results = await cdp(async ({ send, evalJs }) => {
   /* `15` §Keyboard: focus returns to the request field after `이해했어요 · 다음 요청으로`.
    * A user who has finished reading a change is about to type the next request; landing them
    * anywhere else makes them reach for the mouse to do the thing the screen is for. */
-  out.focusAfterUnderstood = await evalJs(
-    `document.activeElement?.getAttribute('data-el') ?? document.activeElement?.tagName ?? null`);
+  /* POLLED, not sampled after a fixed sleep. Read once at a fixed moment this flaked under CPU
+   * load and reported `BODY` — a flaky assertion is worse than none, because it makes every
+   * "N pass" line in this run a little less true. The claim is unchanged: focus lands on the
+   * request field. Only the waiting is now bounded by the outcome instead of by a guess. */
+  out.focusAfterUnderstood = await evalJs(`(async () => {
+    const at = () => document.activeElement?.getAttribute('data-el') ?? document.activeElement?.tagName ?? null;
+    for (let i = 0; i < 120; i++) {
+      if (at() === 'intent') return 'intent';
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    return at(); })()`);
   /* …and `결과 보기` → SC-03. */
   await evalJs(`[...document.querySelectorAll('[data-el="history-row"] button')].find(b => b.textContent.includes('결과 보기'))?.click()`);
   await sleep(1200);
@@ -1952,6 +1975,18 @@ console.log(JSON.stringify(results, null, 2));
     waiting.set(id, (msg) => { clearTimeout(t); res(msg.result?.result?.value); });
     ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true, awaitPromise: true } }));
   });
+
+  /* WAIT for the renderer, do not assume it. A fixed 4 s sleep is a guess about how long a
+   * second Electron takes to boot, and under load it was wrong — `window.__screen is not a
+   * function`, which reads as "the app failed" when the app was merely still starting. The
+   * deadline is still bounded, so a renderer that never loads still fails, and says which. */
+  const ready = await ev2(`(async () => {
+    for (let i = 0; i < 200; i++) {
+      if (typeof window.__screen === 'function') return true;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    return false; })()`);
+  assert.strictEqual(ready, true, 'the refused-store window never finished loading its renderer');
 
   const refused = {
     screen:   await ev2('window.__screen()'),

@@ -51,7 +51,12 @@ function toSignal(event) {
   if (t === 'user') {
     const results = blocks(event).filter((b) => b.type === 'tool_result');
     if (results.length) {
-      const all = results.map((r) => ({ toolUseId: r.tool_use_id ?? null, isError: r.is_error === true }));
+      /* `isError` per block is NOT carried. Nothing read it — the reducer has no
+       * `tool_result` case, and both consumers (`change/explain.js`, `repo.countToolResults`)
+       * read the RAW line, which is what is persisted. A field nobody reads is a claim about
+       * an observation that nothing can check; found by mutation, where inverting it changed
+       * nothing anywhere. The raw line still has it if a later package needs it. */
+      const all = results.map((r) => ({ toolUseId: r.tool_use_id ?? null }));
       return { kind: KIND.TOOL_RESULT, payload: { ...all[0], all } };
     }
     return { kind: KIND.RAW, payload: null };

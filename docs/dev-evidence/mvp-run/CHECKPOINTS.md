@@ -697,3 +697,41 @@ were evenly distributed by finding the word `fibonacci`, which appears only in a
 checks the golden-angle constant, which is the distribution.
 
 Next eligible: WBS-32/33 · the DV-11 decision.
+
+## Batch 25 QA · systematic mutation sweep (not hand-picked)
+
+Report: `BATCH-25-QA.md`. No new Canon findings. 515 tests, three e2e files.
+
+Every mutation in this run so far was one I CHOSE — aimed at what I had just changed, so code
+nobody was looking at was never checked. This sweep generated them mechanically over five core
+files (comparison and logical operators and return constants, on comment-stripped code only),
+79 + 62 mutants: **12 real gaps and 3 equivalents.**
+
+The evidence layer held three of them. `measure()`'s `.git` skip could be inverted so it measured
+`.git` ALONE and the whole suite passed — `19` §E's size ceiling would have stopped firing on
+every real project, silently. `firstUnreadable` answers `rel || '.'` and the root's `rel` is the
+empty string, so without the fallback a project whose root cannot be listed at all is allowed to
+start a Work and the basis gets built by `add -A`, which only WARNS about what it cannot read.
+And the nested-repo ledger's `.git` skip was only ever exercised by a file at the nested repo's
+root, where it cannot matter.
+
+Two more were claims nothing could check: `toSignal`'s `system/status` branch had no coverage at
+all (the recorded fixture carries no such event, and the recording was the only place that
+mapping was exercised), and the permission GRANT matcher was only ever asked to resolve the
+FIRST outstanding refusal — so a matcher that ignored the id entirely passed everything, which
+makes D-116's record a guess. Both now have written-down tables.
+
+Two were code that could not be reached: `buildChecked`'s 확인됨 downgrade (extracted as
+`downgrade()` so a test can hand it the shape `build()` cannot produce) and a per-block `isError`
+that nothing read (deleted — the raw line still carries it).
+
+The sweep also found the suite could HANG: `node --test` has no default per-test deadline, so a
+mutant that never settled a promise produced a CI job that never reports. `--test-timeout=60000`,
+and a test that checks it is set.
+
+Its load then shook the e2e twice, both times by sampling after a fixed sleep rather than waiting
+for the outcome — focus read as `BODY`, and a second Electron's renderer read as
+`window.__screen is not a function`, which looks like a product failure and is not one. Both now
+poll to a bounded deadline and fail in the words of what actually did not happen.
+
+Next eligible: finish the sweep over the remaining main-process files · WBS-32/33 · DV-11.

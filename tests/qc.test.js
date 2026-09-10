@@ -1068,3 +1068,39 @@ test('the ambiguity branch that IS reachable stays reachable', () => {
   assert.strictEqual(r.kind, 'ambiguous');
   assert.ok(r.readings.length > 1, `실행해줘 resolved to ${JSON.stringify(r.readings)}`);
 });
+
+test('a package.json whose `scripts` is not an object is 사용 불가, never a crash', () => {
+  /* FOUND BY MUTATION: `(pkg.scripts && typeof pkg.scripts === 'object') ? pkg.scripts : {}`
+   * had no test behind it at all — nothing in the suite ever handed `availability()` a
+   * malformed `scripts`. `12` §16: 사용 불가 ≠ 실패, and neither is a thrown error.
+   *
+   * A hand-written or generated `package.json` can carry anything, and `19` §C4 is explicit
+   * that JuQode does not invent a build method — so every shape that is not a script map has
+   * to come out as `no_script` with the reason, and none of them may throw. */
+  const { tempDir } = require(path.join(__dirname, 'tmp.js'));
+  for (const scripts of ['npm run build', 42, true, ['build'], null]) {
+    const dir = tempDir('juqode-qc-scripts-');
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'x', scripts }));
+    for (const id of ['qc.dev.start', 'qc.build', 'qc.test']) {
+      let a;
+      assert.doesNotThrow(() => { a = availability(id, { root: dir }); },
+        `${id} threw on scripts=${JSON.stringify(scripts)}`);
+      assert.strictEqual(a.available, false, `${id} claimed to be runnable with scripts=${JSON.stringify(scripts)}`);
+      assert.strictEqual(a.reason, 'no_script', `${id} gave the reason ${a.reason}`);
+    }
+  }
+
+  /* …and an ARRAY is an object to `typeof`, which is the case the guard cannot catch — so it is
+   * checked above by its OUTCOME rather than by the guard's shape. A `package.json` with no
+   * `scripts` key at all is the same answer. */
+  const bare = tempDir('juqode-qc-scripts-');
+  fs.writeFileSync(path.join(bare, 'package.json'), JSON.stringify({ name: 'x' }));
+  assert.strictEqual(availability('qc.build', { root: bare }).reason, 'no_script');
+
+  /* The check can tell a real script map from all of those. */
+  const real = tempDir('juqode-qc-scripts-');
+  fs.writeFileSync(path.join(real, 'package.json'), JSON.stringify({ name: 'x', scripts: { build: 'vite build' } }));
+  const ok = availability('qc.build', { root: real });
+  assert.strictEqual(ok.available, true, 'a real build script was refused');
+  assert.deepStrictEqual(ok.data.argv, ['npm', 'run', 'build']);
+});

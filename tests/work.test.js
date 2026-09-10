@@ -286,6 +286,67 @@ test('an unreadable directory under node_modules is refused too', { skip: proces
   } finally { fs.chmodSync(path.join(dir, 'node_modules/pkg/priv'), 0o700); }
 });
 
+/* ── `toSignal`: the CLI's event shapes → `20`'s signal vocabulary ────────────────────────── */
+
+test('every event shape maps to the signal kind Canon names for it', () => {
+  /* FOUND BY MUTATION: `system/status` had no coverage at all — inverting either half of
+   * `t === 'system' && st === 'status'` passed the whole suite. The recorded fixture does not
+   * contain one, and a recording is the only other place this mapping was exercised, so the
+   * kinds the fixture happens not to carry were mapped by nobody.
+   *
+   * Written down as a table rather than derived: a derived expectation tracks whatever the
+   * function does and cannot fail, which is the shape of test this run keeps finding. */
+  const cases = [
+    [{ type: 'system', subtype: 'init', session_id: 's1', cwd: '/p', claude_code_version: '9.9' },
+     KIND.SESSION_START, { sessionId: 's1', cwd: '/p', version: '9.9' }],
+    [{ type: 'system', subtype: 'status', message: '읽는 중' }, KIND.STATUS, { text: '읽는 중' }],
+    [{ type: 'system', subtype: 'status' }, KIND.STATUS, { text: null }],
+    [{ type: 'system', subtype: 'permission_denied', tool_name: 'Edit', tool_use_id: 't1', message: 'no' },
+     KIND.PERMISSION_DENIED, { tool: 'Edit', toolUseId: 't1', message: 'no' }],
+    [{ type: 'rate_limit_event', rate_limit_info: { retryAfter: 30 } }, KIND.RATE_LIMIT, { retryAfter: 30 }],
+    [{ type: 'rate_limit_event' }, KIND.RATE_LIMIT, null],
+  ];
+  for (const [event, kind, payload] of cases) {
+    const sig = toSignal(event);
+    assert.strictEqual(sig.kind, kind, `${JSON.stringify(event)} became ${sig.kind}`);
+    assert.deepStrictEqual(sig.payload, payload, `${kind} carried the wrong payload`);
+  }
+
+  /* A `system` subtype nobody wrote down is `raw` — an outcome, never a guess. `15` still shows
+   * it as 그 밖의 신호, because hiding an observation is the one thing the screen may not do. */
+  const unknown = toSignal({ type: 'system', subtype: 'something_new' });
+  assert.strictEqual(unknown.kind, KIND.RAW);
+  assert.deepStrictEqual(unknown.payload, { type: 'system', subtype: 'something_new' });
+  /* …and so is an event with no type at all, and a non-event. */
+  for (const junk of [{}, null, undefined, { subtype: 'status' }]) {
+    assert.strictEqual(toSignal(junk).kind, KIND.RAW, `${JSON.stringify(junk)} was classified`);
+  }
+
+  /* Every kind this function can produce is one `20` declares. */
+  const produced = new Set([...cases.map(([, k]) => k), KIND.RAW, KIND.TOOL_USE, KIND.TOOL_RESULT, KIND.FINISH]);
+  for (const k of produced) assert.ok(Object.values(KIND).includes(k), `${k} is not in the signal vocabulary`);
+});
+
+test('an assistant or user message with no blocks is raw, not a lost signal', () => {
+  /* The two branches that fall through to `raw` after looking for blocks. Neither was covered:
+   * the recording's assistant messages all carry a `tool_use`. */
+  const talk = toSignal({ type: 'assistant', message: { content: [{ type: 'text', text: '했어요' }] } });
+  assert.strictEqual(talk.kind, KIND.RAW);
+  assert.strictEqual(talk.payload.text, '했어요', 'the model\'s words were dropped');
+
+  const empty = toSignal({ type: 'user', message: { content: [] } });
+  assert.strictEqual(empty.kind, KIND.RAW);
+  assert.strictEqual(empty.payload, null);
+
+  /* …and a tool_use still wins over text in the same message. */
+  const mixed = toSignal({ type: 'assistant', message: { content: [
+    { type: 'text', text: 'ignore me' },
+    { type: 'tool_use', id: 'u1', name: 'Edit', input: { file_path: 'a.ts' } }] } });
+  assert.strictEqual(mixed.kind, KIND.TOOL_USE);
+  assert.strictEqual(mixed.payload.tool, 'Edit');
+  assert.strictEqual(mixed.payload.all.length, 1);
+});
+
 test('an unreadable ROOT is refused — and the refusal is truthy', { skip: process.getuid?.() === 0 && 'root' }, () => {
   /* FOUND BY MUTATION. `firstUnreadable` answers `rel || '.'`, and the root's `rel` is the
    * EMPTY STRING — so without the `|| '.'` the function returns `''`, `refusal()` reads it as
@@ -634,6 +695,44 @@ test('a grant with no id resolves ONE refusal, not every outstanding one', () =>
   s = reduce(s, grantedSignal({ tool: 'Edit', toolUseId: null }, 'Edit(a.txt)'));
   assert.strictEqual(openPermissions(s).length, 1,
     'one click resolved refusals the user never answered — the Work would report 완료 with unapproved refusals in it');
+});
+
+test('a grant resolves the refusal it NAMES, and nothing when it names none', () => {
+  /* FOUND BY MUTATION: every existing test granted the FIRST outstanding refusal, so a matcher
+   * that ignored the id entirely and resolved "the first unresolved one" passed all of them.
+   * D-116 turns on this: the record says a PERSON approved a specific action, and a grant that
+   * resolves whatever happens to be first makes that record a guess.
+   *
+   * `19` §C3-P: not granting is always safe. A grant naming nothing resolves nothing. */
+  const two = () => reduce(
+    reduce(initial(), { kind: KIND.PERMISSION_DENIED, payload: { tool: 'Edit', toolUseId: 'tu_1' } }),
+    { kind: KIND.PERMISSION_DENIED, payload: { tool: 'Bash', toolUseId: 'tu_2' } });
+  const openIds = (st) => openPermissions(st).map((d) => d.toolUseId);
+
+  /* The SECOND one, by id. The first must be left alone. */
+  const second = reduce(two(), grantedSignal({ tool: 'Bash', toolUseId: 'tu_2' }, 'Bash(ls:*)'));
+  assert.deepStrictEqual(openIds(second), ['tu_1'],
+    'a grant naming the second refusal resolved the first');
+
+  /* An id that names nothing resolves NOTHING — not the first, not the closest. */
+  const stranger = reduce(two(), grantedSignal({ tool: 'Edit', toolUseId: 'tu_999' }, 'Edit(a.txt)'));
+  assert.deepStrictEqual(openIds(stranger), ['tu_1', 'tu_2'],
+    'a grant naming an unknown id resolved a refusal the user never answered');
+
+  /* No id at all falls back to the TOOL — and only to a matching one. */
+  const byTool = reduce(two(), grantedSignal({ tool: 'Bash', toolUseId: null }, 'Bash(ls:*)'));
+  assert.deepStrictEqual(openIds(byTool), ['tu_1'], 'the tool fallback resolved the wrong refusal');
+
+  const noSuchTool = reduce(two(), grantedSignal({ tool: 'Write', toolUseId: null }, 'Write(a.txt)'));
+  assert.deepStrictEqual(openIds(noSuchTool), ['tu_1', 'tu_2'],
+    'a grant for a tool nobody was refused resolved something anyway');
+
+  /* …and a grant carrying neither an id nor a tool resolves nothing at all. */
+  const empty = reduce(two(), { kind: KIND.PERMISSION_GRANTED, payload: {} });
+  assert.deepStrictEqual(openIds(empty), ['tu_1', 'tu_2'],
+    'an empty grant resolved a refusal');
+  const nothing = reduce(two(), { kind: KIND.PERMISSION_GRANTED, payload: null });
+  assert.deepStrictEqual(openIds(nothing), ['tu_1', 'tu_2']);
 });
 
 test('an ended Work cannot be reopened by a stray signal', () => {
