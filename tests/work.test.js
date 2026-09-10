@@ -374,8 +374,12 @@ test('the size cap measures the WORKING TREE, and not `.git`', () => {
    * user's project, and counting it would refuse projects for having history. Nothing checked
    * WHICH tree it walks, so inverting the skip (measure `.git` only) passed the whole suite:
    * `19` §E's size ceiling would have stopped firing, silently, on every real project. */
+  /* The big file is in a SUBDIRECTORY, and that is the whole point: the `.git` skip decides
+   * which directories are ENTERED, so a file at the root is counted either way and a test that
+   * put it there proved nothing. (Measured — the first version of this test did exactly that,
+   * and the mutant survived it.) */
   const big = 'x'.repeat(200_000);
-  const { dir } = repo({ 'a.txt': '1\n', 'big.bin': big });
+  const { dir } = repo({ 'a.txt': '1\n', 'assets/big.bin': big });
 
   /* Over the cap because of the working tree. */
   const over = G.refusal(dir, { maxBytes: 100_000 });
