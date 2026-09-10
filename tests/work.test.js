@@ -242,11 +242,28 @@ test('a nested repository is excluded AND reported', () => {
    * repository is excluded, so a basis could not be taken at all. */
   execFileSync('git', ['init', '-q', '.'], { cwd: path.join(dir, 'vendor/inner') });
 
+  /* FOUND BY MUTATION: the walk's `.git` skip was only checked by a file at the nested repo's
+   * ROOT, where the skip cannot matter — it decides which SUBDIRECTORIES are entered. So a
+   * file one level down is here too, and it is the one that fails if the skip is inverted. */
+  fs.mkdirSync(path.join(dir, 'vendor/inner/src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'vendor/inner/src/deep.txt'), 'd1\n');
+
   const before = G.capture(dir, store, 'before');
   assert.deepStrictEqual(before.nestedRepos, ['vendor/inner'], 'D-126 requires a nested repo to be reported');
+  /* …and the ledger accounts for the nested repo's OWN files, not its git internals. A ledger
+   * full of `.git/objects` entries would report "changes" every time git touched itself. */
+  const paths = before.excluded.map((e) => e.path);
+  assert.ok(paths.includes('vendor/inner/src/deep.txt'),
+    `a file below the nested repo's root is not accounted for: ${paths.join(' · ')}`);
+  assert.deepStrictEqual(paths.filter((p) => p.includes('/.git/')), [],
+    'the nested-repo ledger carries git internals');
+
   fs.writeFileSync(path.join(dir, 'vendor/inner/i.txt'), 'v2-CHANGED\n');
+  fs.writeFileSync(path.join(dir, 'vendor/inner/src/deep.txt'), 'd2-CHANGED\n');
   const after = G.capture(dir, store, 'after');
-  assert.deepStrictEqual(ledgerDiff(before.excluded, after.excluded), [{ path: 'vendor/inner/i.txt', change: 'modified' }],
+  assert.deepStrictEqual(ledgerDiff(before.excluded, after.excluded),
+    [{ path: 'vendor/inner/i.txt', change: 'modified' },
+     { path: 'vendor/inner/src/deep.txt', change: 'modified' }],
     'a change inside a nested repository was invisible in every channel');
 });
 
@@ -267,6 +284,60 @@ test('an unreadable directory under node_modules is refused too', { skip: proces
   try {
     assert.strictEqual(G.refusal(dir)?.reason, G.REFUSE.UNREADABLE);
   } finally { fs.chmodSync(path.join(dir, 'node_modules/pkg/priv'), 0o700); }
+});
+
+test('an unreadable ROOT is refused — and the refusal is truthy', { skip: process.getuid?.() === 0 && 'root' }, () => {
+  /* FOUND BY MUTATION. `firstUnreadable` answers `rel || '.'`, and the root's `rel` is the
+   * EMPTY STRING — so without the `|| '.'` the function returns `''`, `refusal()` reads it as
+   * falsy, and a project whose root cannot be listed at all is allowed to start a Work. The
+   * basis would then be built by `add -A`, which only WARNS about what it cannot read.
+   *
+   * Nothing exercised the root case: every other test made an unreadable file or subdirectory,
+   * where `rel` is non-empty and the fallback never matters. */
+  const { dir } = repo({ 'a.txt': '1\n' });
+  /* Execute but not READ: `git --version` can still resolve the cwd (otherwise the refusal
+   * would be `git-unavailable` and this path would never be reached), while `readdirSync`
+   * throws — which is exactly the shape `firstUnreadable` has to answer for. */
+  fs.chmodSync(dir, 0o111);
+  try {
+    const r = G.refusal(dir);
+    assert.ok(r, 'a project whose root cannot be listed was allowed to start a Work');
+    assert.strictEqual(r.reason, G.REFUSE.UNREADABLE);
+    /* The detail is what the card shows. `''` would render as an empty reason. */
+    assert.ok(r.detail, 'the refusal names nothing');
+  } finally { fs.chmodSync(dir, 0o700); }
+});
+
+test('the size cap measures the WORKING TREE, and not `.git`', () => {
+  /* FOUND BY MUTATION. `measure()` skips `.git` — the repository's own object store is not the
+   * user's project, and counting it would refuse projects for having history. Nothing checked
+   * WHICH tree it walks, so inverting the skip (measure `.git` only) passed the whole suite:
+   * `19` §E's size ceiling would have stopped firing, silently, on every real project. */
+  const big = 'x'.repeat(200_000);
+  const { dir } = repo({ 'a.txt': '1\n', 'big.bin': big });
+
+  /* Over the cap because of the working tree. */
+  const over = G.refusal(dir, { maxBytes: 100_000 });
+  assert.ok(over, 'a project past the size cap was not refused');
+  assert.strictEqual(over.reason, G.REFUSE.TOO_LARGE);
+  assert.ok(Number(over.detail) >= 200_000, `the reported size is ${over.detail}`);
+
+  /* …and generously under it with the same repository, so the number is the tree's and not a
+   * constant. `.git` holds the committed copy of that 200 KB file; if `measure` counted it the
+   * total here would be far over. */
+  assert.strictEqual(G.refusal(dir, { maxBytes: 5_000_000 }), null,
+    'the same project was refused under a cap it is comfortably below');
+  const gitBytes = (() => {
+    let n = 0;
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const c = path.join(d, e.name);
+      if (e.isDirectory()) walk(c); else if (e.isFile()) n += fs.statSync(c).size; } };
+    walk(path.join(dir, '.git'));
+    return n;
+  })();
+  assert.ok(gitBytes > 0, 'the fixture has no .git to have skipped');
+  assert.ok(Number(over.detail) < 200_000 + gitBytes,
+    `the measured size ${over.detail} includes .git (${gitBytes} bytes)`);
 });
 
 test('an inherited GIT_DIR cannot redirect the basis at another repository', () => {

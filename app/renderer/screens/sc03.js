@@ -165,16 +165,38 @@ function liveness(snap) {
 }
 
 /* ── contract B (D-133): the action was refused, and the user decides ── */
+/**
+ * What a grant string names — `Edit(src/a.ts)` → `src/a.ts`, `Bash(npm test:*)` → `npm test`.
+ *
+ * The spec's grammar is closed: `allowSpec` refuses anything containing a parenthesis, comma,
+ * glob character or newline, so the first `(` and the last `)` are the real delimiters and
+ * there is nothing else to parse. A spec that does not have that shape is not shown at all —
+ * the caller falls back to the raw input rather than displaying something half-read.
+ */
+function specTarget(spec) {
+  if (typeof spec !== 'string') return null;
+  const open = spec.indexOf('(');
+  if (open === -1 || !spec.endsWith(')')) return null;
+  const inner = spec.slice(open + 1, -1);
+  return inner.endsWith(':*') ? inner.slice(0, -2) : inner;
+}
+
 function permissionPanel(snap, api, state) {
   const d = snap.permission;
   const panel = el('div', 'panel wait');
   panel.setAttribute('data-el', 'permission');
   panel.appendChild(el('div', 'sm t', C.work.permTitleB));
 
-  /* Verbatim: which tool, and on WHAT. A Bash denial used to show only "Bash" while pressing
-   * 허용 granted `Bash(<the whole command>:*)` — the scope was narrow, but the card describing
-   * what was being approved was not. Whatever the grant is built from is what is shown. */
-  const target = d.input?.file_path ?? d.input?.path ?? d.input?.notebook_path
+  /* Verbatim: which tool, and on WHAT — and specifically the string the GRANT is built from.
+   *
+   * A Bash denial used to show only "Bash" while pressing 허용 granted `Bash(<the whole
+   * command>:*)`. That was fixed by showing the input. This is the second half of the same
+   * problem: `allowSpec` RESOLVES the model's path against the project, so a raw
+   * `../../../etc/shadow` and the grant `//etc/shadow` are the same file written two ways, and
+   * the card was showing the one the flag does not use. `spec` is the grant itself, so the
+   * sentence on the card and the argument on the command line cannot drift apart. */
+  const target = specTarget(d.spec)
+    ?? d.input?.file_path ?? d.input?.path ?? d.input?.notebook_path
     ?? d.input?.command ?? d.input?.url ?? null;
   const what = el('div', 'xs mono mut');
   what.textContent = `${C.gap.workDenialTool}: ${d.tool ?? '—'}${target ? ` · ${target}` : ''}`;

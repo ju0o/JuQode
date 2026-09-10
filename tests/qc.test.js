@@ -1032,3 +1032,39 @@ test('every rule the drawer can explain has all three sentences', () => {
       `${id} has no 실행할 명령 line, so its card asks the user to confirm a blank`);
   }
 });
+
+/* ── invariants of the CLOSED rule set (`19` §C4 · `20`.quick_command_rule) ───────────────── */
+
+test('no two rules share a pattern — the T1 ambiguity branch is unreachable BY INVARIANT', () => {
+  /* FOUND BY MUTATION, as an equivalent mutant that was worth chasing anyway. `match()` reads
+   *
+   *     if (exact.length === 1) return …;
+   *     if (exact.length > 1)   return ambiguous;
+   *
+   * so `> 1` and `>= 1` behave identically and every mutation of that line survives. Chasing it
+   * showed the second branch cannot fire at all: the six rules share no pattern string.
+   *
+   * The branch stays — the rule set is data, and a seventh rule could collide. What this test
+   * adds is the reason it cannot fire TODAY, as a property rather than as a comment: two rules
+   * sharing a pattern would also make one of them permanently unreachable through T1, which is
+   * a defect in the rule set and not something the matcher should quietly resolve. */
+  const seen = new Map();
+  for (const r of RULES) {
+    for (const p of r.patterns) seen.set(p, [...(seen.get(p) ?? []), r.id]);
+  }
+  const shared = [...seen].filter(([, ids]) => ids.length > 1);
+  assert.deepStrictEqual(shared, [],
+    `two rules answer to the same phrase: ${shared.map(([p, ids]) => `${p} → ${ids}`).join(' · ')}`);
+  /* …and the check can see a collision when there is one. */
+  const probe = new Map([['x', ['a']], ['y', ['a', 'b']]]);
+  assert.strictEqual([...probe].filter(([, ids]) => ids.length > 1).length, 1);
+});
+
+test('the ambiguity branch that IS reachable stays reachable', () => {
+  /* T2b — a bare verb with no object. `실행해줘` means three different rules and `19` §C4 says
+   * JuQode does not choose; naming this here means a refactor that made every phrase resolve to
+   * one rule would fail rather than look like an improvement. */
+  const r = match('실행해줘');
+  assert.strictEqual(r.kind, 'ambiguous');
+  assert.ok(r.readings.length > 1, `실행해줘 resolved to ${JSON.stringify(r.readings)}`);
+});

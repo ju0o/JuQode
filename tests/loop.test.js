@@ -14,6 +14,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const R = path.resolve(__dirname, '..');
+const { code: srcOf } = require(path.join(__dirname, 'src.js'));
 
 /* Every fixture directory this file makes, removed when the file finishes. The suite leaked one
  * per case and filled a 7.5 GB tmpfs mid-run — after which every later failure looked like a
@@ -789,4 +790,54 @@ test('a bogus toolUseId is refused, never silently applied to another refusal', 
   assert.strictEqual(out.reason, 'no-such-permission',
     'an id that names nothing produced a real grant for a refusal the caller never asked about');
   assert.strictEqual(repo.signalsFor(db, r.workId).filter((s) => s.kind === 'permission_granted').length, 0);
+});
+
+/* ── the permission card names the same thing the flag will ──────────────────────────────── */
+
+test('a denial carries the GRANT STRING, not only the model\'s raw input', () => {
+  /* `allowSpec` resolves the model's path against the PROJECT — a relative
+   * `../../../etc/shadow` resolved into an unrelated tree before it did. So the raw
+   * `input.file_path` and the grant can name one file while READING as two different places,
+   * and the card was showing the one the flag does not use.
+   *
+   * D-133's whole contract is that the person approves what they were shown. */
+  const session = require(path.join(R, 'app/main/claude/session.js'));
+  const cwd = '/p/app';
+  const denial = { tool: 'Edit', toolUseId: 't1', input: { file_path: '../../etc/hosts' } };
+  const spec = session.allowSpec(denial, cwd);
+  assert.strictEqual(spec, 'Edit(//etc/hosts)');
+  /* The raw input and the grant do NOT read the same — which is exactly why the card must
+   * carry the grant. */
+  assert.notStrictEqual(denial.input.file_path, spec);
+
+  /* The snapshot puts it there. */
+  const sup = srcOf('app/main/work/supervisor.js');
+  assert.ok(/const spec = session\.allowSpec\(d, cwd \?\? '\/'\);/.test(sup),
+    'withScope no longer builds the spec');
+  assert.ok(/return \{ \.\.\.d, scopable: Boolean\(spec\), spec \};/.test(sup),
+    'the grant string does not travel with the denial');
+
+  /* …and the card prefers it. */
+  const sc03 = srcOf('app/renderer/screens/sc03.js');
+  assert.ok(/const target = specTarget\(d\.spec\)/.test(sc03),
+    'the permission card still shows the raw input first');
+});
+
+test('specTarget reads a grant string, or refuses to read one at all', () => {
+  const sc03 = srcOf('app/renderer/screens/sc03.js');
+  /* Evaluated rather than pattern-matched: this one has branches, and a helper that returned
+   * `null` for everything would satisfy any regex about its shape while blanking the card. */
+  const body = /function specTarget\(spec\) \{[\s\S]*?\n\}/.exec(sc03);
+  assert.ok(body, 'specTarget is gone');
+  // eslint-disable-next-line no-new-func
+  const specTarget = new Function(`${body[0]}; return specTarget;`)();
+
+  assert.strictEqual(specTarget('Edit(src/a.ts)'), 'src/a.ts');
+  assert.strictEqual(specTarget('Edit(//etc/hosts)'), '//etc/hosts');
+  assert.strictEqual(specTarget('Bash(npm test:*)'), 'npm test');
+  /* Anything that is not that shape is not shown — the caller falls back to the raw input
+   * rather than displaying something half-read. */
+  for (const bad of [null, undefined, '', 'Edit', 'Edit(', 'Edit)', 42]) {
+    assert.strictEqual(specTarget(bad), null, `specTarget accepted ${JSON.stringify(bad)}`);
+  }
 });

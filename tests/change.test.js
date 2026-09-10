@@ -450,6 +450,38 @@ test('the observed-tools count is the caller\'s measurement, never derived from 
     'result.js still reads a signal list');
 });
 
+test('a 확인됨 claim that cannot name its evidence is DOWNGRADED, never shown', () => {
+  /* FOUND BY MUTATION: the downgrade lived inside `buildChecked`, where nothing could reach it
+   * — `build()` sets a `sourceRef` on every confirmed claim it makes — so every mutation of
+   * those three lines survived the whole suite. The guard is for a FUTURE `build()`, and a
+   * guard nobody can exercise is a guard nobody can check.
+   *
+   * `18` §0.9 · D-114: the 확인됨 chip is an invitation to check the evidence. A chip with no
+   * evidence behind it is the one thing the vocabulary exists to prevent. */
+  const withSource = { kind: 'changed-files', data: null, confidence: 'confirmed', sourceRef: 'evidence:before→after' };
+  const without = { kind: 'invented', data: null, confidence: 'confirmed', sourceRef: null };
+  const expected = { kind: 'agent-report', data: null, confidence: 'expected', sourceRef: null };
+  const out = result.downgrade({ claims: [withSource, without, expected], items: [], outcome: 'complete' });
+
+  assert.strictEqual(out.claims[0].confidence, 'confirmed', 'a claim WITH a source was downgraded');
+  assert.strictEqual(out.claims[1].confidence, 'unconfirmed', 'a 확인됨 claim with no source survived');
+  assert.strictEqual(out.claims[2].confidence, 'expected', '예상됨 was touched');
+  /* Downgraded, not deleted: what was measured is still said, at the confidence it earns. */
+  assert.strictEqual(out.claims.length, 3);
+  assert.strictEqual(out.claims[1].kind, 'invented');
+  /* …and the input is left alone — the caller may still be holding it. */
+  assert.strictEqual(without.confidence, 'confirmed', 'downgrade mutated its argument');
+
+  /* `verify` is what decides there is a problem at all, and it must SEE this one. */
+  assert.deepStrictEqual(result.verify({ claims: [without], items: [], outcome: 'complete' }),
+    ['claim invented is 확인됨 with no source']);
+
+  /* …and `buildChecked` still applies it — the wiring is the half that matters in production. */
+  const src = srcOf('app/main/work/result.js');
+  assert.ok(/problems\.length \? downgrade\(result\) : result/.test(src),
+    'buildChecked no longer downgrades');
+});
+
 test('`15` SC-03 남은 변경 확인 불가 is a STATE, not just a claim row', () => {
   /* UF-REMAIN-UNKNOWN. The result already carried a `changes-unknown` CLAIM — the fact that the
    * evidence pair could not tell. `15` builds a dashed panel on top of it with three ways out,

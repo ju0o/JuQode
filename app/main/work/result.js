@@ -137,11 +137,27 @@ function verify(result) {
 function buildChecked(input) {
   const result = build(input);
   const problems = verify(result);
-  if (!problems.length) return { result, problems };
-
-  result.claims = result.claims.map((c) =>
-    (c.confidence === 'confirmed' && !c.sourceRef) ? { ...c, confidence: 'unconfirmed' } : c);
-  return { result, problems };
+  return { result: problems.length ? downgrade(result) : result, problems };
 }
 
-module.exports = { build, buildChecked, verify, OUTCOMES };
+/**
+ * Strip 확인됨 from any claim that cannot name its evidence.
+ *
+ * FOUND BY MUTATION: this used to be three lines inside `buildChecked`, and every mutation of
+ * them survived — because `build()` sets a `sourceRef` on every confirmed claim it makes, so
+ * nothing reachable could produce the shape this guard exists for. A guard that cannot be
+ * exercised is a guard nobody can check.
+ *
+ * It stays, because what it guards is a FUTURE `build()` — the chip is a promise the user is
+ * invited to check, and the enforcement must not depend on remembering. Pulling it out is what
+ * makes it testable: a test can hand it the shape `build()` cannot currently produce.
+ */
+function downgrade(result) {
+  return {
+    ...result,
+    claims: result.claims.map((c) =>
+      (c.confidence === 'confirmed' && !c.sourceRef) ? { ...c, confidence: 'unconfirmed' } : c),
+  };
+}
+
+module.exports = { build, buildChecked, verify, downgrade, OUTCOMES };

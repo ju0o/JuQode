@@ -265,7 +265,19 @@ function manifestFiles(db, workId, phase) {
   try { return JSON.parse(row.files); } catch { return null; }
 }
 
-const withScope = (d, cwd) => ({ ...d, scopable: Boolean(session.allowSpec(d, cwd ?? '/')) });
+/**
+ * A denial, plus what allowing it would actually grant.
+ *
+ * `scopable` lets the screen decide before it draws a button. `spec` is the grant STRING —
+ * `Edit(src/a.ts)` — and it travels because the card has to name the same thing the flag will:
+ * `allowSpec` resolves the model's path against the project (a relative `../../../etc/shadow`
+ * resolved into an unrelated tree before it did), so the raw `input.file_path` and the grant
+ * can point at one file while READING as two different places. The card showed the raw one.
+ */
+const withScope = (d, cwd) => {
+  const spec = session.allowSpec(d, cwd ?? '/');
+  return { ...d, scopable: Boolean(spec), spec };
+};
 
 /**
  * ONE authority for `seq`, and a boundary around it.
