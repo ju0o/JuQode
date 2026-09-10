@@ -811,6 +811,30 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.readerPatch    = await evalJs(`document.querySelector('.sc04-patch')?.innerText ?? null`);
   /* The patch scrolls INSIDE its own box; the page never scrolls sideways (`16` responsive). */
   out.readerRawOverflow = await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth');
+
+  /* `15` SC-04: which Change Group is SELECTED is what the middle and right columns are about,
+   * and the reader's whole interaction is choosing one. Found by a renderer mutation sweep:
+   * the `on` class, the Raw button's label and the block highlight could all be inverted and
+   * nothing here looked at any of them. A card that looks selected while another one's
+   * contents are shown is a screen telling the user two different things. */
+  out.readerSelection = await evalJs(`(async () => {
+    const groups = () => [...document.querySelectorAll('.sc04-group')];
+    const on = () => groups().map(g => g.classList.contains('on'));
+    const rawLabel = () => groups().map(g => g.querySelector('.sc04-rawbtn')?.textContent ?? null);
+    const out = { count: groups().length, firstOn: on(), firstRaw: rawLabel() };
+    if (groups().length > 1) {
+      groups()[1].click();
+      await new Promise(r => setTimeout(r, 400));
+      out.secondOn = on();
+    }
+    return JSON.stringify(out); })()`);
+  out.readerBlockSel = await evalJs(`(async () => {
+    const blocks = () => [...document.querySelectorAll('.sc04-block')];
+    if (!blocks().length) return JSON.stringify({ count: 0 });
+    const before = blocks().map(b => b.classList.contains('on'));
+    blocks()[0].click();
+    await new Promise(r => setTimeout(r, 400));
+    return JSON.stringify({ count: blocks().length, before, after: blocks().map(b => b.classList.contains('on')) }); })()`);
   for (const theme of ['light', 'dark']) {
     await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
     await sleep(200);
@@ -1096,7 +1120,11 @@ const results = await cdp(async ({ send, evalJs }) => {
 
   /* 모호함 names both readings and runs nothing. */
   await evalJs(`(() => { const f = document.querySelector('[data-el="qc-input"]'); f.value = '서버 좀 정리해줘'; })()`);
-  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
+  /* ENTER routes — and it ROUTES, it does not run (`19` §C4: 항상 설명 후 확인 is two round
+   * trips by design). Every other send in this file clicks 보내기, so the keyboard path had no
+   * coverage; found by a renderer mutation sweep on `e.key === 'Enter'`. */
+  await evalJs(`document.querySelector('[data-el="qc-input"]').dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
   await sleep(600);
   out.qcAmbigKind = await evalJs(`document.querySelector('[data-el="qc-card"]')?.getAttribute('data-kind') ?? null`);
   out.qcAmbig     = await evalJs(`document.querySelector('[data-el="qc-card"]')?.innerText ?? null`);
@@ -1981,6 +2009,39 @@ assert.strictEqual(results.readerCols, 3, '15 §0: SC-04 is three columns — �
 assert.ok(results.readerOverflow <= 0, `SC-04 scrolls sideways by ${results.readerOverflow}px`);
 
 /* D-118: Raw is reachable from the GROUP, without passing through a Code Block. */
+/* `15` SC-04 — exactly one Change Group is selected, and the Raw control says which state it
+ * is in for THAT group. */
+{
+  const r = JSON.parse(results.readerSelection);
+  assert.ok(r.count >= 1, 'SC-04 rendered no change groups');
+  assert.strictEqual(r.firstOn.filter(Boolean).length, 1,
+    `${r.firstOn.filter(Boolean).length} groups are marked selected at once`);
+  assert.strictEqual(r.firstOn[0], true, 'the first group is not the one selected on arrival');
+  /* The Raw control on the SELECTED group says 닫기 once it is open; the others still offer 보기. */
+  const labels = r.firstRaw.filter(Boolean);
+  assert.ok(labels.length, 'no group offers Raw Diff');
+  assert.ok(labels[0].includes('닫기'),
+    `the open group's Raw control says ${JSON.stringify(labels[0])} instead of 닫기`);
+  for (const l of labels.slice(1)) {
+    assert.ok(!l.includes('닫기'), `an unselected group's Raw control says ${JSON.stringify(l)}`);
+  }
+  if (r.secondOn) {
+    assert.strictEqual(r.secondOn.filter(Boolean).length, 1, 'selecting another group selected two');
+    assert.strictEqual(r.secondOn[1], true, 'clicking a group did not select it');
+  }
+}
+
+{
+  const b = JSON.parse(results.readerBlockSel);
+  if (b.count) {
+    assert.strictEqual(b.before.filter(Boolean).length, 0,
+      'a Code Block is highlighted before anyone chose one');
+    assert.strictEqual(b.after.filter(Boolean).length, 1,
+      `clicking one block highlighted ${b.after.filter(Boolean).length}`);
+    assert.strictEqual(b.after[0], true, 'clicking a block highlighted a different one');
+  }
+}
+
 assert.strictEqual(results.readerRawShut, 0, 'the raw panel is open before it was asked for');
 assert.ok(results.readerRawOpen > 0, 'Raw Diff 보기 on the group did not open the raw text');
 assert.ok(/^@@|^[-+]|diff/m.test(results.readerPatch ?? ''),
