@@ -159,12 +159,23 @@ if (restricted && ask.includes('q=1')) {
 }
 
 if (restricted) {
+  /* TWO groups, one file each. SC-04 is a screen for CHOOSING a group — selecting one, opening
+   * its raw, scoping to a block — and with a single group none of that could ever run: every
+   * multi-group branch sat behind a length check and three mutants lived there because the
+   * branch was never entered. A reader with one group cannot test a reader.
+   * (No backticks in here: this comment lives inside a template literal.) */
   const groups = [{ title: '실행 안내를 README 에 넣었어요',
-                    what: 'README 에 실행 방법을 적고, greet 함수를 추가했어요',
+                    what: 'README 에 실행 방법을 적었어요',
                     why: '프로젝트를 처음 여는 사람이 실행 방법을 찾을 수 있게',
-                    affects: '문서와 인사말 함수',
+                    affects: '문서',
                     confidence: 'confirmed',
-                    files: ['README.md', 'src/index.js'] }];
+                    files: ['README.md'] },
+                  { title: '인사말 함수를 추가했어요',
+                    what: 'src/index.js 에 greet 함수를 넣었어요',
+                    why: '이름을 받아 인사말을 만드는 자리가 필요해서',
+                    affects: '인사말 함수',
+                    confidence: 'confirmed',
+                    files: ['src/index.js'] }];
   process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'x', cwd: '/p' }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false,
     permission_denials: [], result: JSON.stringify(groups) }) + '\\n');
@@ -241,6 +252,14 @@ fs.writeFileSync(FAKE_CLI, [
   `  echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_f","is_error":false}]}}'`,
   `  echo '{"type":"result","subtype":"error_max_turns","is_error":false,"terminal_reason":"max_turns","result":"더 진행하지 못했어요","permission_denials":[]}'`,
   '  exit 0',
+  'fi',
+  /* A fourth marker: the CLI **dies before saying anything**. `15` SC-02 시작 실패 is the state
+   * where no Work row exists at all — the supervisor never got an event to open one — and it
+   * had never been rendered. stderr and a non-zero code, which is what a broken install looks
+   * like. */
+  `if [ -f ${JSON.stringify(path.join(DB_DIR, 'startfail'))} ]; then`,
+  `  echo 'juqode-fixture: exited before emitting anything' 1>&2`,
+  '  exit 9',
   'fi',
   `if [ -f ${JSON.stringify(path.join(DB_DIR, 'stubborn'))} ]; then`,
   '  trap "" TERM',
@@ -800,6 +819,26 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.sc03Times = await evalJs(`document.querySelector('[data-card="work"] .times')?.innerText ?? null`);
   out.sc03About = await evalJs(`document.querySelector('[data-card="about"]')?.innerText ?? null`);
   out.sc03RawCollapsed = await evalJs(`document.querySelector('[data-el="raw"]')?.open === false`);
+  /* 기술 출력은 **열 때 한 번** 읽는다. `15` A-11 이 접힌 채로 시작하라고 하는 이유가 그것이고,
+   * 여는 순간마다 저장소를 다시 읽으면 접었다 펴는 것이 조용한 반복 질의가 된다.
+   *
+   * FOUND BY MUTATION: `if (!d.open || box.textContent) return;` 의 `||` 를 `&&` 로 좁히면
+   * 이미 채워진 상자를 **다시** 채운다. 화면의 글자는 같아서 DOM 으로는 안 보인다 — 그래서
+   * 상자에 표식을 넣고 다시 열어 본다. 캐시가 살아 있으면 표식이 남는다. */
+  out.sc03RawOnce = await evalJs(`(async () => {
+    const d = document.querySelector('[data-el="raw"]');
+    if (!d) return null;
+    d.open = true;
+    await new Promise(r => setTimeout(r, 700));
+    const first = d.querySelector('.rawout')?.textContent ?? '';
+    d.querySelector('.rawout').textContent = 'JUQODE-CACHE-MARK';
+    d.open = false;
+    await new Promise(r => setTimeout(r, 300));
+    d.open = true;
+    await new Promise(r => setTimeout(r, 700));
+    const after = d.querySelector('.rawout')?.textContent ?? '';
+    d.open = false;
+    return JSON.stringify({ filled: first.length > 0, after }); })()`);
   /* Cards must not overlap. `scrollHeight > clientHeight` measures a card clipping ITSELF and
    * cannot see one card drawn on top of another — which is what a spanned grid row did. */
   out.overlaps = await evalJs(`(() => {
@@ -959,11 +998,11 @@ const results = await cdp(async ({ send, evalJs }) => {
     const on = () => groups().map(g => g.classList.contains('on'));
     const rawLabel = () => groups().map(g => g.querySelector('.sc04-rawbtn')?.textContent ?? null);
     const out = { count: groups().length, firstOn: on(), firstRaw: rawLabel() };
-    if (groups().length > 1) {
-      groups()[1].click();
-      await new Promise(r => setTimeout(r, 400));
-      out.secondOn = on();
-    }
+    /* This reader is UNEXPLAINED, and groupsFrom puts everything nothing has explained into ONE
+     * group — so there is no second group to click here, and the multi-group rules are checked
+     * on the explained reader below instead. The count is asserted rather than skipped: a
+     * silent length check is how three mutants lived in a branch nothing entered.
+     * (No backticks in here: this comment lives inside a template literal.) */
     return JSON.stringify(out); })()`);
   out.readerBlockSel = await evalJs(`(async () => {
     const blocks = () => [...document.querySelectorAll('.sc04-block')];
@@ -1004,6 +1043,38 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.explainedReader = await evalJs('JSON.stringify(window.__reader())');
   out.explainedText   = await evalJs(`document.querySelector('.sc04')?.innerText ?? null`);
   out.explainedReds   = await evalJs(RED_COUNT('.sc04 *'));
+
+  /* SC-04 is a screen for CHOOSING a group, and until this fixture had two groups none of the
+   * choosing could be exercised: selecting one, its Raw toggle, and what a click inside a card
+   * means. Three mutants lived behind that, all of them in the multi-group path.
+   * (No backticks in here: this comment lives inside a template literal.) */
+  out.explainedSelection = await evalJs(`(async () => {
+    const groups = () => [...document.querySelectorAll('.sc04-group')];
+    const on = () => groups().map(g => g.classList.contains('on'));
+    const rawLabel = () => groups().map(g => g.querySelector('.sc04-rawbtn')?.textContent ?? null);
+    const patches = () => document.querySelectorAll('.sc04-patch').length;
+    const out = { count: groups().length };
+    if (out.count < 2) return JSON.stringify(out);
+    /* pick the SECOND group, and open its raw from the group-level control (D-118's skip) */
+    groups()[1].click();
+    await new Promise(r => setTimeout(r, 400));
+    out.selected = on();
+    groups()[1].querySelector('.sc04-rawbtn').click();
+    await new Promise(r => setTimeout(r, 500));
+    out.rawOpen = { on: on(), raw: rawLabel(), patches: patches() };
+    /* the same control again CLOSES it — it is a toggle, not a second open */
+    groups()[1].querySelector('.sc04-rawbtn').click();
+    await new Promise(r => setTimeout(r, 500));
+    out.rawShut = { on: on(), raw: rawLabel(), patches: patches() };
+    /* a click INSIDE another card is not a click on that card */
+    groups()[0].querySelector('.sc04-files').click();
+    await new Promise(r => setTimeout(r, 300));
+    out.afterChildClick = on();
+    /* …and a click on the card itself is */
+    groups()[0].click();
+    await new Promise(r => setTimeout(r, 300));
+    out.afterCardClick = on();
+    return JSON.stringify(out); })()`);
   /* Nothing on any screen may render a stringified object. `when(at)` was called in SC-04's
    * header without being defined or imported, and it did NOT throw — the browser has a global
    * `when`, so the header quietly displayed `[object Observable]` beside the outcome chip. A
@@ -1685,10 +1756,60 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
 
+  /* ── `15` SC-04 Empty State ────────────────────────────────────────────────────────────
+   * 변경이 없는 Work 의 읽기면. 이 런은 SC-04 를 **변경이 있는** Work 로만 열었고, 방금 실패한
+   * Work 는 파일을 하나도 바꾸지 않았다 — History 의 `변경 보기` 가 그리로 가는 길이다.
+   *
+   * FOUND BY MUTATION: `if (!reader || !reader.groups?.length)` 의 `||` 를 `&&` 로 좁히면
+   * 빈 read model 이 이 분기를 그냥 지나쳐, 아무것도 없는 읽기면이 그려진다 — 사용자에게는
+   * "바꾼 게 없다" 는 말 대신 **빈 화면**이 남는다. */
+  step('SC-04 empty');
+  await evalJs(`[...document.querySelectorAll('[data-el="history-row"]')]
+    .find(r => r.innerText.includes('남은 버튼도 고쳐줘'))
+    ?.querySelectorAll('button')?.forEach(b => { if (b.textContent.trim() === '변경 보기') b.click(); })`);
+  await sleep(1200);
+  out.emptyReaderScreen = await evalJs('window.__screen()');
+  out.emptyReader = await evalJs(`(() => {
+    const n = document.querySelector('.sc04-empty');
+    return n ? JSON.stringify({ text: n.innerText, groups: document.querySelectorAll('.sc04-group').length,
+      acts: [...n.querySelectorAll('button')].map(b => b.textContent.trim()),
+      reds: ${RED_COUNT('.sc04-empty, .sc04-empty *')} }) : null; })()`);
+  out.emptyReaderModel = await evalJs(`JSON.stringify(window.__reader())`);
+  /* …and back to SC-02 the way the empty state offers. */
+  await evalJs(`[...document.querySelectorAll('.sc04-empty button')].find(b => b.textContent.includes('다음 의도로'))?.click()`);
+  await sleep(900);
+  out.afterEmptyReader = await evalJs('window.__screen()');
+
   /* ── `15` SC-02 Unavailable State — 사용 불가 ≠ 실패 (12 §16) ────────────────────────────
    * `15` asks for 네 개의 복구 버튼, and they were a sentence saying they were not built until
    * WBS-04, 22 and 25 shipped. This is the first RENDERED evidence for the state: the real
    * detection path, through the real bridge, with the fixture logged out. */
+  /* ── `15` SC-02 시작 실패 ──────────────────────────────────────────────────────────────
+   * Claude Code 가 시작하자마자 꺼진 경우. `15` 는 **카드 하나, 그리고 행은 없다** 고 적는다 —
+   * 시작되지 않은 작업은 기록에 남지 않는다.
+   *
+   * FOUND BY MUTATION: `reason === 'start-failed'` 를 뒤집으면 이 카드가 **다른 모든 거절**에
+   * 붙고 정작 시작 실패에는 안 붙는다. 이 런은 이 상태에 도달한 적이 없어 아무도 몰랐다. */
+  step('start failed');
+  fs.writeFileSync(path.join(DB_DIR, 'startfail'), '');
+  out.historyBeforeStartFail = await evalJs(`document.querySelectorAll('[data-el="history-row"]').length`);
+  /* 라우터를 먼저 통과해야 Work 가 시작된다 — `send()` 는 `routeIntent` 부터 부른다. 첫 시도에
+   * 쓴 `시작도 못 하는 요청` 은 프로젝트를 바꾸는 요청으로 읽히지 않아 **아무것도 시작하지
+   * 않았고**, 그래서 카드도 없었다. 제품이 옳았고 문구가 틀렸다. */
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '시작 안 되는 버튼 고쳐줘'; })()`);
+  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  await sleep(2500);
+  out.startFailScreen = await evalJs('window.__screen()');
+  out.startFailCard = await evalJs(`document.querySelector('[data-el="start-failed"]')?.innerText ?? null`);
+  /* 카드가 없을 때 무엇이 있었는지 — 실패가 스스로 설명하도록. */
+  out.startFailPanel = await evalJs(`document.querySelector('[data-el="consequence"]')?.innerText ?? null`);
+  out.startFailReds = await evalJs(RED_COUNT('[data-el="start-failed"], [data-el="start-failed"] *'));
+  out.startFailWork = await evalJs('JSON.stringify(window.__work())');
+  /* `15`: 카드 하나, 행은 없다. 기록이 늘었다면 시작하지 못한 작업이 기록된 것이다. */
+  await sleep(600);
+  out.historyAfterStartFail = await evalJs(`document.querySelectorAll('[data-el="history-row"]').length`);
+  fs.rmSync(path.join(DB_DIR, 'startfail'));
+
   step('Claude unavailable');
   fs.writeFileSync(path.join(DB_DIR, 'logged-out'), '');
   await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 오류 고쳐줘'; })()`);
@@ -1788,16 +1909,21 @@ const results = await cdp(async ({ send, evalJs }) => {
     const btn = (t) => [...document.querySelectorAll('[data-card="history"] button')]
       .find(b => b.textContent.includes(t));
     const collapsed = rows();
+    /* 저장소에게 직접 묻는다. 컨트롤이 **없는** 경우가 정당한지는 화면만 보고는 알 수 없고,
+     * 그 구멍으로 뮤턴트가 하나 살아 있었다: \`hidden > 0 || expanded\` 를 \`&&\` 로 좁히면
+     * 컨트롤이 아예 그려지지 않는데, 그때 이 probe 는 "숨은 것이 없나 보다" 로 읽고 통과했다.
+     * 펼칠 수 없게 된 목록은 제품 결함이고, 그것을 아는 유일한 방법은 총 개수다. */
+    const total = (await window.juqode.history(window.__project().id)).works.length;
     const more = btn('개 더');
-    if (!more) return JSON.stringify({ collapsed, expanded: null, recollapsed: null, moreText: null,
-                                       collapse: Boolean(btn('접기')) });
+    if (!more) return JSON.stringify({ total, collapsed, expanded: null, recollapsed: null,
+                                       moreText: null, collapse: Boolean(btn('접기')) });
     const moreText = more.textContent;
     more.click();
     await new Promise(r => setTimeout(r, 500));
     const expanded = rows();
     btn('접기')?.click();
     await new Promise(r => setTimeout(r, 500));
-    return JSON.stringify({ collapsed, expanded, recollapsed: rows(), moreText, collapse: true }); })()`);
+    return JSON.stringify({ total, collapsed, expanded, recollapsed: rows(), moreText, collapse: true }); })()`);
   await evalJs(`window.__openDrawerWith('깃상태')`);
   await sleep(800);
   await evalJs(`document.querySelector('[data-el="qc-send"]')?.click() ?? [...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
@@ -1988,6 +2114,28 @@ const results = await cdp(async ({ send, evalJs }) => {
 /* Every value this run observed, written out before the assertions run: when one fails the app
  * is already gone, and the state that explains it would go with it. */
 fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 2));
+
+/* ── `15` SC-02 시작 실패 — 카드 하나, 그리고 행은 없다 ─────────────────────────────── */
+{
+  assert.strictEqual(results.startFailScreen, 'SC-02',
+    'a Work that never started moved off SC-02 — there is nothing to show on SC-03');
+  assert.ok(results.startFailCard,
+    `the CLI died at startup and no card was drawn — the request area said: ${results.startFailPanel}`);
+  assert.ok(results.startFailCard.includes('작업을 시작하지 못했어요'),
+    `the card does not name the state: ${results.startFailCard}`);
+  /* `18` startFail.body: 파일은 바뀌지 않았고, 기록에도 남지 않는다 — 제품이 그렇게 말한다. */
+  assert.ok(results.startFailCard.includes('기록에 남지 않아요'),
+    `the card does not say the Work left no row: ${results.startFailCard}`);
+  /* …그리고 정말로 남지 않았다. 말과 저장소가 같은 것을 말하는지 센다. */
+  assert.strictEqual(results.historyAfterStartFail, results.historyBeforeStartFail,
+    `a Work that never started added a History row (${results.historyBeforeStartFail} → ${results.historyAfterStartFail})`);
+  assert.strictEqual(JSON.parse(results.startFailWork), null, 'SC-02 is holding a Work that never started');
+  /* 시작하지 못한 것은 실패다 — 하지만 `15` 는 이 카드를 실패 밴드로 그린다(`failband`), 그리고
+   * stderr 를 숨기지 않는다. */
+  assert.ok(results.startFailCard.includes('exited before emitting anything')
+            || results.startFailCard.includes('자세한 출력 보기'),
+    `the card hides what the process said: ${results.startFailCard}`);
+}
 
 /* ── `15` SC-02 Unavailable State ──────────────────────────────────────────────────────── */
 {
@@ -2822,10 +2970,11 @@ assert.ok(results.readerOverflow <= 0, `SC-04 scrolls sideways by ${results.read
   for (const l of labels.slice(1)) {
     assert.ok(!l.includes('닫기'), `an unselected group's Raw control says ${JSON.stringify(l)}`);
   }
-  if (r.secondOn) {
-    assert.strictEqual(r.secondOn.filter(Boolean).length, 1, 'selecting another group selected two');
-    assert.strictEqual(r.secondOn[1], true, 'clicking a group did not select it');
-  }
+  /* 설명되지 않은 읽기면의 그룹은 하나다 — `groupsFrom` 이 설명되지 않은 것을 한 덩어리로
+   * 모으기 때문이다. 그 사실을 **단언**한다: 조용히 건너뛰는 `if (length > 1)` 이 뮤턴트 셋을
+   * 살려 둔 자리였다. 여러 그룹의 규칙은 아래 설명된 읽기면에서 본다. */
+  assert.strictEqual(r.count, 1,
+    `the unexplained reader has ${r.count} groups — the multi-group checks belong here now`);
 
   /* `15` SC-04: block select → raw, SCOPED to that block's file. D-118 is the whole screen —
    * 변경 범위 안의 코드만.
@@ -2865,6 +3014,26 @@ assert.ok(results.readerRawOverflow <= 0,
   `an open patch made the PAGE scroll sideways by ${results.readerRawOverflow}px — it must scroll inside its own box`);
 assert.strictEqual(results.screenAfterReader, 'SC-03', '작업으로 돌아가기 did not return to SC-03');
 
+/* ── `15` SC-04 Empty State — 바꾼 것이 없는 Work 의 읽기면 ──────────────────────────── */
+{
+  assert.strictEqual(results.emptyReaderScreen, 'SC-04', '변경 보기 on a changeless Work did not reach SC-04');
+  const m = JSON.parse(results.emptyReaderModel);
+  /* 전제조건: 정말로 빈 read model 이어야 이 검사가 무언가를 본다. */
+  assert.ok(m, 'SC-04 opened without a read model');
+  assert.strictEqual(m.groups.length, 0, `the "changeless" Work has ${m.groups.length} groups`);
+  const e = JSON.parse(results.emptyReader);
+  assert.ok(e, 'a Work that changed nothing rendered an empty screen instead of saying so');
+  assert.ok(e.text.includes('이 작업은 프로젝트 파일을 바꾸지 않았어요'),
+    `the empty state does not say what happened: ${e.text}`);
+  assert.strictEqual(e.groups, 0, 'the empty state drew change groups');
+  /* `15` SC-04 Empty State 의 두 경로. 그리고 둘 다 복구 초록이 아니다 — 이동이지 복구가 아니다. */
+  assert.deepStrictEqual(e.acts, ['▸ 결과 설명으로', '▸ 다음 의도로'],
+    `the empty state offers ${JSON.stringify(e.acts)}`);
+  /* 바꾼 것이 없는 것은 실패가 아니다 (`16` §2.1). */
+  assert.strictEqual(e.reds, 0, 'a Work that changed nothing is painted as a failure');
+  assert.strictEqual(results.afterEmptyReader, 'SC-02', '▸ 다음 의도로 did not return to SC-02');
+}
+
 /* ── SC-04, once a pass HAS explained the change (WBS-26) ───────────────────────────────
  * Everything below was dead code in every test that existed before: the whole success path of
  * the explanation layer, and the branch of `readerFor` that reads persisted groups. */
@@ -2892,6 +3061,37 @@ assert.ok(!results.explainedText.includes('확인됨'),
  * with all of them in the user's project directory. */
 assert.ok(/--tools/.test(results.explainArgv),
   `the explanation pass carried no tool restriction: ${results.explainArgv}`);
+
+/* ── `15` SC-04 · 그룹을 고르는 화면 ──────────────────────────────────────────────────
+ * 하나짜리 읽기면으로는 읽기면을 검사할 수 없다. 픽스처가 두 그룹을 만들고, 여기서 고르기 ·
+ * Raw 토글 · 카드 클릭 대상을 전부 누른다. 뮤턴트 셋이 이 경로에 살아 있었다. */
+{
+  const g = JSON.parse(results.explainedSelection);
+  /* 전제조건: 두 그룹이 아니면 아래 전부가 조용히 사라진다 — 그게 이 셋이 살아남은 이유였다. */
+  assert.ok(g.count >= 2, `the explained reader has ${g.count} group(s) — the choosing cannot be checked`);
+  assert.strictEqual(g.selected.filter(Boolean).length, 1, 'selecting a group selected more than one');
+  assert.strictEqual(g.selected[1], true, 'clicking a group card did not select it');
+
+  /* Raw 라벨은 **선택된 그룹이면서 raw 가 열려 있을 때**만 닫기다. 둘 중 하나로 넓히면 닫힌
+   * raw 위에 닫기라고 적힌 버튼이 생긴다. */
+  assert.ok(g.rawOpen.patches > 0, 'the group-level Raw control did not open the raw text');
+  assert.ok(g.rawOpen.raw[1].includes('닫기'),
+    `the selected group with raw open says ${JSON.stringify(g.rawOpen.raw[1])}`);
+  assert.ok(!g.rawOpen.raw[0].includes('닫기'),
+    `an unselected group says 닫기: ${JSON.stringify(g.rawOpen.raw[0])}`);
+  /* …그리고 토글이다. */
+  assert.strictEqual(g.rawShut.patches, 0, 'pressing the open Raw control again did not close it');
+  assert.ok(!g.rawShut.raw[1].includes('닫기'),
+    `raw is closed and its control still says ${JSON.stringify(g.rawShut.raw[1])}`);
+  assert.strictEqual(g.rawShut.on[1], true, 'closing the raw also dropped the selection');
+
+  /* 카드 **안**을 누른 것은 카드를 누른 것이 아니다 — 그리고 카드 자체를 누르면 선택된다.
+   * 반쪽만 단언하면 카드가 죽어 있는 것도 통과한다. */
+  assert.deepStrictEqual(g.afterChildClick, g.rawShut.on,
+    'clicking inside another group selected it — the click belongs to what was pressed');
+  assert.strictEqual(g.afterCardClick[0], true, 'clicking a group card did not select it');
+  assert.strictEqual(g.afterCardClick.filter(Boolean).length, 1, 'the card click selected two groups');
+}
 
 assert.deepStrictEqual(JSON.parse(results.objectText), [],
   'a screen rendered a stringified object — some value reached the DOM without being formatted');
@@ -2995,6 +3195,14 @@ assert.strictEqual(results.overlaps, 0, 'two cards are drawn on top of each othe
 assert.ok(results.sc03Times && results.sc03Times.includes('시작'), `header times: ${results.sc03Times}`);
 assert.ok(results.sc03About && results.sc03About.includes('이 작업에 대해'), `right rail: ${results.sc03About}`);
 assert.strictEqual(results.sc03RawCollapsed, true, '기술 출력 보기 must be collapsed by default (A-11)');
+{
+  /* 열 때 한 번만 읽는다 — 두 번째 열기는 이미 있는 것을 그대로 둔다. */
+  const once = JSON.parse(results.sc03RawOnce);
+  assert.ok(once, 'SC-03 has no raw output panel');
+  assert.strictEqual(once.filled, true, 'opening 기술 출력 보기 read nothing — the check is vacuous');
+  assert.strictEqual(once.after, 'JUQODE-CACHE-MARK',
+    'reopening the raw panel read the signals again — it is filled once, on the first open');
+}
 
 /* D-117: the second request is refused as a guard, and the text stays in the field. */
 assert.ok(results.guardCard && results.guardCard.includes('지금 진행 중인 작업이 있어요'), `guard: ${results.guardCard}`);
@@ -3052,7 +3260,11 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
 
   const h = JSON.parse(results.historyFold);
   if (h.moreText === null) {
-    /* Fewer rows than the head: no `N개 더`, and no `접기` either. */
+    /* Fewer rows than the head: no `N개 더`, and no `접기` either — and the STORE has to agree
+     * that there was nothing to hide. Without this the "no control" branch passed whenever the
+     * control failed to render at all, which is the opposite defect. */
+    assert.strictEqual(h.total, h.collapsed,
+      `${h.total - h.collapsed} rows are hidden and no 더 보기 was drawn — the list cannot be opened`);
     assert.ok(h.collapsed <= 3,
       `History showed ${h.collapsed} rows with no 더 보기 — the head is 3`);
     assert.strictEqual(h.collapse, false,

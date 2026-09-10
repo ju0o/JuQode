@@ -247,12 +247,30 @@ export function renderSC02(root, api, nav, state) {
  * claiming `활동` for a Work that is actually waiting for the user to answer. The snapshot is
  * the only thing that knows, so the row is used for nothing but the id.
  */
+/**
+ * Is the answer still ABOUT the screen that asked for it?
+ *
+ * `fillPresence` awaits twice, and in that time the user can leave — for another project, or
+ * off SC-02 entirely. Writing the presence then paints a mode for something they are no
+ * longer looking at, and `19` is about the product only saying what it observed OF WHAT IS
+ * ON SCREEN.
+ *
+ * A pure function, because the state that makes it false — a slow store answering after a
+ * navigation — cannot be produced from the e2e without stubbing the bridge, and a rule that
+ * cannot be reached from the outside is pinned from the inside instead (the `hasEvidenceGap`
+ * pattern). BOTH halves are the rule: neither a different screen nor a different project may
+ * be written to, and either alone is not enough. `tests/presence.test.js` fixes all four.
+ */
+export function presenceIsStill(state, project) {
+  return state.screen === 'SC-02' && state.project === project;
+}
+
 async function fillPresence(api, state) {
   const project = state.project;
   const r = await api.history(project.id);
   /* A read that FAILED says nothing about whether there is a Work. `idle` is `대기 중` — a
    * claim that nothing is happening — and the store refusing to answer is not evidence for it. */
-  if (!r?.ok) { if (state.screen === 'SC-02' && state.project === project) setPresenceMode('unknown'); return; }
+  if (!r?.ok) { if (presenceIsStill(state, project)) setPresenceMode('unknown'); return; }
   const live = r.works.find((w) => w.status !== 'ended');
   let mode = 'idle';
   if (live) {
@@ -263,7 +281,7 @@ async function fillPresence(api, state) {
   }
   /* The answer describes the project this started for. If the user has moved on, it is about
    * something they are no longer looking at. */
-  if (state.screen === 'SC-02' && state.project === project) setPresenceMode(mode);
+  if (presenceIsStill(state, project)) setPresenceMode(mode);
 }
 
 /**

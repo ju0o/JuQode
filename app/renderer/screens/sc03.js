@@ -216,10 +216,16 @@ function permissionPanel(snap, api, state) {
   if (d.scopable === false) {
     panel.appendChild(el('div', 'xs mut', C.gap.workNoScope));
   } else {
+    /* No `cannot-scope` branch here, on purpose. `scopable` on the snapshot and the supervisor's
+     * refusal are the SAME computation — `session.allowSpec(denial, cwd)` — over the same
+     * denial and the same cwd, so a card that drew this button cannot be told `cannot-scope`
+     * when it is pressed. The branch that used to sit here printed the very sentence the
+     * `scopable === false` case above already prints, for a state that cannot occur; two
+     * mutation sites lived in a condition nothing could ever evaluate. If the two computations
+     * are ever allowed to disagree, the honest fix is one authority, not a second message. */
     const retry = btn('btn sm pri', C.work.permRetry, async () => {
       retry.disabled = true;
-      const r = await api.workAllow(snap.work.id, d.toolUseId ?? null);
-      if (!r?.ok && r?.reason === 'cannot-scope') panel.appendChild(el('div', 'xs mut', C.gap.workNoScope));
+      await api.workAllow(snap.work.id, d.toolUseId ?? null);
       retry.disabled = false;
     });
     acts.appendChild(retry);

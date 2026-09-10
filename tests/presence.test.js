@@ -390,3 +390,36 @@ test('the hint that this is not progress is on the card every time', () => {
   assert.ok(card[1].includes('C.presence.hint'), 'the card can be drawn without the hint');
   assert.ok(!/if[\s\S]{0,80}C\.presence\.hint/.test(card[1]), 'the hint is behind a condition');
 });
+
+/* ───────── the answer belongs to the screen that asked for it ───────── */
+
+test('the presence is written only when the screen and the project are still the ones that asked', async () => {
+  /* `fillPresence` awaits twice — the History read, then the snapshot — and the user can leave
+   * inside that window. Writing the mode afterwards paints a claim about a project they are no
+   * longer looking at, or about SC-02 while they are on SC-03.
+   *
+   * This lives in a pure function because the state cannot be produced from the e2e: it needs
+   * a store that answers AFTER a navigation, which means stubbing the bridge. Two mutation
+   * sites sat in this condition and survived the batch-33 sweep for exactly that reason. */
+  const { presenceIsStill } = await import(
+    pathToFileURL(path.join(R, 'app/renderer/screens/sc02.js')).href);
+
+  const project = { id: 'p1' };
+  const other = { id: 'p2' };
+
+  assert.strictEqual(presenceIsStill({ screen: 'SC-02', project }, project), true);
+
+  /* The user moved to another project. The answer is about `project`, and the screen is not. */
+  assert.strictEqual(presenceIsStill({ screen: 'SC-02', project: other }, project), false);
+  /* …and the SAME PATH is not the same object: a re-open makes a new project object, and the
+   * answer in flight belongs to the old one. */
+  assert.strictEqual(presenceIsStill({ screen: 'SC-02', project: { id: 'p1' } }, project), false);
+
+  /* The user left SC-02. SC-03 draws its own presence from the snapshot it is holding; a write
+   * from here would overwrite it with a mode derived from a History read. */
+  assert.strictEqual(presenceIsStill({ screen: 'SC-03', project }, project), false);
+  assert.strictEqual(presenceIsStill({ screen: 'SC-01', project: null }, project), false);
+
+  /* Both halves are the rule — neither alone is enough. */
+  assert.strictEqual(presenceIsStill({ screen: 'SC-03', project: other }, project), false);
+});
