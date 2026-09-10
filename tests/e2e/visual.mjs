@@ -1393,6 +1393,70 @@ const results = await cdp(async ({ send, evalJs }) => {
     const dev = l.rules.find(r => r.id === 'qc.dev.start');
     return JSON.stringify({ available: dev.available, reason: dev.reason }); })()`);
 
+  /* ── WBS-25 · 셸 명령줄 (DV-11: 파이프 셸 · PM 2026-09-10) ───────────────────────────
+   * `15` TD-01 의 Primary Action 이고, 이 런에서 처음으로 존재한다. 여기서 보는 것은 네 가지:
+   * 두 입력칸이 **보이기에 다른가** · 한계를 **치기 전에** 말하는가(동반 조건 ①③) ·
+   * 줄 사이에 셸 상태가 **남는가**(동반 조건 ④, 스파이크의 `LOST` 를 뒤집는 것) ·
+   * 종료 코드를 **코드로** 말하는가. */
+  step('TD-01 shell line');
+  /* 아무것도 치기 전에. 한계는 실패한 뒤에 나오는 사과가 아니라 미리 있는 문장이다. */
+  out.termBefore = await evalJs(`(() => {
+    const n = document.querySelector('[data-el="term-limits"]');
+    const f = document.querySelector('[data-el="term-input"]');
+    const q = document.querySelector('[data-el="qc-input"]');
+    const mono = (e) => e ? getComputedStyle(e).fontFamily : null;
+    return JSON.stringify({ limits: n?.innerText ?? null, field: Boolean(f),
+                            run: document.querySelectorAll('[data-el="term-run"]').length,
+                            termFont: mono(f), qcFont: mono(q) }); })()`);
+
+  const shell = async (line) => {
+    await evalJs(`(() => { document.querySelector('[data-el="term-input"]').value = ${JSON.stringify(line)}; })()`);
+    await evalJs(`document.querySelector('[data-el="term-input"]').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+    /* 명령이 끝나면 종료 코드가 온다. 고정 sleep 은 부하 아래서 거짓말을 한다 — 상태를 기다린다. */
+    for (let i = 0; i < 60; i++) {
+      const t = JSON.parse(await evalJs('JSON.stringify(window.__term())'));
+      if (t.run && t.run.line === line && t.run.code !== null) return t;
+      await sleep(250);
+    }
+    return JSON.parse(await evalJs('JSON.stringify(window.__term())'));
+  };
+
+  out.termPwd = JSON.stringify(await shell('pwd'));
+  /* 동반 조건 ④ · 줄 사이 상태: `cd` 가 다음 줄에 남는다. 줄마다 새 셸이면 남지 않는다. */
+  await shell('cd ..');
+  out.termAfterCd = JSON.stringify(await shell('pwd'));
+  /* 실패한 명령은 종료 코드로 말한다 — `19` §C4: 숨기지 않는다. */
+  out.termFail = JSON.stringify(await shell('juqode-no-such-command'));
+  out.termCard = await evalJs(`document.querySelector('[data-el="term-run"]')?.innerText ?? null`);
+
+  /* …and the RUNNING state, which is the only one 멈추기 belongs to: the button ends the
+   * SESSION (no job control), so under a command that has already finished it would read as
+   * "stop this command" about a command that is over. Captured without waiting — a fixed sleep
+   * would race the command's own end. */
+  await evalJs(`(() => { document.querySelector('[data-el="term-input"]').value = 'sleep 3'; })()`);
+  await evalJs(`document.querySelector('[data-el="term-input"]').dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+  await sleep(700);
+  out.termRunning = await evalJs(`(() => {
+    const c = document.querySelector('[data-el="term-run"]');
+    return c ? JSON.stringify({ state: c.getAttribute('data-state'), text: c.innerText,
+      acts: [...c.querySelectorAll('button')].map(b => b.textContent.trim()) }) : null; })()`);
+  await sleep(3500);
+  out.termAfterSleep = await evalJs('JSON.stringify(window.__term())');
+
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `td01-shell-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+
+  /* 이 런이 띄운 셸은 이 런이 끝낸다. 분리된 프로세스라 앱보다 오래 산다. */
+  out.termStopped = await evalJs(`(async () => {
+    const r = await window.juqode.termStop(window.__project().id);
+    return JSON.stringify(r); })()`);
+
   /* 닫기 preserves the screen beneath. */
   await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '닫기')?.click()`);
   await sleep(300);
@@ -2174,6 +2238,53 @@ assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not 
   const gone = JSON.parse(results.qcDevGone);
   assert.strictEqual(gone.available, true,
     `the dev server survived the stop (${gone.reason}) — this run would leak it past the app`);
+}
+
+/* ── WBS-25 · 셸 명령줄 ────────────────────────────────────────────────────────────────
+ * DV-11 은 제품 결정이었고, GO 는 네 조건과 함께였다. 조건 ①③④ 는 화면에서 확인할 수 있는
+ * 것이고, 여기서 확인한다. 조건 ② 는 능력 한계를 실패로 그리지 않는 것이고 — 이 런이 도달할
+ * 수 있는 능력 한계 상태는 셸이 아예 시작되지 않는 것뿐이라 `term-fail` 카드의 색으로만
+ * 걸린다(그 상태는 이 픽스처가 만들 수 없어 단언하지 않는다 — 없는 증거를 있다고 하지 않는다). */
+{
+  const before = JSON.parse(results.termBefore);
+  assert.ok(before.field, 'TD-01 has two Inputs and the shell line is not one of them');
+  /* 조건 ①③ — 치기 전에, 화면에서. */
+  assert.ok(before.limits && before.limits.includes('sudo'),
+    `the shell line does not say what it cannot do: ${before.limits}`);
+  assert.ok(before.limits.includes('색은 나오지 않고'),
+    `colour and ordering are not disclosed: ${before.limits}`);
+  assert.strictEqual(before.run, 0, 'the terminal shows a result before anything was typed');
+  /* `15`: 두 입력칸은 보이기에 다르다. 같은 글꼴이면 같은 칸으로 읽힌다 — 하나는 문장을 쓰는
+   * 곳이고 하나는 명령을 치는 곳인데, 눌렀을 때 일어나는 일이 다르다. */
+  assert.notStrictEqual(before.termFont, before.qcFont,
+    `the Quick Command field and the shell line are drawn the same (${before.termFont})`);
+  assert.ok(/mono/i.test(before.termFont), `the shell line is not monospaced: ${before.termFont}`);
+
+  const pwd = JSON.parse(results.termPwd);
+  assert.strictEqual(pwd.run.code, 0, `pwd exited ${pwd.run.code}`);
+  assert.ok(pwd.run.output.includes(SEED), `the shell is not in the project: ${pwd.run.output}`);
+  /* 조건 ④ · 줄 사이 상태. 스파이크는 줄마다 새 셸일 때 이것을 `LOST` 로 쟀다. */
+  const moved = JSON.parse(results.termAfterCd);
+  assert.ok(!moved.run.output.includes(SEED + '\n'),
+    `cd did not carry to the next line: ${moved.run.output}`);
+  assert.ok(moved.run.output.trim() && moved.run.output.trim() !== SEED,
+    `the shell went back to where it started: ${moved.run.output}`);
+
+  const failed = JSON.parse(results.termFail);
+  assert.notStrictEqual(failed.run.code, 0, 'an unknown command reported success');
+  assert.ok(results.termCard.includes('종료 코드'), `the exit code is not shown: ${results.termCard}`);
+  /* 작업 제어가 없다는 사실은 버튼 옆에 있다 — 누르기 전에, 그리고 돌고 있는 동안에만. */
+  const running = JSON.parse(results.termRunning);
+  assert.ok(running, 'a running command drew no card');
+  assert.strictEqual(running.state, 'running', `a command still going is ${running.state}`);
+  assert.ok(running.acts.includes('멈추기'), `no way to stop it: ${JSON.stringify(running.acts)}`);
+  assert.ok(running.text.includes('멈추면 이 터미널 세션이 끝나요'),
+    `the stop button does not say it ends the session: ${running.text}`);
+  /* 끝난 명령 아래에는 없다 — 그 명령은 이미 끝났고, 이 버튼이 멈추는 것은 세션이다. */
+  assert.ok(!results.termCard.includes('멈추기'),
+    `a finished command still offers 멈추기: ${results.termCard}`);
+  assert.strictEqual(JSON.parse(results.termAfterSleep).run.code, 0, 'the slept command did not finish');
+  assert.strictEqual(JSON.parse(results.termStopped).ok, true, 'the shell this run started is still up');
 }
 
 /* 닫기 preserves the screen beneath (`15`). */

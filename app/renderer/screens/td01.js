@@ -43,6 +43,11 @@ export function mountDrawer(api, state, onChange) {
 }
 
 function renderDrawer(host, api, state, repaint) {
+  /* 서랍은 업데이트마다 통째로 다시 그려진다. 셸 줄은 **명령이 도는 동안** 출력이 오고, 그
+   * 조각마다 포커스가 사라지면 사용자는 다음 줄을 칠 수 없다 — 어느 칸에 있었는지 기억했다가
+   * 돌려준다. Quick Command 칸도 같은 이유로 같은 이득을 본다. */
+  const focused = document.activeElement?.getAttribute?.('data-el') ?? null;
+  const caret = document.activeElement?.selectionStart ?? null;
   host.innerHTML = '';
   host.classList.toggle('open', Boolean(state.drawerOpen));
   host.setAttribute('data-open', state.drawerOpen ? 'true' : 'false');
@@ -70,7 +75,18 @@ function renderDrawer(host, api, state, repaint) {
   panel.appendChild(banner);
 
   panel.appendChild(qcRegion(api, state, repaint));
+  /* `15` TD-01 Inputs 는 **둘**이다: Quick Command 자연어 칸 · 셸 명령줄. 그리고 둘은 보이기에
+   * 달라야 한다 — 하나는 말이고 하나는 명령이며, 무엇이 실행되는지가 다르다. */
+  panel.appendChild(termRegion(api, state, repaint));
   host.appendChild(panel);
+  if (focused) {
+    const back = panel.querySelector(`[data-el="${focused}"]`);
+    back?.focus?.();
+    if (back && caret != null && back.setSelectionRange) {
+      const at = Math.min(caret, back.value?.length ?? 0);
+      try { back.setSelectionRange(at, at); } catch { /* not a text input */ }
+    }
+  }
 }
 
 /* ── Quick Command: the natural-language field and whatever card it produced ── */
@@ -118,6 +134,151 @@ function qcRegion(api, state, repaint) {
     repaint();
   }));
 
+  return region;
+}
+
+/* ── 셸 명령줄 (WBS-25 · DV-11: 파이프 셸) ──────────────────────────────────────────────
+ *
+ * `19` §C4: **사용자가 사용자로 실행한다.** 이 칸은 검사하지 않고 고치지 않고 막지 않는다.
+ * 대신 무엇이 안 되는지 말한다 — DV-11 GO 의 동반 조건 ①②③ 이 그것이고, 문장은 지어낸 것이
+ * 아니라 `term/session.js` 가 `limits` 로 들고 있는 사실을 옮긴 것이다.
+ *
+ * `15`: Quick Command 칸과 **보이기에 달라야 한다.** 위 칸은 문장을 쓰는 곳이고 이 칸은 명령을
+ * 치는 곳이다 — 등폭 글꼴과 `$` 프롬프트가 그 차이를 말한다.
+ */
+function termRegion(api, state, repaint) {
+  const region = el('div', 'td01-term');
+  region.setAttribute('data-el', 'term');
+
+  const label = el('div', 'td01-qclabel');
+  label.appendChild(el('span', 'kicker', C.gap.termTitle));
+  label.appendChild(el('span', 'xs mut', C.gap.termHint));
+  region.appendChild(label);
+
+  /* 열지 못했다 — `15` TD-01 Unavailable State. 제목 · 이유 · 대체 경로 둘, 그리고 빨강이
+   * 아니다: 셸이 시작되지 않은 것은 사용자의 실패가 아니다(`12` §16). */
+  if (state.termFailed) {
+    const card = el('article', 'card td01-card');
+    card.setAttribute('data-el', 'term-fail');
+    card.setAttribute('data-kind', 'unavailable');
+    card.appendChild(el('span', 'chip unavail', `${C.qc.unavailable} · ${C.qc.notFail}`));
+    card.appendChild(el('div', 'ct', C.term.unavailable));
+    card.appendChild(el('p', 'sm', C.term.unavailableBody));
+    card.appendChild(routes([
+      [C.term.altQc, () => { state.termFailed = null; repaint(); }],
+      [C.term.altRaw, () => { state.toWork = state.termLine ?? ''; repaint(); }],
+    ]));
+    region.appendChild(card);
+    return region;
+  }
+
+  const t = state.term;
+  /* 어디서 도는 셸인가. `15` Displayed Information: shell in project cwd — 그리고 어느 셸인지도
+   * 말한다. 사용자의 `SHELL` 이 fish 라면 이 줄은 `/bin/sh` 이고, 그것을 모른 채 치면 왜 자기
+   * 별칭이 없는지 알 수 없다. 제목 줄에 얹는다: 서랍은 40vh 이고 여기서 한 줄은 비싸다. */
+  if (t) label.appendChild(el('span', 'xs mut mono', C.gap.termWhere(t.cwd, t.limits?.shell ?? '')));
+
+  /* 동반 조건 ①③ — 치기 전에, 화면에서. 접히지 않고, 닫히지 않는다. 두 문장을 한 줄에 두는
+   * 것은 줄여서가 아니라 자리 때문이다 — 내용은 하나도 빼지 않는다. */
+  const limits = el('p', 'xs mut td01-termlimits', `${C.gap.termNoTty} ${C.gap.termNoColour}`);
+  limits.setAttribute('data-el', 'term-limits');
+  region.appendChild(limits);
+
+  /* 출력은 프롬프트 **위**에 쌓인다. 터미널은 그렇게 읽히고, 그래야 입력 줄이 서랍 바닥에
+   * 고정된다 — `15` 의 Primary Action 이 스크롤 아래로 밀려나면 Primary Action 이 아니다. */
+  const outBox = el('div', 'td01-termout');
+  region.appendChild(outBox);
+
+  const row = el('div', 'td01-termrow');
+  row.appendChild(el('span', 'td01-prompt', '$'));
+  const field = el('input', 'td01-terminput');
+  field.type = 'text';
+  field.setAttribute('data-el', 'term-input');
+  field.setAttribute('spellcheck', 'false');
+  field.setAttribute('autocapitalize', 'off');
+  field.setAttribute('autocomplete', 'off');
+  field.value = state.termLine ?? '';
+  field.placeholder = C.gap.termPh;
+  const send = async () => {
+    const line = field.value;
+    state.termLine = line;
+    if (!line.trim()) return;
+    /* 게으르게: 아직 셸이 없으면 여기서 연다. 서랍을 여는 것만으로 사용자의 컴퓨터에 프로세스를
+     * 하나 띄우지는 않는다 — 첫 명령이 그 동의다. */
+    if (!state.term) {
+      const opened = await api.termOpen(state.project.id);
+      if (!opened?.ok) { state.termFailed = opened?.reason ?? 'unknown'; repaint(); return; }
+      state.term = opened;
+    }
+    const r = await api.termWrite(state.project.id, line);
+    if (!r.ok && r.reason === 'closed') {
+      /* 세션이 끝나 있었다(사용자의 `exit`, 크래시, 프로젝트 전환). 새로 열고 한 번만 다시
+       * 보낸다 — 사용자가 같은 줄을 두 번 치게 하지 않는다. */
+      state.term = null;
+      const again = await api.termOpen(state.project.id);
+      if (!again?.ok) { state.termFailed = again?.reason ?? 'unknown'; repaint(); return; }
+      state.term = again;
+      state.termRun = null;
+      await api.termWrite(state.project.id, line);
+    } else if (!r.ok) {
+      state.termNote = r.reason;
+      repaint();
+      return;
+    }
+    state.termNote = null;
+    state.termLine = '';
+    repaint();
+  };
+  /* 타이핑을 상태에 흘려 둔다. 실행 중인 명령의 출력이 도착하면 서랍이 다시 그려지는데,
+   * 그때 이 칸이 상태에서 값을 다시 읽는다 — 흘려 두지 않으면 **사용자가 치고 있던 줄이
+   * 출력 한 조각마다 사라진다.** repaint 는 하지 않는다: 글자마다 다시 그릴 이유가 없다. */
+  field.addEventListener('input', () => { state.termLine = field.value; });
+  field.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+  row.appendChild(field);
+  row.appendChild(btn('btn sm', C.qc.run, send));
+  region.appendChild(row);
+
+  if (state.termNote === 'busy') region.appendChild(el('p', 'xs mut', C.gap.termBusy));
+
+  const run = state.termRun;
+  if (!run) { outBox.appendChild(el('p', 'sm mut', C.gap.termEmpty)); return region; }
+
+  const card = el('article', 'card td01-card');
+  card.setAttribute('data-el', 'term-run');
+  card.setAttribute('data-state', run.ended ? 'ended' : (run.code == null ? 'running' : 'done'));
+  const head = el('div', 'td01-runhead');
+  /* 실행 중에는 종료 코드가 없다. `19` §C4: 종료 코드는 코드로 말하고, 없을 때는 없다고 한다. */
+  if (run.ended) head.appendChild(el('span', 'chip unavail', C.gap.termEnded));
+  else if (run.code == null) head.appendChild(el('span', 'chip', C.gap.termRunning));
+  else head.appendChild(el('span', `chip ${run.code === 0 ? 'ok' : 'fail'}`, `${C.qc.exit} ${run.code}`));
+  card.appendChild(head);
+  if (run.line) card.appendChild(el('p', 'xs mut mono td01-body', `$ ${run.line}`));
+
+  const lines = String(run.output ?? '').split('\n');
+  if (lines.some((l) => l.trim())) {
+    const pre = el('pre', 'td01-output');
+    /* TEXT. 사용자의 컴퓨터에서 온 임의의 내용이고, 마크업이 아니다. */
+    pre.textContent = lines.join('\n').replace(/^\n+|\n+$/g, '');
+    card.appendChild(pre);
+    /* `19` §C4 가 제품이 직접 말하라고 한 것: 가림은 완전하지 않다. 실제로 가린 때만 말한다. */
+    if (lines.some((l) => l.includes('***'))) card.appendChild(el('p', 'xs mut', C.gap.qcMaskNote));
+  }
+  if (run.truncated) card.appendChild(el('p', 'xs mut', C.gap.readerTruncated));
+
+  /* 돌고 있는 동안에만. 끝난 명령 아래의 `멈추기` 는 그 명령을 멈춘다는 뜻으로 읽히는데,
+   * 그 명령은 이미 끝났다 — 그리고 이 버튼이 실제로 멈추는 것은 세션이다. */
+  if (!run.ended && run.code == null) {
+    const acts = el('div', 'row-acts');
+    acts.appendChild(btn('btn sm ghost', C.qc.stop, async () => {
+      await api.termStop(state.project.id);
+      state.term = null;
+      repaint();
+    }));
+    card.appendChild(acts);
+    /* 누르기 전에. 작업 제어가 없어 이 버튼은 명령이 아니라 세션을 끝낸다(동반 조건 ①). */
+    card.appendChild(el('p', 'xs mut', C.gap.termStopNote));
+  }
+  outBox.appendChild(card);
   return region;
 }
 

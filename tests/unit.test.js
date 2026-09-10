@@ -480,11 +480,12 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
      * 2분 동안 새 활동이 보이지 않아요 — and that panel is refreshed by the tick that judges it.
      * See BATCH-22. */
     'work.ago',
-    /* DV-11, all four. `15` TD-01's 지금 안 됨 state is a SHELL that failed to start — and
-     * there is no shell until the pty decision is made, so there is nothing that can fail.
-     * `term.mock` names the mock shell, which is one of the three options that decision picks
-     * between. Rendering any of these now would be drawing a state the product cannot enter. */
-    'term.unavailableBody', 'term.altQc', 'term.altRaw', 'term.mock',
+    /* DV-11 was judged (PM · 2026-09-10 · pipe shell) and three of these four are now rendered
+     * by TD-01's shell line — 지금 안 됨 is a shell that failed to start, which the product can
+     * finally enter. `term.mock` is the ONE that stays: it names the MOCK shell, and the mock
+     * was the option NOT chosen. It is kept rather than deleted because `18` carries it and
+     * this file mirrors `18`; rendering it would be drawing a state the product cannot enter. */
+    'term.mock',
     /* `출력 전체 보기` needs a full output to show. `20` bounds `quick_command_run.output_head`
      * at 64 KB and puts the rest behind `output_ref`; nothing writes one yet, and what the head
      * keeps is a genuine PREFIX with the rest gone (see `qc/run.js`). A button that opened the

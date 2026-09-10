@@ -463,6 +463,28 @@ export const C = {
       'not-executable':   '이 동작을 실행할 방법을 찾지 못했어요.',
       'no-project':       '열려 있는 프로젝트가 없어요.',
     },
+    /* WBS-25 · 셸 명령줄. DV-11 판정(파이프 셸 · PM 2026-09-10) 이후에야 존재하는 화면이고,
+     * `18` 은 이 줄에 대한 키를 갖고 있지 않다 — `term.mock` 은 고르지 않은 선택지의 문구이고,
+     * `15` TD-01 은 입력칸이 있다는 것만 적는다. 아래는 `18` §0 의 어투로 썼고, 내용은
+     * DV-11-DECISION §4 의 동반 조건 네 개와 DV-11-PIPE-SHELL-SPIKE 의 실측에서만 가져왔다.
+     * **지어낸 한계는 하나도 없다** — 한계 문장은 `term/session.js` 의 `limits` 가 사실로
+     * 들고 있는 것과 일대일이다. */
+    termTitle:     '셸 명령줄',
+    termHint:      '내가 직접 치는 명령이에요 — JuQode가 고르지 않아요',
+    termPh:        '예: git status · ls -al · npm ls',
+    /* 보내기 버튼의 말은 `18` 이 이미 갖고 있다 — `qc.run`. 같은 낱말을 gap 에 다시 적는 것은
+     * 승인된 사전을 두 벌 만드는 것이고, 검사가 그걸 잡았다. */
+    termEmpty:     '아직 친 명령이 없어요.',
+    termWhere:     (cwd, shell) => `${shell} · ${cwd}`,
+    /* 동반 조건 ① — 치기 전에 알아야 한다. 실패한 뒤에 알면 늦다: 그때는 이미 "왜 안 되지" 다. */
+    termNoTty:     'sudo · ssh · 비밀번호를 묻는 명령은 여기서 답할 수 없어요 — 묻지도 못한 채 끝나요.',
+    /* 동반 조건 ③ — 색과 순서. 숨기면 사용자가 출력을 잘못 읽는다. */
+    termNoColour:  '색은 나오지 않고, 나오는 순서가 실제 순서와 다를 수 있어요.',
+    /* 작업 제어가 없다는 사실을 버튼 옆에서 말한다 — 누르기 전에. */
+    termStopNote:  '멈추면 이 터미널 세션이 끝나요. 명령 하나만 멈출 수는 없어요.',
+    termRunning:   '실행 중',
+    termBusy:      '앞 명령이 아직 돌고 있어요.',
+    termEnded:     '세션이 끝났어요. 다음 명령을 치면 새로 시작해요.',
     /* Two readings, and the second is always a Work. `15` TD-01 has no key for the sentence. */
     qcAmbiguous:   '두 가지로 읽을 수 있어서 실행하지 않았어요. 어느 쪽인지 골라 주세요.',
     /* `19` §C4 requires the PRODUCT to say this, not only the source: 「가림은 화면 노출을 줄이는

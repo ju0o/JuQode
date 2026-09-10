@@ -31,7 +31,11 @@ const state = { project: null, interpretation: null, recent: [], store: { ok: fa
                 /* TD-01 · the drawer and its Quick Command card. It lives OUTSIDE `#root`, so
                  * its state survives every screen render — `15`: 닫으면 화면 상태가 보존된다. */
                 drawerOpen: false, qcPhrase: '', qcCard: null, qcRun: null,
-                qcDiscover: null, qcOutputOpen: false, toWork: null, drawerProject: null };
+                qcDiscover: null, qcOutputOpen: false, toWork: null, drawerProject: null,
+                /* WBS-25 · the shell line. `19` §C6 REC-010: the session belongs to the
+                 * PROJECT, not to the drawer — closing the drawer keeps it, and changing the
+                 * project ends it (`clearDrawerState`). */
+                term: null, termLine: '', termRun: null, termNote: null, termFailed: null };
 
 /* The drawer lives OUTSIDE `#root`, so navigation does not redraw it — which means its state
  * survives a project switch unless something clears it. A Quick Command card explains a command
@@ -53,6 +57,15 @@ function clearDrawerState() {
   /* …and the drawer closes with the project, because a drawer left open over SC-01 has no cwd
    * to act in and every control in it would fail on a null project. */
   state.drawerOpen = false;
+  /* WBS-25 · the shell too. `19` §C6 REC-010: 프로젝트가 바뀌면 종료. A shell the user `cd`-ed
+   * inside project A must not accept project B's next line — the same defect the Quick Command
+   * card had across a switch (batch 12 HIGH), with a shell behind it instead of a rule.
+   * The main process enforces it as well; this clears what the screen is holding. */
+  state.term = null;
+  state.termLine = '';
+  state.termRun = null;
+  state.termNote = null;
+  state.termFailed = null;
 }
 
 const nav = {
@@ -157,6 +170,14 @@ api.onQcUpdate?.((u) => {
   drawer.paint();
 });
 
+/* WBS-25 · the shell line's output, as it arrives. Its own channel and its own state: a
+ * terminal update is not a Quick Command update, and the two are drawn in different places. */
+api.onTermUpdate?.((u) => {
+  if (!u || !state.term || u.id !== state.term.id) return;
+  state.termRun = u;
+  drawer.paint();
+});
+
 /* `15` §0: the terminal toggle is on every screen's top bar, and `` Ctrl+` `` opens it. */
 window.addEventListener('keydown', (e) => {
   if (e.key !== '`' || !(e.ctrlKey || e.metaKey)) return;
@@ -251,6 +272,13 @@ window.__work    = () => (state.workSnapshot
 window.__narrative = () => state.narrative ?? null;
 window.__brief = () => ({ folded: state.briefFolded, stale: state.stale,
                           refreshFailed: state.refreshFailed });
+/* WBS-25 · what the shell line is holding. Read-only, like every hook here. */
+window.__term = () => ({ open: Boolean(state.term), cwd: state.term?.cwd ?? null,
+                         limits: state.term?.limits ?? null, note: state.termNote,
+                         failed: state.termFailed,
+                         run: state.termRun ? { line: state.termRun.line, code: state.termRun.code ?? null,
+                                                ended: Boolean(state.termRun.ended),
+                                                output: state.termRun.output ?? '' } : null });
 window.__drawer = () => ({ open: state.drawerOpen, phrase: state.qcPhrase,
                            discover: Boolean(state.qcDiscover),
                            card: state.qcCard ? { kind: state.qcCard.route?.kind ?? null,
