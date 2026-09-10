@@ -1,6 +1,6 @@
 # RESUME — JuQode Autonomous MVP Long Run V2
 
-**마지막 체크포인트:** 배치 34 · 브랜치 `dev/mvp-autonomous-v01`
+**마지막 체크포인트:** 배치 35 · 브랜치 `dev/mvp-autonomous-v01`
 **작업 트리:** clean · 백그라운드 프로세스 없음 · **stash 없음** (배치 33 의 미완 작업은 풀렸다)
 **스위트:** unit 572/572 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
 
@@ -12,12 +12,12 @@
 CONTINUE THE SAME JUQODE AUTONOMOUS MVP LONG RUN.
 Do NOT restart planning. Do NOT create a new run. Do NOT reset the branch.
 Current remote branch: dev/mvp-autonomous-v01
-Last checkpoint: batch 34 (WBS-25 shell line · sweep re-measure). Working tree clean, all suites green.
+Last checkpoint: batch 35 (td01 mutants 5/5 killed). Working tree clean, all suites green.
 
 Read RESUME.md first. There is NO blocker this time — §3 is a queue, not a wall.
 
 Queue, in order:
-  1. §3 — 살아 있는 뮤턴트 16개. td01 4개는 "화면에서 안 눌러 본 버튼" 이고 싸다.
+  1. §3 — 살아 있는 뮤턴트 11개 (sc02 4 · sc04 4 · sc03 3). td01 은 0 이다.
   2. §4 — 셸 줄의 남은 구멍: 도달 못 한 사용 불가 카드 · busy 경로 · 세션이 스스로 끝나는 경우.
   3. §5 — WBS-32(사람 검증) · DV-13~16(Windows). 둘 다 PM 이 "나중" 으로 판정했다.
 
@@ -30,7 +30,7 @@ Continue now.
 
 ---
 
-## 2. 이번 세션에 한 일 (배치 34)
+## 2. 이번 세션에 한 일 (배치 34 · 35)
 
 | 커밋 | 내용 |
 |---|---|
@@ -40,6 +40,7 @@ Continue now.
 | `b0d338c` | **WBS-25** 셸 명령줄 — 메인 프로세스 (`app/main/term/session.js`) |
 | `f5c7547` | 같은 것의 결함 둘 (끝난 줄이 이름을 잃음 · 프로젝트 전환 시 종료) |
 | `7f6630c` | **WBS-25** 화면 + CF-22 + `BATCH-34-QA.md` |
+| (배치 35) | td01 뮤턴트 **5/5 사살** — `BATCH-35-QA.md` |
 
 전체 기록: `docs/dev-evidence/mvp-run/BATCH-34-QA.md`.
 
@@ -48,34 +49,37 @@ Continue now.
 
 ---
 
-## 3. 살아 있는 뮤턴트 16개 — 다음 배치의 재료
+## 3. 살아 있는 뮤턴트 11개 — 다음 배치의 재료
 
-원본은 `.mutate-work/results.json` (재측정 결과) 와 `docs/dev-evidence/mvp-run/BATCH-33-sweep.json`
-(배치 33 원본, 저장소에 있다 — 스크래치패드에서 한 번 날렸다).
+목록은 `docs/dev-evidence/mvp-run/BATCH-34-sweep.json` (배치 34 재측정 결과) 에 있고,
+배치 33 원본은 `BATCH-33-sweep.json` 이다. 둘 다 저장소에 있다.
 
-| 파일 | 개수 |
-|---|---|
-| `td01.js` | 5 |
-| `sc02.js` | 4 |
-| `sc04.js` | 4 |
-| `sc03.js` | 3 |
+| 파일 | 개수 | |
+|---|---|---|
+| `td01.js` | **0** | 배치 35 에서 5/5 사살 |
+| `sc02.js` | 4 | presence 모드 · `start-failed` · History `더 보기` |
+| `sc04.js` | 4 | 블록 선택 토글 · 카드 클릭 대상 · 빈 read model |
+| `sc03.js` | 3 | `cannot-scope` 패널 · raw 패널 지연 로드 |
 
-**td01 넷은 싸다 — 전부 "카드는 그렸는데 버튼을 눌러 본 적이 없다":**
-- 모호함 카드에서 **읽기를 고르는** 버튼 (`id === 'work'` · `x.id === id`)
-- 실행 중 카드의 **멈추기** 버튼 (`x.id === 'qc.dev.stop'`) — 배치 34 는 `서버 꺼줘` 로
-  라우팅해서 껐고 버튼은 안 눌렀다
-- 실패 카드 재실행 버튼의 강조 클래스 (`r.state === 'failed' ? ' rec' : ''`)
+**배치 35 의 교훈이 그대로 적용된다:** td01 다섯 개는 전부 "카드는 그렸는데 그 카드의 버튼을
+눌러 본 적이 없다" 였다. 남은 11개도 먼저 **그 조건이 참일 때만 봤고 거짓일 때는 안 봤다**를
+의심할 것.
 
-**다섯 번째는 동등 뮤턴트로 보인다** (`already_running && r.data?.pid` → `||`). 관찰 가능한
-차이를 못 찾았고, 못 찾았다고 적혀 있다. 죽이지 못한 것을 죽였다고 하지 말 것.
+그리고 **"동등 뮤턴트로 보인다"는 결론을 서두르지 말 것.** 배치 34 가 그렇게 적은 하나가
+배치 35 에서 죽었다 — 카드가 스냅샷이라는 것(확인 시점 재확인)이 관찰 가능한 차이를 만들었다.
+
+**따로 적어 둘 것 하나:** `btn ... rec` 는 렌더러 네 화면에서 15번 쓰이는데 **어떤 CSS 도
+`.rec` 를 정의하지 않는다.** 복구 동작 표시가 화면에서는 아무 차이도 만들지 않는다. 색을 주는
+것은 `16` §2.1 색 문법에 걸리는 디자인 결정이고 지우는 것은 네 화면 변경이라, 배치 35 는 적어
+두고 넘겼다 (`BATCH-35-QA.md` §3).
 
 재측정 방법:
 ```bash
 rm -rf .mutate-work    # 트리가 바뀌면 워커 사본은 새로 떠야 한다
-ONLY=docs/dev-evidence/mvp-run/BATCH-33-sweep.json W=2 \
-  python3 scripts/mutate/sweep-renderer.py app/renderer/screens/{sc02,sc03,sc04,td01}.js
+ONLY=docs/dev-evidence/mvp-run/BATCH-34-sweep.json W=2 \
+  python3 scripts/mutate/sweep-renderer.py app/renderer/screens/{sc02,sc03,sc04}.js
 ```
-29개에 약 40분(2워커). e2e 타임아웃은 900s 다 — **타임아웃은 kill 로 세어진다.** 정직한
+11개에 약 35분(2워커). e2e 타임아웃은 900s 다 — **타임아웃은 kill 로 세어진다.** 정직한
 실행 시간보다 낮은 천장은 모든 뮤턴트를 가짜 kill 로 만든다.
 
 ---
@@ -100,7 +104,8 @@ ONLY=docs/dev-evidence/mvp-run/BATCH-33-sweep.json W=2 \
 | | 상태 |
 |---|---|
 | 배치 33 e2e 마무리 | **완료** (`70345ef`) |
-| td01 생존자 9개 | **완료** (`6e11da6`) — 4개는 다른 경로로 아직 산다 (§3) |
+| td01 뮤턴트 5개 | **완료** — 배치 35, 측정으로 0 생존 확인 |
+| td01 생존자 9개 | **완료** (`6e11da6`) |
 | 스윕 재실행(실제 kill 측정) | **완료** — 49% → 74% |
 | WBS-25 셸 명령줄 | **완료** (Linux) · Windows 미검증 |
 | DV-11 | **판정됨 · 구현됨** |

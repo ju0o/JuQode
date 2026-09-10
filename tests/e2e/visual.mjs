@@ -1297,6 +1297,28 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(600);
   out.qcAmbigKind = await evalJs(`document.querySelector('[data-el="qc-card"]')?.getAttribute('data-kind') ?? null`);
   out.qcAmbig     = await evalJs(`document.querySelector('[data-el="qc-card"]')?.innerText ?? null`);
+  /* The card names the readings as CONTROLS, one each, and the Work reading is the one that is
+   * labelled as a Work — `19` §C4 §3: 조용히 고르지 않는다 means the user picks, so what they
+   * pick from has to be right.
+   *
+   * FOUND BY MUTATION: `if (id === 'work')` could be inverted, which labels the RULE reading
+   * 'Claude Code 작업으로 보내기' and the Work reading `work`. The card was read as text and
+   * its buttons were never listed, so both readings could be mislabelled unnoticed. */
+  out.qcAmbigActs = await evalJs(`JSON.stringify(
+    [...document.querySelectorAll('[data-el="qc-card"] button')].map(b => b.textContent.trim()))`);
+
+  /* …and PICKING one. Until now the card was drawn and never used: picking re-asks the store
+   * about the rule the user chose, and that lookup could name a DIFFERENT rule.
+   *
+   * FOUND BY MUTATION: `one.rules.find((x) => x.id === id)` could become `!==`, which takes the
+   * first rule that is NOT the one picked — the card then says 개발 서버를 꺼 달라는 요청 in its
+   * 이해한 것 line while carrying `npm run dev` as the command it would run. */
+  await evalJs(`[...document.querySelectorAll('[data-el="qc-card"] button')]
+    .find(b => b.textContent.trim() === '개발 서버를 꺼 달라는 요청으로 이해했어요.')?.click()`);
+  await sleep(900);
+  out.qcPicked = await evalJs(`(() => {
+    const n = document.querySelector('[data-el="qc-card"]');
+    return n ? JSON.stringify({ kind: n.getAttribute('data-kind'), text: n.innerText }) : null; })()`);
 
   /* Actually RUN one. `qc.git.status` is the fixed, read-only vector — no npm, no network — so
    * the run card's states get rendered evidence without the e2e depending on a build toolchain.
@@ -1312,6 +1334,11 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.qcRunAttr   = await evalJs(`document.querySelector('[data-el="qc-run"]')?.getAttribute('data-state') ?? null`);
   out.qcRunReds   = await evalJs(RED_COUNT('[data-el="qc-run"], [data-el="qc-run"] *'));
   out.qcOutput    = await evalJs(`document.querySelector('.td01-output')?.innerText ?? null`);
+  /* `15` TD-01 실패 marks the re-run as the recovery action; a run that SUCCEEDED has nothing to
+   * recover from. Both halves are captured — the mutation flips the condition, so only the
+   * absent half sees it. */
+  out.qcOkActClasses = await evalJs(`JSON.stringify(Object.fromEntries(
+    [...document.querySelectorAll('[data-el="qc-run"] button')].map(b => [b.textContent.trim(), b.className])))`);
 
   /* 할 수 있는 것 보기 — every rule, and why each one cannot run. */
   await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.includes('할 수 있는 것'))?.click()`);
@@ -1349,13 +1376,32 @@ const results = await cdp(async ({ send, evalJs }) => {
     const n = document.querySelector('[data-el="qc-run"]');
     return n ? JSON.stringify({ state: n.getAttribute('data-state'), text: n.innerText,
       reds: ${RED_COUNT('[data-el="qc-run"], [data-el="qc-run"] *')},
-      acts: [...n.querySelectorAll('button')].map(b => b.textContent.trim()) }) : null; })()`);
+      acts: [...n.querySelectorAll('button')].map(b => b.textContent.trim()),
+      classes: Object.fromEntries([...n.querySelectorAll('button')].map(b => [b.textContent.trim(), b.className])) }) : null; })()`);
 
   await qcSend('개발서버 켜줘');
   out.qcDevCard = await qcCardNow();
   await qcConfirm();
   await sleep(3000);
   out.qcDevRunning = await qcRunNow();
+
+  /* `15` TD-01 · F-C4-05: 멈추기 does not act on the first click — it opens the EXPLAIN card for
+   * the stopping Quick Command, and only 실행 stops the server. The card was reachable by TYPING
+   * 서버 꺼줘 and that path is checked below; the BUTTON was never pressed.
+   *
+   * FOUND BY MUTATION: `listed.rules.find((x) => x.id === 'qc.dev.stop')` could become `!==`,
+   * which hands the button the first rule that is NOT the stop rule. The card then explains
+   * 개발 서버를 꺼 달라는 요청 over `npm run dev` — pressing 실행 on it would START a server
+   * from a card the user opened to stop one. */
+  await evalJs(`[...document.querySelectorAll('[data-el="qc-run"] button')]
+    .find(b => b.textContent.trim() === '멈추기')?.click()`);
+  await sleep(900);
+  out.qcStopViaButton = await qcCardNow();
+  /* 취소 puts the card away and leaves the server RUNNING — the next step is about a server
+   * that is already up. */
+  await evalJs(`[...document.querySelectorAll('[data-el="qc-card"] button')]
+    .find(b => b.textContent.trim() === '취소')?.click()`);
+  await sleep(400);
 
   /* …and asking for it AGAIN while it is up. `19` §C4: 사용 불가 with the reason and the pid,
    * which is the one thing that tells the user WHICH server the product means. */
@@ -1392,6 +1438,43 @@ const results = await cdp(async ({ send, evalJs }) => {
     const l = await window.juqode.qcList(window.__project().id);
     const dev = l.rules.find(r => r.id === 'qc.dev.start');
     return JSON.stringify({ available: dev.available, reason: dev.reason }); })()`);
+
+  /* ── 카드는 스냅샷이다 ────────────────────────────────────────────────────────────────
+   * `19` §C4 는 설명과 확인을 두 번의 왕복으로 나눈다, 그리고 그 사이에 세상이 바뀔 수 있다.
+   * `ipc.js` 는 확인 시점에 availability 를 **다시 묻는다** — 카드를 믿지 않는다. 그 경로에
+   * 검사가 하나도 없었다.
+   *
+   * FOUND BY MUTATION: `r.reason === 'already_running' && r.data?.pid` 를 `||` 로 넓히면,
+   * 거절된 정지 카드가 **이미 죽은 프로세스의 pid** 를 그린다 — 카드의 데이터는 설명 시점의
+   * 것이고 pid 는 거기 남아 있기 때문이다. 화면은 "그 서버는 지금 없어요" 라고 말하면서 그
+   * 서버의 pid 를 함께 보여 주게 된다.
+   *
+   * 서버를 다시 켜고, 정지 카드를 띄운 뒤, **앱 밖에서** 죽인다 — 크래시가 하는 그대로. */
+  await qcSend('개발서버 켜줘');
+  await qcConfirm();
+  await sleep(2500);
+  await qcSend('서버 꺼줘');
+  out.qcStaleBefore = await qcCardNow();
+  {
+    const pid = Number(/pid (\d+)/.exec(JSON.parse(out.qcStaleBefore).text ?? '')?.[1]);
+    assert.ok(Number.isInteger(pid) && pid > 0,
+      `the stop card names no pid to kill: ${JSON.parse(out.qcStaleBefore).text}`);
+    /* 그룹째. `qc/run.js` 가 자기 그룹으로 띄우므로 npm 과 그 자식이 함께 죽는다. */
+    try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+    /* 앱이 그 사실을 알 때까지 기다린다 — 고정 sleep 은 부하 아래서 거짓말을 한다. */
+    let noticed = false;
+    for (let i = 0; i < 40 && !noticed; i++) {
+      const l = JSON.parse(await evalJs(`(async () =>
+        JSON.stringify(await window.juqode.qcList(window.__project().id)))()`));
+      noticed = Boolean(l.rules.find((r) => r.id === 'qc.dev.start')?.available);
+      if (!noticed) await sleep(250);
+    }
+    assert.ok(noticed, 'the app never noticed the dev server it started had died');
+  }
+  /* …이제 낡은 카드의 `실행` 을 누른다. */
+  await qcConfirm();
+  await sleep(900);
+  out.qcStaleAfter = await qcCardNow();
 
   /* ── WBS-25 · 셸 명령줄 (DV-11: 파이프 셸 · PM 2026-09-10) ───────────────────────────
    * `15` TD-01 의 Primary Action 이고, 이 런에서 처음으로 존재한다. 여기서 보는 것은 네 가지:
@@ -2143,6 +2226,27 @@ assert.ok(!/위험|감지|차단/.test(results.qcUnrec),
 /* 모호함 — both readings named, nothing run. */
 assert.strictEqual(results.qcAmbigKind, 'ambiguous');
 assert.ok(results.qcAmbig.includes('골라'), 'the ambiguity does not ask the user to choose');
+/* 두 읽기, 컨트롤 하나씩, 그리고 **어느 것이 Work 인지가 맞다.** `서버 좀 정리해줘` 는
+ * 서버를 끄는 것과 서버 코드를 정리하는 Work 로 읽힌다 (`19` §C4 §3 case C). */
+{
+  const acts = JSON.parse(results.qcAmbigActs);
+  assert.deepStrictEqual(acts,
+    ['개발 서버를 꺼 달라는 요청으로 이해했어요.', '▸ Claude Code 작업으로 보내기'],
+    `the two readings are not two labelled controls: ${JSON.stringify(acts)}`);
+
+  /* 읽기를 고르면 **고른 그 규칙**을 다시 묻는다. 고른 것은 qc.dev.stop 이고, 이 시점에
+   * JuQode 가 켠 개발 서버는 없다 — 그래서 답은 `지금 안 됨` 과 그 이유다. */
+  const picked = JSON.parse(results.qcPicked);
+  assert.ok(picked, 'picking a reading left no card');
+  assert.strictEqual(picked.kind, 'unavailable',
+    `picking 개발 서버를 끈다 with no server running produced a ${picked.kind} card`);
+  assert.ok(picked.text.includes('JuQode 가 켠 개발 서버가 지금 없어요'),
+    `the picked reading does not carry ITS OWN reason: ${picked.text}`);
+  /* 결정적인 절반: 다른 규칙의 명령이 실려 오면 안 된다. 카드는 끄겠다고 말하면서 켜는 명령을
+   * 들고 있게 된다. */
+  assert.ok(!picked.text.includes('npm run dev'),
+    `the card says it will stop the server and carries the command that STARTS one: ${picked.text}`);
+}
 
 /* A Quick Command was actually RUN. Until this existed, 실행 중 · 끝났어요 · 출력 had never been
  * rendered anywhere in the suite, and the batch document claimed every card state was in. */
@@ -2187,6 +2291,21 @@ assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not 
   assert.ok(run.acts.includes('멈추기'), `the running server cannot be stopped: ${JSON.stringify(run.acts)}`);
   assert.strictEqual(run.reds, 0, 'a running dev server is painted as a failure');
 
+  /* 멈추기는 **버튼으로도** 같은 카드에 닿는다 — 그리고 그 카드는 STOP 규칙의 것이다. */
+  const viaBtn = JSON.parse(results.qcStopViaButton);
+  assert.ok(viaBtn, '멈추기 opened no card');
+  assert.strictEqual(viaBtn.kind, 'explained', `the stop button produced a ${viaBtn.kind} card`);
+  assert.ok(/pid \d+/.test(viaBtn.text), `멈추기 opened a card that names no pid: ${viaBtn.text}`);
+  assert.ok(viaBtn.text.includes('SIGTERM'), `the card does not say what it sends: ${viaBtn.text}`);
+  /* 이 카드가 `npm run dev` 를 담는 것은 **맞다** — 신호를 보낼 프로세스를 그 명령으로
+   * 가리킨다(`pid 115218, npm run dev`). 두 카드를 가르는 것은 그것이 아니라 **스크립트
+   * 본문**이다: 그건 시작 카드가 승인받으려고 보여 주는 것이고, 정지 카드에는 없다.
+   * (첫 시도에서 이 단언을 `npm run dev` 로 썼다가 제품이 옳고 단언이 틀렸다.) */
+  assert.ok(!viaBtn.text.includes('setInterval'),
+    `멈추기 opened a card showing a script body — that is a START card: ${viaBtn.text}`);
+  assert.ok(viaBtn.acts.includes('실행') && viaBtn.acts.includes('취소'),
+    `stopping does not go through explain-then-confirm: ${JSON.stringify(viaBtn.acts)}`);
+
   /* 이미 켜져 있음 — 사용 불가, and NOT a failure (`12` §16). */
   const again = JSON.parse(results.qcAlready);
   assert.strictEqual(again.kind, 'unavailable', `asking twice produced ${again.kind}`);
@@ -2206,6 +2325,19 @@ assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not 
   assert.ok(failed.acts.includes('▸ 다시 실행'), `no re-run on a failed build: ${JSON.stringify(failed.acts)}`);
   /* …and THIS one is red: a failed run is the one Quick Command state that is a failure. */
   assert.ok(failed.reds > 0, 'a failed run is not painted as one');
+  /* `15` TD-01 실패: 다시 실행 is the RECOVERY action, and the markup says which action that is.
+   * The ⟺ is the point — a run that succeeded has nothing to recover from, so the same button
+   * on the ok card must NOT carry the marker.
+   *
+   * (`rec` has no CSS rule today — it is a marker in the markup, not a colour. Recorded in
+   * BATCH-35-QA; the mutation is real either way, because the product's own statement about
+   * which action is the recovery one is what flips.) */
+  assert.ok(/\brec\b/.test(failed.classes['▸ 다시 실행'] ?? ''),
+    `the failed card's re-run is not marked as the recovery action: ${failed.classes['▸ 다시 실행']}`);
+  const okActs = JSON.parse(results.qcOkActClasses);
+  assert.ok(okActs['▸ 다시 실행'], `the successful run offers no re-run: ${JSON.stringify(okActs)}`);
+  assert.ok(!/\brec\b/.test(okActs['▸ 다시 실행']),
+    `a run that SUCCEEDED marks its re-run as a recovery action: ${okActs['▸ 다시 실행']}`);
 
   /* The two fixed actions. Neither is a script, and both still have to say what they will do. */
   const term = JSON.parse(results.qcTerminalCard);
@@ -2238,6 +2370,19 @@ assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not 
   const gone = JSON.parse(results.qcDevGone);
   assert.strictEqual(gone.available, true,
     `the dev server survived the stop (${gone.reason}) — this run would leak it past the app`);
+
+  /* 확인 시점에 다시 묻는다 — 그리고 거절된 카드는 **없어진 것의 pid 를 들고 있지 않는다.** */
+  const staleBefore = JSON.parse(results.qcStaleBefore);
+  assert.ok(/pid \d+/.test(staleBefore.text), 'the precondition is gone: the stop card had no pid');
+  const stale = JSON.parse(results.qcStaleAfter);
+  assert.strictEqual(stale.kind, 'unavailable',
+    `confirming a card whose server had died produced a ${stale.kind} card`);
+  assert.ok(stale.text.includes('JuQode 가 켠 개발 서버가 지금 없어요'),
+    `the refusal does not carry the handler's own reason: ${stale.text}`);
+  /* 이쪽이 결정적이다: 설명 시점의 데이터가 그대로 남아 있으므로 pid 는 아직 객체 안에 있다.
+   * 화면에 나오면 "지금 없어요" 라고 말하면서 그것의 pid 를 보여 주는 카드가 된다. */
+  assert.ok(!/pid \d+/.test(stale.text),
+    `a card that says the server is gone printed its pid: ${stale.text}`);
 }
 
 /* ── WBS-25 · 셸 명령줄 ────────────────────────────────────────────────────────────────
