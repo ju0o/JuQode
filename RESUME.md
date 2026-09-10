@@ -2,9 +2,9 @@
 
 **마지막 체크포인트:** 배치 35 · 브랜치 `dev/mvp-autonomous-v01` (푸시 완료)
 **작업 트리:** clean · 백그라운드 프로세스 없음 · stash 없음
-**스위트:** unit 575/575 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
-**정지 사유:** 남은 작업이 **거의 전부 사람의 판단을 기다린다** (§3). PM 판정 2026-09-11.
-게이트 없이 할 수 있는 것은 §4 하나뿐이다.
+**스위트:** unit 576/576 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
+**정지 사유:** 남은 작업이 **전부 사람의 판단을 기다린다** (§3). PM 판정 2026-09-11.
+게이트 없이 할 수 있는 마지막 하나(§4)는 **이 세션에서 끝냈다.**
 
 ---
 
@@ -26,9 +26,9 @@ deleting the duplicate keys was explicitly NOT approved.
 Do this, in order:
   1. Ask the PM whether any §3 gate has opened, and hand them §3's "무엇이 있어야 풀리나".
   2. If a gate is open, do that item.
-  3. If no gate is open, the ONE thing that needs no gate is §4 — `app/main/term/session.js`
-     has never been swept. It is a measurement, not a decision.
-  4. If §4 is done and no gate is open, STOP and say so. Do not invent work.
+  3. If no gate is open, there is NOTHING left that the agent may do alone — §4 (the last
+     un-gated item, sweeping `app/main/term/session.js`) was finished in batch 35.
+     STOP and say so. Do not invent work.
 
 Keep the same operating loop: IMPLEMENT → TEST → PRODUCT QA → TECHNICAL/SECURITY QA →
 TEST ADVERSARY → VISUAL QA when UI changes → FIX → RETEST → MUTATION / NEGATIVE CHECK →
@@ -53,6 +53,7 @@ Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
 | `69b65d9` | td01 전체 스윕 첫 측정 — 15개 중 12 사살, 나머지 처리 |
 | `db1b199` | **`16` §2.1 초록 ▸ 를 화면에 올림** · 나가는 길 없던 카드 하나 |
 | `d1f0516` | 문구 검사가 이름만 보고 있었다 — 열두 개가 숨어 있었다 |
+| `294ad3c` | `term/session.js` 첫 스윕 — 6개 중 5 사살, 남은 하나는 **동등**(근거 기록) |
 
 전체 기록: `BATCH-34-QA.md` · `BATCH-35-QA.md` · `CHECKPOINTS.md`.
 
@@ -124,22 +125,23 @@ Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
 
 ---
 
-## 4. 게이트 없이 할 수 있는 것 — 하나 남았다
+## 4. 게이트 없던 마지막 하나 — **끝났다** (배치 35)
 
-**`app/main/term/session.js` 를 한 번도 쓸어 본 적이 없다.**
+`app/main/term/session.js` 스윕 (PM 승인 2026-09-11): `6 · 4 killed` → 경계 검사를 추가한 뒤
+**`6 · 5 killed · 1 SURVIVED`**, 그리고 그 하나는 **동등 뮤턴트**다.
 
-배치 25~30 이 `app/main` 17개 파일을 쓸었고(제품 결함 19개), 이 파일은 배치 34 에서 생겼다.
-`app/main/ipc.js` 도 그 사이 터미널 핸들러 셋이 늘었다. **결정이 아니라 측정이므로 게이트가
-없다.**
+- **찾은 구멍:** `bytes + size > OUTPUT_LIMIT` 를 `>=` 로 넓히면 **정확히 가득 찬 출력이
+  잘렸다고 표시된다** — 잃은 것이 없는데 잃었다고 말한다. 열어 보니 스위트에 **절단 검사가
+  하나도 없었다**(넘친 쪽도, 딱 맞는 쪽도). 양쪽을 다 만들었다.
+- **남은 하나는 동등하다:** `room > 0` → `>=`. `bytes <= OUTPUT_LIMIT` 이 불변이라 `room` 은
+  음수가 될 수 없고, 새로 열리는 경우는 `room === 0` 뿐인데 그때 `subarray(0, 0)` 은 빈
+  문자열이라 아무것도 바뀌지 않는다. **죽이지 못한 것이 아니라 죽일 것이 없다** — 다음 스윕이
+  같은 것을 다시 파지 않도록 그 자리에 불변식을 적어 두었다.
 
-```bash
-rm -rf .mutate-work
-W=2 python3 scripts/mutate/sweep-renderer.py app/main/term/session.js
-```
+`app/main/ipc.js` 는 그 사이 터미널 핸들러 셋이 늘었지만 배치 25~30 스윕 대상이었고, 새 핸들러
+셋은 `tests/term.test.js` 가 직접 부른다(저장소 거절 · 프로젝트 전환 · 열지 못한 셸).
 
-러너 이름이 `sweep-renderer` 지만 파일을 가리지 않는다 — 단위 스위트와 e2e 로 판정한다.
-사이트 하나에 약 6분(2워커 기준 두 개씩). 살아남는 것이 나오면 §3 과 달리 **바로 처리할 수
-있다.**
+**즉 이제 게이트 밖에 남은 작업이 없다.** 자세한 것은 `BATCH-35-QA.md` §7.
 
 ---
 
