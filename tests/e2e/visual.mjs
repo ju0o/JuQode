@@ -1163,6 +1163,39 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.recentAfterBack = await evalJs('document.querySelectorAll(\'[data-el="recent-row"]\').length');
   out.recentTopAfterBack = await evalJs(`document.querySelector('[data-el="recent-row"] .path')?.textContent ?? null`);
 
+  /* ── the drawer belongs to ONE project ──────────────────────────────────────────
+   * The batch-12 review found a Quick Command card confirmed in one project that would RUN in
+   * another: the drawer lives OUTSIDE `#root`, so navigating does not clear it, and `실행`
+   * reads the project at CLICK time. The fix (`clearDrawerState` on a project change) had no
+   * test at all — found by a renderer mutation sweep, where inverting the comparison so it
+   * clears when the project is the SAME passed everything.
+   *
+   * Opening SEED2 and then SEED also leaves the recent list in the order the next step needs. */
+  step('drawer is per project');
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')].at(-1).click()`);
+  await sleep(1200);
+  await evalJs(`window.__openDrawerWith('깃상태')`);
+  await sleep(800);
+  await evalJs(`document.querySelector('[data-el="qc-send"]')?.click() ?? [...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
+  await sleep(900);
+  out.drawerCardA = await evalJs('JSON.stringify(window.__drawer())');
+
+  /* …to the OTHER project, through the picker, the way a user does it. */
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트'))?.click()`);
+  await sleep(900);
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')].at(-1).click()`);
+  await sleep(1200);
+  out.screenAfterSwitch = await evalJs('window.__screen()');
+  await evalJs(`window.__toggleDrawer()`);
+  await sleep(600);
+  out.drawerAfterSwitch = await evalJs('JSON.stringify(window.__drawer())');
+  await evalJs(`window.__toggleDrawer()`);
+  await sleep(300);
+  /* …and back to the picker, where the next step expects to be. SEED was opened last, so the
+   * deleted-folder row is still the last one. */
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트'))?.click()`);
+  await sleep(900);
+
   /* ── 열 수 없음 ────────────────────────────────────────────────────────────────
    * The one red on SC-01. Until now no rendered evidence existed for ANY of the states the
    * colour grammar is actually about, so "red is failure only" rested on reading the source.
@@ -1924,6 +1957,23 @@ assert.strictEqual(results.guardKeptText, '로그인 오류 고쳐줘',
 assert.strictEqual(results.guardReds, 0, 'the guard card is rendered as a failure');
 
 assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기 did not return to SC-01');
+/* ── the drawer belongs to ONE project (batch-12 HIGH, found untested by a mutation sweep) ── */
+{
+  const a = JSON.parse(results.drawerCardA);
+  assert.strictEqual(a.open, true, 'the drawer did not open in the first project');
+  assert.ok(a.card, 'no Quick Command card was produced to carry across the switch');
+  assert.strictEqual(a.phrase, '깃상태');
+
+  assert.strictEqual(results.screenAfterSwitch, 'SC-02', 'switching projects did not reach SC-02');
+  const b = JSON.parse(results.drawerAfterSwitch);
+  assert.strictEqual(b.open, true, 'the drawer did not reopen in the second project');
+  assert.strictEqual(b.card, null,
+    'a Quick Command card CONFIRMED in one project survived into another — `실행` reads the '
+    + 'project at click time, so it would have run there');
+  assert.strictEqual(b.phrase, '', `the other project's sentence was carried across: ${b.phrase}`);
+  assert.strictEqual(b.run, null, 'a run from another project is still on screen');
+}
+
 assert.ok(results.recentLast, 'a recent row carries no last-Work summary (`15` UF-RETURN)');
 assert.ok(results.recentLast.includes('마지막 작업'),
   `the summary is not labelled: ${results.recentLast}`);
