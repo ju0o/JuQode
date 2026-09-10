@@ -1563,6 +1563,11 @@ const results = await cdp(async ({ send, evalJs }) => {
                             run: document.querySelectorAll('[data-el="term-run"]').length,
                             termFont: mono(f), qcFont: mono(q) }); })()`);
 
+  /* 종료 코드 칩의 **색**. 글자(`종료 코드 0`)는 이미 보고 있었지만 클래스는 아무도 안 봤다 —
+   * FOUND BY MUTATION: `run.code === 0 ? 'ok' : 'fail'` 를 뒤집으면 성공한 명령이 빨강,
+   * 실패한 명령이 초록이 된다. `16` §2.1 의 색 문법이 통째로 뒤집히는데 조용히 통과했다. */
+  const chipClass = () => evalJs(`document.querySelector('[data-el="term-run"] .chip')?.className ?? null`);
+
   const shell = async (line) => {
     await evalJs(`(() => { document.querySelector('[data-el="term-input"]').value = ${JSON.stringify(line)}; })()`);
     await evalJs(`document.querySelector('[data-el="term-input"]').dispatchEvent(
@@ -1577,11 +1582,13 @@ const results = await cdp(async ({ send, evalJs }) => {
   };
 
   out.termPwd = JSON.stringify(await shell('pwd'));
+  out.termOkChip = await chipClass();
   /* 동반 조건 ④ · 줄 사이 상태: `cd` 가 다음 줄에 남는다. 줄마다 새 셸이면 남지 않는다. */
   await shell('cd ..');
   out.termAfterCd = JSON.stringify(await shell('pwd'));
   /* 실패한 명령은 종료 코드로 말한다 — `19` §C4: 숨기지 않는다. */
   out.termFail = JSON.stringify(await shell('juqode-no-such-command'));
+  out.termFailChip = await chipClass();
   out.termCard = await evalJs(`document.querySelector('[data-el="term-run"]')?.innerText ?? null`);
 
   /* …and the RUNNING state, which is the only one 멈추기 belongs to: the button ends the
@@ -2594,6 +2601,12 @@ assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not 
 
   const failed = JSON.parse(results.termFail);
   assert.notStrictEqual(failed.run.code, 0, 'an unknown command reported success');
+  /* `16` §2.1: 빨강은 실패 전용이고, 끝난 것은 초록이다. 양쪽 모두 — 한쪽만 보면 색이 통째로
+   * 뒤집힌 것도 통과한다. */
+  assert.match(results.termOkChip, /\bok\b/, `a command that exited 0 is chipped ${results.termOkChip}`);
+  assert.ok(!/\bfail\b/.test(results.termOkChip), `a successful command is painted as a failure: ${results.termOkChip}`);
+  assert.match(results.termFailChip, /\bfail\b/, `a command that failed is chipped ${results.termFailChip}`);
+  assert.ok(!/\bok\b/.test(results.termFailChip), `a failed command is painted as success: ${results.termFailChip}`);
   assert.ok(results.termCard.includes('종료 코드'), `the exit code is not shown: ${results.termCard}`);
   /* 작업 제어가 없다는 사실은 버튼 옆에 있다 — 누르기 전에, 그리고 돌고 있는 동안에만. */
   const running = JSON.parse(results.termRunning);
@@ -3547,7 +3560,9 @@ console.log(JSON.stringify(results, null, 2));
     return false; })()`);
   assert.strictEqual(hasField, true, 'the drawer never showed the shell line');
   /* 첫 명령이 셸을 여는 동의다 — 그리고 그 열기가 실패한다. */
-  await ev3(`(() => { document.querySelector('[data-el="term-input"]').value = 'echo hi'; })()`);
+  /* 포커스를 준 채로 친다 — 사용자가 하는 그대로. 그리고 이 경로가 중요한 이유가 하나 더
+   * 있다: 실패 카드가 이 칸을 대신하므로, 다시 그린 뒤 포커스를 돌려줄 대상이 **사라진다.** */
+  await ev3(`(() => { const f = document.querySelector('[data-el="term-input"]'); f.focus(); f.value = 'echo hi'; })()`);
   await ev3(`document.querySelector('[data-el="term-input"]').dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
   await sleep(1500);

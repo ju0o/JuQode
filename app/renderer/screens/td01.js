@@ -82,9 +82,16 @@ function renderDrawer(host, api, state, repaint) {
   if (focused) {
     const back = panel.querySelector(`[data-el="${focused}"]`);
     back?.focus?.();
-    if (back && caret != null && back.setSelectionRange) {
-      const at = Math.min(caret, back.value?.length ?? 0);
-      try { back.setSelectionRange(at, at); } catch { /* not a text input */ }
+    /* The caret, when there is one. Two guards used to stand in front of this and the try/catch
+     * behind it did the same work — and a widened `&&` reached `back.value` with `back` null,
+     * which throws out of the drawer's render and takes the whole drawer with it. That is
+     * reachable: type into the shell line, have the shell fail to open, and the field this was
+     * restoring focus to is gone from the card that replaced it. One guard, one catch. */
+    if (back) {
+      try {
+        const at = Math.min(caret ?? 0, back.value?.length ?? 0);
+        back.setSelectionRange(at, at);
+      } catch { /* not a text input */ }
     }
   }
 }
