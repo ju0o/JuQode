@@ -15,6 +15,7 @@ const claude = require('./claude-detect');
 const repo = require('./db/repo');
 const supervisor = require('./work/supervisor');
 const { makeHandlers } = require('./ipc');
+const { buildSignature } = require('./signing');
 
 /* A test run must not write into the user's real application data.
  *
@@ -109,6 +110,22 @@ if (!app.requestSingleInstanceLock()) {
       platform: process.platform,
       arch: process.arch,
     }),
+    /* WBS-33 · 원칙 2: a build that is not signed says so. Read from this executable's own
+     * PE certificate table, not from anything the build process claims — see signing.js.
+     * ONE producer: `juqode:boot` carries it, because that is what SC-01 already awaits. */
+    signature: () => {
+      /* Test affordance: point at a fixture PE. It replaces the FILE, not the answer — the
+       * certificate table is still parsed for real, so the e2e proves the whole chain from
+       * PE bytes to pixels rather than photographing a stubbed string. A source run is never
+       * `packaged`, so without this the notice is unreachable outside a real installer.
+       * Off unless asked for; never set in a shipped build. */
+      const fixture = process.env.JUQODE_SIGNATURE_EXE;
+      return buildSignature({
+        packaged: fixture ? true : app.isPackaged,
+        platform: fixture ? 'win32' : process.platform,
+        exePath: fixture || app.getPath('exe'),
+      });
+    },
   });
   for (const [channel, fn] of Object.entries(handlers)) handle(channel, fn);
 

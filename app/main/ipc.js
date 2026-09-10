@@ -31,6 +31,7 @@ const { answers, statusOf } = require('./interpret/answers');
  * @param {(snapshot:object) => void} deps.push  send a Work update to the window
  * @param {(e:object) => object} [deps.windowFor]
  * @param {() => object} [deps.versions]
+ * @param {() => object} [deps.signature]  WBS-33 · whether THIS build is signed
  */
 /**
  * `18` orient.* — ONE sentence about where the user is, and it must be true.
@@ -93,6 +94,11 @@ function makeHandlers(deps) {
     'juqode:boot': () => ({
       store: db() ? { ok: true } : { ok: false, reason: deps.dbFault?.() ?? null },
       recent: db() ? project.recent(db()) : [],
+      /* WBS-33 · 원칙 2 — a build that is not signed says so, on the first screen the user
+       * sees. It rides on boot because SC-01 already awaits boot: a second round trip would
+       * let the screen paint once without the notice and then move, which is worse than
+       * either answer. `null` is not a state — the shape always arrives. */
+      signature: deps.signature?.() ?? { state: 'unknown', reason: 'not-reported' },
     }),
 
     'juqode:open-project': async (e) => {

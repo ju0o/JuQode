@@ -46,6 +46,12 @@ export function renderSC01(root, api, nav, state) {
     main.appendChild(storeCard(state.store?.reason));
   }
 
+  /* WBS-33 · 원칙 2 — the build says whether it is signed, on the first screen after install.
+   * CF-21: no screen spec hosts this; SC-01 is chosen because it is the only screen with no
+   * project context and the moment a SmartScreen warning is still fresh. */
+  const sig = buildNotice(state.signature);
+  if (sig) main.appendChild(sig);
+
   /* Recent list — A-8 (Founder-pending, removable). SC-01 is complete without it. */
   const recent = el('section', 'recent');
   recent.setAttribute('data-el', 'recent');
@@ -85,6 +91,28 @@ export function renderSC01(root, api, nav, state) {
   }
 
   return { shell, main, openBtn };
+}
+
+/* The build's own signature (WBS-33).
+ *
+ * `16` §2.1 rules out almost everything here: red is the ONE red on this screen and belongs to
+ * a folder that could not be opened, amber fill means 부분 and amber outline means 대기, green ▸
+ * means a recovery action the user can take. An unsigned build is none of those — it is JuQode
+ * stating a fact about itself, so it wears JuQode's own teal. When the signature could not be
+ * judged at all it wears the dashed unknown instead, which is the same distinction D-114 draws.
+ *
+ * A development run returns nothing: `npm start` produces no distributed build, so there is no
+ * fact yet to disclose. That is the one case where silence is not hiding. */
+function buildNotice(sig) {
+  if (!sig || sig.state === 'not-applicable') return null;
+
+  const known = sig.state === 'unsigned';
+  const n = el('div', known ? 'buildnote' : 'buildnote unk');
+  n.setAttribute('data-el', 'build-signature');
+  n.setAttribute('data-state', sig.state);
+  n.appendChild(el('div', 't', known ? C.gap.unsignedTitle : C.gap.unsignedUnknown));
+  if (known) n.appendChild(el('div', 'sm', C.gap.unsignedBody));
+  return n;
 }
 
 /* 열 수 없음 — the one red on this screen (15 SC-01 Failure State):

@@ -71,6 +71,29 @@ fs.writeFileSync(path.join(SEED, 'node_modules', 'huge.js'), 'x'.repeat(1000));
 
 /* A fixture CLI, not the host's. Without this the WBS-09 assertions test a different code
  * path on every machine — and on a host with no Claude Code they pass carrying no information. */
+/* WBS-33 · two synthetic PE files, so the unsigned-build notice can be photographed.
+ *
+ * A source run is never `app.isPackaged`, so the notice is unreachable here without pointing
+ * the main process at a file. It reads the certificate table of whatever it is given, so these
+ * fixtures exercise the real parser — the screenshot below is of bytes being read, not of a
+ * hard-coded string. Structure only: a DOS stub, a PE signature, a PE32+ optional header, and
+ * data directory entry 4, whose SIZE field is the whole question. */
+function fixturePe(certSize) {
+  const b = Buffer.alloc(0x400);
+  b.write('MZ', 0);
+  b.writeUInt32LE(0x80, 0x3c);
+  b.writeUInt32LE(0x00004550, 0x80);          // 'PE\0\0'
+  b.writeUInt16LE(0x20b, 0x80 + 24);          // PE32+
+  const dir4 = 0x80 + 24 + 112 + 4 * 8;
+  b.writeUInt32LE(0x9000, dir4);              // RVA
+  b.writeUInt32LE(certSize, dir4 + 4);        // SIZE — 0 means no signature at all
+  return b;
+}
+const PE_UNSIGNED = path.join(DB_DIR, 'unsigned.exe');
+const PE_SIGNED   = path.join(DB_DIR, 'has-cert.exe');
+fs.writeFileSync(PE_UNSIGNED, fixturePe(0));
+fs.writeFileSync(PE_SIGNED, fixturePe(0x1a20));
+
 const FAKE_CLI = path.join(DB_DIR, 'claude');
 /* The same fixture also serves the Work loop: asked to run a session it emits a stream that
  * ends in a permission REFUSAL, which is the D-133 state the screen has to render. */
@@ -407,7 +430,9 @@ const app = spawnApp([
        * and 90초 no test run would ever photograph either. `tests/loop.test.js` pins the
        * DEFAULTS, so shortening them here cannot become the product's answer. */
       JUQODE_QUIET_MS: '2500', JUQODE_CANCEL_CONFIRM_MS: '2000',
-      JUQODE_CLAUDE_BIN: FAKE_CLI, JUQODE_INTERPRET_DELAY_MS: '2500' } });
+      JUQODE_CLAUDE_BIN: FAKE_CLI, JUQODE_INTERPRET_DELAY_MS: '2500',
+      /* WBS-33 · the notice this run has to photograph. */
+      JUQODE_SIGNATURE_EXE: PE_UNSIGNED } });
 app.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
 const stopApp = () => killTree(app.pid);
 process.on('exit', stopApp);
@@ -549,6 +574,35 @@ const results = await cdp(async ({ send, evalJs }) => {
     strip.remove();
     return JSON.stringify({ chips: out, surfaces: surfacesByTheme });
   })()`);
+
+  /* WBS-33 · 서명되지 않은 빌드. `21` WBS-33 and `22` §95 require the build to say so and
+   * 원칙 2 forbids hiding it; CF-21 records that no screen spec hosts the sentence. The colour
+   * is measured, not asserted from the stylesheet: `16` §2.1 keeps red for failure alone, and
+   * a notice that drifted to red would still pass a source check on the CSS file. */
+  out.buildNotice = await evalJs(`(() => {
+    const n = document.querySelector('[data-el="build-signature"]');
+    if (!n) return JSON.stringify({ present: false });
+    const g = getComputedStyle(n), t = getComputedStyle(n.querySelector('.t'));
+    const fail = getComputedStyle(document.documentElement).getPropertyValue('--fail').trim();
+    return JSON.stringify({ present: true, state: n.getAttribute('data-state'),
+      text: n.innerText, titleColor: t.color, border: g.borderLeftColor,
+      failToken: fail });
+  })()`);
+  {
+    const b = JSON.parse(out.buildNotice);
+    assert.ok(b.present, 'WBS-33: the unsigned build says nothing about being unsigned');
+    assert.strictEqual(b.state, 'unsigned', 'the fixture has an empty certificate table');
+    assert.match(b.text, /서명되지 않은 빌드/, 'the notice must name the fact, not hint at it');
+    /* Red is the one colour this may never be (`16` §2.1). Measured from the rendered pixel
+     * values, both the title and the rule down the side. */
+    const rgb = (hex) => {
+      const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+      return m ? `rgb(${parseInt(m[1],16)}, ${parseInt(m[2],16)}, ${parseInt(m[3],16)})` : hex;
+    };
+    const failRgb = rgb(b.failToken);
+    assert.notStrictEqual(b.titleColor, failRgb, 'the notice is red — 16 §2.1 keeps red for failure');
+    assert.notStrictEqual(b.border, failRgb, 'the notice rule is red — 16 §2.1 keeps red for failure');
+  }
 
   for (const theme of ['light', 'dark']) {
     await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
@@ -2451,7 +2505,10 @@ console.log(JSON.stringify(results, null, 2));
   const PORT2 = PORT + 1;
   const app2 = spawnApp([
     '--no-sandbox', `--remote-debugging-port=${PORT2}`],
-    { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: bad, JUQODE_USER_DATA: USER_DATA } });
+    { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: bad, JUQODE_USER_DATA: USER_DATA,
+      /* A certificate table that IS present but was never judged — the OTHER half of WBS-33's
+       * notice, and the one that must not borrow the certain sentence's words. */
+      JUQODE_SIGNATURE_EXE: PE_SIGNED } });
   const stop2 = () => killTree(app2.pid);
   process.on('exit', stop2);
   await sleep(4000);
@@ -2487,6 +2544,15 @@ console.log(JSON.stringify(results, null, 2));
     disabled: await ev2(`document.querySelector('[data-act="open-project"]').disabled`),
     reds:     await ev2(RED_COUNT('[data-el="store"] *')),
     walk:     await ev2(`(async () => JSON.stringify(await window.juqode.openPath('/etc')))()`),
+    /* WBS-33's OTHER half: a certificate table that is present but unjudged. This app was
+     * pointed at a fixture that has one, so the notice must say 확인 못함 and must NOT reuse
+     * the certain sentence — that would be the product claiming a check it never ran. */
+    sig:      await ev2(`(() => {
+      const n = document.querySelector('[data-el="build-signature"]');
+      if (!n) return JSON.stringify({ present: false });
+      return JSON.stringify({ present: true, state: n.getAttribute('data-state'),
+        text: n.innerText, dashed: getComputedStyle(n).borderLeftStyle });
+    })()`),
   };
   ws.close();
   stop2();
@@ -2506,6 +2572,15 @@ console.log(JSON.stringify(results, null, 2));
   assert.strictEqual(walk.ok, false);
   assert.strictEqual(walk.reason, 'no-store',
     'open-path with no store must answer, not reject — a rejected invoke blanks the window');
+  {
+    const sig = JSON.parse(refused.sig);
+    assert.ok(sig.present, 'a build whose signature could not be judged must still say so');
+    assert.strictEqual(sig.state, 'unknown');
+    assert.match(sig.text, /확인하지 못했어요/, '확인 못함 must be stated in its own words');
+    assert.ok(!/서명되지 않은 빌드/.test(sig.text),
+      'the unjudged state borrowed the certain sentence — that claims a check that did not run');
+    assert.strictEqual(sig.dashed, 'dashed', '16 §2.1: unknown is always dashed');
+  }
   fs.rmSync(badDir, { recursive: true, force: true });
   console.log('refused-store boot: PASS  ', JSON.stringify(refused));
 }

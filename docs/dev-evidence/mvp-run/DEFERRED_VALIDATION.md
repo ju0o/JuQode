@@ -42,6 +42,7 @@ exists it is recorded as a Linux measurement and is **not** carried across.
 | DV-13 | e2e 3종이 Windows 에서 통과하는가 — `launch.mjs` 의 `cmd.exe` 경로 · `taskkill` 정리 · 프로세스 집계 | WBS-01 · WBS-33 | D-125 | IMPLEMENTED_PENDING_VALIDATION | `npm run test:e2e` on Windows (배치 31 에서 리눅스만 측정) |
 | DV-14 | 패키징된 exe 의 로딩 실패가 단일 인스턴스 잠금 때문이었는지 — 누수를 없앤 뒤 재실행 | WBS-33 | `19` §V | UNRESOLVED_NEEDS_RERUN | `verify-windows.ps1` 재실행 (배치 31 이 진단만, 확정 못함) |
 | DV-15 | `windows-spikes.mjs` 가 왜 JSON 없이 죽었는가 | WBS-00 | `19` §C4 · §C6 | UNRESOLVED_NEEDS_RERUN | 하네스가 이제 종료 코드와 마지막 6줄을 보고한다 (배치 31) |
+| DV-16 | 패키징된 빌드에서 `app.getPath('exe')` 가 실제 JuQode.exe 를 가리키고 PE 인증서 테이블이 읽히는가 | WBS-33 | `21` WBS-33 · 원칙 2 | IMPLEMENTED_PENDING_VALIDATION | Windows 에서 설치본 실행 → SC-01 에 서명 고지가 뜨는지 (배치 32 는 합성 PE 로만 측정) |
 
 ### Why DV-9 and DV-10 exist
 

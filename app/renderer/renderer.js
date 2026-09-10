@@ -15,6 +15,8 @@ const root = document.getElementById('root');
 /* Two surfaces exist so far. Navigation is a re-render, not a framework: there is no
  * back stack in the MVP — `15` gives every screen an explicit entry action instead. */
 const state = { project: null, interpretation: null, recent: [], store: { ok: false }, claude: null,
+                /* WBS-33 · what boot said about THIS build's signature. */
+                signature: null,
                 workSnapshot: null, screen: 'SC-01',
                 /* SC-04's own selection. It lives here rather than in the screen because the
                  * screen is re-rendered on every click — a re-render is the navigation. */
@@ -125,6 +127,7 @@ const nav = {
     const b = await api.boot();
     state.store = b.store;
     state.recent = b.recent;
+    state.signature = b.signature ?? null;
     renderSC01(root, api, nav, state);
   },
 };

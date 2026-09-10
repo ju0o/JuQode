@@ -71,3 +71,31 @@
 .sc01 .recentlast { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .sc01 .recentlast .lbl { color: var(--mut2); flex: 0 0 auto; }
 .sc01 .recentlast .val { min-width: 0; overflow-wrap: anywhere; }
+
+/* WBS-33 · 서명되지 않은 빌드 (CF-21).
+ *
+ * NOT red: `16` §2.1 keeps `--fail` as the only red on the screen and gives it to the folder
+ * that could not be opened. NOT amber: fill means 부분 완료 and outline means 대기, and this is
+ * neither. It is JuQode saying something about itself, so it takes JuQode's teal — the same
+ * voice separation `17` enforces between JuQode and Claude everywhere else.
+ *
+ * Quiet on purpose. The screen's primary action is opening a folder; a build fact that shouts
+ * would compete with it, and 숨기지 않는다 asks for present, not loud. */
+.sc01 .buildnote {
+  width: 100%; max-width: 560px;
+  padding: 12px 14px;
+  background: var(--juqbg);
+  border: 1px solid var(--juq); border-left-width: 3px;
+  border-radius: var(--r-inner);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sc01 .buildnote .t { font-weight: 600; color: var(--juq); }
+.sc01 .buildnote .sm { color: var(--ink2); }
+
+/* 확인 못함 is a different claim from 서명되지 않음, so it is a different mark: the dashed
+ * unknown `16` §2.1 reserves for exactly this. */
+.sc01 .buildnote.unk {
+  background: var(--unkbg);
+  border: 1px dashed var(--unk);
+}
+.sc01 .buildnote.unk .t { color: var(--unk); font-weight: 500; }

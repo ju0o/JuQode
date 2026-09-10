@@ -379,6 +379,17 @@ export const C = {
      * is a 확인됨 claim and must not be used when the answer is unknown. */
     readerUnknown:    '이 작업이 무엇을 바꿨는지 여기서 확인하지 못했어요.',
     readerUnknownFiles: (files) => `바뀐 것으로 확인된 파일: ${files}`,
+    /* WBS-33 · the unsigned-build notice. `21` WBS-33 and `22` §95 require the product to say
+     * that a build is not signed — 숨기지 않는다 (원칙 2) — and NO screen spec gives that
+     * sentence a home, `18` no key, `16` no colour. Filed as CANON_FINDINGS CF-21.
+     *
+     * TWO sentences, because it is two states in D-114's vocabulary and one of them must not
+     * borrow the other's certainty: an empty PE certificate table is 확인됨 서명 없음, while a
+     * table we cannot judge is 확인 못함. Saying `서명되지 않았어요` for the second would be the
+     * product claiming a check it did not run. */
+    unsignedTitle:    '서명되지 않은 빌드예요',
+    unsignedBody:     'Windows 가 이 앱을 처음 열 때 경고를 보여 줄 수 있어요. 앱이 하는 일은 달라지지 않아요.',
+    unsignedUnknown:  '이 빌드가 서명되었는지 확인하지 못했어요.',
     /* `15` SC-04 Empty State names `▸ 결과 설명으로` · `▸ 다음 의도로`; `18` carries neither. */
     readerToResult:   '▸ 결과 설명으로',
     readerToIntent:   '▸ 다음 의도로',
