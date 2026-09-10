@@ -109,4 +109,7 @@
 .sc03 .claim .src { font-family: var(--font-mono); font-size: 10px; }
 
 /* 부분 완료 · 된 것 / 안 된 것 — two lists, because one of them alone is half an answer */
-.sc03 .itemlist { display: flex; flex-direction: column; gap: 2px; }
+.sc03 .itemlist { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+/* A chip is a LABEL, so it is as wide as its word. In a flex COLUMN it would otherwise stretch
+ * to the card and read as a band — which is a different thing in `16` §2.1's grammar. */
+.sc03 .itemlist .chip { align-self: flex-start; }

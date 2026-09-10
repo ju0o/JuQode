@@ -1223,6 +1223,33 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
 
+  /* ── `15` SC-03 부분 완료 — 된 것과 안 된 것, 둘 다 ────────────────────────────────────
+   * The most complex result state and the one WBS-18's acceptance is written about, and it had
+   * no rendered evidence: every Work in this run was either allowed through to 끝남 or
+   * cancelled before a tool ran. Here the refusal is NOT allowed — the user presses 그만두기 —
+   * and a tool DID run first, which is exactly 부분: something happened, something did not. */
+  step('partial result');
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '이름을 바꿔줘'; })()`);
+  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  await sleep(2500);
+  out.partialDenied = await evalJs('JSON.stringify(window.__work())');
+  await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.trim() === '그만두기')?.click()`);
+  await sleep(2500);
+  out.partialWork = await evalJs('JSON.stringify(window.__work())');
+  out.partialCard = await evalJs(`document.querySelector('.sc03 [data-card="result"]')?.innerText ?? null`);
+  out.partialDone = await evalJs(`document.querySelector('.sc03 [data-el="done"]')?.innerText ?? null`);
+  out.partialNotDone = await evalJs(`document.querySelector('.sc03 [data-el="not-done"]')?.innerText ?? null`);
+  out.partialReds = await evalJs(RED_COUNT('.sc03 [data-card="result"], .sc03 [data-card="result"] *'));
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(250);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc03-partial-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
+  await sleep(900);
+
   /* ── `15` SC-02 Unavailable State — 사용 불가 ≠ 실패 (12 §16) ────────────────────────────
    * `15` asks for 네 개의 복구 버튼, and they were a sentence saying they were not built until
    * WBS-04, 22 and 25 shipped. This is the first RENDERED evidence for the state: the real
@@ -2286,13 +2313,45 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
     `a cancel with no tool run reported ${ended.outcome}`);
 }
 
+/* ── `15` SC-03 부분 완료 — WBS-18's acceptance row, rendered ──────────────────────────── */
+{
+  const denied = JSON.parse(results.partialDenied);
+  assert.strictEqual(denied.status, 'permission_waiting',
+    `the second Work is ${denied.status}, so 그만두기 was never on screen`);
+  const w = JSON.parse(results.partialWork);
+  assert.strictEqual(w.status, 'ended');
+  /* A tool DID run before the refusal, so stopping there is 부분 — not 취소 · 변경 없음. */
+  assert.strictEqual(w.outcome, 'cancelled_partial',
+    `stopping after a tool had run reported ${w.outcome}`);
+
+  /* BOTH lists. `21` WBS-18's acceptance is exactly this, and it had no rendered evidence. */
+  assert.ok(results.partialNotDone, '부분 완료 drew no 못 한 것 list');
+  assert.ok(results.partialNotDone.includes('허용되지 않아서 하지 못한 것'),
+    `the 못 한 것 list does not name the refusal: ${results.partialNotDone}`);
+  assert.ok(results.partialDone, '부분 완료 drew no 한 것 list — it reads as "nothing was done"');
+  /* The evidence pair could not tell here, and the list SAYS so rather than being dropped
+   * (batch 18: an absent 한 것 list reads as a claim nobody made). */
+  assert.ok(/확인 못함|README|src\//.test(results.partialDone),
+    `the 한 것 list says neither what was done nor that it is unknown: ${results.partialDone}`);
+  /* 부분 is not a failure. `16` §2.1: red is failure alone. */
+  assert.strictEqual(results.partialReds, 0, '부분 완료 was painted as a failure');
+  assert.ok(results.partialCard.includes('취소했어요'),
+    `the result title is ${JSON.stringify(results.partialCard.split('\n')[0])}`);
+}
+
 assert.ok(results.recentLast, 'a recent row carries no last-Work summary (`15` UF-RETURN)');
 assert.ok(results.recentLast.includes('마지막 작업'),
   `the summary is not labelled: ${results.recentLast}`);
-/* The intent as the user typed it — whichever Work was last. Pinning one sentence made this
- * assertion a hostage to the order of the run's steps. */
-assert.ok(/(README\.md 의 첫 줄을 바꿔줘|설정 화면을 고쳐줘|고치는 작업)/.test(results.recentLast),
-  `the summary does not quote the user's own request: ${results.recentLast}`);
+/* The intent as the user typed it — whichever Work was last. Pinning ONE sentence made this a
+ * hostage to the order of the run's steps; the set is every request this file submits, so the
+ * assertion still fails if the row shows something nobody asked for. */
+{
+  const SUBMITTED = ['README.md 의 첫 줄을 바꿔줘', '설정 화면을 고쳐줘', '이름을 바꿔줘',
+                     '로그인 오류 고쳐줘', '결제 화면 문구 바꿔줘'];
+  const quoted = SUBMITTED.some((t) => results.recentLast.includes(t))
+    || /고치는 작업/.test(results.recentLast);           // the correction path prefills its own
+  assert.ok(quoted, `the summary quotes something nobody submitted: ${results.recentLast}`);
+}
 
 assert.strictEqual(results.recentAfterBack, 2, 'the recent list lost a row on return');
 assert.ok(results.recentTopAfterBack && results.recentTopAfterBack.endsWith(path.basename(SEED)),
