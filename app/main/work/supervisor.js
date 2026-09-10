@@ -45,8 +45,13 @@ const now = () => new Date().toISOString();
 
 /* `15` SC-03 names 2분 for 새 신호 없음 and 90초 for 취소 확인 불가. They are thresholds on
  * OBSERVED silence, which is a fact about us, not a judgement about the Work. */
-const QUIET_MS = 2 * 60 * 1000;
-const CANCEL_CONFIRM_MS = 90 * 1000;
+/* `15` names the two numbers and they are the defaults. The override exists so a test can
+ * REACH the states — 새 신호 없음 and 취소 확인 불가 are defined by elapsed silence, and a run
+ * that had to wait two real minutes for each would never photograph either. Same convention as
+ * `JUQODE_CLAUDE_TIMEOUT_MS`; `tests/loop.test.js` pins the defaults so an override cannot
+ * quietly become the product's answer. */
+const QUIET_MS = Number(process.env.JUQODE_QUIET_MS) || 2 * 60 * 1000;
+const CANCEL_CONFIRM_MS = Number(process.env.JUQODE_CANCEL_CONFIRM_MS) || 90 * 1000;
 
 const sinceMs = (iso) => (iso ? Date.now() - new Date(iso).getTime() : 0);
 
@@ -699,8 +704,12 @@ function confirmCancel(db, workId, onUpdate) {
  * screen could never show them: the only event that would deliver the news is the event that
  * makes it untrue. This is the one place a timer is legitimate, and it measures silence since
  * the last OBSERVED fact — never how far along anything is.
+ *
+ * The interval is never coarser than HALF the threshold it is judging. At the shipped 2분 that
+ * is the same 15 s it always was; with a shortened threshold the state would otherwise appear
+ * up to a full tick late, which is a screen that is wrong for as long as the tick is long.
  */
-function watchQuiet(db, onUpdate, { everyMs = 15_000 } = {}) {
+function watchQuiet(db, onUpdate, { everyMs = Math.min(15_000, Math.floor(QUIET_MS / 2)) } = {}) {
   const tick = setInterval(() => {
     for (const [workId] of live) {
       const snap = snapshot(db, workId);

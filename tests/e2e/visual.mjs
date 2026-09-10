@@ -382,6 +382,11 @@ for (const port of [PORT, PORT + 1]) {
 const app = spawn('xvfb-run', ['-a', path.join(ROOT, 'node_modules', '.bin', 'electron'), '.',
   '--no-sandbox', `--remote-debugging-port=${PORT}`],
   { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA,
+      /* `15`'s two silence thresholds, shortened so this run can REACH the states they define.
+       * 새 신호 없음 and 취소 확인 불가 are elapsed silence by definition; at the shipped 2분
+       * and 90초 no test run would ever photograph either. `tests/loop.test.js` pins the
+       * DEFAULTS, so shortening them here cannot become the product's answer. */
+      JUQODE_QUIET_MS: '2500', JUQODE_CANCEL_CONFIRM_MS: '2000',
       JUQODE_CLAUDE_BIN: FAKE_CLI, JUQODE_INTERPRET_DELAY_MS: '2500' } });
 app.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
 const stopApp = () => { try { process.kill(-app.pid, 'SIGKILL'); } catch { /* already gone */ } };
@@ -1142,12 +1147,28 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(2500);
   out.cancelScreen = await evalJs('window.__screen()');
   out.cancelBefore = await evalJs('JSON.stringify(window.__work())');
-  /* `15` DS §1: ONE cancel on the screen, ink-outlined, with its fixed sub-line. */
+
+  /* ① 새 신호 없음 — `15` SC-03 · WBS-15. The child started and then said nothing. This is the
+   * one place a timer is legitimate, and the panel's whole content is a refusal to judge. */
+  await sleep(3500);
+  out.quietPanel = await evalJs(`document.querySelector('.sc03 [data-el="quiet"]')?.innerText ?? null`);
+  out.quietReds = await evalJs(RED_COUNT('.sc03 [data-el="quiet"], .sc03 [data-el="quiet"] *'));
+  out.quietPresence = await evalJs(`document.querySelector('[data-card="presence"] canvas')?.getAttribute('data-mode')`);
+  out.quietChip = await evalJs(`document.querySelector('.sc03 [data-card="work"] .chip')?.textContent ?? null`);
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(250);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc03-quiet-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+
+  /* ② 취소 요청했어요 — `15` DS §1: ONE cancel, ink-outlined, with its fixed sub-line. */
   out.cancelButtons = await evalJs(`JSON.stringify([...document.querySelectorAll('.sc03 button')]
     .filter(b => b.textContent.includes('취소')).map(b => [b.className, b.textContent]))`);
   out.cancelSub = await evalJs(`document.querySelector('.sc03 .cancelrow .mut2')?.textContent ?? null`);
   await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.trim() === '이 작업 취소')?.click()`);
-  await sleep(1200);
+  await sleep(900);
   out.cancelAfter = await evalJs('JSON.stringify(window.__work())');
   out.cancelBand = await evalJs(`[...document.querySelectorAll('.sc03 .panel')]
     .map(n => n.innerText).find(t => t.includes('취소를 요청했어요')) ?? null`);
@@ -1160,10 +1181,16 @@ const results = await cdp(async ({ send, evalJs }) => {
     fs.writeFileSync(path.join(OUT, `sc03-cancel-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+
+  /* ③ 멈췄는지 확인할 수 없어요 — the stop was ASKED FOR and not seen. `07` §8.1 is why this
+   * state exists at all: a cancelled child can exit 0, so "we asked" is not "it stopped". */
+  await sleep(2500);
+  out.unconfPanel = await evalJs(`document.querySelector('.sc03 [data-el="cancel-unconfirmed"]')?.innerText ?? null`);
+  out.unconfReds = await evalJs(RED_COUNT('.sc03 [data-el="cancel-unconfirmed"], .sc03 [data-el="cancel-unconfirmed"] *'));
+
   fs.rmSync(path.join(DB_DIR, 'stubborn'));
-  /* Let the app finish stopping it before the run continues; the child ignores TERM, so this
-   * is the SIGKILL escalation doing its job. */
-  await sleep(6000);
+  /* Let the SIGKILL escalation finish; the child ignores TERM, which is the point of it. */
+  await sleep(7000);
   out.cancelEnded = await evalJs('JSON.stringify(window.__work())');
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
@@ -2134,6 +2161,24 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
   }
 }
 
+/* ── `15` SC-03 · WBS-15 — 새 신호 없음 ──────────────────────────────────────────────────
+ * The panel's whole content is a refusal to judge, so what it does NOT say is the assertion. */
+{
+  assert.ok(results.quietPanel, '새 신호 없음 has no rendered evidence — the state is unreachable');
+  assert.ok(results.quietPanel.includes('멈춘 건지 일하는 중인지 JuQode는 판단하지 않아요'),
+    `the panel judges instead of reporting: ${results.quietPanel}`);
+  assert.ok(results.quietPanel.includes('마지막 활동'),
+    'the panel does not say what was last SEEN');
+  /* NOT a failure and NOT a judgement: `12` §16, and `16` §2.1 keeps red for failure alone. */
+  assert.strictEqual(results.quietReds, 0, '새 신호 없음 was painted as a failure');
+  /* The chip still says 진행 중 — silence is not a state change, it is the absence of one. */
+  assert.strictEqual(results.quietChip, '진행 중',
+    `a silent Work's chip says ${JSON.stringify(results.quietChip)}`);
+  /* `17` P-03: the presence reduces its motion rather than adding any. */
+  assert.strictEqual(results.quietPresence, 'nosignal',
+    `the presence shows ${results.quietPresence} for a Work that has gone quiet`);
+}
+
 /* ── `15` SC-03 · WBS-16 — 취소 요청했어요 ─────────────────────────────────────────────── */
 {
   assert.strictEqual(results.cancelScreen, 'SC-03', 'a Work that keeps running did not reach SC-03');
@@ -2161,6 +2206,16 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
     `the chip says ${JSON.stringify(results.cancelChip)} — 요청했다 is not 멈췄다`);
   /* NOT RED: `16` §2.1 keeps red for failure, and a cancel the user asked for is not one. */
   assert.strictEqual(results.cancelReds, 0, 'a requested cancel was painted as a failure');
+
+  /* …and when the stop is asked for and not SEEN — `07` §8.1 is why this state exists: a
+   * cancelled child can exit 0, so "we asked" is never "it stopped". */
+  assert.ok(results.unconfPanel, '멈췄는지 확인할 수 없어요 has no rendered evidence');
+  assert.ok(results.unconfPanel.includes('아직 실행 중일 수 있어요'),
+    `the panel claims the stop happened: ${results.unconfPanel}`);
+  assert.ok(results.unconfPanel.includes('▸ 계속 기다리기') && results.unconfPanel.includes('▸ 보인 것 확인하기'),
+    `the panel offers no way forward: ${results.unconfPanel}`);
+  assert.strictEqual(results.unconfReds, 0,
+    'an unconfirmed stop was painted as a failure — nobody has established that anything failed');
 
   /* And once the child is actually gone: `07` §8.1 — a cancelled child can exit 0, so the
    * outcome comes from what was OBSERVED. No tool ran, so nothing was changed. */

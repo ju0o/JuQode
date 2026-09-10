@@ -14,6 +14,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const R = path.resolve(__dirname, '..');
+const { code: read } = require(path.join(__dirname, 'src.js'));
 const { code: srcOf } = require(path.join(__dirname, 'src.js'));
 
 /* Every fixture directory this file makes, removed when the file finishes. The suite leaked one
@@ -733,6 +734,12 @@ test('liveness is measured from the last OBSERVED signal, and only that', async 
   /* A literal offset, not one built from the constant under test — that made the threshold
    * itself unassertable: `QUIET_MS = 1e15` kept this green. */
   assert.strictEqual(supervisor.QUIET_MS, 2 * 60 * 1000, '`15` names 2분 for 새 신호 없음');
+  /* …and the env override that lets the e2e reach the state cannot become the DEFAULT. A
+   * shorter threshold shipped by accident would call a working Work quiet. */
+  assert.ok(!process.env.JUQODE_QUIET_MS, 'this suite is running with the threshold overridden');
+  assert.match(read('app/main/work/supervisor.js'),
+    /const QUIET_MS = Number\(process\.env\.JUQODE_QUIET_MS\) \|\| 2 \* 60 \* 1000;/,
+    'the default is no longer `15`\'s 2분');
   const entry = supervisor.live.get(r.workId);
   entry.state = { ...entry.state, lastObserved: { kind: 'tool_use', at: new Date(Date.now() - 121_000).toISOString() } };
   assert.strictEqual(supervisor.snapshot(db, r.workId).liveness, 'quiet');
@@ -811,6 +818,10 @@ sleep 20
   assert.strictEqual(supervisor.snapshot(db, r.workId).cancelUnconfirmed, false, 'it has only just been asked');
 
   assert.strictEqual(supervisor.CANCEL_CONFIRM_MS, 90 * 1000, '`15` names 90초 for 취소 확인 불가');
+  assert.ok(!process.env.JUQODE_CANCEL_CONFIRM_MS, 'this suite is running with the threshold overridden');
+  assert.match(read('app/main/work/supervisor.js'),
+    /const CANCEL_CONFIRM_MS = Number\(process\.env\.JUQODE_CANCEL_CONFIRM_MS\) \|\| 90 \* 1000;/,
+    'the default is no longer `15`\'s 90초');
   const entry = supervisor.live.get(r.workId);
   entry.state = { ...entry.state, cancelRequestedAt: new Date(Date.now() - 91_000).toISOString() };
   const snap = supervisor.snapshot(db, r.workId);
