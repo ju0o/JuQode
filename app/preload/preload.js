@@ -33,6 +33,14 @@ contextBridge.exposeInMainWorld('juqode', {
   qcStop:  (projectId) => ipcRenderer.invoke('juqode:qc-stop', projectId),
   qcRuns:  (projectId) => ipcRenderer.invoke('juqode:qc-runs', projectId),
 
+  /* WBS-25 · TD-01 의 셸 명령줄 (DV-11: 파이프 셸). `19` §C4: 사용자가 사용자로 실행한다 —
+   * 채널은 이름이 정해진 셋이고, 그 어느 것도 채널 이름을 인자로 받지 않는다. 셸이 있다는 것과
+   * 렌더러가 임의의 코드를 부를 수 있다는 것은 다른 말이다. */
+  termOpen:  (projectId) => ipcRenderer.invoke('juqode:term-open', projectId),
+  termWrite: (projectId, line) => ipcRenderer.invoke('juqode:term-write', projectId, line),
+  /** 작업 제어가 없어 명령 하나만 끊을 수 없다 — 이것은 세션을 끝낸다. */
+  termStop:  (projectId) => ipcRenderer.invoke('juqode:term-stop', projectId),
+
   /** WBS-09 — is Claude Code usable right now, and if not, why. Never carries credentials. */
   claudeStatus: () => ipcRenderer.invoke('juqode:claude-detect'),
 
@@ -73,6 +81,12 @@ contextBridge.exposeInMainWorld('juqode', {
     const handler = (_e, update) => fn(update);
     ipcRenderer.on('juqode:qc-update', handler);
     return () => ipcRenderer.removeListener('juqode:qc-update', handler);
+  },
+  /** WBS-25 — the shell line's output, as it arrives. Same shape, its own channel. */
+  onTermUpdate: (fn) => {
+    const handler = (_e, update) => fn(update);
+    ipcRenderer.on('juqode:term-update', handler);
+    return () => ipcRenderer.removeListener('juqode:term-update', handler);
   },
 
 });

@@ -94,6 +94,12 @@ if (!app.requestSingleInstanceLock()) {
     if (!u) return;
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:qc-update', u);
   };
+  /* WBS-25 · the shell line's own channel. A terminal update is not a Quick Command update:
+   * TD-01 draws them in different places and a shared channel would redraw the wrong card. */
+  const pushTerm = (u) => {
+    if (!u) return;
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:term-update', u);
+  };
 
   const handlers = makeHandlers({
     db: () => db,
@@ -101,6 +107,7 @@ if (!app.requestSingleInstanceLock()) {
     evidenceStore: (projectId) => path.join(evidenceRoot(), projectId),
     push: pushUpdate,
     pushQc,
+    pushTerm,
     windowFor: (e) => BrowserWindow.fromWebContents(e.sender),
     versions: () => ({
       app: app.getVersion(),
@@ -180,6 +187,9 @@ if (!app.requestSingleInstanceLock()) {
        * its parent — quitting left vite holding the port, with JuQode unable to stop the server
        * it had started because the handle went with the process that held it. */
       try { handlers.__stopAllQc?.(); } catch { /* nothing running */ }
+      /* WBS-25 · and the shell. It is detached, it holds the user's environment, and after a
+       * quit nothing on screen could ever stop it again. */
+      try { handlers.__stopAllTerm?.(); } catch { /* no session */ }
     });
 
     /* The quiet states are defined by the absence of a signal, so only a clock can deliver

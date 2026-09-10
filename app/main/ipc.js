@@ -19,6 +19,7 @@ const narrate = require('./interpret/narrate');
 const qcRules = require('./qc/rules');
 const qcAvail = require('./qc/availability');
 const qcRun = require('./qc/run');
+const term = require('./term/session');
 const { classify } = require('./router/intent');
 const { scan } = require('./interpret/scan');
 const { answers, statusOf } = require('./interpret/answers');
@@ -84,6 +85,15 @@ function makeHandlers(deps) {
    * in their OWN child processes **so the drawer stays usable** — a dev server must not stop the
    * user from asking for `git status`. What is refused is a second run of the SAME rule. */
   const qcLive = new Map();
+  /* WBS-25 · `19` §C6 REC-010: 프로젝트당 셸 하나 · 첫 열기에 게으르게 · 서랍을 닫아도 살아
+   * 있고 · 프로젝트가 바뀌면 종료. 그래서 이것은 Map 이 아니라 **하나**다 — 두 개가 동시에
+   * 있을 수 있는 자료구조를 두면 "프로젝트가 바뀌면 종료" 가 규칙이 아니라 습관이 된다. */
+  let termLive = null;                    // { projectId, session } | null
+  const termClose = () => {
+    if (!termLive) return;
+    try { termLive.session.stop(); } catch { /* already gone */ }
+    termLive = null;
+  };
   const liveFor = (projectId) => [...qcLive.values()].filter((e) => e.projectId === projectId);
   /* …and with a narrative pass in flight (`19` §C1 ⑦). Both spawn a Claude Code child. */
   const narrating = new Set();
@@ -337,6 +347,58 @@ function makeHandlers(deps) {
       return { ok: true, runId: live.runId };
     },
 
+    /* ── WBS-25 · TD-01 의 셸 명령줄 (DV-11: 파이프 셸 · PM 2026-09-10) ──────────────────
+     *
+     * `19` §C4: 이 줄은 **사용자가 사용자로 실행한다.** 여기에 검사·차단·정정이 없는 것은
+     * 빠뜨린 것이 아니라 계약이다 — 걸러내는 척하는 제품은 걸러내지 못한 것을 안전하다고
+     * 가르친다. 대신 제품은 닫을 수 없는 배너와 `limits` 로 무엇이 안 되는지 말한다.
+     *
+     * Quick Command 와 같은 채널에 두지 않는다: 저쪽은 argv 고정에 셸이 없고, 이쪽은 셸이다.
+     * 채널이 하나면 그 차이가 사라진다. */
+    'juqode:term-open': (_e, projectId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const row = db().prepare('select * from project where id = ?').get(projectId);
+      if (!row) return { ok: false, reason: 'no-project' };
+      /* 프로젝트가 바뀌면 앞의 세션은 끝난다 — REC-010. 사용자가 A 에서 `cd` 해 둔 셸에
+       * B 의 명령을 치게 두는 것은 Quick Command 카드가 프로젝트를 건너가던 것과 같은 결함이다
+       * (배치 12 HIGH). */
+      if (termLive && termLive.projectId !== projectId) termClose();
+      /* 게으르게: 이미 있으면 그것을 돌려준다. 서랍을 닫았다 여는 것으로 맥락이 사라지지 않는다. */
+      if (!termLive) {
+        const session = term.open({
+          cwd: row.path,
+          onUpdate: (u) => deps.pushTerm?.({ projectId, ...u }),
+        });
+        termLive = { projectId, session };
+        /* 셸이 스스로 끝나는 것(사용자의 `exit`, 크래시)도 상태다. 붙들고 있으면 다음 열기가
+         * 죽은 셸을 돌려준다. */
+        session.done.then(() => { if (termLive?.session === session) termLive = null; })
+          .catch(() => { if (termLive?.session === session) termLive = null; });
+      }
+      const s = termLive.session;
+      return { ok: true, id: s.id, cwd: s.cwd, pid: s.pid, limits: s.limits, busy: s.busy() };
+    },
+
+    'juqode:term-write': (_e, projectId, line) => {
+      /* 저장소가 거절된 상태에서는 어떤 채널도 행동하지 않는다 — 세션은 프로젝트를 연 뒤에만
+       * 존재할 수 있고, 프로젝트를 여는 것 자체가 저장소를 필요로 한다. */
+      const gate = needDb();
+      if (gate) return gate;
+      if (!termLive || termLive.projectId !== projectId) return { ok: false, reason: 'not-open' };
+      return termLive.session.write(line);
+    },
+
+    /* 작업 제어가 없으므로 이것은 명령 하나가 아니라 **세션을 끝낸다**(실측: 제어 터미널 없음).
+     * 화면이 그렇게 말해야 하고, 이 이름이 `term-interrupt` 가 아닌 이유가 그것이다. */
+    'juqode:term-stop': (_e, projectId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      if (!termLive || termLive.projectId !== projectId) return { ok: false, reason: 'not-open' };
+      termClose();
+      return { ok: true };
+    },
+
     /* WBS-22 · this project's Quick Command history. */
     'juqode:qc-runs': (_e, projectId) => {
       const gate = needDb();
@@ -498,6 +560,14 @@ function makeHandlers(deps) {
       }
       return n;
     },
+  });
+
+  /* …and the shell. It is detached and holds the user's own environment; a JuQode that quits
+   * without stopping it leaves a shell running in their project directory with nothing on
+   * screen that could ever stop it again. */
+  Object.defineProperty(handlers, '__stopAllTerm', {
+    enumerable: false,
+    value: () => { const n = termLive ? 1 : 0; termClose(); return n; },
   });
 
   return handlers;

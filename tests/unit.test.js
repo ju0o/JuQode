@@ -259,10 +259,19 @@ test('capability containment: each privileged capability lives in exactly one mo
          qc/run         — WBS-22's Quick Command, from `qc/availability`'s argv: `<pm> run
                           <script>` with the script name from a closed list, or a fixed vector.
                           Never a shell, and never anything the user typed (`19` §C4) */
+    /* …and a FIFTH, added when DV-11 was judged (PM · 2026-09-10 · pipe shell):
+         term/session  — WBS-25 · `15` TD-01's Primary Action. This is the ONE place in the
+                         product with a shell, and the one place where what runs is what the
+                         USER typed. `19` §C4 makes that explicit rather than hiding it: the
+                         product does not filter and does not pretend to. Keeping it in a file
+                         of its own is what makes "where can a typed string reach a shell?"
+                         answerable in one place — everything else spawns an argv. */
     'child_process':  ['app/main/claude-detect.js', 'app/main/claude/session.js',
-                       'app/main/evidence/git.js', 'app/main/qc/run.js'],
+                       'app/main/evidence/git.js', 'app/main/qc/run.js',
+                       'app/main/term/session.js'],
     'execFile':       ['app/main/claude-detect.js', 'app/main/evidence/git.js'],
-    'spawn(':         ['app/main/claude/session.js', 'app/main/qc/run.js'],
+    'spawn(':         ['app/main/claude/session.js', 'app/main/qc/run.js',
+                       'app/main/term/session.js'],
     /* the ONLY synchronous spawn in the product: Windows cancel, which has no process group
        to signal and so must call `taskkill /T` on the child's own pid */
     'spawnSync(':     ['app/main/claude/session.js'],

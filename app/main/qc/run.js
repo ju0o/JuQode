@@ -228,4 +228,7 @@ function stopGroup(child) {
   child.once('exit', () => clearTimeout(timer));
 }
 
-module.exports = { start, mask, tail, OUTPUT_LIMIT, TAIL_LINES, STOP_GRACE_MS, DRAIN_MS, TOKENISH };
+/* `stopGroup` is exported for `../term/session.js`: the terminal line's 멈추기 is the SAME
+ * contract (SIGTERM → 5 s → SIGKILL, guarded against a reused pid), and a second copy of it
+ * would be a second thing to get wrong. */
+module.exports = { start, mask, tail, stopGroup, OUTPUT_LIMIT, TAIL_LINES, STOP_GRACE_MS, DRAIN_MS, TOKENISH };

@@ -1892,8 +1892,9 @@ const bridge = JSON.parse(results.bridge);
 assert.strictEqual(results.ready, true, 'renderer did not initialise');
 assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.screen}`);
 assert.deepStrictEqual(bridge.keys.sort(),
-  ['boot', 'brief', 'claudeStatus', 'history', 'interpret', 'onQcUpdate', 'onWorkUpdate',
-   'openPath', 'openProject', 'qcList', 'qcRoute', 'qcRun', 'qcRuns', 'qcStop', 'routeIntent',
+  ['boot', 'brief', 'claudeStatus', 'history', 'interpret', 'onQcUpdate', 'onTermUpdate',
+   'onWorkUpdate', 'openPath', 'openProject', 'qcList', 'qcRoute', 'qcRun', 'qcRuns', 'qcStop',
+   'routeIntent', 'termOpen', 'termStop', 'termWrite',
    'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges', 'workExplain', 'workGet',
    'workReader', 'workSignals', 'workStart'],
   'renderer API surface is not exactly the declared one');
