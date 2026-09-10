@@ -17,9 +17,10 @@ Last checkpoint: batch 35 (renderer mutants: zero survivors). Working tree clean
 Read RESUME.md first. There is NO blocker.
 
 Queue, in order:
-  1. §3 — 문구 검사의 구멍: 미사용 키를 `\b<key>\b` 로 찾아서 **이름이 겹치면 통과**한다
-     (`startFail.resubmit` 이 그렇게 숨어 있었다). 전체 경로로 찾도록 고칠 것.
-  2. §4 — 남은 것: 마커 천장 · Windows 자리표시. 둘 다 알고 남긴 것이다.
+  1. §3 — 문구 백로그 11개. 검사가 전체 경로를 보게 되면서 드러났고 전부 PENDING 에 이유와
+     함께 적혀 있다(`tests/unit.test.js`). 넷은 이미 렌더되는 문구의 두 번째 이름이라
+     `18` 에 되물을 것이고, 일곱은 `15` 가 이름 붙인 미구현 컨트롤이다.
+  2. §4 — 셸 줄에 남은 것: 마커 천장 · Windows 자리표시. 둘 다 알고 남긴 것이다.
   3. §5 — WBS-32(사람 검증) · DV-13~16(Windows). 둘 다 PM 이 "나중" 으로 판정했다.
 살아 있는 렌더러 뮤턴트는 0 이다. 셸 줄(WBS-25)도 Linux 에서는 구멍이 닫혔다.
 
@@ -70,10 +71,20 @@ Continue now.
 SC-01 의 나가는 길 둘에 표시가 없던 것과, **시작 실패 카드에 누를 것이 하나도 없던 것**을
 찾아 같이 고쳤다.
 
-**새로 발견한 구멍 하나 — 다음 큐:** 문구 검사가 미사용 키를 `\b<key>\b` 로 찾는다. 키 이름이
-겹치면(`startFail.resubmit` · `work.resubmit` · `unavailable.resubmit`) 하나만 쓰여도 셋 다
-사용됨으로 통과한다. 그래서 렌더되지 않는 컨트롤이 하나 숨어 있었다. 전체 경로로 찾도록
-고치면 같은 종류가 더 나올 수 있다.
+**문구 검사의 구멍은 고쳤다** (`BATCH-35-QA.md` §6): 이제 **전체 경로**(`C.a.b.c`)로 찾고,
+정당한 예외 둘은 이름이 아니라 접근 방식으로 판정한다 — 계산된 인덱스, 그리고 통째로 넘긴
+부모(`mountThemeToggle(bar, C.theme)`).
+
+열두 개가 숨어 있었다. 하나는 진짜 결함이었고(액터 칩이 `'JUQODE'` 를 하드코딩 — `18` 에 없는
+낱말이다. 낱말은 사전에서, 대문자는 스타일시트에서로 옮겼다), 나머지 열하나는 지우지 않고
+전부 이유와 함께 PENDING 에 적었다.
+
+**다음 큐 — 문구 백로그 11개:**
+- 이미 렌더되는 문구의 **두 번째 이름** 넷 (`presence.title` · `work.observed` · `work.open` ·
+  `qc.kicker`). 화면은 한 번만 말할 수 있으므로 `18` 에 되물을 후보다.
+- `15` 가 이름 붙였지만 **아직 안 만든 컨트롤** 일곱 (`guard.answer` · `work.now` ·
+  `work.requested` · `work.resubmit` · `qc.terminal` · `term.out`, 그리고 `guard.wait` 는
+  **보류가 아니라 결정**이다 — 기다리기는 아무것도 누르지 않으면 일어나는 일이다).
 
 **배치 35 가 비싸게 배운 것 둘:**
 - **조용히 건너뛰는 길이 검사는 검사가 아니다.** sc04 뮤턴트 셋이 첫 시도에서 살아남았다 —
