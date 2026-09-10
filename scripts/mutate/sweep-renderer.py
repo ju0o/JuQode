@@ -12,6 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 S = os.environ.get('SWEEP_DIR') or os.path.join(REPO, '.mutate-work')
 WORKERS = int(os.environ.get('W', '2'))
+# A timeout is counted as a KILL, so a ceiling below the honest run time turns every mutant
+# into a false kill. The suite grows; this is the ceiling for a HUNG run, not a budget.
+E2E_TIMEOUT = int(os.environ.get('E2E_TIMEOUT', '900'))
 FILES = sys.argv[1:]
 
 def sites(rel):
@@ -69,7 +72,7 @@ def run_one(pair):
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, start_new_session=True)
             try:
-                out, _ = proc.communicate(timeout=420)
+                out, _ = proc.communicate(timeout=E2E_TIMEOUT)
                 killed = proc.returncode != 0 or 'visual+behaviour: PASS' not in out
             except subprocess.TimeoutExpired:
                 # start_new_session + killpg, or per-file `node tests/*.test.js` children
@@ -85,6 +88,21 @@ def run_one(pair):
 allsites = []
 for f in FILES:
     allsites += sites(f)
+# ONLY=<a previous results.json> re-runs just that sweep's SURVIVORS — the only way to say what
+# a new test actually killed. Sites are matched on themselves (file · operator · surrounding
+# code), never on an index: the files have changed since, and a survivor whose code is gone must
+# be REPORTED missing rather than silently counted as killed.
+only = os.environ.get('ONLY')
+if only:
+    prev = json.load(open(only))
+    want = {(r['rel'], r['old'], r['new'], r['ctx']) for r in prev if not r['killed']}
+    key = lambda s: (s['rel'], s['old'], s['new'], ' '.join(s['ctx'].split())[:110])
+    allsites = [s for s in allsites if key(s) in want]
+    missing = want - {key(s) for s in allsites}
+    print(f'{len(want)} survivors recorded, {len(allsites)} still present', flush=True)
+    for m in sorted(missing):
+        print(f'GONE      {m[0]}  {m[1]!r} -> {m[2]!r}\n          {m[3]}', flush=True)
+
 print(f'{len(allsites)} renderer mutants across {len(FILES)} files, {WORKERS} workers', flush=True)
 
 results = []

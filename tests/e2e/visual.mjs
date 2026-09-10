@@ -47,7 +47,11 @@ const SEED = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-seed-
  * JuQode's own and does not depend on .gitignore (19 §C1 ④). */
 fs.writeFileSync(path.join(SEED, 'package.json'), JSON.stringify({
   name: 'seed-app', main: 'src/index.js',
-  scripts: { dev: 'vite', build: 'vite build', test: 'node --test' },
+  /* `dev` STAYS UP. It was `vite`, which is not installed here and dies the instant it is
+   * spawned, so 계속 실행 중 · 이미 켜져 있음 — two of TD-01's states — were unreachable and
+   * nine td01 mutants survived in the branches that draw them. `build` is still `vite build`,
+   * and it is what produces the FAILED state, so the fixture keeps both kinds of ending. */
+  scripts: { dev: 'node -e "setInterval(() => {}, 1000)"', build: 'vite build', test: 'node --test' },
   dependencies: { vite: '^5.0.0' },
 }, null, 2));
 fs.writeFileSync(path.join(SEED, 'package-lock.json'), '{"lockfileVersion":3}');
@@ -1322,6 +1326,73 @@ const results = await cdp(async ({ send, evalJs }) => {
     fs.writeFileSync(path.join(OUT, `td01-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
 
+  /* ── the four states a Quick Command has that a `git status` never reaches ──────────────
+   * 계속 실행 중 · 이미 켜져 있음 · 실패 · 그리고 아무것도 띄우지 않는 고정 동작.
+   *
+   * FOUND BY MUTATION: nine td01 mutants survived the batch-33 sweep and every one of them
+   * lives in a branch below — `r.kind === 'long_running'` (켜 둔 채로 다음 요청),
+   * `r.reason === 'already_running'` (the pid line), `r.state === 'failed'` (▸ Work 로 요청 and
+   * the red re-run), `id === 'qc.terminal.open'` (the fixed action's 실행할 명령), and
+   * `id === 'qc.dev.stop' && r.data?.pid` (the pid the signal would go to). None of them had
+   * ever been drawn, because the fixture's dev script could not stay up. */
+  const qcSend = async (phrase) => {
+    await evalJs(`(() => { document.querySelector('[data-el="qc-input"]').value = ${JSON.stringify(phrase)}; })()`);
+    await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
+    await sleep(800);
+  };
+  const qcConfirm = () => evalJs(`[...document.querySelectorAll('[data-el="qc-card"] button')].find(b => b.textContent.trim() === '실행')?.click()`);
+  const qcCardNow = () => evalJs(`(() => {
+    const n = document.querySelector('[data-el="qc-card"]');
+    return n ? JSON.stringify({ kind: n.getAttribute('data-kind'), text: n.innerText,
+      acts: [...n.querySelectorAll('button')].map(b => b.textContent.trim()) }) : null; })()`);
+  const qcRunNow = () => evalJs(`(() => {
+    const n = document.querySelector('[data-el="qc-run"]');
+    return n ? JSON.stringify({ state: n.getAttribute('data-state'), text: n.innerText,
+      reds: ${RED_COUNT('[data-el="qc-run"], [data-el="qc-run"] *')},
+      acts: [...n.querySelectorAll('button')].map(b => b.textContent.trim()) }) : null; })()`);
+
+  await qcSend('개발서버 켜줘');
+  out.qcDevCard = await qcCardNow();
+  await qcConfirm();
+  await sleep(3000);
+  out.qcDevRunning = await qcRunNow();
+
+  /* …and asking for it AGAIN while it is up. `19` §C4: 사용 불가 with the reason and the pid,
+   * which is the one thing that tells the user WHICH server the product means. */
+  await qcSend('개발서버 켜줘');
+  out.qcAlready = await qcCardNow();
+
+  /* A run that FAILS — `vite build` with no vite. `15` TD-01 실패: ▸ 다시 실행 AND ▸ Work 로
+   * 요청, because a failed build with only a re-run button leaves the user with the same
+   * button. This is also the first FAILED Quick Command the suite has ever drawn. */
+  await qcSend('빌드해줘');
+  await qcConfirm();
+  await sleep(6000);
+  out.qcFailedRun = await qcRunNow();
+
+  /* The fixed action that spawns nothing: its 실행할 명령 line is the ACTION, and a card that
+   * showed nothing there would be asking the user to confirm a blank. */
+  await qcSend('터미널 열어줘');
+  out.qcTerminalCard = await qcCardNow();
+
+  /* …and stopping the server, which is the same explain-then-confirm path (F-C4-05) and the
+   * only card that names the pid it is about to signal. It also has to happen: a dev server
+   * left up outlives the app, and this run started it. */
+  await qcSend('서버 꺼줘');
+  out.qcStopCard = await qcCardNow();
+  await qcConfirm();
+  /* No sleep: 멈춤 요청함 is a state the card passes THROUGH, and this fixture's server is a
+   * bare `setInterval` that is gone the moment SIGTERM lands — MEASURED, it was already
+   * 멈췄어요 700 ms later. What is asserted is the pair the card is allowed to be in, never
+   * 끝났어요 (`07` §8.1: a signalled child did not complete). */
+  out.qcStopRequested = await qcRunNow();
+  await sleep(6000);
+  out.qcStopped = await qcRunNow();
+  out.qcDevGone = await evalJs(`(async () => {
+    const l = await window.juqode.qcList(window.__project().id);
+    const dev = l.rules.find(r => r.id === 'qc.dev.start');
+    return JSON.stringify({ available: dev.available, reason: dev.reason }); })()`);
+
   /* 닫기 preserves the screen beneath. */
   await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '닫기')?.click()`);
   await sleep(300);
@@ -2025,6 +2096,84 @@ assert.strictEqual(JSON.parse(results.qcRunState).run.state, 'ok');
 
 /* 할 수 있는 것 보기 — the closed set, with a reason on every one that cannot run. */
 assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not the closed six');
+
+/* ── TD-01 · 계속 실행 중 · 이미 켜져 있음 · 실패 · 고정 동작 ──────────────────────────
+ * Nine surviving td01 mutants live in these five branches, and they survived because the
+ * fixture could not produce the states: a dev script that dies on spawn is never running, so
+ * nothing was ever already running and nothing had to be stopped. */
+{
+  const card = JSON.parse(results.qcDevCard);
+  assert.strictEqual(card.kind, 'explained', `the dev card is ${card.kind}`);
+  assert.ok(card.text.includes('npm run dev'), `the card does not show the command: ${card.text}`);
+  /* `19` §C4: WHICH script was chosen is reported — the body, not just the npm invocation. */
+  assert.ok(card.text.includes('setInterval'), `the card hides the script body: ${card.text}`);
+  /* `15` TD-01: a long-running action SAYS it will not end on its own, before it is confirmed. */
+  assert.ok(card.text.includes('끄기 전까지 계속 켜져 있는 동작이에요'),
+    `a long-running command was confirmed without saying it stays up: ${card.text}`);
+
+  const run = JSON.parse(results.qcDevRunning);
+  assert.ok(run, 'the dev server was confirmed and no run card was drawn');
+  assert.strictEqual(run.state, 'running', `the running dev server card is ${run.state}`);
+  /* `15` TD-01 · WBS-24: 계속 실행 중 is reported WITHOUT ever being called done, and the way
+   * out of it is to leave it up — a long-running action whose only control is 멈추기 forces the
+   * user to stop the thing they asked for in order to ask for anything else. */
+  assert.ok(run.acts.includes('켜 둔 채로 다음 요청'),
+    `a long-running run offers no way to leave it up: ${JSON.stringify(run.acts)}`);
+  assert.ok(run.acts.includes('멈추기'), `the running server cannot be stopped: ${JSON.stringify(run.acts)}`);
+  assert.strictEqual(run.reds, 0, 'a running dev server is painted as a failure');
+
+  /* 이미 켜져 있음 — 사용 불가, and NOT a failure (`12` §16). */
+  const again = JSON.parse(results.qcAlready);
+  assert.strictEqual(again.kind, 'unavailable', `asking twice produced ${again.kind}`);
+  assert.ok(again.text.includes('개발 서버가 이미 돌고 있어요'),
+    `the second ask does not say why: ${again.text}`);
+  assert.ok(/pid \d+/.test(again.text), `사용 불가 names no pid: ${again.text}`);
+
+  /* 실패 — `15` TD-01: BOTH ▸ 다시 실행 and ▸ Work 로 요청. */
+  const failed = JSON.parse(results.qcFailedRun);
+  assert.ok(failed, 'the failing build drew no run card');
+  assert.strictEqual(failed.state, 'failed', `\`vite build\` with no vite ended as ${failed.state}`);
+  assert.ok(failed.text.includes('실행이 실패했어요'), `the failure is not named: ${failed.text}`);
+  /* `19` §C4: 종료 코드·stderr 숨기지 않음. */
+  assert.ok(failed.text.includes('종료 코드'), `a failed run hides its exit code: ${failed.text}`);
+  assert.ok(failed.acts.includes('▸ Claude Code 작업으로 요청'),
+    `a failed build offers only the same button again: ${JSON.stringify(failed.acts)}`);
+  assert.ok(failed.acts.includes('▸ 다시 실행'), `no re-run on a failed build: ${JSON.stringify(failed.acts)}`);
+  /* …and THIS one is red: a failed run is the one Quick Command state that is a failure. */
+  assert.ok(failed.reds > 0, 'a failed run is not painted as one');
+
+  /* The two fixed actions. Neither is a script, and both still have to say what they will do. */
+  const term = JSON.parse(results.qcTerminalCard);
+  assert.strictEqual(term.kind, 'explained', `터미널 열어줘 produced ${term.kind}`);
+  assert.ok(term.text.includes('화면 아래에 터미널 창을 열어요'),
+    `the fixed action's 실행할 명령 line is blank: ${term.text}`);
+  assert.ok(term.text.includes('아무 명령도 자동으로 실행하지 않아요'),
+    `opening the terminal does not say it runs nothing: ${term.text}`);
+
+  const stop = JSON.parse(results.qcStopCard);
+  assert.strictEqual(stop.kind, 'explained', `서버 꺼줘 produced ${stop.kind} while a server was up`);
+  assert.ok(/pid \d+/.test(stop.text), `the stop card names no pid to signal: ${stop.text}`);
+  assert.ok(stop.text.includes('SIGTERM') && stop.text.includes('SIGKILL'),
+    `the stop card does not say what signal it sends: ${stop.text}`);
+
+  /* `15` TD-01: 멈춤 요청됨 → 멈춤, never 완료. The first of the two is transient — a child
+   * that dies on the signal is already 멈췄어요 by the first paint — so what is pinned is that
+   * the card is in one of those two and in neither of the ones that would be a lie. */
+  const req = JSON.parse(results.qcStopRequested);
+  assert.ok(['stopped-requested', 'stopped'].includes(req.state),
+    `pressing 실행 on the stop card gave ${req.state}`);
+  assert.ok(req.text.includes('멈춤 요청함') || req.text.includes('멈췄어요'),
+    `the stopping card says ${req.text}`);
+  const stopped = JSON.parse(results.qcStopped);
+  assert.strictEqual(stopped.state, 'stopped', `the stopped server ended as ${stopped.state}`);
+  assert.ok(stopped.text.includes('멈췄어요'), `a stopped run says ${stopped.text}`);
+  /* `07` §8.1: a signalled child is never 끝났어요, whatever code it carried. */
+  assert.ok(!stopped.text.includes('끝났어요'), 'a stopped run was reported as completed');
+  /* …and it really is gone: the rule is available again, which is the store's own answer. */
+  const gone = JSON.parse(results.qcDevGone);
+  assert.strictEqual(gone.available, true,
+    `the dev server survived the stop (${gone.reason}) — this run would leak it past the app`);
+}
 
 /* 닫기 preserves the screen beneath (`15`). */
 assert.strictEqual(JSON.parse(results.drawerClosed).open, false);
