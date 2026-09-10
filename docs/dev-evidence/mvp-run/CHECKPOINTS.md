@@ -828,3 +828,31 @@ shapes the TypeScript compiler does not actually produce, or comparisons whose t
 the same answer through a different path.
 
 Next eligible: `work/supervisor.js` (52 sites, the last large one) · WBS-32/33 · DV-11.
+
+## Batch 29 QA · mutation sweep, stage five (the Work supervisor) — and the programme's ledger
+
+Report: `BATCH-29-QA.md`. No new Canon findings. 541 tests, three e2e files.
+
+**Nobody had ever called `watchQuiet`.** Every part of its push condition could be flipped with
+the suite passing. It is the one place a timer is legitimate — `15` defines 새 신호 없음 and
+취소 확인 불가 by the ABSENCE of a signal, and the only event that would deliver that news is the
+event that makes it untrue — so a wrong condition raises nothing at all: the screen simply never
+shows those states. It is now driven through all four cases, including the one that isolates the
+cancel half of the condition from the silence half.
+
+**The sweep programme is complete: 348 mutants over 17 main-process files, 68 survivors, and
+every survivor has a written reason.** It found sixteen product defects, three defects in the
+sweep tool itself, and two in the suite. The ones that would have shipped: the offline guard
+nobody had called (any `||` → `&&` made it cancel the app's own `file:` load), the size cap that
+did not measure the working tree, an unreadable project root that was allowed to start a Work in
+both evidence mechanisms, a rename rendered as three cards, a narrative prompt that could hand
+the model the answers the facts layer could NOT establish under a heading calling them measured,
+and a 확인됨 tool count that undercounted two different ways.
+
+Of the 68: five are Windows-only (DV-12, unmeasurable here) and 63 are equivalent or unreachable
+— comparisons the preceding line already returned past, two paths that reach the same answer, or
+branches on AST shapes the TypeScript compiler does not produce. The point of the ledger is not
+the number; it is that each one carries its reason.
+
+Next eligible: WBS-32 (needs people) · WBS-33 (needs Windows and a certificate) · DV-11's pty
+decision. All three are outside what this run can measure.

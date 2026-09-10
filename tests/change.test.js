@@ -387,6 +387,35 @@ test('the segmenter never asks anything — it only reads the diff', () => {
   }
 });
 
+test('a name list that does not match the patch is DROPPED, never zipped by index', () => {
+  /* FOUND BY MUTATION in `supervisor.saveDiffs`: `zipped.length === names.length` could be
+   * inverted, so the authoritative name list would be used exactly when it does NOT describe
+   * the same patch — and every file's diff would be filed under another file's name.
+   *
+   * The two git calls (`diff` and `diff-tree --name-only`) exist to agree; `19` §C5-B and the
+   * batch-06 review are about what happens when two parsers read one patch differently. If
+   * they ever disagree on how many files there are, zipping BY INDEX is the one thing that must
+   * not happen — a card would then attribute a change to a file that did not change. */
+  const patch = [
+    'diff --git a/one.ts b/one.ts', '@@ -1 +1 @@', '-a', '+b',
+    'diff --git a/two.ts b/two.ts', '@@ -1 +1 @@', '-c', '+d',
+  ].join('\n');
+
+  /* Agreeing: the names win, which is what makes exotic paths right. */
+  const agreed = B.splitDiff(patch, ['첫.ts', '둘.ts']);
+  assert.deepStrictEqual(agreed.map((f) => f.path), ['첫.ts', '둘.ts']);
+
+  /* Disagreeing — the supervisor's guard is `zipped.length === names.length`, and this is the
+   * shape it is guarding against. Zipped by index, `two.ts`'s diff would be labelled `첫.ts`. */
+  const short = B.splitDiff(patch, ['첫.ts']);
+  assert.strictEqual(short.length, 2, 'the patch still has two files whatever the name list says');
+  assert.notStrictEqual(short.length, ['첫.ts'].length,
+    'the length check the supervisor makes must be able to see this disagreement');
+  /* …and the fallback — no names at all — reads each header, which is right about WHICH file
+   * even when it is wrong about an exotic name. */
+  assert.deepStrictEqual(B.splitDiff(patch).map((f) => f.path), ['one.ts', 'two.ts']);
+});
+
 test('a path that itself contains " b/" is still read correctly', () => {
   /* FOUND BY MUTATION: the equal-halves arithmetic in `headerPath` — the branch that exists
    * BECAUSE `lastIndexOf(' b/')` gets a path wrong — had no test of its own. Both of its `&&`

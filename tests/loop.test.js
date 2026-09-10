@@ -741,6 +741,63 @@ test('liveness is measured from the last OBSERVED signal, and only that', async 
   assert.strictEqual(supervisor.snapshot(db, r.workId).liveness, 'unknown');
 });
 
+test('watchQuiet pushes the states that ONLY silence can produce — and nothing else', async () => {
+  /* FOUND BY MUTATION: every part of the tick's push condition could be flipped and the suite
+   * passed — nothing ever called `watchQuiet`.
+   *
+   * It is the one place a timer is legitimate (`15` defines 새 신호 없음 and 취소 확인 불가 by
+   * the ABSENCE of a signal, and the only event that would deliver that news is the event that
+   * makes it untrue). So it is also the one place where a wrong condition is invisible: the
+   * screen simply never shows those states, and nothing errors. */
+  const { dir, db, project, store } = bench();
+  const bin = path.join(dir, 'stubborn-claude');
+  fs.writeFileSync(bin, `#!/bin/sh
+trap "" TERM
+echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
+sleep 20
+`, { mode: 0o755 });
+  const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
+  const entry = supervisor.live.get(r.workId);
+
+  const pushes = [];
+  const stop = supervisor.watchQuiet(db, (snap) => pushes.push(snap), { everyMs: 15 });
+  const tick = () => new Promise((res) => setTimeout(res, 60));
+  try {
+    /* LIVE: nothing to say. A push here would redraw SC-03 on a timer with no news in it. */
+    await tick();
+    assert.deepStrictEqual(pushes, [], 'a live Work was pushed on a timer with nothing to report');
+
+    /* QUIET: the news is the silence itself. */
+    entry.state = { ...entry.state, lastObserved: { kind: 'tool_use', at: new Date(Date.now() - 121_000).toISOString() } };
+    await tick();
+    assert.ok(pushes.length, '새 신호 없음 is never delivered — the screen cannot show it');
+    assert.strictEqual(pushes.at(-1).liveness, 'quiet');
+
+    /* UNKNOWN: also silence, and also delivered. */
+    pushes.length = 0;
+    entry.state = { ...entry.state, lastObserved: null };
+    await tick();
+    assert.ok(pushes.length, '확인 불가 is never delivered');
+    assert.strictEqual(pushes.at(-1).liveness, 'unknown');
+
+    /* CANCEL UNCONFIRMED while still live: the OTHER half of the condition, on its own. */
+    pushes.length = 0;
+    supervisor.cancel(db, r.workId);
+    entry.state = { ...entry.state,
+                    lastObserved: { kind: 'tool_use', at: new Date().toISOString() },
+                    cancelRequestedAt: new Date(Date.now() - 91_000).toISOString() };
+    await tick();
+    assert.ok(pushes.length, '멈췄는지 확인할 수 없어요 is never delivered while the Work is still live');
+    assert.strictEqual(pushes.at(-1).cancelUnconfirmed, true);
+    assert.strictEqual(pushes.at(-1).liveness, 'live',
+      'this case must be the cancel half of the condition, not the silence half');
+  } finally {
+    stop();
+    supervisor.cancel(db, r.workId);
+    await r.done.catch(() => {});
+  }
+});
+
 test('a cancel that stays unobserved becomes 확인 불가, and never 취소됨', async () => {
   const { dir, db, project, store } = bench();
   const bin = path.join(dir, 'stubborn-claude');
