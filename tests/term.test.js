@@ -108,6 +108,33 @@ test('토큰처럼 보이는 값은 화면에서 가려진다 — 가려질 뿐�
   } finally { s.stop(); }
 });
 
+test('출력 상한은 상한을 넘을 때만 잘렸다고 말한다 — 딱 맞게 찬 출력은 잘린 것이 아니다', async () => {
+  /* `20` 이 화면에 실을 출력을 64 KB 로 묶고, 남는 것은 잘렸다고 말한다. 그 경계에서 한 칸을
+   * 잘못 잡으면 제품이 **잃은 것이 없는데 잃었다고 말한다** — `19` 가 금지하는 과잉주장의
+   * 축소판이다.
+   *
+   * FOUND BY MUTATION: `bytes + size > OUTPUT_LIMIT` 를 `>=` 로 넓히면 정확히 가득 찬 출력이
+   * `truncated` 로 표시된다. 스위트에 절단 검사가 **하나도 없었다** — 넘친 쪽도, 딱 맞는 쪽도.
+   *
+   * 마커 줄은 측정 전에 지워지지만 그 앞뒤 줄바꿈 둘은 남는다. 그래서 내용은 상한에서 2 를
+   * 뺀 만큼 찍고, 합이 정확히 상한이 되게 한다. */
+  const { OUTPUT_LIMIT } = require(path.join(R, 'app/main/qc/run.js'));
+  const s = session(tempDir('juqode-term-bound'));
+  try {
+    const exact = await line(s, `head -c ${OUTPUT_LIMIT - 2} /dev/zero | tr '\\0' x`, 20000);
+    assert.strictEqual(Buffer.byteLength(exact.output, 'utf8'), OUTPUT_LIMIT,
+      'the fixture did not fill the head exactly — the boundary is not being tested');
+    assert.strictEqual(exact.truncated, false,
+      'an output that fits exactly was reported as cut — nothing was lost');
+
+    const over = await line(s, `head -c ${OUTPUT_LIMIT} /dev/zero | tr '\\0' x`, 20000);
+    assert.strictEqual(over.truncated, true, 'an output past the head was not reported as cut');
+    /* 남는 것은 진짜 앞부분이다 — `qc/run.js` 의 같은 규칙. */
+    assert.strictEqual(Buffer.byteLength(over.output, 'utf8'), OUTPUT_LIMIT,
+      'the kept head is not exactly the bound');
+  } finally { s.stop(); }
+});
+
 test('한 번에 한 줄 — 앞 줄이 도는 동안의 줄은 거절하고 이유를 말한다', async () => {
   const s = session(tempDir('juqode-term-busy'));
   try {

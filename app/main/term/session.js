@@ -110,6 +110,11 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
     const size = Buffer.byteLength(s, 'utf8');
     if (bytes + size > OUTPUT_LIMIT) {
       const room = OUTPUT_LIMIT - bytes;
+      /* `room > 0` 을 `>=` 로 넓힌 뮤턴트는 **동등하다** — 스윕에서 살아남았고, 이유가 있다:
+       * `bytes` 는 이 가드 안에서만 늘거나 상한으로 못박히므로 `bytes <= OUTPUT_LIMIT` 이
+       * 불변이고, 따라서 `room` 은 절대 음수가 아니다. `>=` 가 새로 여는 경우는 `room === 0`
+       * 하나뿐인데, 그때 `subarray(0, 0)` 은 빈 문자열이라 `out` 이 그대로고 `bytes` 는 이미
+       * 상한이다. 관찰 가능한 차이가 없다 — 죽이지 못한 것이 아니라 죽일 것이 없다. */
       if (room > 0) {
         out += Buffer.from(s, 'utf8').subarray(0, room).toString('utf8').replace(/�$/, '');
         bytes = OUTPUT_LIMIT;
