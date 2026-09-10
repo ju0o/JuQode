@@ -180,6 +180,16 @@ fs.writeFileSync(FAKE_CLI, [
    * Claude-unavailable state — the one `12` §16 calls 사용 불가 ≠ 실패 — with the real
    * detection code path rather than a stub. `detect()` runs on every preflight, no cache. */
   `if [ \"$1\" = \"auth\" ]; then if [ -f ${JSON.stringify(path.join(DB_DIR, 'logged-out'))} ]; then echo '{\"loggedIn\":false}'; else echo '{\"loggedIn\":true,\"email\":\"fixture@example.test\",\"orgId\":\"org-fixture\"}'; fi; exit 0; fi`,
+  /* A second marker makes the fixture a session that STARTS and then goes quiet, ignoring
+   * SIGTERM — the shape `15` SC-03's 취소 요청했어요 and `07` §8.1's "a cancelled child can
+   * still exit 0" are both about. Without it the run could only ever photograph a Work that
+   * finished on its own. */
+  `if [ -f ${JSON.stringify(path.join(DB_DIR, 'stubborn'))} ]; then`,
+  '  trap "" TERM',
+  `  echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p","claude_code_version":"9.9.9"}'`,
+  '  sleep 60',
+  '  exit 0',
+  'fi',
   /* "$@" — the fixture has to SEE `--resume`, or it cannot behave like a session that was
    * granted something. Without it every turn replayed the same denial. */
   `exec ${process.execPath} ${FAKE_CLI_JS} "$@"`,
@@ -1119,6 +1129,44 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(300);
   out.drawerClosed = await evalJs('JSON.stringify(window.__drawer())');
   out.screenAfterDrawer = await evalJs('window.__screen()');
+
+  /* ── `15` SC-03 취소 요청했어요 · 멈췄는지 확인할 수 없어요 ──────────────────────────────
+   * WBS-16, and `07` §8.1's measured fact that a cancelled child can still exit 0. Until now
+   * the run could only photograph a Work that finished on its own, so the whole cancel family
+   * had no rendered evidence — found by a renderer mutation sweep, where every branch of
+   * `stateChip` and of the cancel band survived. */
+  step('cancel');
+  fs.writeFileSync(path.join(DB_DIR, 'stubborn'), '');
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '설정 화면을 고쳐줘'; })()`);
+  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  await sleep(2500);
+  out.cancelScreen = await evalJs('window.__screen()');
+  out.cancelBefore = await evalJs('JSON.stringify(window.__work())');
+  /* `15` DS §1: ONE cancel on the screen, ink-outlined, with its fixed sub-line. */
+  out.cancelButtons = await evalJs(`JSON.stringify([...document.querySelectorAll('.sc03 button')]
+    .filter(b => b.textContent.includes('취소')).map(b => [b.className, b.textContent]))`);
+  out.cancelSub = await evalJs(`document.querySelector('.sc03 .cancelrow .mut2')?.textContent ?? null`);
+  await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.trim() === '이 작업 취소')?.click()`);
+  await sleep(1200);
+  out.cancelAfter = await evalJs('JSON.stringify(window.__work())');
+  out.cancelBand = await evalJs(`[...document.querySelectorAll('.sc03 .panel')]
+    .map(n => n.innerText).find(t => t.includes('취소를 요청했어요')) ?? null`);
+  out.cancelChip = await evalJs(`document.querySelector('.sc03 [data-card="work"] .chip')?.textContent ?? null`);
+  out.cancelReds = await evalJs(RED_COUNT('.sc03 [data-card="work"], .sc03 [data-card="work"] *'));
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(250);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc03-cancel-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  fs.rmSync(path.join(DB_DIR, 'stubborn'));
+  /* Let the app finish stopping it before the run continues; the child ignores TERM, so this
+   * is the SIGKILL escalation doing its job. */
+  await sleep(6000);
+  out.cancelEnded = await evalJs('JSON.stringify(window.__work())');
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
+  await sleep(900);
 
   /* ── `15` SC-02 Unavailable State — 사용 불가 ≠ 실패 (12 §16) ────────────────────────────
    * `15` asks for 네 개의 복구 버튼, and they were a sentence saying they were not built until
@@ -2086,10 +2134,48 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
   }
 }
 
+/* ── `15` SC-03 · WBS-16 — 취소 요청했어요 ─────────────────────────────────────────────── */
+{
+  assert.strictEqual(results.cancelScreen, 'SC-03', 'a Work that keeps running did not reach SC-03');
+  const before = JSON.parse(results.cancelBefore);
+  assert.strictEqual(before.status, 'running', `the Work was ${before.status}, not running`);
+
+  /* `15` DS §1: ONE cancel on the screen, ink-outlined — never recovery-green, never red. */
+  const buttons = JSON.parse(results.cancelButtons);
+  assert.strictEqual(buttons.length, 1, `there are ${buttons.length} cancels on SC-03`);
+  assert.match(buttons[0][0], /\bcancel\b/, `the cancel is styled ${buttons[0][0]}`);
+  assert.ok(!/\b(pri|rec|fail)\b/.test(buttons[0][0]),
+    `the cancel is styled as something else: ${buttons[0][0]}`);
+  assert.ok(results.cancelSub && results.cancelSub.includes('이미 바뀐 파일은 그대로 남아요'),
+    `the cancel's sub-line is missing or reworded: ${results.cancelSub}`);
+
+  /* After pressing it: 요청했다 and 멈췄다 are different statements, and only the first is true. */
+  const after = JSON.parse(results.cancelAfter);
+  assert.strictEqual(after.status, 'cancel_requested',
+    `pressing 취소 moved the Work to ${after.status}`);
+  assert.ok(results.cancelBand && results.cancelBand.includes('취소를 요청했어요'),
+    `the cancel-requested band is missing: ${results.cancelBand}`);
+  assert.ok(results.cancelBand.includes('실제로 멈추는지 확인하고 있어요'),
+    'the band does not say the stop is unconfirmed');
+  assert.strictEqual(results.cancelChip, '취소를 요청했어요',
+    `the chip says ${JSON.stringify(results.cancelChip)} — 요청했다 is not 멈췄다`);
+  /* NOT RED: `16` §2.1 keeps red for failure, and a cancel the user asked for is not one. */
+  assert.strictEqual(results.cancelReds, 0, 'a requested cancel was painted as a failure');
+
+  /* And once the child is actually gone: `07` §8.1 — a cancelled child can exit 0, so the
+   * outcome comes from what was OBSERVED. No tool ran, so nothing was changed. */
+  const ended = JSON.parse(results.cancelEnded);
+  assert.strictEqual(ended.status, 'ended', `the Work never ended (${ended.status})`);
+  assert.strictEqual(ended.outcome, 'cancelled_nochange',
+    `a cancel with no tool run reported ${ended.outcome}`);
+}
+
 assert.ok(results.recentLast, 'a recent row carries no last-Work summary (`15` UF-RETURN)');
 assert.ok(results.recentLast.includes('마지막 작업'),
   `the summary is not labelled: ${results.recentLast}`);
-assert.ok(results.recentLast.includes('README.md 의 첫 줄을 바꿔줘'),
+/* The intent as the user typed it — whichever Work was last. Pinning one sentence made this
+ * assertion a hostage to the order of the run's steps. */
+assert.ok(/(README\.md 의 첫 줄을 바꿔줘|설정 화면을 고쳐줘|고치는 작업)/.test(results.recentLast),
   `the summary does not quote the user's own request: ${results.recentLast}`);
 
 assert.strictEqual(results.recentAfterBack, 2, 'the recent list lost a row on return');
