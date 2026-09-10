@@ -94,6 +94,12 @@ function makeHandlers(deps) {
     try { termLive.session.stop(); } catch { /* already gone */ }
     termLive = null;
   };
+  /* 프로젝트가 바뀌면 종료 — 한 군데서. 셸을 여는 순간에만 검사하면 "바뀌면 종료" 가 아니라
+   * "다음에 열 때 종료" 가 된다: 사용자가 A 를 떠난 뒤에도 A 의 디렉터리에서 도는 셸이 계속
+   * 살아 있고, 화면에는 그것을 끌 방법이 없다. 프로젝트를 여는 모든 경로가 이걸 부른다. */
+  const termCloseIfOther = (projectId) => {
+    if (termLive && termLive.projectId !== projectId) termClose();
+  };
   const liveFor = (projectId) => [...qcLive.values()].filter((e) => e.projectId === projectId);
   /* …and with a narrative pass in flight (`19` §C1 ⑦). Both spawn a Claude Code child. */
   const narrating = new Set();
@@ -114,7 +120,11 @@ function makeHandlers(deps) {
     'juqode:open-project': async (e) => {
       const gate = needDb();
       if (gate) return gate;
-      return project.pick(db(), deps.windowFor?.(e) ?? null, (p) => { lastPick = p; });
+      const picked = await project.pick(db(), deps.windowFor?.(e) ?? null, (p) => { lastPick = p; });
+      /* WBS-25 · `19` §C6 REC-010. Cancelling is not a project change, so only a real one closes
+       * the shell. */
+      if (picked?.ok && picked.project) termCloseIfOther(picked.project.id);
+      return picked;
     },
 
     'juqode:open-path': (_e, target) => {
@@ -127,7 +137,9 @@ function makeHandlers(deps) {
       if (typeof target !== 'string' || target === '') return { ok: false, reason: 'not-offered' };
       const known = target === lastPick || project.recent(db()).some((p) => p.path === target);
       if (!known) return { ok: false, reason: 'not-offered' };
-      return project.openPath(db(), target);
+      const opened = project.openPath(db(), target);
+      if (opened?.ok && opened.project) termCloseIfOther(opened.project.id);
+      return opened;
     },
 
     'juqode:interpret': async (_e, projectId) => {
@@ -363,7 +375,7 @@ function makeHandlers(deps) {
       /* 프로젝트가 바뀌면 앞의 세션은 끝난다 — REC-010. 사용자가 A 에서 `cd` 해 둔 셸에
        * B 의 명령을 치게 두는 것은 Quick Command 카드가 프로젝트를 건너가던 것과 같은 결함이다
        * (배치 12 HIGH). */
-      if (termLive && termLive.projectId !== projectId) termClose();
+      termCloseIfOther(projectId);
       /* 게으르게: 이미 있으면 그것을 돌려준다. 서랍을 닫았다 여는 것으로 맥락이 사라지지 않는다. */
       if (!termLive) {
         const session = term.open({

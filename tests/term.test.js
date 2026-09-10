@@ -70,6 +70,16 @@ test('종료 코드는 코드로 보고된다 — 0 도 0 이 아닌 것도', as
   } finally { s.stop(); }
 });
 
+test('끝난 줄도 자기가 어느 명령이었는지 말한다', async () => {
+  /* 마지막 업데이트는 `running` 이 이미 비워진 뒤에 나간다. 그때 줄 이름을 잃으면 카드가
+   * **읽을 것이 생긴 바로 그 순간** `$ …` 머리를 잃는다. */
+  const s = session(tempDir('juqode-term-line'));
+  try {
+    const r = await line(s, 'echo hi');
+    assert.strictEqual(r.line, 'echo hi', `the finished update names ${r.line}`);
+  } finally { s.stop(); }
+});
+
 test('stderr 는 숨기지도 분리하지도 않는다', async () => {
   const s = session(tempDir('juqode-term-stderr'));
   try {
@@ -148,6 +158,36 @@ test('아는 POSIX 셸이면 그것을, 모르면 /bin/sh — 마커가 조용�
    * 영영 도착하지 않는다 — 조용히 멈춘 것처럼 보인다. */
   assert.deepStrictEqual(term.shellFor({ SHELL: '/usr/bin/fish' }), { path: '/bin/sh', posix: true });
   assert.deepStrictEqual(term.shellFor({}), { path: '/bin/sh', posix: true });
+});
+
+test('프로젝트가 바뀌면 셸은 끝난다 — 다음에 열 때가 아니라 바뀔 때 (`19` §C6 REC-010)', async () => {
+  /* A 에서 `cd` 해 둔 셸이 B 의 명령을 받으면, 사용자가 보고 있는 프로젝트와 명령이 도는
+   * 디렉터리가 다르다. 배치 12 의 Quick Command 카드와 같은 결함이고, 뒤에 셸이 있다.
+   * 그리고 "셸을 다시 열 때 검사" 로는 부족하다 — 그 사이 A 의 셸은 계속 살아 있고 화면에는
+   * 그것을 끌 방법이 없다. */
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const { openDb } = require(path.join(R, 'app/main/db/db.js'));
+  const repo = require(path.join(R, 'app/main/db/repo.js'));
+  const db = openDb(':memory:');
+  const a = repo.openProject(db, tempDir('juqode-term-a'), 'a');
+  const b = repo.openProject(db, tempDir('juqode-term-b'), 'b');
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
+  try {
+    const opened = await h['juqode:term-open'](null, a.id);
+    assert.strictEqual(opened.ok, true, `the shell did not open: ${opened.reason}`);
+    /* 같은 프로젝트를 다시 열면 **같은 세션**이다 — 서랍을 닫았다 여는 것으로 맥락이 사라지지
+     * 않는다는 것이 REC-010 의 다른 절반이다. */
+    assert.strictEqual((await h['juqode:term-open'](null, a.id)).id, opened.id,
+      'reopening the drawer started a second shell');
+    /* 프로젝트를 여는 것만으로 끝난다 — 셸을 다시 열어 달라고 하지 않았는데도. */
+    const moved = h['juqode:open-path'](null, db.prepare('select path from project where id = ?').get(b.id).path);
+    assert.strictEqual(moved.ok, true, `opening the other project failed: ${moved.reason}`);
+    assert.strictEqual((await h['juqode:term-write'](null, a.id, 'echo x')).reason, 'not-open',
+      "project A's shell outlived the switch");
+  } finally {
+    h.__stopAllTerm?.();
+    db.close();
+  }
 });
 
 test('사용자가 친 줄은 그대로 간다 — 걸러내는 척하지 않는다 (`19` §C4)', () => {

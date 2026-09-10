@@ -84,9 +84,13 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
   let pending = null;              // the exit code, held for DRAIN_MS while the pipes catch up
   let drain = null;
 
-  const flush = (ended, code = null) => {
+  /* `line` is passed explicitly on the last update of a line: by then `running` has been
+   * cleared, and reading it there made the FINISHED update the only one that could not say
+   * which command it belonged to — the card would lose its `$ …` header exactly when the user
+   * has something to read under it. */
+  const flush = (ended, code = null, line = running?.line ?? null) => {
     const update = { id, ended: Boolean(ended), code,
-                     output: mask(out), truncated, line: running?.line ?? null };
+                     output: mask(out), truncated, line };
     onUpdate(update);
     return update;
   };
@@ -120,9 +124,10 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
       drain = setTimeout(() => {
         drain = null;
         const code = pending;
+        const line = running?.line ?? null;
         pending = null;
         running = null;
-        flush(false, code);
+        flush(false, code, line);
       }, DRAIN_MS);
       drain.unref?.();
     }
