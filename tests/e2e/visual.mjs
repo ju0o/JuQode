@@ -194,7 +194,15 @@ const SEED2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-seed
   const db = openDb(DB);
   repo.openProject(db, SEED, path.basename(SEED));
   const t = Date.now(); while (Date.now() === t) { /* distinct millisecond */ }
-  repo.openProject(db, SEED2, path.basename(SEED2));
+  const p2 = repo.openProject(db, SEED2, path.basename(SEED2));
+  /* Four ended Works in the OTHER project, so `15` §0 Board's History fold (M → L, `N개 더`)
+   * has something to fold. The run's own Works all land in SEED and there are never enough of
+   * them; the control and its absence are both rules, and only a longer list exercises the
+   * first one. Ended, so nothing here is a live Work competing for the D-117 slot. */
+  for (const intent of ['첫 번째 요청', '두 번째 요청', '세 번째 요청', '네 번째 요청']) {
+    const w = repo.beginWork(db, p2.id, intent).work;
+    repo.setWorkState(db, w.id, { status: 'ended', outcome: 'complete' });
+  }
   db.close();
 }
 
@@ -875,6 +883,10 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.historyRows   = await evalJs(`document.querySelectorAll('[data-el="history-row"]').length`);
   out.historyText   = await evalJs(`document.querySelector('[data-card="history"]')?.innerText ?? null`);
   out.historyReds   = await evalJs(RED_COUNT('[data-card="history"], [data-card="history"] *'));
+  /* Every finished Work's row carries its OUTCOME, and a running one carries the waiting chip
+   * instead — never one of the five terminal titles. Found by mutation on `w.status !== 'ended'`. */
+  out.historyChips = await evalJs(`JSON.stringify([...document.querySelectorAll('[data-el="history-row"]')]
+    .map(r => [...r.querySelectorAll('.chip')].map(c => [c.className, c.textContent])))`);
   /* Cards must not be drawn on top of each other. The existing overlap check runs while SC-03
    * is on screen, so its `.sc02 .card` half matched NOTHING and could never fail — and SC-02's
    * real layout, once History had rows, drew the History card over the Brief. */
@@ -1115,7 +1127,10 @@ const results = await cdp(async ({ send, evalJs }) => {
   step('Claude unavailable');
   fs.writeFileSync(path.join(DB_DIR, 'logged-out'), '');
   await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 오류 고쳐줘'; })()`);
-  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  /* ENTER submits — `15` SC-02 Inputs, and every other submit in this file clicks the button,
+   * so the keyboard path had no coverage at all. Found by mutation on `e.key === 'Enter'`. */
+  await evalJs(`document.querySelector('[data-el="intent"]').dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
   await sleep(1500);
   out.unavailCard = await evalJs(`document.querySelector('[data-el="unavailable"]')?.innerText ?? null`);
   out.unavailActions = await evalJs(`JSON.stringify([...document.querySelectorAll('[data-el="unavailable"] button')].map(b => b.textContent))`);
@@ -1199,6 +1214,24 @@ const results = await cdp(async ({ send, evalJs }) => {
   step('drawer is per project');
   await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')].at(-1).click()`);
   await sleep(1200);
+  /* `15` §0 Board: History is M and GROWS to L. It opens showing the head of the list with a
+   * `N개 더` control, and `접기` puts it back. Found by mutation: `state.historyExpanded === true`
+   * could be inverted so it opened expanded, and nothing here looked. */
+  out.historyFold = await evalJs(`(async () => {
+    const rows = () => document.querySelectorAll('[data-el="history-row"]').length;
+    const btn = (t) => [...document.querySelectorAll('[data-card="history"] button')]
+      .find(b => b.textContent.includes(t));
+    const collapsed = rows();
+    const more = btn('개 더');
+    if (!more) return JSON.stringify({ collapsed, expanded: null, recollapsed: null, moreText: null,
+                                       collapse: Boolean(btn('접기')) });
+    const moreText = more.textContent;
+    more.click();
+    await new Promise(r => setTimeout(r, 500));
+    const expanded = rows();
+    btn('접기')?.click();
+    await new Promise(r => setTimeout(r, 500));
+    return JSON.stringify({ collapsed, expanded, recollapsed: rows(), moreText, collapse: true }); })()`);
   await evalJs(`window.__openDrawerWith('깃상태')`);
   await sleep(800);
   await evalJs(`document.querySelector('[data-el="qc-send"]')?.click() ?? [...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
@@ -2011,6 +2044,46 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
     + 'project at click time, so it would have run there');
   assert.strictEqual(b.phrase, '', `the other project's sentence was carried across: ${b.phrase}`);
   assert.strictEqual(b.run, null, 'a run from another project is still on screen');
+}
+
+/* `15` §0 Board — History opens FOLDED (M) and grows to L.
+ *
+ * The rule is conditional and both halves are asserted: a control exists only when something is
+ * behind it (`15` DS §1 — a control that does nothing is not an action), and when it does, it
+ * says the REAL number hidden and puts the list back. */
+{
+  const h = JSON.parse(results.historyFold);
+  if (h.moreText === null) {
+    /* Fewer rows than the head: no `N개 더`, and no `접기` either. */
+    assert.ok(h.collapsed <= 3,
+      `History showed ${h.collapsed} rows with no 더 보기 — the head is 3`);
+    assert.strictEqual(h.collapse, false,
+      '접기 is offered on a list that was never expanded');
+  } else {
+    assert.match(h.moreText, /^\d+개 더$/, `the control says ${JSON.stringify(h.moreText)}`);
+    assert.strictEqual(h.collapsed, 3, `History opened with ${h.collapsed} rows, not the head of 3`);
+    assert.ok(h.expanded > h.collapsed, `더 보기 did not add rows (${h.collapsed} → ${h.expanded})`);
+    assert.strictEqual(h.recollapsed, h.collapsed,
+      `접기 did not put it back (${h.expanded} → ${h.recollapsed}, was ${h.collapsed})`);
+    /* The count is the REAL number hidden, not a page size. */
+    assert.strictEqual(Number(/^(\d+)/.exec(h.moreText)[1]), h.expanded - h.collapsed,
+      `${h.moreText} does not match the ${h.expanded - h.collapsed} rows it hides`);
+  }
+}
+
+/* Each finished row carries its outcome; a running one carries the waiting chip. */
+{
+  const chips = JSON.parse(results.historyChips);
+  assert.ok(chips.length, 'no history rows to check');
+  for (const row of chips) {
+    assert.strictEqual(row.length, 1, `a history row carries ${row.length} chips`);
+    const [cls, text] = row[0];
+    assert.ok(text.trim(), 'a history row has an empty chip');
+    /* Not the waiting chip: every Work in this run has ended. A `wait` chip here would mean a
+     * finished Work is being reported as still going. */
+    assert.ok(!/\bwait\b/.test(cls),
+      `a finished Work carries the waiting chip: ${cls} ${text}`);
+  }
 }
 
 assert.ok(results.recentLast, 'a recent row carries no last-Work summary (`15` UF-RETURN)');

@@ -12,7 +12,11 @@
 - `NOT STARTED` — 사람이나 Windows 가 필요해서 이 런에서 할 수 없다
 - `SPIKE` — 제품 기능이 아니라 판정 재료를 만드는 패키지
 
-493 unit tests · e2e 3종(`boot.test.mjs` · `visual.mjs` · `offline-shutdown.mjs`).
+542 unit tests · e2e 3종(`boot.test.mjs` · `visual.mjs` · `offline-shutdown.mjs`).
+
+**돌연변이 검증.** 배치 25~30 이 `app/main` 17개 파일과 렌더러 일부에 대해 돌연변이를 **기계적으로**
+생성해 돌렸다(비교·논리 연산자와 반환 상수를, 주석을 벗긴 코드에서만). 제품 결함 19개를 찾았고,
+살아남은 것 각각에 이유가 붙어 있다 — 결산은 `BATCH-29-QA.md`, 렌더러는 `BATCH-30-QA.md`.
 
 | WBS | 이름 | 상태 | 코드 | 테스트 |
 |---|---|---|---|---|
