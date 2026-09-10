@@ -1,8 +1,10 @@
 # RESUME — JuQode Autonomous MVP Long Run V2
 
-**마지막 체크포인트:** 배치 35 (렌더러 생존자 0) · 브랜치 `dev/mvp-autonomous-v01`
-**작업 트리:** clean · 백그라운드 프로세스 없음 · **stash 없음** (배치 33 의 미완 작업은 풀렸다)
-**스위트:** unit 573/573 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
+**마지막 체크포인트:** 배치 35 · 브랜치 `dev/mvp-autonomous-v01` (푸시 완료)
+**작업 트리:** clean · 백그라운드 프로세스 없음 · stash 없음
+**스위트:** unit 575/575 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
+**정지 사유:** 남은 작업이 **거의 전부 사람의 판단을 기다린다** (§3). PM 판정 2026-09-11.
+게이트 없이 할 수 있는 것은 §4 하나뿐이다.
 
 ---
 
@@ -12,23 +14,26 @@
 CONTINUE THE SAME JUQODE AUTONOMOUS MVP LONG RUN.
 Do NOT restart planning. Do NOT create a new run. Do NOT reset the branch.
 Current remote branch: dev/mvp-autonomous-v01
-Last checkpoint: batch 35 (renderer mutants: zero survivors). Working tree clean, all suites green.
+Last checkpoint: batch 35. Working tree clean, all suites green.
 
-Read RESUME.md first. There is NO blocker.
+Read RESUME.md first.
 
-Queue, in order:
-  1. §3 — 문구 백로그 11개. 검사가 전체 경로를 보게 되면서 드러났고 전부 PENDING 에 이유와
-     함께 적혀 있다(`tests/unit.test.js`). 넷은 이미 렌더되는 문구의 두 번째 이름이라
-     `18` 에 되물을 것이고, 일곱은 `15` 가 이름 붙인 미구현 컨트롤이다.
-  2. §4 — 셸 줄에 남은 것: 마커 천장 · Windows 자리표시. 둘 다 알고 남긴 것이다.
-  3. §5 — WBS-32(사람 검증) · DV-13~16(Windows). 둘 다 PM 이 "나중" 으로 판정했다.
-살아 있는 렌더러 뮤턴트는 0 이다. 셸 줄(WBS-25)도 Linux 에서는 구멍이 닫혔다.
+THIS RUN IS GATED. §3 lists three items and NONE of them may be done by the agent alone —
+PM judged them Human Gate on 2026-09-11. Do not "unblock" them by deciding for the human:
+the copy one would break this project's own rule (edit `18` first, never copy.js), and
+deleting the duplicate keys was explicitly NOT approved.
+
+Do this, in order:
+  1. Ask the PM whether any §3 gate has opened, and hand them §3's "무엇이 있어야 풀리나".
+  2. If a gate is open, do that item.
+  3. If no gate is open, the ONE thing that needs no gate is §4 — `app/main/term/session.js`
+     has never been swept. It is a measurement, not a decision.
+  4. If §4 is done and no gate is open, STOP and say so. Do not invent work.
 
 Keep the same operating loop: IMPLEMENT → TEST → PRODUCT QA → TECHNICAL/SECURITY QA →
 TEST ADVERSARY → VISUAL QA when UI changes → FIX → RETEST → MUTATION / NEGATIVE CHECK →
 CHECKPOINT COMMIT → CONTINUE.
 Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
-Continue now.
 ```
 
 ---
@@ -37,135 +42,142 @@ Continue now.
 
 | 커밋 | 내용 |
 |---|---|
-| `70345ef` | 배치 33 e2e 패치 초록으로 — 막고 있던 단언 하나의 **진짜** 원인 |
-| `6e11da6` | td01 생존자용 픽스처 + 네 상태 e2e · 스윕 러너에 `ONLY=` 재측정 모드 |
-| `2935e47` | DV-11 PM 판정 기록 (파이프 셸 GO · 동반 조건 4개) |
-| `b0d338c` | **WBS-25** 셸 명령줄 — 메인 프로세스 (`app/main/term/session.js`) |
-| `f5c7547` | 같은 것의 결함 둘 (끝난 줄이 이름을 잃음 · 프로젝트 전환 시 종료) |
-| `7f6630c` | **WBS-25** 화면 + CF-22 + `BATCH-34-QA.md` |
-| (배치 35) | 렌더러 뮤턴트 **16개 전부** 정리 — `BATCH-35-QA.md` |
+| `70345ef` | 배치 33 의 빨간 단언 해제 — 원인은 행 선택이 아니라 단언 자체였다 |
+| `6e11da6` | td01 픽스처 + 네 상태 e2e · 스윕 러너 `ONLY=` 재측정 모드 |
+| `2935e47` | **DV-11 PM 판정** 기록 (파이프 셸 GO · 동반 조건 4개) |
+| `b0d338c` `f5c7547` | **WBS-25** 셸 명령줄 — 메인 프로세스 |
+| `7f6630c` | **WBS-25** 화면 + **CF-22** + `BATCH-34-QA.md` |
+| `1c34685` | td01 뮤턴트 5/5 사살 |
+| `a31b083` | 남은 렌더러 생존자 11개 — 7 사살 · 4 GONE · **생존 0** |
+| `1237661` | 셸이 시작되지 않는 상태 · `exit` 뒤에 죽어 있던 줄 (**제품 결함**) |
+| `69b65d9` | td01 전체 스윕 첫 측정 — 15개 중 12 사살, 나머지 처리 |
+| `db1b199` | **`16` §2.1 초록 ▸ 를 화면에 올림** · 나가는 길 없던 카드 하나 |
+| `d1f0516` | 문구 검사가 이름만 보고 있었다 — 열두 개가 숨어 있었다 |
 
-전체 기록: `docs/dev-evidence/mvp-run/BATCH-34-QA.md`.
+전체 기록: `BATCH-34-QA.md` · `BATCH-35-QA.md` · `CHECKPOINTS.md`.
 
-**스윕 재측정 (처음):** 배치 33 생존자 35 → **6 사라짐**(코드가 다시 쓰였다) · **13 사살** ·
-**16 생존**. 현재 트리 62 사이트 중 46 사망 = **74%** (배치 33 시점 49%).
+**측정된 것:**
+- 렌더러 뮤턴트 **생존 0** (배치 33 생존자 35 → 6 GONE · 25 사살 · 추출로 생긴 3도 사살)
+- `td01.js` 전체 15 사이트 → 12 사살 → 나머지 처리 후 **13 사이트 전부 커버**
+- 초록 ▸ 대비 **6.96:1**(밝게) · **7.36:1**(어둡게), 두 테마 색이 서로 다름
+
+**이번에 찾은 제품 결함 넷:**
+1. `exit` 뒤의 다음 줄이 **아무 일도 하지 않았다** — 세션 없음이 `closed`/`not-open` 두
+   이름으로 오는데 렌더러가 앞의 것만 봤다. 거절 이유조차 화면에 없어 터미널이 죽은 것처럼
+   보였다.
+2. **시작 실패 카드에 누를 것이 하나도 없었다** — `18` 은 `▸ 다시 보내기` 를 처음부터
+   갖고 있었고 `refusalCard` 는 콜백까지 받고 있었다.
+3. **`16` §2.1 의 초록 ▸ 가 화면에 존재한 적이 없다** — `.rec` 를 정의하는 스타일시트가
+   없었다. 코드는 세 곳에서 그 문법을 인용하고 있었다.
+4. **액터 칩이 `'JUQODE'` 를 하드코딩** — `18` 에 없는 낱말이다. 낱말은 사전에서, 대문자는
+   스타일시트에서로 옮겼다(형제인 Claude 칩이 이미 그렇게 한다).
+
+**내 코드에서 나온 것 하나:** 배치 34 에 넣은 포커스 복원의 겹친 가드가 `back` 이 null 일 때
+`back.value` 에 닿아 **렌더 도중 throw** → 서랍 전체가 안 그려진다. 뒤에 이미 `try/catch` 가
+있었다. 겹친 가드가 방어가 아니라 새 크래시 경로였다.
 
 ---
 
-## 3. 렌더러 뮤턴트 — 생존자 0
+## 3. ⚠️ HUMAN GATE — 세 항목 (PM 판정 · 2026-09-11)
 
-배치 35 가 16개를 전부 정리했다 (`BATCH-35-QA.md`). 측정 기록:
+**에이전트가 혼자 진행하면 안 되는 것들이다.** "막혀 있으니 대신 결정한다" 가 이 run 에서
+가장 하기 쉬운 실수이고, 특히 ① 은 그렇게 하면 **이 프로젝트 자신의 규칙을 어긴다.**
 
-| | |
+### ① 문구 중복 4개 — **삭제 승인 안 됨**
+
+| 키 | 이미 렌더되는 같은 문구 |
 |---|---|
-| `td01.js` | 5 사살 · 이후 전체 스윕에서 15개 중 12 사살 → 나머지 처리 후 13개 전부 커버 |
-| `sc02.js` 4 | 2 사살 · 2 GONE(순수 함수 추출) |
-| `sc03.js` 3 | 1 사살 · 2 GONE(도달 불가 분기 삭제) |
-| `sc04.js` 4 | 4 사살 |
-| 추출로 새로 생긴 3 | 3 사살 |
+| `presence.title` | `presence.kicker` |
+| `work.observed` | `work.lastSeen` |
+| `work.open` | `history.result` · `guard.open` |
+| `qc.kicker` | `term.qcTitle` |
 
-목록 원본은 `BATCH-34-sweep.json` · `BATCH-33-sweep.json` (둘 다 저장소에 있다).
+화면은 한 번만 말할 수 있으므로 키 하나를 접어야 하는데, `copy.js` 헤더의 규칙이
+**"여기서 고치지 말고 `18` 을 먼저 고쳐라"** 다. copy.js 에서 지우는 것은 규칙 위반이고
+**PM 이 승인하지 않았다.**
 
-**`rec` 클래스는 칠했다** (`BATCH-35-QA.md` §3): `16` §2.1 의 초록 ▸ 가 처음으로 화면에
-올라갔다. 대비 실측 6.96(밝게) · 7.36(어둡게), 두 테마 색이 다른 것도 단언한다. 칠하고 나서
-SC-01 의 나가는 길 둘에 표시가 없던 것과, **시작 실패 카드에 누를 것이 하나도 없던 것**을
-찾아 같이 고쳤다.
+**무엇이 있어야 풀리나:** `18` 쪽에서 해당 키를 접거나 용도를 구분해 준 결과. 그 전까지는
+`tests/unit.test.js` 의 PENDING 에 이유와 함께 남아 있고, 그게 맞는 상태다.
 
-**문구 검사의 구멍은 고쳤다** (`BATCH-35-QA.md` §6): 이제 **전체 경로**(`C.a.b.c`)로 찾고,
-정당한 예외 둘은 이름이 아니라 접근 방식으로 판정한다 — 계산된 인덱스, 그리고 통째로 넘긴
-부모(`mountThemeToggle(bar, C.theme)`).
+### ② 미구현 컨트롤 7개 — `15` 를 읽어야 한다
 
-열두 개가 숨어 있었다. 하나는 진짜 결함이었고(액터 칩이 `'JUQODE'` 를 하드코딩 — `18` 에 없는
-낱말이다. 낱말은 사전에서, 대문자는 스타일시트에서로 옮겼다), 나머지 열하나는 지우지 않고
-전부 이유와 함께 PENDING 에 적었다.
+`guard.answer` · `guard.wait` · `work.now` · `work.requested` · `work.resubmit` ·
+`qc.terminal` · `term.out`.
 
-**다음 큐 — 문구 백로그 11개:**
-- 이미 렌더되는 문구의 **두 번째 이름** 넷 (`presence.title` · `work.observed` · `work.open` ·
-  `qc.kicker`). 화면은 한 번만 말할 수 있으므로 `18` 에 되물을 후보다.
-- `15` 가 이름 붙였지만 **아직 안 만든 컨트롤** 일곱 (`guard.answer` · `work.now` ·
-  `work.requested` · `work.resubmit` · `qc.terminal` · `term.out`, 그리고 `guard.wait` 는
-  **보류가 아니라 결정**이다 — 기다리기는 아무것도 누르지 않으면 일어나는 일이다).
+`15` 가 이름 붙인 컨트롤·레이블이고, **어디에 어떤 동작으로 놓이는지는 `15` 에 있다.**
+에이전트가 자리를 정하면 그것은 구현이 아니라 발명이다.
 
-**배치 35 가 비싸게 배운 것 둘:**
-- **조용히 건너뛰는 길이 검사는 검사가 아니다.** sc04 뮤턴트 셋이 첫 시도에서 살아남았다 —
-  단언이 `if (groups().length > 1)` 뒤에 있었고 이 런의 SC-04 는 그룹이 하나였다. 물려받은
-  검사도 같은 이유로 이미 공허했다. 이제 두 자리 모두 **개수를 단언**한다.
-- **"동등 뮤턴트로 보인다"를 서두르지 말 것.** 배치 34 가 그렇게 적은 하나가 배치 35 에서
-  죽었다 — 카드가 스냅샷이라는 사실이 관찰 가능한 차이를 만들었다.
+(`guard.wait` 만 예외 — **보류가 아니라 결정**이다: 기다리기는 아무것도 누르지 않으면
+일어나는 일이고, 친 문구는 이미 칸에 남아 있다. `refusalCard` 에 이유가 적혀 있다.)
 
-**따로 적어 둘 것 하나:** `btn ... rec` 는 렌더러 네 화면에서 15번 쓰이는데 **어떤 CSS 도
-`.rec` 를 정의하지 않는다.** 복구 동작 표시가 화면에서는 아무 차이도 만들지 않는다. 색을 주는
-것은 `16` §2.1 색 문법에 걸리는 디자인 결정이고 지우는 것은 네 화면 변경이라, 배치 35 는 적어
-두고 넘겼다 (`BATCH-35-QA.md` §3).
+**무엇이 있어야 풀리나:** 각 항목에 대한 `15` 의 해당 절, 또는 PM 이 정한 배치·동작.
 
-재측정 방법 (다시 재고 싶을 때):
+### ③ WBS-32 (사람 도그푸드) · DV-13~16 (Windows)
+
+`13` §11 DoD 와 `09` §14 는 **비개발자가 이해하는지**를 묻는다 — 사람이 앉아서 써야 답이
+나오고, 에이전트가 대신 답하면 그건 증거가 아니라 추정이다. Windows 항목은 그 OS 에서
+직접 돌려야 한다. **PM 판정: 둘 다 나중, DEFERRED 유지.**
+
+**무엇이 있어야 풀리나:** 비개발자 테스터 한 명 / Windows 기기에서의 실행 로그.
+파이프 셸(WBS-25)의 Windows 검증도 여기 붙는다 — `shellFor()` 의 Windows 갈래는
+**측정이 아니라 자리표시**이고, `$?`/`printf` 마커는 cmd.exe 에서 그대로 돌지 않는다.
+
+---
+
+## 4. 게이트 없이 할 수 있는 것 — 하나 남았다
+
+**`app/main/term/session.js` 를 한 번도 쓸어 본 적이 없다.**
+
+배치 25~30 이 `app/main` 17개 파일을 쓸었고(제품 결함 19개), 이 파일은 배치 34 에서 생겼다.
+`app/main/ipc.js` 도 그 사이 터미널 핸들러 셋이 늘었다. **결정이 아니라 측정이므로 게이트가
+없다.**
+
 ```bash
-rm -rf .mutate-work    # 트리가 바뀌면 워커 사본은 새로 떠야 한다
-ONLY=docs/dev-evidence/mvp-run/BATCH-34-sweep.json W=2 \
-  python3 scripts/mutate/sweep-renderer.py app/renderer/screens/{sc02,sc03,sc04}.js
+rm -rf .mutate-work
+W=2 python3 scripts/mutate/sweep-renderer.py app/main/term/session.js
 ```
-사이트 하나에 약 6분(2워커 기준 두 개씩). e2e 타임아웃은 900s 다 — **타임아웃은 kill 로 세어진다.** 정직한
-실행 시간보다 낮은 천장은 모든 뮤턴트를 가짜 kill 로 만든다.
+
+러너 이름이 `sweep-renderer` 지만 파일을 가리지 않는다 — 단위 스위트와 e2e 로 판정한다.
+사이트 하나에 약 6분(2워커 기준 두 개씩). 살아남는 것이 나오면 §3 과 달리 **바로 처리할 수
+있다.**
 
 ---
 
-## 4. 셸 줄(WBS-25) — 배치 35 에서 구멍 셋을 닫았다
+## 5. 알고 남긴 천장
 
-- **`15` TD-01 지금 안 됨(셸이 시작되지 않음)** — 도달했다. `JUQODE_TERM_SHELL` 로 없는
-  프로그램을 가리키고 자기 실행을 띄운다. 카드 · 이유 · 대체 경로 둘 · 빨강 0 실측.
-- **busy 경로** — 화면 문구와 "친 줄이 칸에 남는다" 를 e2e 가 본다.
-- **세션이 스스로 끝나는 경우** — `exit` → `세션이 끝났어요` → 다음 줄이 새 셸에서 돈다.
-  여기서 **제품 결함**이 나왔다: 세션 없음이 `closed` 와 `not-open` 두 이름으로 오는데
-  렌더러가 앞의 것만 봤다. `exit` 뒤의 다음 줄은 **아무 일도 하지 않았다.**
-- `td01.js` 전체 스윕: 15개 중 12 사살 → 칩 색 단언 추가 + 포커스 복원 가드 정리 후 **13개
-  전부 커버**.
-
-### 남은 것 — 알고 남긴 것
-
-- **`15` TD-01 의 지금 안 됨 카드(셸이 시작되지 않음)는 그렸지만 도달해 본 적이 없다.**
-  이 픽스처는 셸 시작 실패를 만들 수 없다. `JUQODE_TERM_SHELL` 같은 테스트 어포던스로
-  없는 셸을 가리키게 하는 것이 가장 싼 길로 보인다(`JUQODE_SIGNATURE_EXE` 와 같은 패턴).
-- **busy 경로**(앞 줄이 도는 동안 보낸 줄)는 단위로만 검사된다. 화면 문구는 미검증.
-- **세션이 스스로 끝나는 경우**(사용자가 `exit` 를 친다)는 `termEnded` 칩이 있지만 e2e 가
-  도달하지 않는다. 다음 줄을 치면 새로 열리는 재개 경로도 마찬가지다.
-- **마커 천장:** 명령이 마커 문자열을 스스로 출력하면 줄이 끝난 것으로 읽힌다. 난수로 추측을
-  막았을 뿐이다. 별도 파일 서술자가 답이지만 셸마다 다르다.
-- **Windows:** `shellFor()` 의 Windows 갈래는 **자리표시다.** `$?`/`printf` 마커는 cmd.exe
-  에서 그대로 돌지 않는다. 재기 전까지 Windows 에 대해 아무 말도 하지 말 것.
-
----
-
-## 5. 남은 MVP 큐 전체
-
-| | 상태 |
-|---|---|
-| 배치 33 e2e 마무리 | **완료** (`70345ef`) |
-| 렌더러 뮤턴트 16개 | **완료** — 배치 35, 측정으로 0 생존 확인 |
-| td01 생존자 9개 | **완료** (`6e11da6`) |
-| 스윕 재실행(실제 kill 측정) | **완료** — 49% → 74% |
-| WBS-25 셸 명령줄 | **완료** (Linux) · Windows 미검증 |
-| DV-11 | **판정됨 · 구현됨** |
-| WBS-33 | 완료 (`952d68b`) — DV-16(실제 패키징 exe 검증) 대기 |
-| WBS-32 (사람 검증) | 미착수 — PM: 나중 |
-| DV-13/14/15/16 | 사용자 Windows 재실행 대기 — PM: 나중. 파이프 셸 검증도 여기 붙는다 |
+- **마커 천장** — 셸 줄의 종료 코드는 난수 마커 + `printf` 로 받는다. 명령이 그 문자열을
+  스스로 출력하면 줄이 끝난 것으로 읽는다. 별도 파일 서술자가 답이지만 셸마다 다르다.
+- **Windows** — `shellFor()` 의 Windows 갈래는 자리표시다(§3 ③).
+- **`.rec` 를 쓰지 않는 복구 경로** — SC-01·SC-02·SC-03·SC-04·TD-01 은 표시를 붙였다.
+  새 화면을 만들 때 복구 동작에는 `rec` 를 붙일 것.
+- **`13` §11 DoD 는 WBS-32 를 포함한다** — §3 ③ 이 열리기 전에는 MVP 를 "끝났다" 고 말할 수
+  없다.
 
 ---
 
 ## 6. 비싸게 배운 것 — 계속 유효
 
 - **추측하지 말고 찍어라.** 배치 33 이 세 번 틀린 원인을 `results.json` 한 번이 잡았다.
-  이제 `visual.mjs` 는 단언 전에 관측값 전부를 `tmp-visual/results.json` 에 남긴다.
-- **위치는 정체성이 아니다.** 목록에서 고를 때는 이름/경로로.
-- **관찰 지점과 단언 사이에 단계를 끼워 넣지 말 것.**
-- **전이 상태를 고정 지연으로 관찰하려 하지 말 것.** `멈춤 요청함` 은 700ms 뒤에 이미
-  `멈췄어요` 였다. 관찰 가능한 것을 단언하고, 거짓이 되는 상태가 아님을 단언한다.
-- **타임아웃은 kill 로 세어진다.** 스윕 천장이 실행 시간보다 낮으면 전부 가짜 kill 이다.
-- **없어진 코드는 죽인 것이 아니다.** 재측정은 사이트를 인덱스가 아니라 자기 자신으로 맞추고,
-  사라진 것은 GONE 으로 보고한다.
-- **`evalJs` 템플릿 리터럴 안 주석에 백틱 금지.**
+  `visual.mjs` 는 단언 전에 관측값 전부를 `tmp-visual/results.json` 에 남긴다.
+- **조용히 건너뛰는 길이 검사는 검사가 아니다.** `if (groups().length > 1)` 뒤의 단언 셋이
+  한 번도 실행되지 않았다. 이제 개수를 **단언**한다 — 건너뛰는 대신 터지도록.
+- **다른 키로 만족되는 가드는 가드가 아니다.** 문구 검사가 잎 이름만 봐서 열두 개가 숨었다.
+- **"동등 뮤턴트로 보인다"를 서두르지 말 것.** 배치 34 가 그렇게 적은 하나가 배치 35 에서
+  죽었다.
+- **겹친 방어 가드가 새 크래시 경로가 될 수 있다.** 뒤에 catch 가 있으면 앞의 가드는 빚이다.
+- **전이 상태를 고정 지연으로 관찰하지 말 것.** `멈춤 요청함` 은 700ms 뒤 이미 `멈췄어요`.
+- **타임아웃은 kill 로 세어진다.** 스윕 천장이 실행 시간보다 낮으면 전부 가짜 kill.
+- **없어진 코드는 죽인 것이 아니다** — 재측정은 GONE 으로 보고한다.
+- **위치는 정체성이 아니다** · **관찰 지점과 단언 사이에 단계를 끼워 넣지 말 것.**
+- **`evalJs`/픽스처 템플릿 리터럴 안 주석에 백틱 금지.** 이번에도 두 번 당했다.
+- **grep 을 `head` 로 잘라 읽고 "없다" 라고 결론내지 말 것.** 이번에 한 번 그렇게 틀렸다.
 - **`pkill -f` / `pgrep -f` 금지** (자기 셸을 죽인다). pidfile 또는 `pgrep -x`.
-- **VISUAL QA 는 진짜로 본다.** 배치 34 의 레이아웃 결함 둘은 단언 전부 통과 상태에서
+- **`nohup ... &` 는 PPID 1 로 재부모화된다** — 셸의 프로세스 트리에 자식으로 안 보인다.
+  "안 돌고 있다" 로 오독하기 쉽다. `ps -eo pid,ppid,etimes,args` 로 직접 확인할 것.
+- **VISUAL QA 는 진짜로 본다.** 배치 34 의 레이아웃 결함 둘은 단언이 전부 통과한 상태에서
   스크린샷으로만 보였다.
+
+---
 
 ## 7. 이 런의 보안 제약 (계속 유효)
 
@@ -174,5 +186,22 @@ ONLY=docs/dev-evidence/mvp-run/BATCH-34-sweep.json W=2 \
 - 제외 경로 변경 보고는 **메타데이터만** (D-126a).
 - 측정하지 않은 것을 측정했다고 말하지 않는다 — 특히 Windows.
 - **빨간 스위트를 푸시하지 않는다.**
-- 셸 줄에 **차단 목록을 만들지 말 것** (`19` §C4). `tests/term.test.js` 가 그것을 검사한다 —
+- 셸 줄에 **차단 목록을 만들지 말 것** (`19` §C4). `tests/term.test.js` 가 검사한다 —
   걸러내는 척하는 제품은 걸러내지 못한 것을 안전하다고 가르친다.
+- **문구는 `copy.js` 에서 고치지 않는다** — `18` 을 먼저 고친다 (§3 ①).
+
+---
+
+## 8. 도구
+
+```bash
+# 뮤테이션 스윕 (파일을 가리지 않는다)
+rm -rf .mutate-work                    # 트리가 바뀌면 워커 사본은 새로 떠야 한다
+W=2 python3 scripts/mutate/sweep-renderer.py <파일…>
+ONLY=<이전 results.json> W=2 python3 scripts/mutate/sweep-renderer.py <파일…>   # 생존자만 재측정
+
+# 스윕이 도는 동안 대상 파일을 편집하지 말 것 — 러너가 매 뮤턴트마다 원본을 다시 읽고 단언한다.
+# e2e 타임아웃 기본 900s (`E2E_TIMEOUT`). 타임아웃은 kill 로 세어진다.
+```
+
+측정 기록: `BATCH-33-sweep.json`(배치 33 원본) · `BATCH-34-sweep.json`(재측정) — 둘 다 저장소에.
