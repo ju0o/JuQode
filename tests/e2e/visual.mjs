@@ -1606,6 +1606,35 @@ const results = await cdp(async ({ send, evalJs }) => {
     fs.writeFileSync(path.join(OUT, `td01-shell-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
 
+  /* 한 번에 한 줄. 앞 줄이 도는 동안 보낸 줄은 거절되고, **화면이 이유를 말한다** — 단위
+   * 스위트가 거절을 검사하지만 그 문장이 화면에 있는지는 여기서만 볼 수 있다. */
+  await evalJs(`(() => { document.querySelector('[data-el="term-input"]').value = 'sleep 2'; })()`);
+  await evalJs(`document.querySelector('[data-el="term-input"]').dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+  await sleep(400);
+  await evalJs(`(() => { document.querySelector('[data-el="term-input"]').value = 'echo late'; })()`);
+  await evalJs(`document.querySelector('[data-el="term-input"]').dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+  await sleep(500);
+  out.termBusy = await evalJs(`(() => {
+    const n = document.querySelector('[data-el="term"]');
+    return JSON.stringify({ text: n?.innerText ?? null,
+                            kept: document.querySelector('[data-el="term-input"]').value }); })()`);
+  await sleep(2500);
+
+  /* 세션이 스스로 끝나는 경우 — 사용자가 `exit` 를 친다. 서랍이 남고, 다음 줄이 새 셸을 연다.
+   * `19` §C6 REC-010 의 "닫아도 살아 있다" 의 반대쪽 절반이다: 끝난 것은 끝났다고 말한다. */
+  await evalJs(`(() => { document.querySelector('[data-el="term-input"]').value = 'exit'; })()`);
+  await evalJs(`document.querySelector('[data-el="term-input"]').dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+  await sleep(1500);
+  out.termExited = await evalJs(`(() => {
+    const c = document.querySelector('[data-el="term-run"]');
+    return JSON.stringify({ state: c?.getAttribute('data-state') ?? null, text: c?.innerText ?? null,
+                            term: window.__term() }); })()`);
+  /* …그리고 다음 줄은 새 셸에서 돈다. 사용자가 같은 줄을 두 번 치게 하지 않는다. */
+  out.termAfterExit = JSON.stringify(await shell('pwd'));
+
   /* 이 런이 띄운 셸은 이 런이 끝낸다. 분리된 프로세스라 앱보다 오래 산다. */
   out.termStopped = await evalJs(`(async () => {
     const r = await window.juqode.termStop(window.__project().id);
@@ -2577,6 +2606,23 @@ assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not 
   assert.ok(!results.termCard.includes('멈추기'),
     `a finished command still offers 멈추기: ${results.termCard}`);
   assert.strictEqual(JSON.parse(results.termAfterSleep).run.code, 0, 'the slept command did not finish');
+  /* 거절은 화면에서 이유를 말하고, 사용자가 친 줄은 칸에 남는다 (UF-RULE-NOQUEUE 와 같은 태도:
+   * 줄 세우지도 버리지도 않는다). */
+  const busy = JSON.parse(results.termBusy);
+  assert.ok(busy.text.includes('앞 명령이 아직 돌고 있어요'),
+    `a refused line said nothing on screen: ${busy.text}`);
+  assert.strictEqual(busy.kept, 'echo late', 'the refused line was thrown away');
+
+  /* 사용자가 친 `exit` 로 세션이 끝난다 — 그리고 화면이 그렇게 말한다. */
+  const exited = JSON.parse(results.termExited);
+  assert.strictEqual(exited.state, 'ended', `a shell the user exited is ${exited.state}`);
+  assert.ok(exited.text.includes('세션이 끝났어요'), `the ended session says ${exited.text}`);
+  /* …그리고 다음 줄이 새 셸을 연다: 같은 줄을 두 번 치게 하지 않는다. */
+  const afterExit = JSON.parse(results.termAfterExit);
+  assert.strictEqual(afterExit.run.code, 0, 'the line after an exited session did not run');
+  assert.ok(afterExit.run.output.includes(SEED),
+    `the reopened shell is not in the project: ${afterExit.run.output}`);
+
   assert.strictEqual(JSON.parse(results.termStopped).ok, true, 'the shell this run started is still up');
 }
 
@@ -3434,9 +3480,110 @@ assert.ok(results.failCard.includes('폴더가 없어요'), 'the failure card do
 assert.strictEqual(results.failActions, 2, `15 asks for 2 recovery actions, found ${results.failActions}`);
 assert.ok(results.failReds > 0, 'the one red on SC-01 is not rendered red');
 
+console.log(JSON.stringify(results, null, 2));
+/* ── A terminal that cannot be opened ───────────────────────────────────────────
+ * `15` TD-01 Unavailable State: 터미널을 열 수 없어요 + 이유 + 두 대체 경로. Until DV-11 was
+ * judged there was no shell and so no way to fail; now there is a shell, and the ONE state it
+ * has that this machine cannot produce on its own is "the shell did not start" — every machine
+ * that runs this app has a shell. `JUQODE_TERM_SHELL` points the line at one that is not
+ * there, which is the only honest way to reach the card. Its own launch, because the setting
+ * belongs to the whole main process.
+ */
+{
+  const PORT3 = PORT + 2;
+  const app3 = spawnApp(['--no-sandbox', `--remote-debugging-port=${PORT3}`],
+    { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB,
+      JUQODE_USER_DATA: USER_DATA, JUQODE_TERM_SHELL: '/nonexistent/juqode-shell' } });
+  const stop3 = () => killTree(app3.pid);
+  process.on('exit', stop3);
+  await sleep(4000);
+
+  const page = await pageTarget(PORT3);
+  assert.ok(page, 'the app did not open a window for the broken-terminal run');
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+  let n = 0; const waiting = new Map();
+  ws.onmessage = (m) => { const msg = JSON.parse(m.data); if (waiting.has(msg.id)) { waiting.get(msg.id)(msg); waiting.delete(msg.id); } };
+  const ev3 = (expr) => new Promise((res, rej) => {
+    const id = ++n;
+    const t = setTimeout(() => rej(new Error('CDP timeout on the broken-terminal run')), 20000);
+    waiting.set(id, (msg) => { clearTimeout(t); res(msg.result?.result?.value); });
+    ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true, awaitPromise: true } }));
+  });
+
+  const ready = await ev3(`(async () => {
+    for (let i = 0; i < 200; i++) {
+      if (typeof window.__screen === 'function' && window.__ready === true) return true;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return false; })()`);
+  assert.strictEqual(ready, true, 'the broken-terminal run never finished booting');
+
+  await ev3(`[...document.querySelectorAll('[data-el="recent-row"]')]
+    .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED))}))?.click()`);
+  /* 열릴 때까지 기다린다 — 고정 sleep 은 "얼마나 걸리나" 에 대한 추측이고, 두 번째 앱이 뜨는
+   * 중이면 틀린다. 드로어는 프로젝트가 있어야 열리므로 SC-02 를 먼저 기다린다. */
+  const opened = await ev3(`(async () => {
+    for (let i = 0; i < 100; i++) {
+      if (window.__screen() === 'SC-02' && window.__project()) return true;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return false; })()`);
+  if (!opened) {
+    /* 실패가 스스로 설명하게 한다 — 두 번째 앱은 로그를 남기지 않고 죽는다. */
+    const why = await ev3(`(async () => JSON.stringify({
+      screen: window.__screen(), rows: document.querySelectorAll('[data-el="recent-row"]').length,
+      fail: document.querySelector('[data-el="fail"]')?.innerText ?? null,
+      store: JSON.stringify((await window.juqode.boot()).store),
+      direct: JSON.stringify(await window.juqode.openPath(${JSON.stringify(SEED)})) }))()`);
+    assert.fail(`the broken-terminal run never opened the project: ${why}`);
+  }
+  await ev3(`window.__toggleDrawer()`);
+  const hasField = await ev3(`(async () => {
+    for (let i = 0; i < 60; i++) {
+      if (document.querySelector('[data-el="term-input"]')) return true;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return false; })()`);
+  assert.strictEqual(hasField, true, 'the drawer never showed the shell line');
+  /* 첫 명령이 셸을 여는 동의다 — 그리고 그 열기가 실패한다. */
+  await ev3(`(() => { document.querySelector('[data-el="term-input"]').value = 'echo hi'; })()`);
+  await ev3(`document.querySelector('[data-el="term-input"]').dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+  await sleep(1500);
+  const broken = {
+    screen: await ev3('window.__screen()'),
+    term:   await ev3('JSON.stringify(window.__term())'),
+    card:   await ev3(`document.querySelector('[data-el="term-fail"]')?.innerText ?? null`),
+    acts:   await ev3(`JSON.stringify([...document.querySelectorAll('[data-el="term-fail"] button')].map(b => b.textContent.trim()))`),
+    reds:   await ev3(RED_COUNT('[data-el="term-fail"], [data-el="term-fail"] *')),
+    run:    await ev3(`document.querySelectorAll('[data-el="term-run"]').length`),
+  };
+  ws.close();
+  stop3();
+  await sleep(400);
+
+  assert.ok(broken.card, 'the shell failed to start and TD-01 said nothing');
+  assert.ok(broken.card.includes('터미널을 열 수 없어요'),
+    `the card does not name the state: ${broken.card}`);
+  /* `12` §16 · DV-11 동반 조건 ②: 능력 한계는 실패가 아니다. 셸이 시작되지 않은 것은
+   * 사용자의 명령이 실패한 것과 다르고, `16` §2.1 은 빨강을 실패에만 준다. */
+  assert.ok(broken.card.includes('지금 안 됨'), `the card is not in the 지금 안 됨 grammar: ${broken.card}`);
+  assert.strictEqual(broken.reds, 0, 'a terminal that could not start is painted as a failure');
+  /* `15`: 이유 + 대체 경로 **두 개**. 한 개짜리 막다른 길이 아니다. */
+  assert.deepStrictEqual(JSON.parse(broken.acts), ['▸ Quick Command 출력으로 확인', '▸ Raw Diff로 확인'],
+    `the card offers ${broken.acts}`);
+  /* …그리고 실행 결과인 척하지 않는다: 아무것도 돌지 않았다. */
+  assert.strictEqual(broken.run, 0, 'a shell that never started produced a run card');
+  assert.strictEqual(JSON.parse(broken.term).open, false, 'a shell that never started is held as open');
+  console.log('broken-terminal run: PASS  ', JSON.stringify(broken));
+}
+
+/* The fixture projects go LAST: the run above opens SEED in a second app, and this used to
+ * delete it first — the launch then sat on SC-01 with `폴더가 없어요` and the terminal card it
+ * was there to photograph never happened. */
 for (const d of [SEED, SEED2]) fs.rmSync(d, { recursive: true, force: true });
 
-console.log(JSON.stringify(results, null, 2));
 /* ── A store the app must refuse ────────────────────────────────────────────────
  * WBS-21 says a file we cannot understand is refused, never replaced. That is only half
  * the promise: the app must also still BOOT and say so. Nothing above proves that, so it

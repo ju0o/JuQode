@@ -389,6 +389,9 @@ function makeHandlers(deps) {
           .catch(() => { if (termLive?.session === session) termLive = null; });
       }
       const s = termLive.session;
+      /* A shell that did not start is not a session. `15` TD-01 Unavailable State: 열 수 없어요
+       * with a reason — never a handle that accepts lines and drops them. */
+      if (s.pid == null) { termClose(); return { ok: false, reason: 'spawn-failed' }; }
       return { ok: true, id: s.id, cwd: s.cwd, pid: s.pid, limits: s.limits, busy: s.busy() };
     },
 

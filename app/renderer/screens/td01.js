@@ -211,9 +211,13 @@ function termRegion(api, state, repaint) {
       state.term = opened;
     }
     const r = await api.termWrite(state.project.id, line);
-    if (!r.ok && r.reason === 'closed') {
-      /* 세션이 끝나 있었다(사용자의 `exit`, 크래시, 프로젝트 전환). 새로 열고 한 번만 다시
-       * 보낸다 — 사용자가 같은 줄을 두 번 치게 하지 않는다. */
+    /* 세션이 끝나 있었다 — 사용자의 `exit`, 크래시, 프로젝트 전환. **두 이름으로 온다:** 셸이
+     * 죽었지만 핸들이 남아 있으면 `closed`, 메인이 이미 핸들을 놓았으면 `not-open`. 앞의 것만
+     * 보고 있었고, 그래서 MEASURED: `exit` 를 친 다음 줄은 **아무 일도 일어나지 않았다** —
+     * 거절 이유가 화면에 나오지도 않는다(그 문구는 busy 에만 있다). 사용자에게는 터미널이
+     * 그냥 죽은 것으로 보인다. 세션이 없다는 두 답은 같은 상황이므로 같이 처리한다. */
+    if (!r.ok && (r.reason === 'closed' || r.reason === 'not-open')) {
+      /* 새로 열고 한 번만 다시 보낸다 — 사용자가 같은 줄을 두 번 치게 하지 않는다. */
       state.term = null;
       const again = await api.termOpen(state.project.id);
       if (!again?.ok) { state.termFailed = again?.reason ?? 'unknown'; repaint(); return; }

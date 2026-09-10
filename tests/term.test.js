@@ -137,6 +137,44 @@ test('stop() 은 세션을 끝낸다 — 작업 제어가 없으니 이것이 �
   assert.strictEqual(s.write('echo after').ok, false, 'a closed session still accepted a line');
 });
 
+test('없는 셸은 세션이 아니다 — pid 없이 열렸다고 하지 않는다', async () => {
+  /* `15` TD-01 Unavailable State 는 **셸이 시작되지 않은** 상태다. 그 상태가 카드로만 존재하고
+   * 도달할 수 없으면, 그 카드가 옳은지 아무도 모른다. `JUQODE_TERM_SHELL` 이 그리로 가는
+   * 유일한 길이다 — 이 앱이 도는 기계에는 셸이 있기 때문이다.
+   *
+   * 없는 프로그램의 spawn 실패는 `error` 이벤트로 **비동기**로 오지만, pid 가 없다는 것은
+   * 그 자리에서 안다. 그래서 호출자가 "열지 못했어요" 라고 답할 수 있다 — 치는 줄마다 조용히
+   * 삼키는 죽은 세션을 돌려주는 대신에. */
+  const s = term.open({ cwd: tempDir('juqode-term-noshell'),
+                        env: { ...process.env, JUQODE_TERM_SHELL: '/nonexistent/juqode-shell' } });
+  assert.strictEqual(s.pid, null, 'a shell that does not exist reported a pid');
+  const end = await s.done;
+  assert.strictEqual(end.why, 'spawn-failed', `the session ended as ${end.why}`);
+});
+
+test('열지 못한 셸은 `열렸다`로 답하지 않는다 (ipc)', async () => {
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const { openDb } = require(path.join(R, 'app/main/db/db.js'));
+  const repo = require(path.join(R, 'app/main/db/repo.js'));
+  const db = openDb(':memory:');
+  const p = repo.openProject(db, tempDir('juqode-term-fail'), 'f');
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
+  const saved = process.env.JUQODE_TERM_SHELL;
+  process.env.JUQODE_TERM_SHELL = '/nonexistent/juqode-shell';
+  try {
+    const r = await h['juqode:term-open'](null, p.id);
+    assert.strictEqual(r.ok, false, 'a shell that never started was reported as open');
+    assert.strictEqual(r.reason, 'spawn-failed', `the reason is ${r.reason}`);
+    /* …그리고 붙들고 있지 않는다: 다음 열기가 죽은 세션을 돌려받으면 안 된다. */
+    assert.strictEqual((await h['juqode:term-write'](null, p.id, 'echo x')).reason, 'not-open',
+      'the failed session is still being held');
+  } finally {
+    if (saved === undefined) delete process.env.JUQODE_TERM_SHELL; else process.env.JUQODE_TERM_SHELL = saved;
+    h.__stopAllTerm?.();
+    db.close();
+  }
+});
+
 test('한계는 지어낸 문장이 아니라 이 구현이 실제로 가진 것이다 (동반 조건 ①②③)', () => {
   const s = session(tempDir('juqode-term-limits'));
   try {

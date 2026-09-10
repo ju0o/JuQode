@@ -46,6 +46,11 @@ const MARK = () => `__JUQODE_TERM_${randomUUID().replace(/-/g, '')}__`;
  * 모르면 `/bin/sh` 로 내려간다. 어느 쪽인지는 `limits.shell` 로 화면에 나간다. */
 const POSIX = /(?:^|\/)(?:sh|bash|dash|ksh|zsh)$/;
 function shellFor(env = process.env) {
+  /* Test affordance: point the line at a shell that is not there, so `15` TD-01's
+   * 터미널을 열 수 없어요 state can be REACHED rather than only drawn. Nothing else can produce
+   * it — a machine that runs this app has a shell. Off unless asked for; never set in a shipped
+   * build, and it names a program, not a command line. */
+  if (env.JUQODE_TERM_SHELL) return { path: env.JUQODE_TERM_SHELL, posix: true };
   if (process.platform === 'win32') {
     /* Windows 는 이 런에서 DEFERRED_VALIDATION 이다. 여기에 cmd.exe 를 적는 것은 측정이
      * 아니라 자리표시이고, `$?`/`printf` 마커는 cmd 에서 그대로 돌지 않는다. */
@@ -154,6 +159,10 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
 
   return {
     id,
+    /* `null` when the program is not there. `spawn` reports that asynchronously through the
+     * `error` event, but the missing pid is known SYNCHRONOUSLY — which is what lets the caller
+     * answer "the terminal could not be opened" instead of handing back a dead session that
+     * silently swallows every line the user types. */
     pid: child.pid ?? null,
     cwd,
     startedAt,
