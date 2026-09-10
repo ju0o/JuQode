@@ -178,8 +178,19 @@ if (resumed) {
   /* …and it touches the gitignored, JuQode-excluded .env. Canon 19 SS-E: that change is NOT in
    * the diff by design, and the product still has to SAY it happened — from the ledger, as a
    * path and nothing more. This gives the evidence-gap card its first rendered evidence. */
-  fs.writeFileSync(${JSON.stringify(path.join(SEED, '.env'))},
-    'SECRET_TOKEN=juqode-synthetic-fixture-marker-CHANGED\\n');
+  /* ONCE, on the first granted turn only. The card must also be ABSENT for a Work that touched
+   * no excluded path, and while every Work in the run wrote this file there was no such Work to
+   * look at — so the absent half of D-126a could not be checked at all. */
+  const envOnce = ${JSON.stringify(path.join(SEED, '.env-touched'))};
+  if (!fs.existsSync(envOnce)) {
+    fs.writeFileSync(${JSON.stringify(path.join(SEED, '.env'))},
+      'SECRET_TOKEN=juqode-synthetic-fixture-marker-CHANGED\\n');
+    fs.writeFileSync(envOnce, '1');
+  } else {
+    /* a NORMAL edit, so this Work still has changes to read — just no excluded one */
+    fs.writeFileSync(${JSON.stringify(path.join(SEED, 'src', 'later.js'))},
+      'export const later = true;\\n');
+  }
 }
 const out = resumed ? [
   { type: 'system', subtype: 'init', session_id: 's', cwd: '/p', claude_code_version: '9.9.9' },
@@ -241,10 +252,21 @@ fs.writeFileSync(FAKE_CLI, [
  * get re-read?" answerable: the list starts SEED2-first, the run opens SEED, and on return
  * SEED must be on top. A count alone cannot tell a re-read from a stale DOM. */
 const SEED2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-seed2-')));
+/* A third project whose History FITS. The fixture comment below says the control and its
+ * absence are both rules — only the first was ever built, and `hidden > 0` could be widened to
+ * `hidden >= 0` with nothing noticing. Every project in this run ends up with four or more
+ * Works, so the short list has to be seeded on purpose. */
+const SEED3 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-seed3-')));
 {
   const { openDb } = require(path.join(ROOT, 'app/main/db/db.js'));
   const repo = require(path.join(ROOT, 'app/main/db/repo.js'));
   const db = openDb(DB);
+  /* SEED3 FIRST, so it sits at the BOTTOM of the last-opened list and the order the rest of
+   * this run reads is exactly what it was before this project existed. */
+  const p3 = repo.openProject(db, SEED3, path.basename(SEED3));
+  {
+    const t0 = Date.now(); while (Date.now() === t0) { /* distinct millisecond */ }
+  }
   repo.openProject(db, SEED, path.basename(SEED));
   const t = Date.now(); while (Date.now() === t) { /* distinct millisecond */ }
   const p2 = repo.openProject(db, SEED2, path.basename(SEED2));
@@ -254,6 +276,12 @@ const SEED2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-seed
    * first one. Ended, so nothing here is a live Work competing for the D-117 slot. */
   for (const intent of ['첫 번째 요청', '두 번째 요청', '세 번째 요청', '네 번째 요청']) {
     const w = repo.beginWork(db, p2.id, intent).work;
+    repo.setWorkState(db, w.id, { status: 'ended', outcome: 'complete' });
+  }
+  /* TWO Works — fewer than the head of three, so this project's History has nothing hidden and
+   * the `N개 더` control must not be drawn at all. */
+  for (const intent of ['짧은 요청 하나', '짧은 요청 둘']) {
+    const w = repo.beginWork(db, p3.id, intent).work;
     repo.setWorkState(db, w.id, { status: 'ended', outcome: 'complete' });
   }
   db.close();
@@ -451,10 +479,33 @@ const PRI_CONTRAST = `(() => {
   return Math.round(((Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05)) * 100) / 100;
 })()`;
 
+/* SC-03's state panels each have a condition over the snapshot. Sampling the snapshot AND the
+ * panels together, everywhere this run reaches SC-03, turns those conditions into one invariant
+ * checked across every state the run actually produced.
+ *
+ * FOUND BY MUTATION: five separate flips in those conditions survived — `status === 'input_waiting'`
+ * inverted, and both halves of `status !== 'ended' && liveness === 'quiet'` / `'unknown'`. Every
+ * existing check asked whether a panel was PRESENT when expected; none asked whether it was
+ * ABSENT when its condition did not hold, which is the half a widened condition breaks. */
+const PANELS = `(() => {
+  const w = window.__work();
+  const n = (el) => document.querySelectorAll('.sc03 [data-el="' + el + '"]').length;
+  return JSON.stringify({ screen: window.__screen(), status: w?.status ?? null,
+    liveness: w?.liveness ?? null, input: n('input'), quiet: n('quiet'), unknown: n('unknown') });
+})()`;
+
 const results = await cdp(async ({ send, evalJs }) => {
   step('cdp attached');
   await send('Page.enable');
   const out = {};
+  out.panelSamples = [];
+  out.gapSamples = [];
+  const sampleGap = async (where) => out.gapSamples.push(`${where}|` + await evalJs(`JSON.stringify({
+    screen: window.__screen(), work: window.__work()?.id ?? null,
+    gap: window.__reader()?.gap ?? null,
+    card: document.querySelectorAll('[data-el="evidence-gap"]').length })`));
+  const samplePanels = async (where) =>
+    out.panelSamples.push(`${where}|` + await evalJs(PANELS));
 
   out.ready  = await evalJs('window.__ready === true');
   out.screen = await evalJs('window.__screen()');
@@ -633,8 +684,12 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
   out.recentRows = await evalJs('document.querySelectorAll(\'[data-el="recent-row"]\').length');
   step('open recent row');
-  /* the SECOND row — the older project — so the reorder on return is a real signal */
-  await evalJs(`document.querySelectorAll('[data-el="recent-row"]')[1].click()`);
+  /* By NAME. This was `[1]` — "the second row, the older project" — and seeding one more
+   * fixture project silently made it a DIFFERENT project, after which every later step ran
+   * against the wrong store and the failure surfaced 400 lines away as a missing canvas. A
+   * position is not an identity. */
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
+    .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED))}))?.click()`);
   await sleep(700);
 
   /* 해석 중 — a required `15` state that had no rendered evidence. The scan finishes in
@@ -729,6 +784,7 @@ const results = await cdp(async ({ send, evalJs }) => {
 
   out.screenAfterSubmit = await evalJs('window.__screen()');
   out.work = await evalJs('JSON.stringify(window.__work())');
+  await samplePanels('first-work');
   out.permPanel = await evalJs(`document.querySelector('[data-el="permission"]')?.innerText ?? null`);
   out.workReds = await evalJs(RED_COUNT('.sc03 *'));
   out.nextSlot = await evalJs(`document.querySelector('[data-el="next"]')?.innerText ?? null`);
@@ -787,6 +843,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.includes('허용하고'))?.click()`);
   await sleep(2500);
   out.afterAllow = await evalJs('JSON.stringify(window.__work())');
+  await samplePanels('after-allow');
 
   /* WBS-18 · the 확인됨 tool count, cross-checked against the app's OWN recorded signals.
    *
@@ -865,12 +922,14 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`document.querySelector('.sc04 .card')?.style.removeProperty('color')`);
   out.readerOverflow = await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth');
   out.readerCols     = await evalJs(`document.querySelectorAll('.sc04-col').length`);
+  await sampleGap('reader-1');
   out.readerRawShut  = await evalJs(`document.querySelectorAll('.sc04-patch').length`);
   out.readerText     = await evalJs(`document.querySelector('.sc04')?.innerText ?? null`);
   /* WBS-38 · `15` SC-04 Secondary Actions. Two of the four are shared top-bar elements; these
    * two are the screen's own, and 원하던 결과가 아니에요 was not built here at all until the
    * batch-16 QA pass — a user who had just been shown why a change happened had no way to say
    * it was not what they wanted from the screen that showed them. */
+  await sampleGap('reader-acts');
   out.readerActs = await evalJs(`(() => {
     const b = document.querySelector('.sc04 [data-el="next-actions"]');
     return b ? JSON.stringify({ n: b.querySelectorAll('button').length, text: b.innerText }) : null; })()`);
@@ -904,11 +963,23 @@ const results = await cdp(async ({ send, evalJs }) => {
     return JSON.stringify(out); })()`);
   out.readerBlockSel = await evalJs(`(async () => {
     const blocks = () => [...document.querySelectorAll('.sc04-block')];
+    /* the RAW column's filenames. The same class also labels the middle column's file groups,
+     * and counting both said three files were shown when one was. (No backticks in here: this
+     * comment lives inside a template literal and one would end it.) */
+    const files = () => [...document.querySelectorAll('.sc04-rawcard .sc04-filename')].map(n => n.textContent);
     if (!blocks().length) return JSON.stringify({ count: 0 });
     const before = blocks().map(b => b.classList.contains('on'));
+    const key = blocks()[0].getAttribute('data-block');
     blocks()[0].click();
     await new Promise(r => setTimeout(r, 400));
-    return JSON.stringify({ count: blocks().length, before, after: blocks().map(b => b.classList.contains('on')) }); })()`);
+    const after = blocks().map(b => b.classList.contains('on'));
+    const scopedFiles = files();
+    /* click it AGAIN — the same block closes the scoped raw (15 SC-04: block select -> raw). */
+    blocks()[0].click();
+    await new Promise(r => setTimeout(r, 400));
+    return JSON.stringify({ count: blocks().length, before, after,
+      key, scopedFiles, reopened: blocks().map(b => b.classList.contains('on')),
+      afterSecondClickFiles: files() }); })()`);
   for (const theme of ['light', 'dark']) {
     await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
     await sleep(200);
@@ -956,6 +1027,7 @@ const results = await cdp(async ({ send, evalJs }) => {
 
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업으로'))?.click()`);
   await sleep(600);
+  await sampleGap('after-reader');
   out.screenAfterReader = await evalJs('window.__screen()');
   /* WBS-05 · 오래됨. The project gains a top-level folder while the reader is open, which is a
    * STRUCTURAL change and therefore moves `source_hash` (`19` §C1 ⑤ — a body edit does not).
@@ -1016,6 +1088,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   /* `변경 보기` → SC-04, for a Work that is no longer the one on screen. */
   await evalJs(`[...document.querySelectorAll('[data-el="history-row"] button')].find(b => b.textContent.includes('변경 보기'))?.click()`);
   await sleep(1500);
+  await sampleGap('history-reader');
   out.historyToReader = await evalJs('window.__screen()');
   /* WBS-37 · SC-04 → SC-02: 읽기면이 접히며 History 로 착지한다. `이해했어요` is SC-04's own
    * way out, so it is where the sentence is about. */
@@ -1050,6 +1123,24 @@ const results = await cdp(async ({ send, evalJs }) => {
    * still one. `shot()` reads the canvas back as pixels. */
   const PRESENCE = `document.querySelector('[data-card="presence"] canvas')`;
   const shot = `${PRESENCE}.toDataURL()`;
+  /* SC-02's presence canvas is mounted by an ASYNC fill, so a fixed sleep after the navigation
+   * is a bet on the machine being idle. Under a mutation sweep it is not, and this read came
+   * back `null.toDataURL()` — a harness flake reported as a product failure, which is the one
+   * thing this file must never do. Poll for it instead. */
+  {
+    let ready = false;
+    for (let i = 0; i < 40 && !ready; i++) {
+      ready = await evalJs(`Boolean(${PRESENCE})`);
+      if (!ready) await sleep(250);
+    }
+    if (!ready) {
+      const why = await evalJs(`JSON.stringify({ screen: window.__screen(),
+        project: window.__project()?.path ?? null,
+        cards: [...document.querySelectorAll('[data-card]')].map(n => n.getAttribute('data-card')),
+        presenceHtml: document.querySelector('[data-card="presence"]')?.innerHTML?.slice(0, 300) ?? null })`);
+      throw new Error('the Agent Presence canvas never mounted on SC-02 (10s): ' + why);
+    }
+  }
   out.presenceMode  = await evalJs(`${PRESENCE}?.getAttribute('data-mode')`);
   out.presenceAria  = await evalJs(`${PRESENCE}?.getAttribute('aria-label')`);
   out.presenceLabel = await evalJs(`document.querySelector('[data-card="presence"] .plabel')?.textContent`);
@@ -1249,11 +1340,13 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(2500);
   out.cancelScreen = await evalJs('window.__screen()');
   out.cancelBefore = await evalJs('JSON.stringify(window.__work())');
+  await samplePanels('cancel-before');
 
   /* ① 새 신호 없음 — `15` SC-03 · WBS-15. The child started and then said nothing. This is the
    * one place a timer is legitimate, and the panel's whole content is a refusal to judge. */
   await sleep(3500);
   out.quietPanel = await evalJs(`document.querySelector('.sc03 [data-el="quiet"]')?.innerText ?? null`);
+  await samplePanels('quiet');
   out.quietReds = await evalJs(RED_COUNT('.sc03 [data-el="quiet"], .sc03 [data-el="quiet"] *'));
   out.quietPresence = await evalJs(`document.querySelector('[data-card="presence"] canvas')?.getAttribute('data-mode')`);
   out.quietChip = await evalJs(`document.querySelector('.sc03 [data-card="work"] .chip')?.textContent ?? null`);
@@ -1272,6 +1365,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.trim() === '이 작업 취소')?.click()`);
   await sleep(900);
   out.cancelAfter = await evalJs('JSON.stringify(window.__work())');
+  await samplePanels('cancel-after');
   out.cancelBand = await evalJs(`[...document.querySelectorAll('.sc03 .panel')]
     .map(n => n.innerText).find(t => t.includes('취소를 요청했어요')) ?? null`);
   out.cancelChip = await evalJs(`document.querySelector('.sc03 [data-card="work"] .chip')?.textContent ?? null`);
@@ -1294,6 +1388,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   /* Let the SIGKILL escalation finish; the child ignores TERM, which is the point of it. */
   await sleep(7000);
   out.cancelEnded = await evalJs('JSON.stringify(window.__work())');
+  await samplePanels('cancel-ended');
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
 
@@ -1310,6 +1405,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('.sc03 button')].find(b => b.textContent.trim() === '그만두기')?.click()`);
   await sleep(2500);
   out.partialWork = await evalJs('JSON.stringify(window.__work())');
+  await samplePanels('partial');
   out.partialCard = await evalJs(`document.querySelector('.sc03 [data-card="result"]')?.innerText ?? null`);
   out.partialDone = await evalJs(`document.querySelector('.sc03 [data-el="done"]')?.innerText ?? null`);
   out.partialNotDone = await evalJs(`document.querySelector('.sc03 [data-el="not-done"]')?.innerText ?? null`);
@@ -1332,9 +1428,28 @@ const results = await cdp(async ({ send, evalJs }) => {
   step('failure');
   fs.writeFileSync(path.join(DB_DIR, 'failing'), '');
   await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '남은 버튼도 고쳐줘'; })()`);
-  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+
+  /* `15` SC-02 Inputs: Enter 보냄 · Shift+Enter 줄바꿈. FOUND BY MUTATION — every other submit
+   * in this file clicks the button, so the keydown handler had no coverage at all and
+   * `e.key === 'Enter' && !e.shiftKey` could be inverted to `||` (which sends on EVERY key
+   * that is not Shift-held — including ordinary typing) without a single test noticing.
+   *
+   * Shift+Enter first, and it must do NOTHING: the screen stays, the text stays. Then the
+   * same request is sent with a bare Enter, so the whole failure flow below is now the proof
+   * that Enter submits — no extra Work, no extra boot. */
+  const key = (mods) => `document.querySelector('[data-el="intent"]').dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ${mods} }))`;
+  await evalJs(key('shiftKey: true'));
+  await sleep(600);
+  out.shiftEnterScreen = await evalJs('window.__screen()');
+  out.shiftEnterKeptText = await evalJs(`document.querySelector('[data-el="intent"]').value`);
+  assert.strictEqual(out.shiftEnterScreen, 'SC-02', 'Shift+Enter submitted the request — it must insert a newline');
+  assert.strictEqual(out.shiftEnterKeptText, '남은 버튼도 고쳐줘', 'Shift+Enter consumed the text');
+
+  await evalJs(key('shiftKey: false'));
   await sleep(3000);
   out.failWork = await evalJs('JSON.stringify(window.__work())');
+  await samplePanels('failed');
   out.failResult = await evalJs(`document.querySelector('.sc03 [data-card="result"]')?.innerText ?? null`);
   out.failChip = await evalJs(`document.querySelector('.sc03 [data-card="work"] .chip')?.textContent ?? null`);
   out.failPresence = await evalJs(`document.querySelector('[data-card="presence"] canvas')?.getAttribute('data-mode')`);
@@ -1444,7 +1559,8 @@ const results = await cdp(async ({ send, evalJs }) => {
    *
    * Opening SEED2 and then SEED also leaves the recent list in the order the next step needs. */
   step('drawer is per project');
-  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')].at(-1).click()`);
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
+    .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED2))}))?.click()`);
   await sleep(1200);
   /* `15` §0 Board: History is M and GROWS to L. It opens showing the head of the list with a
    * `N개 더` control, and `접기` puts it back. Found by mutation: `state.historyExpanded === true`
@@ -1470,19 +1586,159 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(900);
   out.drawerCardA = await evalJs('JSON.stringify(window.__drawer())');
 
-  /* …to the OTHER project, through the picker, the way a user does it. */
+  /* …to the OTHER project, through the picker, the way a user does it. Which project is
+   * "other" depends on where the run currently is, so it is read here, before navigating —
+   * the picker is not showing a project. */
+  const beforeSwitch = JSON.parse(await evalJs('JSON.stringify(window.__project())'));
+  out.beforeSwitch = JSON.stringify(beforeSwitch);
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트'))?.click()`);
   await sleep(900);
-  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')].at(-1).click()`);
+  /* A DIFFERENT project — which is what this step is about — chosen by identity rather than by
+   * position. It was `.at(-1)`, and seeding one more fixture project silently made that a
+   * different row; a position is not an identity. Naming one project outright is no better
+   * here, because the row that is "other" depends on where the run currently is. */
+  /* …excluding SEED3, which this run has never opened: this step is about carrying the drawer
+   * across a switch, not about a project's first interpretation. */
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
+    .find(r => { const p = r.querySelector('.path')?.textContent ?? '';
+                 return p !== ${JSON.stringify(beforeSwitch?.path ?? '')} && p !== ${JSON.stringify(SEED3)}; })?.click()`);
   await sleep(1200);
   out.screenAfterSwitch = await evalJs('window.__screen()');
-  await evalJs(`window.__toggleDrawer()`);
-  await sleep(600);
+  out.switchedTo = await evalJs('JSON.stringify(window.__project())');
+  assert.notStrictEqual(JSON.parse(out.switchedTo).path, JSON.parse(out.beforeSwitch).path,
+    'the switch stayed in the same project — this step is about carrying the drawer ACROSS one');
+
+  /* Read as STATE, and read it closed. `clearDrawerState` closes the drawer with the project —
+   * a drawer left open over a project it does not belong to has no cwd to act in — so there is
+   * nothing to open here, and opening one would only measure the opening. */
   out.drawerAfterSwitch = await evalJs('JSON.stringify(window.__drawer())');
-  await evalJs(`window.__toggleDrawer()`);
-  await sleep(300);
-  /* …and back to the picker, where the next step expects to be. SEED was opened last, so the
-   * deleted-folder row is still the last one. */
+
+  /* Give the switched-to project time to finish its own interpretation before asking the store
+   * about it — the fixture holds the scan for JUQODE_INTERPRET_DELAY_MS on purpose. */
+  await sleep(3000);
+
+  /* A project that has NOT aged says nothing about ageing.
+   *
+   * FOUND BY MUTATION: `if (!r?.ok || !r.stale?.changed) return;` could become `&&` and every
+   * check still passed, because this run only ever looked at the STALE case. With `&&` a
+   * perfectly fresh answer falls through and `state.stale` is set to `{changed:false}` — the
+   * Brief then carries an ageing state for a project that has not aged. The negative case is
+   * the whole guard. */
+  out.freshBrief = await evalJs(`(async () => {
+    const p = window.__project();
+    const b = await window.juqode.brief(p.id);
+    return JSON.stringify({ ok: b?.ok ?? null, changed: b?.stale?.changed ?? null,
+                            stateStale: window.__brief().stale,
+                            band: document.querySelectorAll('[data-card="brief"] .staleband').length });
+  })()`);
+  {
+    const f = JSON.parse(out.freshBrief);
+    /* Preconditions, asserted rather than assumed: if this project stopped being interpreted or
+     * started being stale, the check below would pass while testing nothing. */
+    assert.strictEqual(f.ok, true, 'the switched-to project has no readable interpretation — the guard is untested');
+    assert.strictEqual(f.changed, false, 'the switched-to project is stale — the fresh case is no longer covered');
+    assert.strictEqual(f.stateStale, null, 'a project that has not aged was given an ageing state');
+    assert.strictEqual(f.band, 0, 'the ageing band is drawn for a project that has not aged');
+  }
+
+  /* …now to the project whose History FITS. `15` §0: the control only exists when there is
+   * something behind it, and a `더 보기` over a complete list is a control that does nothing.
+   *
+   * FOUND BY MUTATION: `hidden > 0` could be widened to `hidden >= 0` and every existing check
+   * still passed, because every project this run had ever looked at had something hidden. */
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트'))?.click()`);
+  await sleep(900);
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
+    .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED3))}))?.click()`);
+  await sleep(2000);
+  out.historyMore = await evalJs(`(async () => {
+    const p = window.__project();
+    const total = (await window.juqode.history(p.id)).works.length;
+    const shown = document.querySelectorAll('[data-el="history-row"]').length;
+    const more = [...document.querySelectorAll('[data-card="history"] button')]
+      .find(b => b.textContent.includes('개 더'));
+    return JSON.stringify({ path: p.path, total, shown, hidden: total - shown, more: more?.textContent ?? null });
+  })()`);
+  {
+    const h = JSON.parse(out.historyMore);
+    assert.strictEqual(h.path, SEED3, 'the switch landed on the wrong project');
+    assert.strictEqual(h.hidden, 0, `this project was seeded with a History that fits and has ${h.hidden} hidden`);
+    assert.strictEqual(h.more, null, `a 더 보기 control was drawn over a complete list: ${h.more}`);
+  }
+
+  /* SC-02 · 두 가지로 읽혀요 — the AMBIGUOUS card on the request field.
+   *
+   * The drawer has its own 모호함 card and that one was covered; this one, the card SC-02 draws
+   * from `routed.options`, had no coverage at all — five mutations on its two option loops all
+   * survived. The copy promises `어느 쪽인지 골라 주세요. JuQode가 대신 정하지 않아요`, so what
+   * is asserted is that BOTH readings have a control and that JuQode chose neither: exactly one
+   * Work button (never two, never zero) and one 터미널 button. */
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '서버 좀 정리해줘'; })()`);
+  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  await sleep(900);
+  out.sc02Ambiguous = await evalJs(`(() => {
+    const n = document.querySelector('[data-el="ambiguous"]');
+    if (!n) return JSON.stringify({ present: false });
+    const labels = [...n.querySelectorAll('button')].map(b => b.textContent.trim());
+    return JSON.stringify({ present: true, screen: window.__screen(), labels,
+      title: n.querySelector('.t')?.textContent ?? null });
+  })()`);
+  {
+    const a = JSON.parse(out.sc02Ambiguous);
+    assert.ok(a.present, 'an ambiguous request drew no card on SC-02');
+    assert.strictEqual(a.screen, 'SC-02', '모호함 must not start anything — it names both readings');
+    assert.strictEqual(a.title, '두 가지로 읽혀요');
+    const work = a.labels.filter((l) => l === 'Claude Code 작업으로 보내기');
+    const term = a.labels.filter((l) => l === '터미널 열기');
+    assert.strictEqual(work.length, 1, `the Work reading has ${work.length} controls, not one`);
+    assert.strictEqual(term.length, 1, `the terminal reading has ${term.length} controls, not one`);
+    assert.ok(a.labels.includes('▸ 다시 적기'), 'the third way out — saying it differently — is missing');
+  }
+  /* And the terminal control must actually reach the drawer, carrying the phrase. */
+  await evalJs(`[...document.querySelectorAll('[data-el="ambiguous"] button')].find(b => b.textContent.trim() === '터미널 열기').click()`);
+  await sleep(700);
+  out.ambiguousToDrawer = await evalJs('JSON.stringify(window.__drawer())');
+  {
+    const d = JSON.parse(out.ambiguousToDrawer);
+    assert.strictEqual(d.open, true, '터미널 열기 did not open the drawer');
+    assert.strictEqual(d.phrase, '서버 좀 정리해줘', 'the drawer opened without the phrase the user typed');
+  }
+  await evalJs(`document.querySelector('[data-el="ambiguous"]')?.remove()`);
+
+  /* …and the case where THREE Quick Command rules match at once.
+   *
+   * `실행해줘` routes to `['qc.dev.start','qc.build','qc.test','work']` (verb with no object —
+   * `19` §C4). Every one of those readings leads to the same control, so the card must offer
+   * that control ONCE. Three buttons reading 터미널 열기 that all open the same drawer with the
+   * same phrase do not name three readings; they name one, three times, while the copy
+   * promises `어느 쪽인지 골라 주세요`. */
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '실행해줘'; })()`);
+  await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
+  await sleep(900);
+  out.manyReadings = await evalJs(`(() => {
+    const n = document.querySelector('[data-el="ambiguous"]');
+    if (!n) return JSON.stringify({ present: false });
+    return JSON.stringify({ present: true,
+      labels: [...n.querySelectorAll('button')].map(b => b.textContent.trim()) });
+  })()`);
+  {
+    const m = JSON.parse(out.manyReadings);
+    assert.ok(m.present, '실행해줘 is ambiguous over three rules and drew no card');
+    const term = m.labels.filter((l) => l === '터미널 열기');
+    const work = m.labels.filter((l) => l === 'Claude Code 작업으로 보내기');
+    assert.strictEqual(term.length, 1,
+      `the card repeats 터미널 열기 ${term.length} times — one control per reading it does not distinguish`);
+    assert.strictEqual(work.length, 1, `the card offers the Work reading ${work.length} times`);
+  }
+  await evalJs(`document.querySelector('[data-el="ambiguous"]')?.remove()`);
+  await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); if (f) f.value = ''; })()`);
+  /* 터미널 열기 above opened the drawer. Close it by STATE rather than by toggling — a toggle
+   * is only correct if you already know which way it will go, and the step before this one
+   * toggles too. */
+  await evalJs(`if (window.__drawer().open) window.__toggleDrawer()`);
+  await sleep(600);
+  /* …and back to the picker, where the next step expects to be. It selects the row it wants
+   * by name, so the order here does not matter. */
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트'))?.click()`);
   await sleep(900);
 
@@ -1493,7 +1749,9 @@ const results = await cdp(async ({ send, evalJs }) => {
    * situation, and the resulting card is measured and photographed. */
   step('folder that is gone');
   fs.rmSync(SEED2, { recursive: true, force: true });
-  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')].at(-1).click()`);
+  fs.rmSync(SEED3, { recursive: true, force: true });
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
+    .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED2))}))?.click()`);
   await sleep(600);
   out.failCard = await evalJs(`document.querySelector('[data-el="fail"]')?.innerText ?? null`);
   out.failActions = await evalJs(`document.querySelectorAll('[data-el="fail"] .row-acts button').length`);
@@ -1508,6 +1766,10 @@ const results = await cdp(async ({ send, evalJs }) => {
 
   return out;
 });
+
+/* Every value this run observed, written out before the assertions run: when one fails the app
+ * is already gone, and the state that explains it would go with it. */
+fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 2));
 
 /* ── `15` SC-02 Unavailable State ──────────────────────────────────────────────────────── */
 {
@@ -1578,7 +1840,7 @@ for (const [k, v] of Object.entries(results.matrix)) {
 assert.ok(Math.abs(results.centreOffset) <= 40,
   `SC-01 content is ${results.centreOffset}px off vertical centre`);
 /* WBS-02 · WBS-21 · WBS-09 */
-assert.strictEqual(results.recentRows, 2, 'the seeded projects did not reach SC-01 from the store');
+assert.strictEqual(results.recentRows, 3, 'the seeded projects did not reach SC-01 from the store');
 assert.strictEqual(results.screenAfterOpen, 'SC-02', `opening a project did not reach SC-02 (got ${results.screenAfterOpen})`);
 assert.strictEqual(JSON.parse(results.openedProject).path, SEED, 'SC-02 is showing a different project than the one opened');
 assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(),
@@ -2158,6 +2420,24 @@ assert.ok(results.readerOverflow <= 0, `SC-04 scrolls sideways by ${results.read
     assert.strictEqual(r.secondOn.filter(Boolean).length, 1, 'selecting another group selected two');
     assert.strictEqual(r.secondOn[1], true, 'clicking a group did not select it');
   }
+
+  /* `15` SC-04: block select → raw, SCOPED to that block's file. D-118 is the whole screen —
+   * 변경 범위 안의 코드만.
+   *
+   * FOUND BY MUTATION: `group.files.filter((f) => f.file === scoped)` could be flipped to
+   * `!==`, which shows every file EXCEPT the one the reader selected, and nothing noticed —
+   * the block's `on` class was checked, the thing the click is FOR was not. */
+  const b = JSON.parse(results.readerBlockSel);
+  if (b.count) {
+    const file = b.key.split('#')[0];
+    assert.strictEqual(b.before.filter(Boolean).length, 0, 'a block was already selected on arrival');
+    assert.strictEqual(b.after.filter(Boolean).length, 1, 'selecting a block selected more than one');
+    assert.ok(b.after[0], 'clicking a block did not select it');
+    assert.deepStrictEqual(b.scopedFiles, [file],
+      `selecting a block in ${file} showed ${JSON.stringify(b.scopedFiles)} — the raw must be scoped to it`);
+    /* Clicking the same block again closes the scoped raw: the toggle, not a second open. */
+    assert.strictEqual(b.reopened.filter(Boolean).length, 0, 'clicking the selected block again kept it selected');
+  }
 }
 
 {
@@ -2219,6 +2499,30 @@ assert.ok(/끝났어요|일부만|끝내지 못했어요|취소했어요/.test(r
 /* Canon 19 SS-E · 증거에 담기지 않은 변경. The Work touched the seed's gitignored `.env`, which
  * JuQode also excludes, so that change is not in the diff BY DESIGN — and the product still has
  * to say it happened. From the ledger: the PATH, and nothing else. */
+{
+  /* D-126a · the excluded-path card appears EXACTLY when there is a gap to report, at every
+   * SC-04 this run opens.
+   *
+   * FOUND BY MUTATION: `if (!gap?.known || !gap.paths?.length) return null;` could become `&&`
+   * — which draws the card, and its sentence 증거에 담기지 않은 변경이 있어요, for a Work with
+   * no gap at all — and `return null` could become `return {}`. Both survived: the suite had
+   * only ever read a Work that DID have a gap. Announcing changes that were not excluded is
+   * the same failure as staying silent about ones that were, so BOTH sides are asserted, and
+   * the run is required to reach both. */
+  const gaps = results.gapSamples
+    .map((r) => { const i = r.indexOf('|'); return { where: r.slice(0, i), ...JSON.parse(r.slice(i + 1)) }; })
+    .filter((g) => g.screen === 'SC-04' && g.gap);
+  assert.ok(gaps.length >= 2, `only ${gaps.length} SC-04 visits carried reader state`);
+  for (const g of gaps) {
+    assert.strictEqual(g.card > 0, g.gap.known && g.gap.paths > 0,
+      `${g.where}: card drawn ${g.card} time(s) for known=${g.gap.known} paths=${g.gap.paths}`);
+  }
+  assert.ok(gaps.some((g) => g.card > 0), 'no Work with an excluded-path change was read');
+  /* The ABSENT half cannot be reached from here — every Work this fixture produces with
+   * changes also touches the excluded path — so it is pinned as a pure function instead, in
+   * tests/reader.test.js. What this rule adds is that the RENDERED card agrees with the state
+   * at every SC-04 the run does open. */
+}
 assert.ok(results.evidenceGap, 'the excluded path changed and no evidence-gap card was drawn');
 assert.ok(results.evidenceGap.includes('증거에 담기지 않은 변경이 있어요'));
 assert.ok(results.evidenceGap.includes('.env'), `the card names no path: ${results.evidenceGap}`);
@@ -2303,7 +2607,9 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
 
   assert.strictEqual(results.screenAfterSwitch, 'SC-02', 'switching projects did not reach SC-02');
   const b = JSON.parse(results.drawerAfterSwitch);
-  assert.strictEqual(b.open, true, 'the drawer did not reopen in the second project');
+  /* The drawer CLOSES with the project (`clearDrawerState`): over a switch it has no cwd, and
+   * every control in it would act on a project the user did not open it for. */
+  assert.strictEqual(b.open, false, 'the drawer stayed open across a project switch');
   assert.strictEqual(b.card, null,
     'a Quick Command card CONFIRMED in one project survived into another — `실행` reads the '
     + 'project at click time, so it would have run there');
@@ -2317,6 +2623,27 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
  * behind it (`15` DS §1 — a control that does nothing is not an action), and when it does, it
  * says the REAL number hidden and puts the list back. */
 {
+  /* SC-03's state panels, as ONE invariant over every SC-03 state this run produced. Each
+   * panel must appear exactly when its condition holds — the ⟺ is the point: a widened
+   * condition shows a panel where it does not belong, and only the "absent" half sees that. */
+  {
+    const samples = results.panelSamples
+      .map((r) => { const i = r.indexOf('|'); return { where: r.slice(0, i), ...JSON.parse(r.slice(i + 1)) }; })
+      .filter((x) => x.screen === 'SC-03' && x.status !== null);
+    assert.ok(samples.length >= 5, `only ${samples.length} SC-03 states were sampled`);
+    for (const x of samples) {
+      const at = `${x.where} (status=${x.status} liveness=${x.liveness})`;
+      assert.strictEqual(x.input > 0, x.status === 'input_waiting', `input panel at ${at}`);
+      assert.strictEqual(x.quiet > 0, x.status !== 'ended' && x.liveness === 'quiet', `quiet panel at ${at}`);
+      assert.strictEqual(x.unknown > 0, x.status !== 'ended' && x.liveness === 'unknown', `unknown panel at ${at}`);
+    }
+    /* …and the invariant is only worth anything if the run reached both sides of it. An ENDED
+     * Work is what makes `status !== 'ended'` observable at all. */
+    assert.ok(samples.some((x) => x.status === 'ended'), 'no ENDED Work was sampled — the guard is vacuous');
+    assert.ok(samples.some((x) => x.status !== 'ended'), 'no live Work was sampled');
+    assert.ok(samples.some((x) => x.liveness === 'quiet'), 'the 새 신호 없음 state was never sampled');
+  }
+
   const h = JSON.parse(results.historyFold);
   if (h.moreText === null) {
     /* Fewer rows than the head: no `N개 더`, and no `접기` either. */
@@ -2477,7 +2804,7 @@ assert.ok(results.recentLast.includes('마지막 작업'),
   assert.ok(quoted, `the summary quotes something nobody submitted: ${results.recentLast}`);
 }
 
-assert.strictEqual(results.recentAfterBack, 2, 'the recent list lost a row on return');
+assert.strictEqual(results.recentAfterBack, 3, 'the recent list lost a row on return');
 assert.ok(results.recentTopAfterBack && results.recentTopAfterBack.endsWith(path.basename(SEED)),
   'the just-opened project is not at the top of the recent list — the list was not re-read');
 /* 15 SC-01 Failure State: title + reason in plain words + TWO recovery actions, and it is
