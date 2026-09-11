@@ -1,10 +1,14 @@
 # RESUME — JuQode Autonomous MVP Long Run V2
 
-**마지막 체크포인트:** 배치 35 · 브랜치 `dev/mvp-autonomous-v01` (푸시 완료)
+**마지막 체크포인트:** 배치 36 · 브랜치 `dev/mvp-autonomous-v01` (**푸시 안 됨 — 로컬 커밋 `4b1ebf3`**)
 **작업 트리:** clean · 백그라운드 프로세스 없음 · stash 없음
 **스위트:** unit 576/576 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
-**정지 사유:** 남은 작업이 **전부 사람의 판단을 기다린다** (§3). PM 판정 2026-09-11.
-게이트 없이 할 수 있는 마지막 하나(§4)는 **이 세션에서 끝냈다.**
+**정지 사유:** 남은 작업이 **전부 사람의 판단을 기다린다** (§3).
+게이트 ① · ② 는 **Founder 개정 D-138 (2026-09-11) 로 열렸고 배치 36 에서 닫혔다.** 남은 것은 ③ 뿐이다.
+
+> ⚠️ **`JuQode-Private` 의 Canon 이 커밋되지 않은 채 있다** — `04`(D-138) · `15` · `16` · `17` · `18`
+> 그리고 `docs/visual/` 산출물 넷. 배치 36 의 구현이 근거로 삼는 문서가 그것이다.
+> **Canon 커밋은 사람이 한다** — 이 run 은 Canon 을 커밋하지 않는다.
 
 ---
 
@@ -14,21 +18,21 @@
 CONTINUE THE SAME JUQODE AUTONOMOUS MVP LONG RUN.
 Do NOT restart planning. Do NOT create a new run. Do NOT reset the branch.
 Current remote branch: dev/mvp-autonomous-v01
-Last checkpoint: batch 35. Working tree clean, all suites green.
+Last checkpoint: batch 36. Working tree clean, all suites green.
 
 Read RESUME.md first.
 
-THIS RUN IS GATED. §3 lists three items and NONE of them may be done by the agent alone —
-PM judged them Human Gate on 2026-09-11. Do not "unblock" them by deciding for the human:
-the copy one would break this project's own rule (edit `18` first, never copy.js), and
-deleting the duplicate keys was explicitly NOT approved.
+THIS RUN IS GATED. Gates ① and ② OPENED (Founder D-138, 2026-09-11, plus the amended `18`
+and `15`) and batch 36 closed them. Gate ③ is still shut and may NOT be done by the agent.
 
 Do this, in order:
-  1. Ask the PM whether any §3 gate has opened, and hand them §3's "무엇이 있어야 풀리나".
-  2. If a gate is open, do that item.
-  3. If no gate is open, there is NOTHING left that the agent may do alone — §4 (the last
-     un-gated item, sweeping `app/main/term/session.js`) was finished in batch 35.
-     STOP and say so. Do not invent work.
+  1. Ask the PM whether §3 ③ has opened, and hand them its "무엇이 있어야 풀리나".
+  2. If it is open, do that item.
+  3. If it is not, there is NOTHING left that the agent may do alone. STOP and say so.
+     Do not invent work. In particular do NOT place `work.requested` or `qc.terminal` —
+     `15`'s Human Gate ② appendix files both as Founder decisions, with the reason.
+
+Canon (`JuQode-Private/docs/current/**`) is the human's to commit, not this run's.
 
 Keep the same operating loop: IMPLEMENT → TEST → PRODUCT QA → TECHNICAL/SECURITY QA →
 TEST ADVERSARY → VISUAL QA when UI changes → FIX → RETEST → MUTATION / NEGATIVE CHECK →
@@ -38,7 +42,7 @@ Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
 
 ---
 
-## 2. 이번 세션에 한 일 (배치 34 · 35)
+## 2. 이번 세션에 한 일 (배치 34 · 35 · 36)
 
 | 커밋 | 내용 |
 |---|---|
@@ -54,6 +58,7 @@ Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
 | `db1b199` | **`16` §2.1 초록 ▸ 를 화면에 올림** · 나가는 길 없던 카드 하나 |
 | `d1f0516` | 문구 검사가 이름만 보고 있었다 — 열두 개가 숨어 있었다 |
 | `294ad3c` | `term/session.js` 첫 스윕 — 6개 중 5 사살, 남은 하나는 **동등**(근거 기록) |
+| `4b1ebf3` | **배치 36 · D-138** SC-02 위계 개정 + **게이트 ① · ② 닫음** (아래 §2.1) |
 
 전체 기록: `BATCH-34-QA.md` · `BATCH-35-QA.md` · `CHECKPOINTS.md`.
 
@@ -79,41 +84,57 @@ Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
 
 ---
 
-## 3. ⚠️ HUMAN GATE — 세 항목 (PM 판정 · 2026-09-11)
+### 2.1 배치 36 — Founder 개정 D-138 (재부팅으로 끊겼다가 이어서 끝냄)
 
-**에이전트가 혼자 진행하면 안 되는 것들이다.** "막혀 있으니 대신 결정한다" 가 이 run 에서
-가장 하기 쉬운 실수이고, 특히 ① 은 그렇게 하면 **이 프로젝트 자신의 규칙을 어긴다.**
+크래시 직전 작업이 12개 파일에 uncommitted 로 남아 있었다. Canon 쪽 근거(D-138 · `18` · `15`)를
+확인하고 이어서 끝냈다.
 
-### ① 문구 중복 4개 — **삭제 승인 안 됨**
+**측정된 것:**
+- 기본 SC-02 의 가장 큰 물체 `brief` → `intent`, 밀도 **0.765 → 0.424**
+- Work 가 도는 동안 가장 큰 물체도 주 열 첫 카드도 `stream`
+- **1440 · 1280 · 1024 에서 주어도 순서도 같고 가로 스크롤 0** (D-138 §9)
 
-| 키 | 이미 렌더되는 같은 문구 |
+**제품 결함 셋:** Work 가 도는 중에도 `아직 요청한 작업이 없어요` 라고 말했다 · 실패한 Work 의
+`변경 읽기` 가 조건 없이 붙어 빈 리더를 여는 버튼이었다 · 가드 카드에 `15` 의 네 동작 중 하나만
+있었다(`기다리기` 를 "안 누르면 되는 일" 로 접은 판단이 틀렸다 — 닫을 길이 없으면 알림이 사용자가
+들고 있는 요청 위에 앉아 있는다).
+
+**내 검사에서 나온 것 둘:**
+1. `visual.mjs` 가 Brief 의 여섯 답을 **도착 직후**에 읽고 있었다. D-138 은 해석이 끝나면 접힘이
+   기본이므로 그 자리에서 0 이다 — 크래시가 남긴 빨간 단언이 이것이었다. 기본 상태를 먼저 재고
+   여섯 답은 `펼치기` 를 누른 자리에서 잰다.
+2. **시각 QA 가 잡았다:** 레일의 머리줄이 줄어들기만 해서 자기 버튼을 라벨보다 좁게 눌렀고
+   `다시 읽\n기` · `펼치\n기` 로 낱말이 가운데서 끊겼다. **단언은 전부 통과한 상태였다.**
+   Range 의 줄 수를 세는 검사를 남겼다.
+
+PENDING 문구 목록 **12 → 3** (`work.ago` · `term.mock` · `qc.full` 은 이미 "결정됨", 새로 남은
+둘은 `work.requested` · `qc.terminal` — 둘 다 Founder 판단).
+
+---
+
+## 3. ⚠️ HUMAN GATE — 남은 것은 ③ 하나
+
+### ① 문구 중복 4개 — **닫힘 (2026-09-11 · D-138 개정과 함께)**
+
+`18` 쪽에서 풀렸다. `presence.title` 은 **접혔고**(같은 네 글자 · §0.8), 나머지 셋은 중복이
+**아니었다** — `work.observed` · `work.open` · `qc.kicker` 는 각각 다른 표면의 이름이고
+어느 화면도 그리지 않고 있었을 뿐이다. 셋 다 배치 36 에서 화면에 올라갔다.
+규칙(`copy.js` 에서 고치지 않는다)은 지켜졌다: `18` 이 먼저 바뀌었다.
+
+### ② 미구현 컨트롤 7개 — **다섯 닫힘 · 둘은 Founder 판단으로 남음**
+
+`15` 부록(Human Gate ② 판정 기록 · 2026-09-11)이 자리를 정해 주었다.
+
+| 키 | 상태 |
 |---|---|
-| `presence.title` | `presence.kicker` |
-| `work.observed` | `work.lastSeen` |
-| `work.open` | `history.result` · `guard.open` |
-| `qc.kicker` | `term.qcTitle` |
+| `guard.answer` · `guard.wait` · `work.now` · `work.open` · `work.resubmit` · `term.out` | **구현됨** (배치 36) |
+| `work.requested` | **유보 — Founder 판단.** `18` 은 SC-03 에 `요청한 말` 라벨을 두지만 `15` 와 승인 산출물 셋은 그 머리를 **라벨 없이** 그린다. 라벨을 붙이면 D-138 §6(불필요한 가구 제거)과 부딪힌다 |
+| `qc.terminal` | **유보 — Founder 판단.** QC 카드는 **이미 터미널 서랍 안**이고 셸 열이 같은 화면에 있다 — 있는 자리로 가는 링크가 된다. 목적지를 새로 정하는 것은 발명이다 |
 
-화면은 한 번만 말할 수 있으므로 키 하나를 접어야 하는데, `copy.js` 헤더의 규칙이
-**"여기서 고치지 말고 `18` 을 먼저 고쳐라"** 다. copy.js 에서 지우는 것은 규칙 위반이고
-**PM 이 승인하지 않았다.**
+**무엇이 있어야 풀리나:** 두 항목에 대한 Founder 의 결정. 그 전까지 `tests/unit.test.js` 의
+PENDING 에 이유와 함께 남아 있고, 그게 맞는 상태다.
 
-**무엇이 있어야 풀리나:** `18` 쪽에서 해당 키를 접거나 용도를 구분해 준 결과. 그 전까지는
-`tests/unit.test.js` 의 PENDING 에 이유와 함께 남아 있고, 그게 맞는 상태다.
-
-### ② 미구현 컨트롤 7개 — `15` 를 읽어야 한다
-
-`guard.answer` · `guard.wait` · `work.now` · `work.requested` · `work.resubmit` ·
-`qc.terminal` · `term.out`.
-
-`15` 가 이름 붙인 컨트롤·레이블이고, **어디에 어떤 동작으로 놓이는지는 `15` 에 있다.**
-에이전트가 자리를 정하면 그것은 구현이 아니라 발명이다.
-
-(`guard.wait` 만 예외 — **보류가 아니라 결정**이다: 기다리기는 아무것도 누르지 않으면
-일어나는 일이고, 친 문구는 이미 칸에 남아 있다. `refusalCard` 에 이유가 적혀 있다.)
-
-**무엇이 있어야 풀리나:** 각 항목에 대한 `15` 의 해당 절, 또는 PM 이 정한 배치·동작.
-
-### ③ WBS-32 (사람 도그푸드) · DV-13~16 (Windows)
+### ③ WBS-32 (사람 도그푸드) · DV-13~16 (Windows) — **열리지 않았다**
 
 `13` §11 DoD 와 `09` §14 는 **비개발자가 이해하는지**를 묻는다 — 사람이 앉아서 써야 답이
 나오고, 에이전트가 대신 답하면 그건 증거가 아니라 추정이다. Windows 항목은 그 OS 에서
@@ -125,23 +146,15 @@ Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
 
 ---
 
-## 4. 게이트 없던 마지막 하나 — **끝났다** (배치 35)
+## 4. 게이트 밖에 남은 작업
 
-`app/main/term/session.js` 스윕 (PM 승인 2026-09-11): `6 · 4 killed` → 경계 검사를 추가한 뒤
-**`6 · 5 killed · 1 SURVIVED`**, 그리고 그 하나는 **동등 뮤턴트**다.
+**없다.** 배치 35 가 마지막 스윕(`app/main/term/session.js`)을 끝냈고, 배치 36 은 D-138 이
+열어 준 것을 전부 구현했다. §3 ② 의 남은 둘과 ③ 은 사람을 기다린다.
 
-- **찾은 구멍:** `bytes + size > OUTPUT_LIMIT` 를 `>=` 로 넓히면 **정확히 가득 찬 출력이
-  잘렸다고 표시된다** — 잃은 것이 없는데 잃었다고 말한다. 열어 보니 스위트에 **절단 검사가
-  하나도 없었다**(넘친 쪽도, 딱 맞는 쪽도). 양쪽을 다 만들었다.
-- **남은 하나는 동등하다:** `room > 0` → `>=`. `bytes <= OUTPUT_LIMIT` 이 불변이라 `room` 은
-  음수가 될 수 없고, 새로 열리는 경우는 `room === 0` 뿐인데 그때 `subarray(0, 0)` 은 빈
-  문자열이라 아무것도 바뀌지 않는다. **죽이지 못한 것이 아니라 죽일 것이 없다** — 다음 스윕이
-  같은 것을 다시 파지 않도록 그 자리에 불변식을 적어 두었다.
-
-`app/main/ipc.js` 는 그 사이 터미널 핸들러 셋이 늘었지만 배치 25~30 스윕 대상이었고, 새 핸들러
-셋은 `tests/term.test.js` 가 직접 부른다(저장소 거절 · 프로젝트 전환 · 열지 못한 셸).
-
-**즉 이제 게이트 밖에 남은 작업이 없다.** 자세한 것은 `BATCH-35-QA.md` §7.
+사람이 해야 할 것 둘:
+1. **`JuQode-Private` 의 Canon 커밋** — `04`(D-138) · `15` · `16` · `17` · `18` · `docs/visual/` 넷이
+   uncommitted 다. 이 run 은 Canon 을 커밋하지 않는다.
+2. **`dev/mvp-autonomous-v01` 푸시** — `4b1ebf3` 이 로컬에만 있다.
 
 ---
 
@@ -176,8 +189,14 @@ Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
 - **`pkill -f` / `pgrep -f` 금지** (자기 셸을 죽인다). pidfile 또는 `pgrep -x`.
 - **`nohup ... &` 는 PPID 1 로 재부모화된다** — 셸의 프로세스 트리에 자식으로 안 보인다.
   "안 돌고 있다" 로 오독하기 쉽다. `ps -eo pid,ppid,etimes,args` 로 직접 확인할 것.
-- **VISUAL QA 는 진짜로 본다.** 배치 34 의 레이아웃 결함 둘은 단언이 전부 통과한 상태에서
-  스크린샷으로만 보였다.
+- **VISUAL QA 는 진짜로 본다.** 배치 34 의 레이아웃 결함 둘, 배치 36 의 낱말 가운데 끊김
+  (`펼치\n기`) 은 **단언이 전부 통과한 상태에서** 스크린샷으로만 보였다.
+- **철자에 묶인 가드는 가드가 아니다.** `mode = snap ? … : 'unknown'` 한 줄을 정규식으로 박아
+  둔 검사가, 같은 규칙을 early return 으로 다시 쓴 순간 빨개졌다. 리팩터에 깨지고 철자만
+  유지한 회귀에는 통과한다 — 붙잡아야 할 것은 **규칙**이다.
+- **검사도 개정을 따라간다.** `17` 이 요구하던 "여러 카드 · 여러 크기" 를 단언하던 블록이
+  외부 리뷰가 혼란스럽다고 한 바로 그 배치를 통과시키고 있었다. 검사는 카드의 벽을 금지하는
+  것만큼 쉽게 **강제**한다.
 
 ---
 
