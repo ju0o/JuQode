@@ -1,14 +1,14 @@
 # RESUME — JuQode Autonomous MVP Long Run V2
 
-**마지막 체크포인트:** 배치 36 · 브랜치 `dev/mvp-autonomous-v01` (**푸시 안 됨 — 로컬 커밋 `4b1ebf3`**)
+**마지막 체크포인트:** 배치 36 · 브랜치 `dev/mvp-autonomous-v01` (**푸시 완료** · Draft PR [#4](https://github.com/ju0o/JuQode/pull/4))
 **작업 트리:** clean · 백그라운드 프로세스 없음 · stash 없음
 **스위트:** unit 576/576 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
 **정지 사유:** 남은 작업이 **전부 사람의 판단을 기다린다** (§3).
 게이트 ① · ② 는 **Founder 개정 D-138 (2026-09-11) 로 열렸고 배치 36 에서 닫혔다.** 남은 것은 ③ 뿐이다.
 
-> ⚠️ **`JuQode-Private` 의 Canon 이 커밋되지 않은 채 있다** — `04`(D-138) · `15` · `16` · `17` · `18`
-> 그리고 `docs/visual/` 산출물 넷. 배치 36 의 구현이 근거로 삼는 문서가 그것이다.
-> **Canon 커밋은 사람이 한다** — 이 run 은 Canon 을 커밋하지 않는다.
+> **Canon 은 PM 승인(2026-09-11) 뒤 커밋·푸시되었다** — `JuQode-Private` `7c28496`
+> (브랜치 `canon/mvp-run-implementation-findings` · Draft PR [#14](https://github.com/ju0o/JuQode-Private/pull/14),
+> #13 위에 쌓여 있다). 배치 36 의 구현이 근거로 삼는 문서가 그것이다. **둘 다 머지 승인 안 됨.**
 
 ---
 
@@ -151,10 +151,14 @@ PENDING 에 이유와 함께 남아 있고, 그게 맞는 상태다.
 **없다.** 배치 35 가 마지막 스윕(`app/main/term/session.js`)을 끝냈고, 배치 36 은 D-138 이
 열어 준 것을 전부 구현했다. §3 ② 의 남은 둘과 ③ 은 사람을 기다린다.
 
-사람이 해야 할 것 둘:
-1. **`JuQode-Private` 의 Canon 커밋** — `04`(D-138) · `15` · `16` · `17` · `18` · `docs/visual/` 넷이
-   uncommitted 다. 이 run 은 Canon 을 커밋하지 않는다.
-2. **`dev/mvp-autonomous-v01` 푸시** — `4b1ebf3` 이 로컬에만 있다.
+커밋·푸시·PR 은 **끝났다** (PM 승인 2026-09-11):
+
+| | 어디 |
+|---|---|
+| Canon | `JuQode-Private` `7c28496` · `canon/mvp-run-implementation-findings` · Draft PR #14 |
+| 구현 | `JuQode` `f88d720` · `dev/mvp-autonomous-v01` · Draft PR #4 |
+
+**둘 다 머지 승인 안 됨.** PR #3(Foundation)은 손대지 않았다.
 
 ---
 
