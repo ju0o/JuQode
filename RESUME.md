@@ -1,10 +1,11 @@
 # RESUME — JuQode Autonomous MVP Long Run V2
 
-**마지막 체크포인트:** 배치 36 · 브랜치 `dev/mvp-autonomous-v01` (**푸시 완료** · Draft PR [#4](https://github.com/ju0o/JuQode/pull/4))
+**마지막 체크포인트:** 배치 36 · 브랜치 `dev/mvp-autonomous-v01` @ `bee695c` (**푸시 완료** · Draft PR [#4](https://github.com/ju0o/JuQode/pull/4))
 **작업 트리:** clean · 백그라운드 프로세스 없음 · stash 없음
 **스위트:** unit 576/576 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
 **정지 사유:** 남은 작업이 **전부 사람의 판단을 기다린다** (§3).
-게이트 ① · ② 는 **Founder 개정 D-138 (2026-09-11) 로 열렸고 배치 36 에서 닫혔다.** 남은 것은 ③ 뿐이다.
+**세 게이트가 전부 닫혔다.** ① · ② 는 Founder 개정 D-138 (2026-09-11) 로 열려 배치 36 에서
+닫혔고, ② 의 마지막 둘은 PM 이 **폐기**로 판정했다. 남은 것은 §3 ③ — **사람과 Windows** 뿐이다.
 
 > **Canon 은 PM 승인(2026-09-11) 뒤 커밋·푸시되었다** — `JuQode-Private` `7c28496`
 > (브랜치 `canon/mvp-run-implementation-findings` · Draft PR [#14](https://github.com/ju0o/JuQode-Private/pull/14),
@@ -22,17 +23,23 @@ Last checkpoint: batch 36. Working tree clean, all suites green.
 
 Read RESUME.md first.
 
-THIS RUN IS GATED. Gates ① and ② OPENED (Founder D-138, 2026-09-11, plus the amended `18`
-and `15`) and batch 36 closed them. Gate ③ is still shut and may NOT be done by the agent.
+ALL AUTOMATED FOUNDER/PM PRODUCT DECISIONS ARE EXHAUSTED. Gates ① and ② are CLOSED
+(Founder D-138 + amended `18`/`15`, then the PM's 2026-09-11 retirement ruling).
+Gate ③ is still shut and may NOT be done by the agent.
 
 Do this, in order:
   1. Ask the PM whether §3 ③ has opened, and hand them its "무엇이 있어야 풀리나".
   2. If it is open, do that item.
   3. If it is not, there is NOTHING left that the agent may do alone. STOP and say so.
-     Do not invent work. In particular do NOT place `work.requested` or `qc.terminal` —
-     `15`'s Human Gate ② appendix files both as Founder decisions, with the reason.
+     Do not invent work.
 
-Canon (`JuQode-Private/docs/current/**`) is the human's to commit, not this run's.
+Do NOT build `work.requested` or `qc.terminal`. They are RETIRED (PM, 2026-09-11), the
+implementation already has neither, and `tests/e2e/visual.mjs` now MEASURES that absence
+together with what must stay. Finishing the backlog by building them is the failure mode
+those five assertions exist to stop.
+
+Canon (`JuQode-Private/docs/current/**`) is the Owner's to write — file writes there were
+blocked in this session. See §4 for the two items still waiting on them.
 
 Keep the same operating loop: IMPLEMENT → TEST → PRODUCT QA → TECHNICAL/SECURITY QA →
 TEST ADVERSARY → VISUAL QA when UI changes → FIX → RETEST → MUTATION / NEGATIVE CHECK →
@@ -59,6 +66,7 @@ Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
 | `d1f0516` | 문구 검사가 이름만 보고 있었다 — 열두 개가 숨어 있었다 |
 | `294ad3c` | `term/session.js` 첫 스윕 — 6개 중 5 사살, 남은 하나는 **동등**(근거 기록) |
 | `4b1ebf3` | **배치 36 · D-138** SC-02 위계 개정 + **게이트 ① · ② 닫음** (아래 §2.1) |
+| `bee695c` | **PM 폐기 판정의 회귀 검사** — 두 컨트롤의 **부재**를 측정한다 (§2.2) |
 
 전체 기록: `BATCH-34-QA.md` · `BATCH-35-QA.md` · `CHECKPOINTS.md`.
 
@@ -110,6 +118,19 @@ Never push a red suite. Windows-only requirements remain DEFERRED_VALIDATION.
 PENDING 문구 목록 **12 → 3** (`work.ago` · `term.mock` · `qc.full` 은 이미 "결정됨", 새로 남은
 둘은 `work.requested` · `qc.terminal` — 둘 다 Founder 판단).
 
+### 2.2 PM Canon/MVP Closure 판정 (2026-09-11)
+
+**`work.requested` · `qc.terminal` = 폐기.** 문구 키가 있다는 이유로 라벨을 붙이지 않는다
+(요청문이 스스로를 이름한다 · D-138 §6) · 목적지가 이미 들어와 있는 표면인 컨트롤은 동작이
+아니다 (Quick Command 는 TD-01 안에 그대로 · **D-134 불변**).
+
+**구현은 이미 둘 다 만든 적이 없다** — 고칠 코드가 없었고, 문제는 **부재가 측정되지 않았다는
+것**이었다. 다섯 검사를 **쌍으로** 넣었다: 요청문이 있다 / 라벨이 없다 · QC 가 TD-01 안에 있다 /
+자기참조 링크가 없다. 한쪽만 걸면 반대로 깨진다. 라벨은 **문구 키가 아니라 렌더된 글자**로 본다.
+
+**PR 스택 판정:** #14 가 단일 누적 Canon Closure PR 이다. #13 은 **SUPERSEDED**
+(`956a8c3` 이 `7c28496` 의 조상임을 기계로 확인) — 표시해 두었고 **닫지는 않았다.**
+
 ---
 
 ## 3. ⚠️ HUMAN GATE — 남은 것은 ③ 하나
@@ -121,18 +142,18 @@ PENDING 문구 목록 **12 → 3** (`work.ago` · `term.mock` · `qc.full` 은 �
 어느 화면도 그리지 않고 있었을 뿐이다. 셋 다 배치 36 에서 화면에 올라갔다.
 규칙(`copy.js` 에서 고치지 않는다)은 지켜졌다: `18` 이 먼저 바뀌었다.
 
-### ② 미구현 컨트롤 7개 — **다섯 닫힘 · 둘은 Founder 판단으로 남음**
+### ② 미구현 컨트롤 7개 — **닫힘 (다섯 구현 · 둘 폐기)**
 
 `15` 부록(Human Gate ② 판정 기록 · 2026-09-11)이 자리를 정해 주었다.
 
 | 키 | 상태 |
 |---|---|
 | `guard.answer` · `guard.wait` · `work.now` · `work.open` · `work.resubmit` · `term.out` | **구현됨** (배치 36) |
-| `work.requested` | **유보 — Founder 판단.** `18` 은 SC-03 에 `요청한 말` 라벨을 두지만 `15` 와 승인 산출물 셋은 그 머리를 **라벨 없이** 그린다. 라벨을 붙이면 D-138 §6(불필요한 가구 제거)과 부딪힌다 |
-| `qc.terminal` | **유보 — Founder 판단.** QC 카드는 **이미 터미널 서랍 안**이고 셸 열이 같은 화면에 있다 — 있는 자리로 가는 링크가 된다. 목적지를 새로 정하는 것은 발명이다 |
+| `work.requested` · `qc.terminal` | **폐기 — PM 판정 2026-09-11** (§2.2). 구현은 이미 부합하고, 부재를 재는 검사가 들어갔다 |
 
-**무엇이 있어야 풀리나:** 두 항목에 대한 Founder 의 결정. 그 전까지 `tests/unit.test.js` 의
-PENDING 에 이유와 함께 남아 있고, 그게 맞는 상태다.
+**이 게이트는 닫혔다.** 다만 두 키는 **아직 `tests/unit.test.js` 의 PENDING 에 남아 있다** —
+`18` · `15` 가 폐기를 기록한 뒤에 뺀다. 이 프로젝트는 문구를 `18` 에서 먼저 고치고 `copy.js`
+에서는 고치지 않는다. **Canon 보다 먼저 키를 지우면 그 규칙이 막으려던 역순이 된다.**
 
 ### ③ WBS-32 (사람 도그푸드) · DV-13~16 (Windows) — **열리지 않았다**
 
@@ -149,16 +170,40 @@ PENDING 에 이유와 함께 남아 있고, 그게 맞는 상태다.
 ## 4. 게이트 밖에 남은 작업
 
 **없다.** 배치 35 가 마지막 스윕(`app/main/term/session.js`)을 끝냈고, 배치 36 은 D-138 이
-열어 준 것을 전부 구현했다. §3 ② 의 남은 둘과 ③ 은 사람을 기다린다.
-
-커밋·푸시·PR 은 **끝났다** (PM 승인 2026-09-11):
+열어 준 것을 전부 구현했으며, PM 이 §3 ② 의 마지막 둘을 폐기로 판정했다.
+**자동화된 Founder/PM 제품 결정은 전부 소진되었다** — 남은 것은 §3 ③, 사람과 Windows 다.
 
 | | 어디 |
 |---|---|
-| Canon | `JuQode-Private` `7c28496` · `canon/mvp-run-implementation-findings` · Draft PR #14 |
-| 구현 | `JuQode` `f88d720` · `dev/mvp-autonomous-v01` · Draft PR #4 |
+| Canon | `JuQode-Private` `7c28496` · `canon/mvp-run-implementation-findings` · Draft PR **#14** (누적 · #13 을 대체) |
+| 구현 | `JuQode` `bee695c` · `dev/mvp-autonomous-v01` · Draft PR **#4** |
 
-**둘 다 머지 승인 안 됨.** PR #3(Foundation)은 손대지 않았다.
+**둘 다 머지 승인 안 됨.** PR #3(Foundation)은 손대지 않았다. PR #13 은 SUPERSEDED 로 표시만
+하고 닫지 않았다. **PR #4 가 병합 불가로 보이는 이유는 draft 플래그 하나뿐이다** —
+`mergeable: MERGEABLE` · `CLEAN`. (push 직후 몇 초간 `UNKNOWN` 이 나오는 것은 GitHub 의 비동기
+재계산이지 문제가 아니다.)
+
+### ⚠️ Owner 가 직접 해야 하는 것 — Canon 쓰기가 막혀 있다
+
+이 세션에서 `JuQode-Private` 의 **파일 쓰기가 분류기에 차단**됐다(읽기는 된다). 그래서 둘이 남았다:
+
+1. **커밋 안 된 상태 표기 정리** — 작업 트리에 14개 파일이 수정된 채 있다. 준비된 메시지로
+   커밋만 하면 된다:
+   `19` 의 D-125~D-129 `🟡 제안` → `✅ 확정` · 문서 머리 `CANDIDATE` → Final Planning Gate PASS
+   (`13`~`23` · `25` · `27`) · `04` 서문의 확정 범위 `D-137` → `D-138`.
+   **건드리지 않은 것:** `26` 로드맵의 CANDIDATE 전부 · `04` §1 의 🟡 규칙 서술 · `08`~`11` 의
+   `PROPOSED` — 전부 정당하다.
+2. **Gate ② 폐기 기록** — `18` 과 `15` 에 `work.requested` · `qc.terminal` 폐기를 적는 것.
+   그 뒤에야 `copy.js` 에서 키를 지우고 PENDING 에서 뺄 수 있다.
+
+### PM 판단이 필요한 것 하나 — 손대지 않았다
+
+`05` 의 가정 원장(A-8 ~ A-15)이 아직 **"Founder 판정 대기"** 이고 "이 표는 Founder Planning
+Gate 의 심사 대상" 이라고 적는데, 그 Gate 는 **2026-09-09 에 PASS 했다.** 그런데 `03` §4.1 은
+"제품 의미 · 범위 · 설계는 이 승인으로 바뀌지 않았다" 고도 적는다. Gate 가 A-8~A-15 를
+**전제째 승인한 것인지**는 상태 표기 정리가 아니라 **해석**이므로, 고치면 결정의 의미가 바뀔 수
+있어 남겨 두었다. **새 Founder 결정을 만들지는 않았다** — 문서가 불완전하다는 이유만으로
+결정을 발명하지 않는다.
 
 ---
 
