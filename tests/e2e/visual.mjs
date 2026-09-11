@@ -731,6 +731,14 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.claude         = await evalJs('(async () => JSON.stringify(await window.juqode.claudeStatus()))()');
   await sleep(400);
   out.interp         = await evalJs('JSON.stringify(window.__interp())');
+  /* D-138 · `15` Visual hierarchy: **해석이 끝나면 접힘이 기본**. So the state measured first is
+   * the one the user actually arrives at — folded, in the rail — and the six answers are
+   * measured where a reader would see them: after they press 펼치기. This block used to read the
+   * answers straight off the arrival, which only worked while the arrival was expanded. */
+  out.briefFoldedFirst = await evalJs('JSON.stringify(window.__brief())');
+  out.briefAnswersDefault = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
+  await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '펼치기')?.click()`);
+  await sleep(300);
   out.briefRows      = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
   out.briefChips     = await evalJs(`JSON.stringify([...document.querySelectorAll('[data-card="brief"] .ans')].map(n => n.querySelector('.chip').textContent))`);
   out.briefConfirmedHaveSource = await evalJs(`[...document.querySelectorAll('[data-card="brief"] .ans')]
@@ -746,9 +754,8 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.briefText = await evalJs(`document.querySelector('[data-card="brief"]')?.innerText ?? null`);
 
   /* ── WBS-05 · fold · stale · refresh ────────────────────────────────────────────────────
-   * D-132: a FIRST open is large, so the Brief is unfolded here and 접기 collapses it to its
-   * header. Nothing about this is automatic — every one of these is a button. */
-  out.briefFoldedFirst = await evalJs('JSON.stringify(window.__brief())');
+   * 접기/펼치기 are BUTTONS either way — D-138 changed which side the card starts on, not
+   * whether the user owns the toggle. */
   out.briefAnswersVisible = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
   await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '접기')?.click()`);
   await sleep(300);
@@ -771,6 +778,28 @@ const results = await cdp(async ({ send, evalJs }) => {
     const line = document.querySelector('[data-card="brief"] .partial-line');
     return line ? getComputedStyle(line).color === amber : null; })()`);
   out.compSC02       = await evalJs(COMPOSITION('.sc02'));
+  /* D-138 §13 judges "the DEFAULT interface", and the Brief is open here only because this test
+   * just pressed 펼치기 and 다시 읽기. So the default is measured on purpose: fold the Brief the
+   * way every arrival now leaves it, measure, and put it back so the rest of the run is
+   * unchanged. An expanded Brief being the biggest card is the user's own doing; an expanded
+   * Brief being the biggest card WITHOUT being asked for is the thing the amendment forbids. */
+  await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '접기')?.click()`);
+  await sleep(300);
+  out.compSC02Default = await evalJs(COMPOSITION('.sc02'));
+  out.sc02DefaultOrder = await evalJs(`JSON.stringify(
+    [...document.querySelectorAll('.sc02-main > [data-card]')].map(n => n.getAttribute('data-card')))`);
+  out.briefRailFolded = await evalJs(`Boolean(document.querySelector('.sc02-rail [data-card="brief"]'))`);
+  /* The rail is the narrow column, and a header row that can only shrink squeezes its own
+   * buttons below their labels — which breaks a two-syllable Korean word across two lines. A
+   * Range over the label reports one rect per line it occupies, so "the label wrapped" is a
+   * measurement rather than a look. */
+  out.railHeadBroken = await evalJs(`JSON.stringify(
+    [...document.querySelectorAll('.sc02-rail .chead .btn')].filter(b => {
+      const rng = document.createRange(); rng.selectNodeContents(b);
+      return rng.getClientRects().length > 1;
+    }).map(b => b.textContent.trim()))`);
+  await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '펼치기')?.click()`);
+  await sleep(300);
   out.sc02Cards      = await evalJs(`JSON.stringify([...document.querySelectorAll('[data-card]')].map(n => n.getAttribute('data-card')))`);
   /* The open-path gate, exercised THROUGH the bridge. Asserting that main.js contains the
    * string `not-offered` passes just as happily when the gate is `true || …`. */
@@ -863,7 +892,53 @@ const results = await cdp(async ({ send, evalJs }) => {
   /* WBS-35 · SC-02's presence with a LIVE Work — the Work above is still `permission_waiting`.
    * SC-02 holds no snapshot, so it has to fetch one; a History row would say only `running` and
    * could never produce this mode. This is the assertion that SC-02 asks the right question. */
-  out.sc02PresenceLive = await evalJs(`document.querySelector('[data-card="presence"] canvas')?.getAttribute('data-mode')`);
+  /* `.pbody canvas` rather than the card: D-138 §5 moved the presence INTO SC-02's Work Stream,
+   * and there is exactly one presence canvas in the app wherever it is mounted. */
+  out.sc02PresenceLive = await evalJs(`document.querySelector('.pbody canvas')?.getAttribute('data-mode')`);
+
+  /* ── D-138 · SC-02 WITH A WORK RUNNING ─────────────────────────────────────────────────
+   * The amendment's §3 RUNNING question — "지금 무슨 일이 일어나고 있나" — has to be answered by
+   * the first thing the eye lands on. Measured, not judged: the Work Stream must be FIRST in
+   * the primary column and it must be the largest card on the board. */
+  out.compSC02Running = await evalJs(COMPOSITION('.sc02'));
+  out.sc02RunningOrder = await evalJs(`JSON.stringify(
+    [...document.querySelectorAll('.sc02-main > [data-card]')].map(n => n.getAttribute('data-card')))`);
+  out.sc02StreamLive = await evalJs(`document.querySelector('[data-card="stream"]')?.getAttribute('data-live')`);
+  out.sc02StreamText = await evalJs(`document.querySelector('[data-card="stream"]')?.innerText ?? null`);
+  out.sc02StreamOpen = await evalJs(`[...document.querySelectorAll('[data-card="stream"] button')].map(b => b.textContent.trim())`);
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(250);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc02-running-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+
+  /* ── D-138 §9 · the SAME hierarchy at every supported width ────────────────────────────
+   * The external review noticed that SHRINKING the window produced a more understandable
+   * order. That is evidence the wide layout was wrong, so the wide layout is what is measured:
+   * at 1440, 1280 and 1024 the subject must be the same card, in the same position, and the
+   * board must never scroll sideways. A narrower width may stack; it may not re-rank. */
+  const WIDTHS = [1440, 1280, 1024];
+  const byWidth = {};
+  for (const w of WIDTHS) {
+    await send('Emulation.setDeviceMetricsOverride',
+               { width: w, height: 900, deviceScaleFactor: 1, mobile: false });
+    await sleep(350);
+    byWidth[w] = {
+      comp: await evalJs(COMPOSITION('.sc02')),
+      order: await evalJs(`JSON.stringify(
+        [...document.querySelectorAll('.sc02 [data-card]')].map(n => n.getAttribute('data-card')))`),
+      overflow: await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth'),
+    };
+    if (w === 1024) {
+      const shot = await send('Page.captureScreenshot', { format: 'png' });
+      fs.writeFileSync(path.join(OUT, 'sc02-running-1024.png'), Buffer.from(shot.result.data, 'base64'));
+    }
+  }
+  await send('Emulation.clearDeviceMetricsOverride');
+  await sleep(350);
+  out.sc02Widths = JSON.stringify(byWidth);
   await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 오류 고쳐줘'; })()`);
   await evalJs(`document.querySelector('[data-act="submit-intent"]').click()`);
   await sleep(1500);
@@ -1196,7 +1271,11 @@ const results = await cdp(async ({ send, evalJs }) => {
   /* WBS-35 · Agent Presence. Measured on the real canvas, because every claim this component
    * makes is about what is PAINTED — a source assertion cannot tell a breathing sphere from a
    * still one. `shot()` reads the canvas back as pixels. */
-  const PRESENCE = `document.querySelector('[data-card="presence"] canvas')`;
+  /* D-138 §5 mounts the presence INSIDE SC-02's Work Stream and leaves SC-03's card as it was.
+   * There is exactly ONE presence canvas in the app either way (the node is moved, never
+   * rebuilt — see `presence.js`), so the probe asks for the presence itself rather than for the
+   * card that happens to host it on this screen. */
+  const PRESENCE = `document.querySelector('.pbody canvas')`;
   const shot = `${PRESENCE}.toDataURL()`;
   /* SC-02's presence canvas is mounted by an ASYNC fill, so a fixed sleep after the navigation
    * is a bet on the machine being idle. Under a mutation sweep it is not, and this read came
@@ -1212,13 +1291,13 @@ const results = await cdp(async ({ send, evalJs }) => {
       const why = await evalJs(`JSON.stringify({ screen: window.__screen(),
         project: window.__project()?.path ?? null,
         cards: [...document.querySelectorAll('[data-card]')].map(n => n.getAttribute('data-card')),
-        presenceHtml: document.querySelector('[data-card="presence"]')?.innerHTML?.slice(0, 300) ?? null })`);
+        presenceHtml: document.querySelector('.pbody')?.innerHTML?.slice(0, 300) ?? null })`);
       throw new Error('the Agent Presence canvas never mounted on SC-02 (10s): ' + why);
     }
   }
   out.presenceMode  = await evalJs(`${PRESENCE}?.getAttribute('data-mode')`);
   out.presenceAria  = await evalJs(`${PRESENCE}?.getAttribute('aria-label')`);
-  out.presenceLabel = await evalJs(`document.querySelector('[data-card="presence"] .plabel')?.textContent`);
+  out.presenceLabel = await evalJs(`document.querySelector('.plabel')?.textContent`);
   out.presenceBox   = await evalJs(`JSON.stringify((() => { const r = ${PRESENCE}?.getBoundingClientRect(); return r ? [Math.round(r.width), Math.round(r.height)] : null; })())`);
   /* A blank canvas would satisfy every other check here. Count the pixels that are not fully
    * transparent, so "it drew something" is a measurement. */
@@ -1239,7 +1318,7 @@ const results = await cdp(async ({ send, evalJs }) => {
    * previous theme's colour for the rest of the session, and nothing noticed — every pixel
    * check here was taken under one theme. */
   out.presenceTint = await evalJs(`(async () => {
-    const c = document.querySelector('[data-card="presence"] canvas');
+    const c = document.querySelector('.pbody canvas');
     const ink = () => {
       const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
       let r = 0, g = 0, b = 0, n = 0;
@@ -1673,7 +1752,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.quietPanel = await evalJs(`document.querySelector('.sc03 [data-el="quiet"]')?.innerText ?? null`);
   await samplePanels('quiet');
   out.quietReds = await evalJs(RED_COUNT('.sc03 [data-el="quiet"], .sc03 [data-el="quiet"] *'));
-  out.quietPresence = await evalJs(`document.querySelector('[data-card="presence"] canvas')?.getAttribute('data-mode')`);
+  out.quietPresence = await evalJs(`document.querySelector('.pbody canvas')?.getAttribute('data-mode')`);
   out.quietChip = await evalJs(`document.querySelector('.sc03 [data-card="work"] .chip')?.textContent ?? null`);
   for (const theme of ['light', 'dark']) {
     await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
@@ -1777,7 +1856,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   await samplePanels('failed');
   out.failResult = await evalJs(`document.querySelector('.sc03 [data-card="result"]')?.innerText ?? null`);
   out.failChip = await evalJs(`document.querySelector('.sc03 [data-card="work"] .chip')?.textContent ?? null`);
-  out.failPresence = await evalJs(`document.querySelector('[data-card="presence"] canvas')?.getAttribute('data-mode')`);
+  out.failPresence = await evalJs(`document.querySelector('.pbody canvas')?.getAttribute('data-mode')`);
   /* Red is EXPECTED here, and only here. The count proves the grammar is applied, not merely
    * avoided everywhere. */
   out.failReds = await evalJs(RED_COUNT('.sc03 [data-card="result"], .sc03 [data-card="result"] *'));
@@ -2292,9 +2371,17 @@ assert.ok(Math.abs(results.centreOffset) <= 40,
 assert.strictEqual(results.recentRows, 3, 'the seeded projects did not reach SC-01 from the store');
 assert.strictEqual(results.screenAfterOpen, 'SC-02', `opening a project did not reach SC-02 (got ${results.screenAfterOpen})`);
 assert.strictEqual(JSON.parse(results.openedProject).path, SEED, 'SC-02 is showing a different project than the one opened');
+/* D-138 §5 folded Agent Presence INTO the Work Stream, so `presence` is no longer a card of its
+ * own on SC-02 — the canvas, the nine modes and `presence.hint` all moved with it, and the
+ * separate probes above still find them. The rule this assertion carries is unchanged: the
+ * board is EXACTLY the cards this package builds, and nothing a later package owns is drawn. */
 assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(),
-  ['brief', 'history', 'intent', 'presence', 'stream'],
+  ['brief', 'history', 'intent', 'stream'],
   'SC-02 board is not the cards this package builds — nothing a later package owns may be drawn');
+/* …and the presence did not simply vanish with its card. */
+assert.ok(results.presenceMode, 'Agent Presence has no mode on SC-02 — §5 integrated it, not removed it');
+assert.ok((results.sc02StreamText ?? '').includes('모양은 지금 상태만 나타내요'),
+  'the Work Stream hosts the presence without `18` presence.hint — the shape would read as progress');
 /* WBS-03 — the Brief is six answers, and a 확인됨 chip must name the file it rests on (D-114). */
 const interp = JSON.parse(results.interp);
 assert.ok(interp, 'the Brief never arrived — interpretation did not run on open');
@@ -2370,11 +2457,15 @@ assert.strictEqual(results.briefConfirmedHaveSource, 0,
   '`20`: every 확인됨 answer carries the source that backs it');
 
 /* ── WBS-05 · fold ────────────────────────────────────────────────────────────────────────
- * D-132: a FIRST open is large. Folding is a button, and it collapses to the header — which
- * keeps the two things the user can still do. Nothing here happens on its own. */
-assert.strictEqual(JSON.parse(results.briefFoldedFirst).folded, false,
-  'a first open started folded — D-132 makes it large');
-assert.strictEqual(results.briefAnswersVisible, 6);
+ * D-138 REPLACED D-132's "a FIRST open is large": `15` Visual hierarchy now says 해석이 끝나면
+ * 접힘이 기본, because the large first open is exactly what made the project description the
+ * biggest object on the screen. The capability is untouched — 펼치기 brings all six answers
+ * back, and it is still a button that only the user presses. */
+assert.strictEqual(JSON.parse(results.briefFoldedFirst).folded, true,
+  'the Brief stayed expanded once the project had been read — D-138 §4 folds it into the rail');
+assert.strictEqual(results.briefAnswersDefault, 0,
+  'the default Brief drew its six answers — that is the wall D-138 §4 removes');
+assert.strictEqual(results.briefAnswersVisible, 6, '펼치기 did not bring the six answers back');
 assert.strictEqual(JSON.parse(results.briefFoldedAfter).folded, true, '접기 did nothing');
 assert.strictEqual(results.briefAnswersFolded, 0, 'a folded Brief still drew its six answers');
 assert.ok(results.briefHeadFolded.includes('펼치기'), 'a folded Brief cannot be reopened');
@@ -2826,10 +2917,69 @@ assert.strictEqual(results.animating, 0,
   assert.ok(C1.cards <= 2, `SC-01 has ${C1.cards} cards — it is not the sparse entry screen`);
   assert.ok(C1.density < 0.25, `SC-01 covers ${(C1.density * 100).toFixed(0)}% of the surface`);
 
-  /* SC-02 모듈 보드 — 크기가 다른 카드가 여럿 놓인다. By SIZE: the board is two equal columns
-   * on purpose (a stack cannot overlap), so the variety is in area, not in width. */
-  assert.ok(C2.cards >= 4, `SC-02 has only ${C2.cards} cards`);
-  assert.ok(C2.distinctSizes >= 3, `SC-02's cards come in ${C2.distinctSizes} sizes`);
+  /* SC-02 — D-138 REPLACED this rule.
+   *
+   * `17` used to say 모듈 보드 · 크기가 다른 카드가 여럿 놓인다, and this block asserted exactly
+   * that: at least four cards, at least three sizes. It PASSED on the arrangement the external
+   * review called confusing — MEASURED before the amendment: 5 cards, density 0.765, and the
+   * largest card on the screen was `brief`. A test can enforce a wall of cards as easily as it
+   * can forbid one; what changed is the spec, so this is the spec's new sentence in numbers.
+   *
+   * 하나의 주 표면 + 소수의 보조 요소: there is a clear winner, it is not the project
+   * description, and the board is not covered edge to edge. */
+  assert.ok(C2.cards <= 4, `SC-02 draws ${C2.cards} cards at once — D-138 asks for a small number`);
+
+  /* The DEFAULT screen — the one §13 is about. `C2` above was taken with the Brief expanded by
+   * this test's own clicks, and a Brief the user opened is allowed to be the biggest thing on
+   * the screen. What is forbidden is that happening on its own. */
+  const C2D = results.compSC02Default;
+  assert.ok(C2D, 'the default SC-02 composition was never measured');
+  assert.notStrictEqual(C2D.largest, 'brief',
+    'the Project Brief is the largest object on the DEFAULT SC-02 — D-138 §4 forbids exactly that');
+  assert.ok(results.briefRailFolded, 'the Brief is not in the rail — §4 puts it in the secondary region');
+  assert.deepStrictEqual(JSON.parse(results.railHeadBroken), [],
+    'a rail control is squeezed until its label wraps mid-word — the rail is narrower, not smaller');
+  assert.ok(C2D.density < 0.62,
+    `SC-02 covers ${(C2D.density * 100).toFixed(0)}% of the board by default — that is a wall of cards`);
+  assert.strictEqual(JSON.parse(results.sc02DefaultOrder)[0], 'intent',
+    'the idle primary column does not open on the request field — §3 IDLE asks it to');
+
+  /* …and with a Work RUNNING the subject changes, which is D-138 §7: the same screen composes
+   * differently by state rather than only changing its text. */
+  const C2R = results.compSC02Running;
+  assert.ok(C2R, 'SC-02 was never measured with a Work running');
+  assert.strictEqual(C2R.largest, 'stream',
+    `with a Work running SC-02's largest card is ${C2R.largest}, not the current Work`);
+  const runOrder = JSON.parse(results.sc02RunningOrder);
+  assert.strictEqual(runOrder[0], 'stream',
+    `the primary column starts with ${runOrder[0]} while a Work runs — §3 asks it to answer "지금 무슨 일이"`);
+  assert.notStrictEqual(C2D.largest, C2R.largest,
+    'idle and running SC-02 have the same subject — that is one dashboard whose text changes');
+  /* The subject is carried by POSITION and SIZE together here, not by size alone the way SC-03
+   * carries it (there the Work is ≥1.8× the next card). On SC-02 the request field stays a
+   * full, usable card while a Work runs — `15` keeps it enabled and the D-117 guard is what
+   * answers a second submit — so the Work leads by being first, widest and the largest, not by
+   * dwarfing a field the user may still need. Anything at or below 1.0 means it is NOT the
+   * largest, which is the part that must not regress. */
+  assert.ok(C2R.dominance > 1.0,
+    `the running Work is ${C2R.dominance?.toFixed(2)}× the next card — it is not the largest`);
+  assert.strictEqual(results.sc02StreamLive, 'work', 'the running Work Stream is not marked live');
+  assert.ok(results.sc02StreamOpen.includes('열기'),
+    `the current Work card offers ${JSON.stringify(results.sc02StreamOpen)} — \`18\` work.open is its way in`);
+  assert.ok(!/아직 요청한 작업이 없어요/.test(results.sc02StreamText ?? ''),
+    'SC-02 says no Work has been requested while one is running');
+
+  /* D-138 §9 · same hierarchy at 1440 · 1280 · 1024. A width that re-ranks the board means the
+   * widest layout was never the designed one. */
+  const widths = JSON.parse(results.sc02Widths);
+  const subjects = Object.entries(widths).map(([w, v]) => [w, v.comp.largest]);
+  assert.strictEqual(new Set(subjects.map(([, l]) => l)).size, 1,
+    `the subject changes with the window width: ${subjects.map((x) => x.join('=')).join(' · ')}`);
+  for (const [w, v] of Object.entries(widths)) {
+    assert.strictEqual(v.comp.largest, 'stream', `at ${w}px the subject is ${v.comp.largest}`);
+    assert.strictEqual(JSON.parse(v.order)[0], 'stream', `at ${w}px the board does not open on the Work`);
+    assert.strictEqual(v.overflow, 0, `SC-02 scrolls sideways at ${w}px by ${v.overflow}px`);
+  }
 
   /* SC-03 집중된 활성 Work — Work 가 화면의 주어다. The biggest card IS the Work, and it is
    * the biggest by a margin rather than by a pixel. */

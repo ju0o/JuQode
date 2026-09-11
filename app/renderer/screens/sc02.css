@@ -12,8 +12,13 @@
      around a 591 px card, with dense flow packing a second card into the space the Brief was
      already painting on. `align-self: stretch` only moved the failure: the card then clipped
      its own content, which `16` §4 forbids. A stack cannot overlap. */
+  /* D-138 · the two stacks are no longer peers. The MAIN column carries the subject of
+     whatever state the screen is in; the RAIL carries supporting context (folded Brief,
+     History). 1.62 : 1 is wide enough that the main column reads as the subject at 1024 and
+     narrow enough that the rail is still a usable list — the ratio is what keeps the hierarchy
+     the SAME at 1440, 1280 and 1024 rather than only at the width it was designed on. */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
   max-width: 1440px;
@@ -21,6 +26,16 @@
   margin: 0 auto;
 }
 .sc02-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* The rail is quieter than the main column, and says so in weight rather than in colour:
+   `16` §2 spends colour on STATE, and "this is secondary" is not a state. */
+.sc02-rail .card { padding: 12px 14px; }
+.sc02-rail .chead .ct { font-size: 11px; }
+/* MEASURED in the rail: the header row could only SHRINK, so its own controls were squeezed
+   below their labels and broke mid-word — `다시 읽\n기` · `펼치\n기`, and worse at 1024. Every
+   assertion passed while that was on screen. The row wraps now and the buttons keep their own
+   width: a control whose label is cut in half is one the reader has to decode first. */
+.sc02-rail .chead { flex-wrap: wrap; row-gap: 6px; }
+.sc02-rail .chead .btn { flex: 0 0 auto; white-space: nowrap; }
 
 /* `16` §4 sizes are about WIDTH; inside a stack every card fills its column and is exactly as
    tall as its content. The classes stay so the markup keeps saying what each card weighs. */
@@ -48,9 +63,17 @@
 
 .sc02 [data-card="unavail"] { background: var(--grey); }
 
-/* narrow window: one stack, in reading order — the Brief first, then what the user says next. */
-@media (max-width: 900px) {
+/* D-138 §9 · the hierarchy must be the SAME at every width, and the external review's own
+   observation — that shrinking the window produced a *better* order — is evidence that it was
+   not. It is the same order now at every width because the DOM order is the hierarchy:
+   main column (subject) first, rail second. Collapsing to one stack therefore reads top to
+   bottom as subject → context, which is what the wide layout reads as left → right.
+
+   Below 1024 the rail loses its own column rather than being squeezed into an unreadable one.
+   Nothing is reordered on the way down — if it had to be, the desktop order would be wrong. */
+@media (max-width: 1023px) {
   .sc02 { grid-template-columns: minmax(0, 1fr); padding: 20px; }
+  .sc02-rail .card { padding: 14px 16px; }
 }
 
 /* Brief — the six answers. Each row is label + chip, then the answer, then the file the
@@ -148,3 +171,22 @@
   border: 1px solid var(--line); background: var(--grey);
 }
 .sc02 .failband.soft .t { color: var(--ink2); }
+
+/* ── D-138 · the Work Stream, SC-02's subject while a Work is running ──────────────────
+ * `15` SC-02 ③ / Running State (compact): name · state · last observed fact · ✓ ● ○ · 열기.
+ * Nothing here is a progress reading — every row is an observation or a declared count. */
+.sc02 [data-card="stream"] .streambody { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sc02 .streamtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+/* The user's own words name the Work, and they wrap rather than being cut — a truncated intent
+   is a different sentence. Same rule as the History row, same class. */
+.sc02 .streamtop .histname { flex: 1 1 auto; }
+.sc02 .streamlive { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.sc02 .streamlive .mono { font-family: var(--font-mono); }
+.sc02 .streamcounts { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+
+/* While a Work is live this card is the visual winner of the primary column — D-138 §7. The
+   weight comes from the card's own `.active` grammar (`16` §5), not from a new colour. */
+.sc02 [data-card="stream"][data-live="work"] {
+  border-color: var(--line3);
+  box-shadow: 0 1px 2px rgba(20, 23, 28, .05), 0 14px 32px -18px rgba(20, 23, 28, .22);
+}

@@ -134,7 +134,7 @@ function workCard(snap, api, nav, state) {
 
 /* A chip is a LABEL. `18` writes the panel titles as sentences and gives them a UI context of
  * "카드 제목"; repeating one in the chip says the same thing twice on one surface (§0.8). */
-function stateChip(snap) {
+export function stateChip(snap) {
   if (snap.status === 'ended') {
     return el('span', `chip ${OUTCOME[snap.outcome]?.cls ?? 'unk'}`, outcomeTitle(snap.outcome));
   }
@@ -152,8 +152,19 @@ function liveness(snap) {
   const row = el('div', 'liveness');
   row.setAttribute('data-el', 'liveness');
   const seen = snap.lastObserved;
+  /* `15` No-Step State (M-08): the state EVERY Work starts in, and it is not silent — the
+   * session start IS an observed fact, so the line states it.
+   *
+   * It used to repeat `work.noSteps` here, which `18` files as the STEP region's sentence.
+   * The same sentence then appeared twice on one screen (this row and the steps card), which
+   * §0.8 forbids — and it answered a question about STEPS where the reader is asking about
+   * ACTIVITY. `work.observed` + `work.sessionStart` is the pair `18` carries for exactly this
+   * branch. Wall-clock, not `12초 전`: a relative count with nothing refreshing it goes wrong
+   * on its own (see `work.ago`, PENDING). */
   if (!seen) {
-    row.appendChild(el('span', 'sm mut', C.work.noSteps));
+    row.appendChild(el('span', 'xs mut2', C.work.observed));
+    row.appendChild(el('span', 'sm', C.work.sessionStart));
+    if (snap.work?.started_at) row.appendChild(el('span', 'xs mut mono', clock(snap.work.started_at)));
     return row;
   }
   row.appendChild(el('span', 'xs mut2', C.work.lastSeen));
@@ -484,10 +495,29 @@ function resultCard(snap, api, nav, state) {
   /* WBS-38 · these are D-136's own examples of 다음 행동 — 변경 내용 보기 · 프로젝트로 돌아가기.
    * They are JuQode's offer, and the block says so; Claude's NEXT lives on the Steps card and
    * is text, not buttons. */
+  /* `15` SC-03 Failure State: `변경 읽기` **only if changesApplied > 0**, otherwise the line
+   * `바뀐 파일이 없어요`. That line is already on the card — `claimText` renders it for a
+   * `changed-files` claim with no files — so what was missing is the CONDITION. A 변경 읽기 on
+   * a Work that changed nothing opens a reader with nothing in it, which `15` DS §1 does not
+   * count as an action. A remainder the evidence pair could not read is NOT zero: that is the
+   * `changes-unknown` state, and `remainPanel` above owns it. */
+  const changedClaim = (snap.result?.claims ?? []).find((c) => c.kind === 'changed-files');
+  const hasChanges = (changedClaim?.data?.files?.length ?? 0) > 0;
+
   const acts = nextActions([
     /* `15` SC-04 entry: SC-03 `변경 읽기`. It is the PRIMARY action here — a finished Work's next
      * question is what it actually changed, and reading that is the product's whole argument. */
-    btn('btn sm pri', C.work.readChanges, () => nav.toReader(snap)),
+    hasChanges ? btn('btn sm pri', C.work.readChanges, () => nav.toReader(snap)) : null,
+    /* `15` SC-03 Failure State · Human Gate ② (2026-09-11): a failed Work's way forward is to
+     * say it again. It lands on SC-02 with the user's OWN sentence back in the field and does
+     * NOT send it — `12` treats 보내기 as consent to change files, so the person presses it.
+     * Green ▸: `16` §2.1 gives recovery the green, and this is a way out of a state the user
+     * did not choose. */
+    snap.outcome === 'failed'
+      ? btn('btn sm ghost rec', C.work.resubmit,
+            () => nav.toWorkbench(state.project, state.interpretation,
+                                  { intent: snap.work.intent, focusIntent: true }))
+      : null,
     btn('btn sm', C.work.unwanted, () => {
       /* Open the panel in place rather than navigating: `15` puts the Unwanted-result state on
        * SC-03, and a user who is not sure yet must be able to go on reading. */

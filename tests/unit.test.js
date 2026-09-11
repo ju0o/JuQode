@@ -502,27 +502,31 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
      * same 64 KB again would be lying about what it offers. */
     'qc.full',
 
-    /* ── surfaced when this check started matching WHOLE PATHS (batch 35) ──────────────────
-     * Every one of these was hidden behind a namesake: the leaf name alone was found somewhere
-     * else in the file and the key counted as used. They are written down now, each with what
-     * it would take to render it, rather than left invisible again.
+    /* ── Human Gate ① · ② — resolved 2026-09-11, so this list SHRANK by nine ───────────────
+     * Every entry below is what is LEFT after the PM opened the two gates. Nine keys that were
+     * parked here turned out not to be pending at all:
      *
-     * Duplicates of copy that IS rendered, under a second name. `18` carries both; the screen
-     * can only say it once, and it says it through the key the screen already uses. */
-    'presence.title',      // `presence.kicker` is on the card; a title repeating it is 18 §0.8
-    'work.observed',       // `work.lastSeen` is the liveness label, same words
-    'work.open',           // History uses `history.result`; the guard uses `guard.open`
-    'qc.kicker',           // the drawer's Quick Command label is `term.qcTitle`
-
-    /* Controls `15` names that no screen builds yet. Each is a real backlog item. */
-    'guard.answer',        // 답하기 needs the guard to know the Work is input_waiting; SC-03 owns that
-    'guard.wait',          // DECIDED, not pending: waiting is what happens when nothing is pressed,
-                           // and the text is already kept in the field (see `refusalCard`)
-    'work.now',            // `15` SC-03's label for the step region; the region is drawn unlabelled
-    'work.requested',      // SC-03 shows the intent as the card's heading, without a field label
-    'work.resubmit',       // SC-03's failed result offers 변경 읽기 · 작업대로; re-sending is SC-02's
-    'qc.terminal',         // ▸ 터미널에서 보기 from a QC card — the drawer is already open there
-    'term.out',            // a heading over the drawer's output; the output is unlabelled today
+     *   `presence.title`  DELETED — `18` folded it onto `presence.kicker` (the same four
+     *                     characters, and a card cannot name its actor twice, §0.8).
+     *   `work.observed` · `work.open` · `qc.kicker` were filed as DUPLICATES of copy that was
+     *                     already rendered. Measured against `18` and the approved prototype,
+     *                     none of the three was: each names a different surface, and all three
+     *                     are now drawn (the No-Step liveness branch, SC-02's current-Work
+     *                     card, and the QC card's own head).
+     *   `guard.answer` · `guard.wait` · `work.now` · `work.resubmit` · `term.out` were filed as
+     *                     controls `15` had not placed. `15` had placed every one of them; the
+     *                     screens had not built them.
+     *
+     * TWO are genuinely still open and are Founder decisions, not backlog — see `15`'s
+     * Human Gate ② appendix. They are named here with what it would take to close them. */
+    'work.requested',      // `18` labels the SC-03 intent 요청한 말; `15` and all three approved
+                           // artifacts render that heading UNLABELLED. Adding a label is a
+                           // Founder call, not an implementation detail (D-138 §6 cuts furniture)
+    'qc.terminal',         // ▸ 터미널에서 보기 on a QC card — but the QC card is already INSIDE the
+                           // terminal drawer with the shell pane beside it, so the approved
+                           // placement is a link to where the reader already is. D-138 §11 says
+                           // the old prototype does not win that on approval alone; choosing a
+                           // new destination would be inventing one
   ]);
 
   /* The FULL access path — `C.startFail.resubmit`, not `resubmit`.

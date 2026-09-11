@@ -193,6 +193,11 @@ function termRegion(api, state, repaint) {
 
   /* 출력은 프롬프트 **위**에 쌓인다. 터미널은 그렇게 읽히고, 그래야 입력 줄이 서랍 바닥에
    * 고정된다 — `15` 의 Primary Action 이 스크롤 아래로 밀려나면 Primary Action 이 아니다. */
+  /* `18` `term.out` — the output pane's own name, over the pane and not over the column.
+   * `gap.termTitle` above names the INPUT ("셸 명령줄"); this names what is stacked above it.
+   * Human Gate ② (2026-09-11): the approved prototype's drawer carries exactly this label in
+   * exactly this place, and no screen was drawing it. */
+  region.appendChild(el('div', 'xs mut2 td01-outlabel', C.term.out));
   const outBox = el('div', 'td01-termout');
   region.appendChild(outBox);
 
@@ -300,7 +305,17 @@ function routeCard(api, state, repaint) {
   card.setAttribute('data-el', 'qc-card');
   /* `15` §0: EVERY card that carries a claim names who acts — including 미인식 and 모호함, which
    * are JuQode's own judgements about the phrase and not Claude Code's. */
-  card.appendChild(el('span', 'chip juq td01-actor', C.actor.juq));
+  const cardHead = el('div', 'td01-cardhead');
+  cardHead.appendChild(el('span', 'chip juq td01-actor', C.actor.juq));
+  /* `18` `qc.kicker` — which ENGINE produced this card, on the card itself.
+   *
+   * Human Gate ② (2026-09-11): this was filed as a duplicate of `term.qcTitle`. It is not.
+   * `term.qcTitle` names the drawer PANEL; this names one CARD inside it, and the approved
+   * prototype renders both at once on the same drawer. A card that outlives its panel's
+   * heading — scrolled, or read on its own — otherwise says who acted but not under which
+   * rule set, and the deterministic rule set is the whole claim this product makes here. */
+  cardHead.appendChild(el('span', 'kicker', C.qc.kicker));
+  card.appendChild(cardHead);
 
   if (!r?.ok || r.route?.kind === 'unrecognized') {
     /* 미인식 — NEUTRAL, never red. `15` TD-01 and `19` §C4: not recognising is a branch to the

@@ -125,7 +125,12 @@ export const C = {
     ended:     '끝',
     stepsTitle:'Step — Claude Code가 실제로 알린 것만',
     noSteps:   '아직 Step이 없어요. Claude Code가 알려 주면 여기에 보여요.',
+    /* ONE liveness line, two exclusive branches — never both on screen (`18`, 2026-09-11).
+     * `observed` is the branch before any Step signal, and its value is `sessionStart`; from
+     * the first observed signal on it is `lastSeen` + what was seen. `15` No-Step State · M-08:
+     * every Work starts in the first branch. */
     observed:  '마지막 활동',
+    sessionStart: '시작',
     lastSeen:  '마지막 활동',
     ago:       '전',
     nextEmpty: 'Claude Code가 아직 다음 단계를 보내지 않았어요.',
@@ -203,7 +208,9 @@ export const C = {
   /* WBS-35 · Agent Presence (`18` §presence). Three keys, and only three — the nine mode
    * labels are NOT in `18`; they are in `gap.presenceLabel` with the reason. */
   presence: {
-    title:  'Claude Code',
+    /* `presence.title` was FOLDED in `18` (2026-09-11): it carried the same four characters as
+     * `kicker`, and one card cannot say who is acting twice (`18` §0.8). The kicker is the one
+     * name on this surface. */
     kicker: 'Claude Code',
     hint:   '모양은 지금 상태만 나타내요. 진행 정도를 뜻하지 않아요.',
   },

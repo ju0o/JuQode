@@ -290,6 +290,9 @@ let instance = null;
 
 /**
  * The Agent Presence card — S, canvas 56 px + label (`16` §125, `15` §42).
+ *
+ * Still here for SC-03, which has room for it. On SC-02 the same body is embedded in the
+ * current-Work surface instead — see `presenceBody` and D-138 §5.
  * @param {keyof MODES} mode
  */
 export function presenceCard(mode) {
@@ -300,6 +303,29 @@ export function presenceCard(mode) {
   head.appendChild(el('span', 'actor', C.presence.kicker));
   card.appendChild(head);
 
+  card.appendChild(presenceBody(mode));
+
+  /* `18` `presence.hint`: the shape is a state, not an amount. Said on the card, every time,
+   * because "reading it as progress" is this package's named failure case (`21` WBS-35). */
+  card.appendChild(el('div', 'xs mut2 foot', C.presence.hint));
+  return card;
+}
+
+/**
+ * D-138 §5 — the Presence body, so it can live INSIDE the current-Work surface rather than in
+ * a card of its own.
+ *
+ * The amendment allows that integration "if that preserves all D-123 truthfulness semantics",
+ * and every one of them is carried by the same objects as before: the SAME singleton canvas and
+ * instance (so the breath is not restarted and no second rAF loop is created), the same nine
+ * modes, and the same `setPresenceMode` correction path. What changes is where the 56 px canvas
+ * is appended. The host card must still say `presence.hint` — the shape is a state, not an
+ * amount — because that sentence belongs to the presence, not to the card that framed it.
+ *
+ * @param {keyof MODES} mode
+ * @returns {HTMLElement}
+ */
+export function presenceBody(mode) {
   if (!node) {
     node = document.createElement('canvas');
     instance = new Presence(node, { size: 56, points: 80 });
@@ -308,17 +334,12 @@ export function presenceCard(mode) {
   body.appendChild(node);
   const label = el('div', 'plabel');
   body.appendChild(label);
-  card.appendChild(body);
 
   /* The label element is rebuilt with the card, so the instance is re-pointed at it and the
    * mode re-applied — the text is written by `setMode` and by nothing else. */
   instance.label = label;
   instance.setMode(MODES[mode] ? mode : 'idle');
-
-  /* `18` `presence.hint`: the shape is a state, not an amount. Said on the card, every time,
-   * because "reading it as progress" is this package's named failure case (`21` WBS-35). */
-  card.appendChild(el('div', 'xs mut2 foot', C.presence.hint));
-  return card;
+  return body;
 }
 
 /**

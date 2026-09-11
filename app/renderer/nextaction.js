@@ -41,7 +41,17 @@ export function nextActions(buttons) {
   box.appendChild(head);
 
   const row = el('div', 'row-acts');
-  for (const b of buttons) row.appendChild(b);
+  /* A caller may hand over a slot that is not offered in this state — `15` makes 변경 읽기
+   * conditional on there being changes, and D-138 §6 says a card is not drawn for a state that
+   * does not exist. `null` is that absence, and it is dropped here rather than at every call
+   * site. An EMPTY list still renders the heading, and that would be a 다음 행동 block offering
+   * nothing, so it is refused outright. */
+  const shown = buttons.filter(Boolean);
+  /* English on purpose: this is a programmer error that can only be reached by a caller
+   * passing an empty list, and every Korean string in the product must be `18` verbatim
+   * (tests/unit.test.js enforces it). A message the user can never see is not copy. */
+  if (!shown.length) throw new Error('nextActions called with no action');
+  for (const b of shown) row.appendChild(b);
   box.appendChild(row);
   return box;
 }

@@ -24,7 +24,8 @@ import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
-import { presenceCard, setPresenceMode, modeFor } from '../presence.js';
+import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
+import { stateChip } from './sc03.js';
 
 export function renderSC02(root, api, nav, state) {
   root.innerHTML = '';
@@ -48,31 +49,41 @@ export function renderSC02(root, api, nav, state) {
   shell.appendChild(bar);
 
   const board = el('main', 'sc02 board fade-in');
-  /* TWO COLUMN STACKS, not a row grid.
+  /* D-138 · TWO STACKS, and they are no longer peers: a MAIN column that holds the subject of
+   * whatever state the screen is in, and a narrower RAIL that holds supporting context.
    *
-   * `17` asks for a module board of differently sized cards, and the first implementation used a
-   * six-column grid with `grid-auto-flow: dense` and auto rows. MEASURED: once History had rows,
-   * the Brief was drawn straight OVER the card below it — an auto row sized to 449 px while the
-   * card in it was 591 px tall, and dense flow then packed another card into the space the Brief
-   * was already painting on. `align-self: stretch` only moved the failure: the card then clipped
-   * its own content at exactly two rows, which `16` §4 forbids outright.
+   * Before the amendment both columns were `1fr` and the Brief opened in the left one, so the
+   * biggest object on the screen was the project description — MEASURED: `compSC02.largest`
+   * was `brief` and board density was 0.765 (`tmp-visual/results.json`, batch 35). A
+   * non-developer's first scan landed on a card that answers a question they did not ask.
    *
-   * A stack cannot overlap. Each column is a flex column, so a card is exactly as tall as its
-   * content and the next card starts below it — no row arithmetic to get wrong. */
-  const colL = el('div', 'sc02-col');
-  const colR = el('div', 'sc02-col');
-  board.appendChild(colL);
-  board.appendChild(colR);
+   * A stack still cannot overlap, which is why this is two flex columns and not a row grid —
+   * see the measured failure recorded below. */
+  const colMain = el('div', 'sc02-col sc02-main');
+  const colRail = el('div', 'sc02-col sc02-rail');
+  board.appendChild(colMain);
+  board.appendChild(colRail);
   board.setAttribute('data-screen', 'SC-02');
 
-  /* ① Brief — WIDE. Real now: three of the six answers come from files this project actually
-   * contains, and the other three say 확인 못함 (`11`: 부분 해석은 실패가 아니다). */
+  /* ① Brief — D-138 §4: supporting project context, NOT the user's permanent primary task.
+   *
+   * While the project is still being READ it is the subject and sits in the main column — the
+   * user is waiting on it and there is nothing else to look at. The moment the interpretation
+   * exists it moves to the rail, where a returning open finds it already folded (D-132) and a
+   * first open finds it open but out of the primary scan path. The capability is untouched
+   * (`11` F-C1-02); only its claim on attention is. */
   const brief = card('wide2', 'brief');
-  colL.appendChild(brief);
+  const placeBrief = () => {
+    const wanted = state.interpretation ? colRail : colMain;
+    /* Only ever a MOVE, and only when the column is actually wrong — re-appending a node that
+     * is already in place would restart the card's fade for no reason. */
+    if (brief.parentNode !== wanted) wanted.insertBefore(brief, wanted.firstChild);
+  };
+  placeBrief();
 
   /* WBS-05 · the Brief's own controls. Re-rendering IS the interaction — the same pattern the
    * other screens use — so every one of these hands state back and redraws. */
-  const paint = () => renderBrief(brief, state.interpretation, {
+  const paint = () => { placeBrief(); renderBrief(brief, state.interpretation, {
     stale: state.stale,
     folded: state.briefFolded,
     refreshFailed: state.refreshFailed,
@@ -104,6 +115,10 @@ export function renderSC02(root, api, nav, state) {
       });
     },
   });
+  };
+  /* Every redraw re-places the card, so the interpretation ARRIVING is also when the Brief
+   * stops being the subject — the move and the content change land in the same frame instead
+   * of as two separate jumps. */
   paint();
 
   if (state.interpretation) {
@@ -124,6 +139,17 @@ export function renderSC02(root, api, nav, state) {
       state.interpretation = r?.ok
         ? r.interpretation
         : { status: 'failed', failedCode: null, answers: [], readFiles: [] };
+      /* D-138 §4 · the Brief is visibly presented WHILE the project is being understood, and
+       * collapses into a compact secondary affordance once it HAS been. This is that moment.
+       *
+       * MEASURED before this line existed: with the Brief left open on a first read it was
+       * still the largest object on SC-02 (`compSC02.largest === 'brief'`, density 0.676) even
+       * after it had been moved to the rail — a non-developer's first scan kept landing on the
+       * project description. Nothing is lost: the header keeps `펼치기` and D-132 already folds
+       * it on every later open. A FAILED read is left open — its band is the whole message,
+       * and folding it would hide the reason. A re-read the user ASKED for re-opens itself
+       * (see `onReread`), because they asked to see the result. */
+      if (r?.ok) state.briefFolded = true;
       /* WBS-04's own report — how many answers the narrative pass filled, and why it did not.
        * It is not drawn: the Brief shows the ANSWERS and their chips, which is what the reader
        * needs. This is for the run log and the e2e, the way `__work` carries counts. */
@@ -160,7 +186,7 @@ export function renderSC02(root, api, nav, state) {
   intent.appendChild(row);
   intent.appendChild(el('div', 'xs mut2', C.intent.examples));
   intent.appendChild(el('div', 'xs mut2', C.intent.approvalNote));
-  colR.appendChild(intent);
+  colMain.appendChild(intent);
 
   /* Enter submits, Shift+Enter is a newline (`15` SC-02 Inputs). */
   field.addEventListener('keydown', (e) => {
@@ -203,30 +229,39 @@ export function renderSC02(root, api, nav, state) {
     consequence.appendChild(refusalCard(r, api, nav, state, p, { phrase: text, resubmit: () => startWork(text) }));
   }
 
-  /* Work Stream — WIDE. Genuinely empty: this project has no Works, and none can be started
-   * until WBS-10. No heading and no actor badge: `18` has no key for this region, and `15` §0
-   * scopes the actor badge to a Work / QC CARD, of which there is none. The empty sentence is
-   * the whole card, and it is true. (`18` files that string under SC-03 — see CANON_FINDINGS
-   * CF-2; SC-03 is one Work and cannot have a "nothing requested yet" state.) */
-  const stream = card('wide', 'stream');
-  stream.appendChild(el('div', 'sm mut', C.work.empty));
-  colL.appendChild(stream);
+  /* ② Work Stream — D-138 §3 · §5, and `15` SC-02 ③.
+   *
+   * This region is the screen's subject WHILE A WORK IS RUNNING: the first thing in the primary
+   * column, answering "무엇이 지금 일어나고 있나". Before the amendment SC-02 had no current-Work
+   * surface at all — the card below unconditionally said `아직 요청한 작업이 없어요` even with a
+   * Work running, which is a sentence the product had no evidence for. The running Work was
+   * visible only as a `진행 중` chip on a History row.
+   *
+   * Agent Presence is INSIDE this card rather than beside it (D-138 §5). Same canvas, same nine
+   * modes, same correction path — and `presence.hint` is still said out loud here, because the
+   * sentence belongs to the presence and not to the card that used to frame it.
+   *
+   * `18` `work.now` names the region; Human Gate ② (2026-09-11) settled that the label is this
+   * key's copy and not `15`'s table shorthand `지금`. */
+  const stream = card('wide2', 'stream');
+  stream.appendChild(head(C.work.now));
+  const streamBody = el('div', 'streambody');
+  streamBody.setAttribute('data-el', 'stream-body');
+  stream.appendChild(streamBody);
+  stream.appendChild(presenceBody('idle'));
+  stream.appendChild(el('div', 'xs mut2 foot', C.presence.hint));
+  colMain.appendChild(stream);
+  fillStream(streamBody, stream, api, nav, state);
 
-  /* WBS-35 · Agent Presence — S, above History (`15` §0 Board). SC-02 holds no Work snapshot,
-   * so it opens at 대기 중 and is corrected once the store answers. It never GUESSES a mode
-   * from the History row: a row says `running`, and `running` alone cannot tell 활동 from
-   * 답을 기다리는 중 from 새 활동 없음. Those come from the snapshot or not at all. */
-  colR.appendChild(presenceCard('idle'));
-  fillPresence(api, state);
-
-  /* History — M (cols 5–6). WBS-20: every Work this project started, newest first. `12`
-   * F-C2-04 — it never disappears, and a failed or cancelled Work stays in it. */
+  /* History — the rail. WBS-20: every Work this project started, newest first. `12`
+   * F-C2-04 — it never disappears, and a failed or cancelled Work stays in it.
+   * D-138 §5: findable, compact until the user expands it, never competing with the subject. */
   const hist = card('m', 'history');
   hist.appendChild(head(C.history.title));
   const rows = el('div', 'histrows');
   hist.appendChild(rows);
   hist.appendChild(el('div', 'xs mut2 foot', C.history.note));
-  colR.appendChild(hist);
+  colRail.appendChild(hist);
 
   /* The list is filled from the store, which is a read the screen does not have synchronously.
    * Until it answers, the card shows nothing rather than a wrong empty state — `아직 끝난
@@ -250,7 +285,7 @@ export function renderSC02(root, api, nav, state) {
 /**
  * Is the answer still ABOUT the screen that asked for it?
  *
- * `fillPresence` awaits twice, and in that time the user can leave — for another project, or
+ * `fillStream` awaits twice, and in that time the user can leave — for another project, or
  * off SC-02 entirely. Writing the presence then paints a mode for something they are no
  * longer looking at, and `19` is about the product only saying what it observed OF WHAT IS
  * ON SCREEN.
@@ -265,23 +300,98 @@ export function presenceIsStill(state, project) {
   return state.screen === 'SC-02' && state.project === project;
 }
 
-async function fillPresence(api, state) {
+/**
+ * D-138 · the Work Stream's content, and the presence mode, from ONE read.
+ *
+ * `15` SC-02 ③ / Running State (compact): name · state · last observed fact · ✓ ● ○ counts ·
+ * `열기`. Every field is a column the store already holds or a fact the snapshot observed —
+ * nothing here is derived from a clock and nothing is a progress reading.
+ *
+ * The card MOVES to the top of the primary column when a Work is live, and stays under the
+ * request field when there is none. That is D-138 §7: the same screen composes differently by
+ * state instead of changing only its text. It is done here rather than at build time because
+ * whether a Work is running is not known synchronously — and an idle screen therefore never
+ * moves at all.
+ */
+async function fillStream(body, stream, api, nav, state) {
   const project = state.project;
   const r = await api.history(project.id);
-  /* A read that FAILED says nothing about whether there is a Work. `idle` is `대기 중` — a
-   * claim that nothing is happening — and the store refusing to answer is not evidence for it. */
-  if (!r?.ok) { if (presenceIsStill(state, project)) setPresenceMode('unknown'); return; }
-  const live = r.works.find((w) => w.status !== 'ended');
-  let mode = 'idle';
-  if (live) {
-    const snap = (await api.workGet(live.id))?.work;
-    /* A live Work whose snapshot could not be fetched is NOT 대기 중. `idle` says nothing is
-     * happening, and something is — we just cannot see what. That is `unknown`. */
-    mode = snap ? modeFor(snap) : 'unknown';
-  }
   /* The answer describes the project this started for. If the user has moved on, it is about
    * something they are no longer looking at. */
-  if (presenceIsStill(state, project)) setPresenceMode(mode);
+  if (!presenceIsStill(state, project)) return;
+
+  /* A read that FAILED says nothing about whether there is a Work. `idle` is `대기 중` — a
+   * claim that nothing is happening — and the store refusing to answer is not evidence for it. */
+  if (!r?.ok) { setPresenceMode('unknown'); return; }
+
+  const live = r.works.find((w) => w.status !== 'ended');
+  if (!live) {
+    /* TRUE, and now only said when it is: this project has no Work that has not ended. */
+    body.appendChild(el('div', 'sm mut', C.work.empty));
+    setPresenceMode('idle');
+    return;
+  }
+
+  /* A History row carries `status` and `outcome` and nothing about liveness, permissions or a
+   * pending question — so a mode derived from the row would be claiming `활동` for a Work that
+   * is actually waiting for the user to answer. The snapshot is the only thing that knows, so
+   * the row is used for nothing but the id. */
+  const snap = (await api.workGet(live.id))?.work;
+  if (!presenceIsStill(state, project)) return;
+  if (!snap) {
+    /* A live Work whose snapshot could not be fetched is NOT 대기 중. `idle` says nothing is
+     * happening, and something is — we just cannot see what. */
+    body.appendChild(el('div', 'sm mut', C.orient.unknown));
+    setPresenceMode('unknown');
+    return;
+  }
+  setPresenceMode(modeFor(snap));
+
+  /* D-138 §3: with a Work running, this is what the first scan must land on. */
+  stream.parentNode?.insertBefore(stream, stream.parentNode.firstChild);
+  stream.setAttribute('data-live', 'work');
+
+  const top = el('div', 'streamtop');
+  top.appendChild(el('span', 'sm histname', snap.work.intent));
+  top.appendChild(stateChip(snap));
+  body.appendChild(top);
+
+  /* The last observed fact — the same two branches as SC-03's liveness line, in the same words
+   * (`18` `work.observed` + `work.sessionStart` before any signal, `work.lastSeen` + what was
+   * seen after one). A compact card may not invent a third way of saying it. */
+  const seen = snap.lastObserved;
+  const live_ = el('div', 'xs mut streamlive');
+  if (seen) {
+    live_.appendChild(el('span', 'mut2', C.work.lastSeen));
+    live_.appendChild(el('span', '', C.gap.signal[seen.kind] ?? C.gap.signal.raw));
+    if (seen.at) live_.appendChild(el('span', 'mono', when(seen.at)));
+  } else {
+    live_.appendChild(el('span', 'mut2', C.work.observed));
+    live_.appendChild(el('span', '', C.work.sessionStart));
+    if (snap.work.started_at) live_.appendChild(el('span', 'mono', when(snap.work.started_at)));
+  }
+  body.appendChild(live_);
+
+  /* `15`'s `✓2 ●1 ○1`. Counts of DECLARED steps only (D-107) — a zero here means Claude Code
+   * declared none of that kind, not that none happened, which is why the legend that names the
+   * three marks travels with them. The row is omitted entirely when nothing has been declared:
+   * `✓0 ●0 ○0` is three zeros pretending to be a measurement. */
+  const counts = { done: 0, running: 0, declared_next: 0 };
+  for (const st of snap.steps ?? []) if (st.state in counts) counts[st.state] += 1;
+  if (counts.done || counts.running || counts.declared_next) {
+    const row = el('div', 'xs mut2 streamcounts');
+    row.appendChild(el('span', '', `✓ ${counts.done}`));
+    row.appendChild(el('span', '', `● ${counts.running}`));
+    row.appendChild(el('span', '', `○ ${counts.declared_next}`));
+    row.appendChild(el('span', '', C.work.legend));
+    body.appendChild(row);
+  }
+
+  /* `18` `work.open` · `15` SC-02 ③ — the way into the Work. Human Gate ② (2026-09-11): this
+   * key was never a duplicate of `guard.open`, it was a button no screen had built. */
+  const acts = el('div', 'row-acts');
+  acts.appendChild(btn('btn sm', C.work.open, () => nav.toWork(snap)));
+  body.appendChild(acts);
 }
 
 /**
@@ -474,15 +584,40 @@ function refusalCard(r, api, nav, state, project, { phrase = '', resubmit = null
     n.setAttribute('data-el', 'guard');
     n.appendChild(el('div', 'sm t', C.guard.title));
     n.appendChild(el('div', 'xs mut', C.guard.body));
-    const acts = el('div', 'row-acts');
-    acts.appendChild(btn('btn sm', C.guard.open, async () => {
+    /* `15` SC-02 Guard State names FOUR actions IN THIS ORDER, and Human Gate ② (2026-09-11)
+     * confirmed all four against the approved prototype's own guard card:
+     *   열기 (UF-GUARD-VIEW) · 답하기 (UF-GUARD-ANSWER) · 이 작업 취소 (UF-GUARD-CANCEL) ·
+     *   기다리기 (UF-GUARD-WAIT).
+     * Terminal is deliberately NOT among them (M-06). */
+    const open = async () => {
       const got = await api.workGet(r.detail.id);
       if (got?.ok) nav.toWork(got.work);
-    }));
+    };
+    const acts = el('div', 'row-acts');
+    acts.appendChild(btn('btn sm', C.guard.open, open));
+
+    /* `답하기` is rendered ONLY while the active Work is 입력 대기 — `15` says so, and the
+     * prototype gates it the same way. It goes to the same place as 열기 because that is where
+     * the answer field is: SC-03 owns the input panel, and a second field here would be a
+     * second way to answer the same question. The row status cannot tell — 입력 대기 is a
+     * SNAPSHOT state, not a column — so the button is added when the snapshot says so and
+     * never appears otherwise. */
+    api.workGet(r.detail.id).then((got) => {
+      if (got?.ok && got.work?.status === 'input_waiting') {
+        acts.insertBefore(btn('btn sm', C.guard.answer, open), acts.children[1] ?? null);
+      }
+    });
+
     acts.appendChild(btn('btn sm cancel', C.guard.cancel, () => api.workCancel(r.detail.id)));
+
+    /* `기다리기` (UF-GUARD-WAIT) DISMISSES THIS NOTICE and starts nothing. An earlier revision
+     * left it out, reasoning that waiting is what happens when nothing is pressed — but `15`
+     * lists it as a guard action and the approved prototype's own handler is `S.guard=false`,
+     * i.e. close the card. The two are not the same thing: with no way to dismiss it, the
+     * notice sits over the request the user is still holding. The text stays in the field
+     * either way (UF-RULE-NOQUEUE) — that is what makes closing it safe. */
+    acts.appendChild(btn('btn sm ghost', C.guard.wait, () => n.remove()));
     n.appendChild(acts);
-    /* `기다리기` is not a control — waiting is what happens when nothing is pressed, and the
-     * text is already kept in the field. A button that does nothing is not an action. */
     n.appendChild(el('div', 'xs mut2', C.guard.rule));
     return n;
   }

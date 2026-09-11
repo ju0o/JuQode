@@ -157,14 +157,24 @@ details > summary:hover { color: var(--ink); }
 /* WBS-35 · Agent Presence. Used on SC-02 and SC-03, so it lives here rather than in either
  * screen's sheet. The canvas is a fixed 56 px square (`16` §125) and never scales with the
  * card — a presence that grew with its container would be reporting the layout, not the mode. */
-[data-card="presence"] .pbody {
+/* D-138 §5 moved this body INTO SC-02's current-Work surface, so the selectors are on the
+ * presence's own classes rather than on the card that used to host it. The canvas stays 56 px
+ * in both homes — that is `16` §125 and the reason it is not sized by its container. */
+.pbody {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding: 6px 0 2px;
 }
-[data-card="presence"] canvas { display: block; width: 56px; height: 56px; }
-[data-card="presence"] .plabel {
+.pbody canvas { display: block; width: 56px; height: 56px; }
+.plabel {
   font-size: 12px; color: var(--ink2); text-align: center; overflow-wrap: anywhere;
 }
+/* Inside the Work Stream the presence sits BESIDE its label rather than above it: the card's
+   subject is the Work, and a centred 56 px column would make the presence the subject. Same
+   canvas, same size, same nine modes — only the axis differs. */
+[data-card="stream"] .pbody {
+  flex-direction: row; align-items: center; gap: 12px; padding: 4px 0 0;
+}
+[data-card="stream"] .plabel { text-align: left; }
 
 /* WBS-38 · 다음 행동 ≠ NEXT (D-136 · `17`).
  *

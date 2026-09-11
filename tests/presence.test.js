@@ -347,9 +347,23 @@ test('SC-02 never guesses a mode from a History row', () => {
    * announce 활동 for a Work that is actually waiting for the user to answer a question. */
   assert.ok(/modeFor\(snap\)/.test(src), 'SC-02 does not map from a snapshot');
   assert.ok(!/modeFor\(\s*(live|w)\b/.test(src), 'SC-02 maps a History row straight to a mode');
-  /* …and a live Work whose snapshot could not be read is not called 대기 중. */
-  assert.ok(/mode = snap \? modeFor\(snap\) : 'unknown'/.test(src),
-    'a live Work with no snapshot is reported as idle');
+  /* …and a live Work whose snapshot could not be read is not called 대기 중.
+   *
+   * This used to pin one EXPRESSION — `mode = snap ? modeFor(snap) : 'unknown'` — and it broke
+   * the moment D-138 rewrote the same rule as an early return, while the rule itself was still
+   * being kept. A guard bound to a spelling fails on a refactor and passes on a regression that
+   * happens to keep the spelling; what has to hold is the RULE. So: there is a branch on a
+   * MISSING snapshot, it reports `unknown`, and `idle` is claimed in exactly one place — the
+   * branch that established there is no live Work at all. */
+  assert.ok(/if \(!snap\)|snap \? modeFor\(snap\) : 'unknown'/.test(src),
+    'SC-02 has no branch for a live Work whose snapshot could not be read');
+  assert.ok(!/if \(!snap\)[\s\S]{0,400}setPresenceMode\('idle'\)/.test(src),
+    'a live Work with no snapshot is reported as 대기 중');
+  const idles = [...src.matchAll(/setPresenceMode\('idle'\)/g)];
+  assert.strictEqual(idles.length, 1,
+    `대기 중 is claimed in ${idles.length} places — it is only true where there is no live Work`);
+  assert.ok(/if \(!live\)[\s\S]{0,600}setPresenceMode\('idle'\)/.test(src),
+    'the one 대기 중 does not sit under the branch that found no live Work');
   /* …nor is a History read that FAILED. `idle` is `대기 중`, a claim that nothing is happening;
    * the store refusing to answer is not evidence for it. */
   assert.ok(/if \(!r\?\.ok\) \{[^}]*setPresenceMode\('unknown'\)/.test(src),

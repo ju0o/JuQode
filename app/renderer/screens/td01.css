@@ -139,3 +139,17 @@
   background: var(--card); color: var(--ink);
 }
 .td01-terminput:focus-visible { outline: 2px solid var(--juq); outline-offset: 1px; }
+
+/* Human Gate ② (2026-09-11) · the QC card's own head: WHO acted (the JUQODE chip) and under
+ * WHICH rule set (`18` `qc.kicker`). Two facts on one row, the same pairing the approved
+ * prototype draws. The kicker is not upper-cased here — it is a product name, and `16` reserves
+ * the tracked upper case for the actor badge. */
+.td01-cardhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.td01-cardhead .td01-actor { align-self: center; }
+.td01-cardhead .kicker {
+  font-size: 11px; font-weight: 600; letter-spacing: 0; color: var(--juq);
+}
+
+/* `18` `term.out` — the name of the pane below it. Quiet: it is a label on a region the user is
+ * already looking at, not an announcement. */
+.td01-outlabel { padding-bottom: 2px; }
