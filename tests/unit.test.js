@@ -517,27 +517,22 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
      *                     controls `15` had not placed. `15` had placed every one of them; the
      *                     screens had not built them.
      *
-     * TWO were left for the Founder — see `15`'s Human Gate ② appendix.
+     * The last TWO left this list on 2026-09-11, and NOT by being built. PM ruled both
+     * RETIRED, `18` struck them, and `15`'s appendix records the judgement:
      *
-     * PM RULED BOTH ON 2026-09-11: **RETIRE.** Neither control is to be built — `work.requested`
-     * because the sentence names itself and a label over it is the furniture D-138 §6 removes,
-     * `qc.terminal` because its destination is the surface the reader is already inside.
-     * The implementation already matches (it never built either), and `tests/e2e/visual.mjs`
-     * now MEASURES that absence together with what must stay: the request sentence is still on
-     * SC-03, and Quick Command is still inside TD-01 (D-134 unchanged).
+     *   `work.requested` — the SC-03 head is the user's own sentence and names itself; a label
+     *                      over it is the furniture D-138 §6 removes.
+     *   `qc.terminal`    — its destination is the surface the reader is already inside, and a
+     *                      control that goes where you are is not an action.
      *
-     * They stay on this list until `18` and `15` record the retirement. This project fixes copy
-     * in `18` FIRST and never in `copy.js` — deleting the keys here ahead of Canon would be the
-     * exact inversion that rule exists to stop. The entries below are therefore a Canon to-do,
-     * no longer a product question. */
-    'work.requested',      // `18` labels the SC-03 intent 요청한 말; `15` and all three approved
-                           // artifacts render that heading UNLABELLED. Adding a label is a
-                           // Founder call, not an implementation detail (D-138 §6 cuts furniture)
-    'qc.terminal',         // ▸ 터미널에서 보기 on a QC card — but the QC card is already INSIDE the
-                           // terminal drawer with the shell pane beside it, so the approved
-                           // placement is a link to where the reader already is. D-138 §11 says
-                           // the old prototype does not win that on approval alone; choosing a
-                           // new destination would be inventing one
+     * A retired key is not a pending key: there is nothing left to render, so neither belongs
+     * on a to-do list. Both are gone from `copy.js` — `18` was struck FIRST, which is the order
+     * this project's rule exists to enforce.
+     *
+     * The absence is not left to this list to remember. `tests/e2e/visual.mjs` MEASURES it, in
+     * pairs, together with what has to stay: the request sentence is still on SC-03, and Quick
+     * Command is still inside TD-01 (D-134 unchanged). A prohibition on its own would have been
+     * satisfied by deleting the heading, or by moving Quick Command out of the drawer. */
   ]);
 
   /* The FULL access path — `C.startFail.resubmit`, not `resubmit`.

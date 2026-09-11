@@ -1,6 +1,6 @@
 # RESUME — JuQode Autonomous MVP Long Run V2
 
-**마지막 체크포인트:** 배치 36 · 브랜치 `dev/mvp-autonomous-v01` @ `bee695c` (**푸시 완료** · Draft PR [#4](https://github.com/ju0o/JuQode/pull/4))
+**마지막 체크포인트:** 배치 36 · 브랜치 `dev/mvp-autonomous-v01` (**푸시 완료** · Draft PR [#4](https://github.com/ju0o/JuQode/pull/4))
 **작업 트리:** clean · 백그라운드 프로세스 없음 · stash 없음
 **스위트:** unit 576/576 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
 **정지 사유:** 남은 작업이 **전부 사람의 판단을 기다린다** (§3).
@@ -151,9 +151,13 @@ PENDING 문구 목록 **12 → 3** (`work.ago` · `term.mock` · `qc.full` 은 �
 | `guard.answer` · `guard.wait` · `work.now` · `work.open` · `work.resubmit` · `term.out` | **구현됨** (배치 36) |
 | `work.requested` · `qc.terminal` | **폐기 — PM 판정 2026-09-11** (§2.2). 구현은 이미 부합하고, 부재를 재는 검사가 들어갔다 |
 
-**이 게이트는 닫혔다.** 다만 두 키는 **아직 `tests/unit.test.js` 의 PENDING 에 남아 있다** —
-`18` · `15` 가 폐기를 기록한 뒤에 뺀다. 이 프로젝트는 문구를 `18` 에서 먼저 고치고 `copy.js`
-에서는 고치지 않는다. **Canon 보다 먼저 키를 지우면 그 규칙이 막으려던 역순이 된다.**
+**이 게이트는 닫혔다 — 끝까지.** `18` · `15` 가 폐기를 기록했고(Canon `334f6c9`), 그 **뒤에**
+`copy.js` 에서 두 키를 지우고 PENDING 에서도 뺐다. 순서가 규칙 그대로다.
+산출물 넷도 맞췄다 — 둘 다 실제로 그리고 있었다(QC 카드 세 종류의 터미널 링크 12곳 ·
+SC-03 breadcrumb 의 라벨 5곳). **지운 것은 라벨이고 요청문이 아니다.**
+
+**PENDING 문구 목록 12 → 3 → 1.** 남은 셋 중 `work.ago` · `term.mock` · `qc.full` 은 이미
+"결정됨" 이고, 폐기된 둘은 키 자체가 없어졌다.
 
 ### ③ WBS-32 (사람 도그푸드) · DV-13~16 (Windows) — **열리지 않았다**
 
@@ -175,26 +179,24 @@ PENDING 문구 목록 **12 → 3** (`work.ago` · `term.mock` · `qc.full` 은 �
 
 | | 어디 |
 |---|---|
-| Canon | `JuQode-Private` `7c28496` · `canon/mvp-run-implementation-findings` · Draft PR **#14** (누적 · #13 을 대체) |
-| 구현 | `JuQode` `bee695c` · `dev/mvp-autonomous-v01` · Draft PR **#4** |
+| Canon | `JuQode-Private` `334f6c9` · `canon/mvp-run-implementation-findings` · Draft PR **#14** (누적 · #13 을 대체) |
+| 구현 | `JuQode` `dev/mvp-autonomous-v01` · Draft PR **#4** |
 
-**둘 다 머지 승인 안 됨.** PR #3(Foundation)은 손대지 않았다. PR #13 은 SUPERSEDED 로 표시만
-하고 닫지 않았다. **PR #4 가 병합 불가로 보이는 이유는 draft 플래그 하나뿐이다** —
+**둘 다 머지 승인 안 됨.** PR #3(Foundation)은 손대지 않았다. PR #13 은 SUPERSEDED 로 표시하고
+**머지 없이 닫았다** — 브랜치 · 히스토리는 보존(`956a8c3` 은 `#14` head 의 조상). **PR #4 가 병합 불가로 보이는 이유는 draft 플래그 하나뿐이다** —
 `mergeable: MERGEABLE` · `CLEAN`. (push 직후 몇 초간 `UNKNOWN` 이 나오는 것은 GitHub 의 비동기
 재계산이지 문제가 아니다.)
 
-### ⚠️ Owner 가 직접 해야 하는 것 — Canon 쓰기가 막혀 있다
+### Canon — 둘 다 끝났다
 
-이 세션에서 `JuQode-Private` 의 **파일 쓰기가 분류기에 차단**됐다(읽기는 된다). 그래서 둘이 남았다:
+이 세션에서 `JuQode-Private` 파일 쓰기가 한동안 분류기에 차단됐다. 둘 다 해소되었다:
 
-1. **커밋 안 된 상태 표기 정리** — 작업 트리에 14개 파일이 수정된 채 있다. 준비된 메시지로
-   커밋만 하면 된다:
+1. ~~**커밋 안 된 상태 표기 정리**~~ — **완료** (Owner 가 직접 `b37ac3f` 로 push).
    `19` 의 D-125~D-129 `🟡 제안` → `✅ 확정` · 문서 머리 `CANDIDATE` → Final Planning Gate PASS
    (`13`~`23` · `25` · `27`) · `04` 서문의 확정 범위 `D-137` → `D-138`.
    **건드리지 않은 것:** `26` 로드맵의 CANDIDATE 전부 · `04` §1 의 🟡 규칙 서술 · `08`~`11` 의
    `PROPOSED` — 전부 정당하다.
-2. **Gate ② 폐기 기록** — `18` 과 `15` 에 `work.requested` · `qc.terminal` 폐기를 적는 것.
-   그 뒤에야 `copy.js` 에서 키를 지우고 PENDING 에서 뺄 수 있다.
+2. ~~**Gate ② 폐기 기록**~~ — **완료** (Canon `334f6c9` · 구현 반영까지). 둘 다 끝났다.
 
 ### PM 판단이 필요한 것 하나 — 손대지 않았다
 

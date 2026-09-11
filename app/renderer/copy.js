@@ -120,7 +120,10 @@ export const C = {
     cancel:    '이 작업 취소',
     cancelSub: '취소하면 다음 실행을 멈춰요. 이미 바뀐 파일은 그대로 남아요.',
     route:     'Claude Code 작업 · 시작 전 상태를 기록해 두었어요',
-    requested: '요청한 말',
+    /* `work.requested` was RETIRED in `18` (PM, 2026-09-11): the SC-03 head is the user's own
+     * sentence, and a `요청한 말` label over it is the furniture D-138 §6 removes. The sentence
+     * is still drawn — `workCard` renders `snap.work.intent` as the heading. What went is the
+     * label, and `tests/e2e/visual.mjs` measures both halves so neither can drift back. */
     started:   '시작',
     ended:     '끝',
     stepsTitle:'Step — Claude Code가 실제로 알린 것만',
@@ -311,7 +314,11 @@ export const C = {
     output:        '출력 보기',
     fold:          '출력 접기',
     full:          '출력 전체 보기',
-    terminal:      '▸ 터미널에서 보기',
+    /* `qc.terminal` was RETIRED in `18` (PM, 2026-09-11): this card is already INSIDE the TD-01
+     * drawer with the shell pane beside it, so a `▸ 터미널에서 보기` here points at the surface
+     * the reader is already on. A control whose destination is where you are is not an action.
+     * Quick Command does not move — D-134 is unchanged. (Not to be confused with the rule id
+     * `qc.terminal.open`, which is a different thing and still live.) */
     rerun:         '▸ 다시 실행',
     toWork:        '▸ Claude Code 작업으로 요청',
     leave:         '켜 둔 채로 다음 요청',
