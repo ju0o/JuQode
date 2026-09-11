@@ -846,6 +846,15 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.sc03Overflow = await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth');
   out.sc03Clipped = await evalJs(`[...document.querySelectorAll('.sc03 .card')].filter(n => n.scrollHeight > n.clientHeight + 1).length`);
   out.sc03Times = await evalJs(`document.querySelector('[data-card="work"] .times')?.innerText ?? null`);
+  /* Human Gate ② final ruling (PM · 2026-09-11) — `work.requested` is RETIRED.
+   *
+   * The two halves are measured separately on purpose, because the ruling has two halves that
+   * pull opposite ways: the user's own sentence must still be on screen, and the `요청한 말`
+   * label above it must not exist. A single "does the card contain the intent" probe would pass
+   * with the label reinstated, and a single "no label" probe would pass with the whole heading
+   * deleted. Both are named here so neither can drift. */
+  out.sc03WorkName = await evalJs(`document.querySelector('.sc03 [data-card="work"] .wname')?.textContent ?? null`);
+  out.sc03WorkHeadText = await evalJs(`document.querySelector('.sc03 [data-card="work"]')?.innerText ?? null`);
   out.sc03About = await evalJs(`document.querySelector('[data-card="about"]')?.innerText ?? null`);
   out.sc03RawCollapsed = await evalJs(`document.querySelector('[data-el="raw"]')?.open === false`);
   /* 기술 출력은 **열 때 한 번** 읽는다. `15` A-11 이 접힌 채로 시작하라고 하는 이유가 그것이고,
@@ -1456,6 +1465,20 @@ const results = await cdp(async ({ send, evalJs }) => {
    * its buttons were never listed, so both readings could be mislabelled unnoticed. */
   out.qcAmbigActs = await evalJs(`JSON.stringify(
     [...document.querySelectorAll('[data-el="qc-card"] button')].map(b => b.textContent.trim()))`);
+
+  /* Human Gate ② final ruling (PM · 2026-09-11) — `qc.terminal` (`▸ 터미널에서 보기`) is RETIRED:
+   * a control whose destination is the surface the user is already inside has no action.
+   *
+   * So the check is a PAIR, not a prohibition. Asserting only "the link is absent" would also
+   * pass if Quick Command were moved out of the drawer entirely — which D-134 forbids. Measure
+   * both: QC still lives inside TD-01 and is still usable, AND there is no link from a QC card
+   * back to the terminal it is already in. */
+  out.qcInsideDrawer = await evalJs(`Boolean(
+    document.querySelector('[data-screen-overlay="TD-01"] [data-el="qc-card"]'))`);
+  out.qcSelfLinks = await evalJs(`JSON.stringify(
+    [...document.querySelectorAll('[data-el="qc-card"] button, [data-el="qc-card"] a')]
+      .map(b => b.textContent.trim())
+      .filter(t => t.includes('터미널')))`);
 
   /* …and PICKING one. Until now the card was drawn and never used: picking re-asks the store
    * about the rule the user chose, and that lookup could name a DIFFERENT rule.
@@ -2382,6 +2405,30 @@ assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(),
 assert.ok(results.presenceMode, 'Agent Presence has no mode on SC-02 — §5 integrated it, not removed it');
 assert.ok((results.sc02StreamText ?? '').includes('모양은 지금 상태만 나타내요'),
   'the Work Stream hosts the presence without `18` presence.hint — the shape would read as progress');
+/* ── Human Gate ② · final ruling (PM · 2026-09-11) — two RETIREMENTS ──────────────────────
+ *
+ * Both were filed as "controls `15` names that no screen builds". The ruling is that neither
+ * should be built: a label the product does not need, and a link to where the reader already
+ * is. These five assertions are what stop a later batch from "finishing the backlog" by
+ * building them — the absence is now a measured contract, not an omission.
+ *
+ * ① the requested Work text still appears where Canon requires it ...*/
+assert.ok(results.sc03WorkName && results.sc03WorkName.trim().length > 0,
+  'SC-03 lost the user\'s own request sentence — the ruling retires the LABEL, not the text');
+assert.ok((results.sc03WorkHeadText ?? '').includes(results.sc03WorkName),
+  'the Work card does not carry its own name in its rendered text');
+/* ② ...and no redundant `요청한 말` heading is introduced above it. Matched as RENDERED TEXT
+ *    rather than through the copy key, so this still holds after the key itself is deleted. */
+assert.ok(!/요청한 말/.test(results.sc03WorkHeadText ?? ''),
+  'SC-03 grew a 요청한 말 label — D-138 §6 removes furniture, and the sentence names itself');
+/* ③ Quick Command is still INSIDE TD-01 (D-134 unchanged) ... */
+assert.strictEqual(results.qcInsideDrawer, true,
+  'the Quick Command card is not inside the TD-01 drawer — D-134 puts it there and is unchanged');
+/* ④ ...and ⑤ no QC control points back at the terminal it is already in. Any 터미널 button on
+ *    the card would be that, which is why the filter is on the word and not on one label. */
+assert.deepStrictEqual(JSON.parse(results.qcSelfLinks), [],
+  'a QC card offers a 터미널 control while already inside the terminal drawer — that is no action');
+
 /* WBS-03 — the Brief is six answers, and a 확인됨 chip must name the file it rests on (D-114). */
 const interp = JSON.parse(results.interp);
 assert.ok(interp, 'the Brief never arrived — interpretation did not run on open');
