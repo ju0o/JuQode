@@ -1,0 +1,566 @@
+// JuQode ERD
+// local: app/main/db/schema.sql + MIGRATIONS 2,3
+// server: Supabase Postgres (auth, subscription, usage)
+
+Project JuQode {
+  database_type: 'PostgreSQL'
+}
+
+// ============================================================
+// LOOKUP
+// ============================================================
+
+Table work_status {
+  code text [pk]
+}
+
+Table work_outcome {
+  code text [pk]
+}
+
+Table step_state {
+  code text [pk]
+}
+
+Table confidence {
+  code text [pk]
+}
+
+Table signal_kind {
+  code text [pk]
+}
+
+Table block_kind {
+  code text [pk]
+}
+
+Table qc_status {
+  code text [pk]
+}
+
+Table evidence_kind {
+  code text [pk]
+}
+
+Table quick_command_rule {
+  code text [pk]
+}
+
+Table schema_version {
+  version integer [pk]
+  applied_at timestamptz [not null]
+}
+
+// ============================================================
+// LOCAL - PROJECT
+// ============================================================
+
+Table project {
+  id uuid [pk]
+  owner_id uuid [not null]
+  path text [not null]
+  name text [not null]
+  first_opened_at timestamptz [not null]
+  last_opened_at timestamptz [not null]
+
+  indexes {
+    (owner_id, path) [unique]
+  }
+}
+
+Table interpretation {
+  id uuid [pk]
+  project_id uuid [not null]
+  status text [not null]
+  source_hash text
+  is_current boolean [not null, default: true]
+  skipped_note text
+  created_at timestamptz [not null]
+  ended_at timestamptz
+}
+
+Table interpretation_answer {
+  interpretation_id uuid [not null]
+  q smallint [not null]
+  answer_text text
+  confidence text [not null]
+  source_ref text
+
+  indexes {
+    (interpretation_id, q) [pk]
+  }
+}
+
+Table interpretation_read_file {
+  interpretation_id uuid [not null]
+  path text [not null]
+
+  indexes {
+    (interpretation_id, path) [pk]
+  }
+}
+
+// ============================================================
+// LOCAL - WORK
+// ============================================================
+
+Table work {
+  id uuid [pk]
+  project_id uuid [not null]
+  intent text [not null]
+  status text [not null]
+  outcome text
+  requested_at timestamptz [not null]
+  started_at timestamptz [not null]
+  ended_at timestamptz
+  stream_ref text
+  signals_truncated boolean [not null, default: false]
+
+  indexes {
+    (project_id, ended_at)
+  }
+}
+
+Table step {
+  id uuid [pk]
+  work_id uuid [not null]
+  ord smallint [not null]
+  title text [not null]
+  state text [not null]
+  declared_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (work_id, ord) [unique]
+  }
+}
+
+Table work_signal {
+  id uuid [pk]
+  work_id uuid [not null]
+  seq bigint [not null]
+  source text [not null]
+  kind text [not null]
+  payload text
+  observed_at timestamptz [not null]
+
+  indexes {
+    (work_id, seq) [unique]
+    (work_id, observed_at)
+  }
+}
+
+Table evidence_basis {
+  id uuid [pk]
+  work_id uuid [not null]
+  phase text [not null]
+  kind text [not null]
+  ref text [not null]
+  excluded text
+  created_at timestamptz [not null]
+
+  indexes {
+    (work_id, phase) [unique]
+  }
+}
+
+// ============================================================
+// LOCAL - RESULT
+// ============================================================
+
+Table work_result {
+  work_id uuid [pk]
+  summary text [not null]
+  what_failed text
+  created_at timestamptz [not null]
+}
+
+Table result_claim {
+  id uuid [pk]
+  work_id uuid [not null]
+  ord smallint [not null]
+  claim_text text [not null]
+  confidence text [not null]
+
+  indexes {
+    (work_id, ord) [unique]
+  }
+}
+
+Table result_item {
+  id uuid [pk]
+  work_id uuid [not null]
+  kind text [not null]
+  ord smallint [not null]
+  item_text text [not null]
+
+  indexes {
+    (work_id, kind, ord) [unique]
+  }
+}
+
+// ============================================================
+// LOCAL - CHANGE
+// ============================================================
+
+Table raw_diff {
+  id uuid [pk]
+  work_id uuid [not null]
+  file text [not null]
+  displayable boolean [not null]
+  unified_head text
+  unified_ref text
+  before_hash text
+  after_hash text
+
+  indexes {
+    (work_id, file) [unique]
+  }
+}
+
+Table change_group {
+  id uuid [pk]
+  work_id uuid [not null]
+  ord smallint [not null]
+  title text [not null]
+  what text
+  why text
+  affects text
+  confidence text
+  explainable boolean [not null, default: true]
+  source_ref text
+
+  indexes {
+    (work_id, ord) [unique]
+  }
+}
+
+Table change_group_file {
+  change_group_id uuid [not null]
+  raw_diff_id uuid [not null]
+
+  indexes {
+    (change_group_id, raw_diff_id) [pk]
+  }
+}
+
+Table code_block {
+  id uuid [pk]
+  change_group_id uuid [not null]
+  raw_diff_id uuid [not null]
+  ord smallint [not null]
+  kind text [not null]
+  name text
+  explanation text
+  hunk_ord smallint
+  line_start integer
+  line_end integer
+
+  indexes {
+    (change_group_id, ord) [unique]
+  }
+}
+
+// ============================================================
+// LOCAL - QUICK COMMAND
+// ============================================================
+
+Table quick_command_run {
+  id uuid [pk]
+  project_id uuid [not null]
+  phrase text [not null]
+  rule_id text [not null]
+  command text [not null]
+  status text [not null]
+  output_head text
+  output_ref text
+  exit_code integer
+  started_at timestamptz
+  ended_at timestamptz
+  stopped_at timestamptz
+  created_at timestamptz [not null]
+
+  indexes {
+    (project_id, created_at)
+  }
+}
+
+// ============================================================
+// SERVER - ACCOUNT
+// ============================================================
+
+Table auth_users {
+  id uuid [pk]
+  email text [unique]
+  created_at timestamptz [not null]
+  last_sign_in_at timestamptz
+}
+
+Table profile {
+  id uuid [pk]
+  email text [not null]
+  display_name text
+  role text [not null, default: 'member']
+  status text [not null, default: 'active']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+}
+
+Table device {
+  id uuid [pk]
+  user_id uuid [not null]
+  device_name text
+  platform text
+  app_version text
+  last_seen_at timestamptz [not null]
+  revoked_at timestamptz
+
+  indexes {
+    (user_id, last_seen_at)
+  }
+}
+
+Table auth_event {
+  id uuid [pk]
+  user_id uuid [not null]
+  device_id uuid [not null]
+  kind text [not null]
+  ip_hash text
+  occurred_at timestamptz [not null]
+
+  indexes {
+    (user_id, occurred_at)
+  }
+}
+
+// ============================================================
+// SERVER - SUBSCRIPTION
+// V1 scope: plan, subscription (tier only, no charging).
+// payment and billing_webhook are declared but stay empty until charging is turned on.
+// ============================================================
+
+Table plan {
+  code text [pk]
+  name text [not null]
+  price_krw integer [not null]
+  billing_interval text [not null]
+  daily_work_limit integer [not null]
+  seat_limit integer [not null, default: 1]
+  is_active boolean [not null, default: true]
+  sort_ord smallint [not null]
+}
+
+Table subscription {
+  id uuid [pk]
+  user_id uuid [not null]
+  plan_code text [not null]
+  status text [not null]
+  provider text [not null]
+  provider_customer_id text
+  provider_subscription_id text [unique]
+  current_period_start timestamptz [not null]
+  current_period_end timestamptz [not null]
+  cancel_at_period_end boolean [not null, default: false]
+  trial_end_at timestamptz
+  canceled_at timestamptz
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (user_id, status)
+    (current_period_end)
+  }
+}
+
+Table payment {
+  id uuid [pk]
+  subscription_id uuid [not null]
+  user_id uuid [not null]
+  amount_krw integer [not null]
+  status text [not null]
+  provider_payment_id text [unique]
+  receipt_url text
+  paid_at timestamptz
+  failed_reason text
+  created_at timestamptz [not null]
+
+  indexes {
+    (user_id, created_at)
+  }
+}
+
+Table billing_webhook {
+  id uuid [pk]
+  provider text [not null]
+  event_id text [not null, unique]
+  event_type text [not null]
+  payload text [not null]
+  processed_at timestamptz
+  received_at timestamptz [not null]
+}
+
+// ============================================================
+// SERVER - ENTITLEMENT AND USAGE
+// ============================================================
+
+Table policy {
+  user_id uuid [pk]
+  daily_work_limit_override integer
+  allow_file_edit boolean [not null, default: true]
+  allow_terminal boolean [not null, default: true]
+  allow_deploy boolean [not null, default: true]
+  updated_at timestamptz [not null]
+}
+
+Table usage_day {
+  user_id uuid [not null]
+  day date [not null]
+  works integer [not null, default: 0]
+  qc_runs integer [not null, default: 0]
+  updated_at timestamptz [not null]
+
+  indexes {
+    (user_id, day) [pk]
+  }
+}
+
+Table audit_work {
+  id uuid [pk]
+  user_id uuid [not null]
+  device_id uuid [not null]
+  project_ref text [not null]
+  outcome text [not null]
+  tools_granted text
+  started_at timestamptz [not null]
+  ended_at timestamptz
+}
+
+// ============================================================
+// REFS - LOCAL
+//
+// two foreign keys are not drawn because their columns are nullable and dbdiagram's
+// many-to-one operator requires NOT NULL on the child side:
+//   work.outcome           -> work_outcome.code   (set only when status = 'ended')
+//   change_group.confidence -> confidence.code    (null until the group is explained)
+// ============================================================
+
+Ref: interpretation.project_id > project.id [delete: restrict]
+Ref: work.project_id > project.id [delete: restrict]
+Ref: quick_command_run.project_id > project.id [delete: restrict]
+
+Ref: interpretation_answer.interpretation_id > interpretation.id [delete: cascade]
+Ref: interpretation_read_file.interpretation_id > interpretation.id [delete: cascade]
+Ref: interpretation_answer.confidence > confidence.code
+
+Ref: work.status > work_status.code
+Ref: step.work_id > work.id [delete: cascade]
+Ref: step.state > step_state.code
+Ref: work_signal.work_id > work.id [delete: cascade]
+Ref: work_signal.kind > signal_kind.code
+Ref: evidence_basis.work_id > work.id [delete: cascade]
+Ref: evidence_basis.kind > evidence_kind.code
+
+Ref: work_result.work_id - work.id [delete: cascade]
+Ref: result_claim.work_id > work_result.work_id [delete: cascade]
+Ref: result_claim.confidence > confidence.code
+Ref: result_item.work_id > work_result.work_id [delete: cascade]
+
+Ref: raw_diff.work_id > work.id [delete: cascade]
+Ref: change_group.work_id > work.id [delete: cascade]
+Ref: change_group_file.change_group_id > change_group.id [delete: cascade]
+Ref: change_group_file.raw_diff_id > raw_diff.id [delete: cascade]
+Ref: code_block.change_group_id > change_group.id [delete: cascade]
+Ref: code_block.raw_diff_id > raw_diff.id [delete: restrict]
+Ref: code_block.kind > block_kind.code
+
+Ref: quick_command_run.rule_id > quick_command_rule.code
+Ref: quick_command_run.status > qc_status.code
+
+// ============================================================
+// REFS - SERVER
+// ============================================================
+
+Ref: profile.id - auth_users.id [delete: cascade]
+
+// logical link across two databases: project lives in local SQLite, profile in Postgres.
+// not enforced by a foreign key.
+Ref: project.owner_id > profile.id [delete: restrict]
+
+Ref: device.user_id > profile.id [delete: cascade]
+Ref: auth_event.user_id > profile.id [delete: cascade]
+Ref: auth_event.device_id > device.id [delete: cascade]
+
+Ref: subscription.user_id > profile.id [delete: cascade]
+Ref: subscription.plan_code > plan.code [delete: restrict]
+Ref: payment.subscription_id > subscription.id [delete: cascade]
+Ref: payment.user_id > profile.id [delete: cascade]
+
+Ref: policy.user_id - profile.id [delete: cascade]
+Ref: usage_day.user_id > profile.id [delete: cascade]
+Ref: audit_work.user_id > profile.id [delete: cascade]
+Ref: audit_work.device_id > device.id [delete: cascade]
+
+// ============================================================
+// GROUPS
+// ============================================================
+
+TableGroup lookup {
+  work_status
+  work_outcome
+  step_state
+  confidence
+  signal_kind
+  block_kind
+  qc_status
+  evidence_kind
+  quick_command_rule
+  schema_version
+}
+
+TableGroup local_project {
+  project
+  interpretation
+  interpretation_answer
+  interpretation_read_file
+}
+
+TableGroup local_work {
+  work
+  step
+  work_signal
+  evidence_basis
+  work_result
+  result_claim
+  result_item
+}
+
+TableGroup local_change {
+  raw_diff
+  change_group
+  change_group_file
+  code_block
+}
+
+TableGroup local_quick_command {
+  quick_command_run
+}
+
+TableGroup server_account {
+  auth_users
+  profile
+  device
+  auth_event
+}
+
+TableGroup server_subscription {
+  plan
+  subscription
+  payment
+  billing_webhook
+}
+
+TableGroup server_entitlement {
+  policy
+  usage_day
+  audit_work
+}
