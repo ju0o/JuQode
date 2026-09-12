@@ -24,6 +24,25 @@ Project JuQode {
 }
 
 // ============================================================
+// 읽는 법 — 이 표는 데이터가 아니라 범례다.
+// 코드 패널을 보지 못하는 사람도 표기 규칙을 읽을 수 있게 다이어그램 안에 둔다.
+// 각 줄의 note(말풍선)에 뜻이 적혀 있다.
+// ============================================================
+
+Table _READ_ME {
+  a_no_marker text [note: '표시가 없는 컬럼 = 지금 있다. app/main/db/schema.sql + MIGRATIONS 에 실재한다.']
+  b_note_proposed text [note: 'note 제안 = 아직 없다. 마이그레이션이 필요하고 아직 쓰지 않았다. 그림에 있다고 있는 것이 아니다.']
+  c_note_v1 text [note: 'note V1 = 배포(V1)부터 생긴다. 지금 MVP 스키마에는 없다.']
+  d_note_unused text [note: 'note MVP/미사용 = 컬럼은 있으나 지금 아무도 값을 넣지 않는다.']
+  e_table_note text [note: '표 아래 Note = DBML 문법으로 표현할 수 없는 것만. CHECK 제약, 부분 UNIQUE 인덱스, 필요한 시드, 신뢰 경계, 알려진 구멍.']
+  f_group_mvp text [note: 'MVP 그룹 = 지금 도는 로컬 SQLite 26개 표. 로그인도 구독도 서버도 없다. 이 단계에서 확인하는 것은 하나다 — Claude Code 가 이 도구와 실제로 연동되는가.']
+  g_group_v1 text [note: 'V1 그룹 = 배포부터 생기는 서버 Postgres. 아직 하나도 만들지 않았다.']
+  h_two_databases text [note: '데이터베이스가 둘이다. database_type 이 PostgreSQL 인 것은 dbdiagram 이 엔진을 하나만 받기 때문이고, MVP 절반은 로컬 임베디드 SQLite 다 (D-129).']
+  i_undrawn_refs text [note: '그리지 않은 연결 셋. project.owner_id -> profile.id 는 데이터베이스가 달라 외래키가 아니다. work.outcome -> work_outcome.code 와 change_group.confidence -> confidence.code 는 nullable 이라 dbdiagram 의 다대일 연산자가 거부한다.']
+  j_source text [note: '원본은 app/main/db/schema.sql 과 app/main/db/db.js 다. 이 그림은 사본이고, 값이 다르면 원본이 맞다.']
+}
+
+// ============================================================
 // MVP · LOOKUP
 // ============================================================
 
@@ -657,6 +676,10 @@ Ref: audit_usage.engine_used > engine.code [delete: restrict]
 // ============================================================
 // GROUPS
 // ============================================================
+
+TableGroup "읽는 법" {
+  _READ_ME
+}
 
 TableGroup "MVP · 룩업" {
   work_status

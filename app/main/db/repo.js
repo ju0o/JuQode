@@ -407,6 +407,18 @@ function saveChangeGroups(db, workId, groups) {
     const g = db.prepare(`insert into change_group (id, work_id, ord, title, what, why, affects, confidence, source_ref, explainable)
                           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const link = db.prepare('insert into change_group_file (change_group_id, raw_diff_id) values (?, ?)');
+    /* `change_group_file` 의 두 외래키는 각각 독립이다 — 둘이 같은 Work 에 속하는지 DB 가
+     * 보지 않으므로, 작업 A 의 그룹에 작업 B 의 diff 를 이을 수 있다. 정식 해법은
+     * (id, work_id) UNIQUE + 복합 외래키이고 `schema.sql` 은 Canon 축자 사본이라 판정
+     * 대상이다. 그때까지 저장 계층이 같은 모양을 거부한다 — 마이그레이션 2가 CHECK 를
+     * 붙일 수 없어 택한 것과 같은 방법이다.
+     *
+     * 버리고 지나간다, 던지지 않는다: `files` 는 모델 출력에서 온 id 목록이고, 그중 하나가
+     * 이 Work 의 것이 아니라고 해서 나머지 설명까지 잃을 이유가 없다. D-114 의 근거 없는
+     * 확인됨을 거부하지 않고 예상됨으로 내리는 것과 같은 판단이다. */
+    const mine = new Set(
+      db.prepare('select id from raw_diff where work_id = ?').all(workId).map((r) => r.id)
+    );
     groups.forEach((grp, i) => {
       const id = randomUUID();
       /* D-114, enforced where the CHECK cannot be: a 확인됨 group must name its evidence. It is
@@ -415,7 +427,7 @@ function saveChangeGroups(db, workId, groups) {
       const sourced = grp.confidence === 'confirmed' && !grp.sourceRef ? 'expected' : grp.confidence;
       g.run(id, workId, i, grp.title, grp.what ?? null, grp.why ?? null, grp.affects ?? null,
             sourced ?? null, grp.sourceRef ?? null, grp.explainable === false ? 0 : 1);
-      for (const rawDiffId of grp.files ?? []) link.run(id, rawDiffId);
+      for (const rawDiffId of grp.files ?? []) { if (mine.has(rawDiffId)) link.run(id, rawDiffId); }
     });
     db.exec('commit');
   } catch (e) {

@@ -672,3 +672,41 @@ test('a Work turn is NOT tool-restricted — the flag belongs only to the read-o
   await session.run({ cwd: tempDir('juqode-run-'), bin, sessionId: 'sid', prompt: 'x', onSignal: () => {} });
   assert.ok(!argv().includes('--tools'), `a Work turn carried a tool restriction: ${JSON.stringify(argv())}`);
 });
+
+test('한 작업의 그룹은 다른 작업의 diff 를 인용하지 못한다', () => {
+  /* `change_group_file` 은 change_group 과 raw_diff 를 **각각** 참조하고, 둘이 같은 work_id
+   * 인지 DB 가 보지 않는다. 그래서 작업 A 의 변경 그룹에 작업 B 의 diff 를 이을 수 있다 —
+   * SC-04 가 이 작업이 바꾼 것이라며 다른 작업의 코드를 보여 주게 된다.
+   *
+   * 정식 해법은 (id, work_id) UNIQUE + 복합 외래키이고 `schema.sql` 이 Canon 축자 사본이라
+   * 판정 대상이다. 그때까지 저장 계층이 거부하고, 이 검사가 그것을 고정한다 — 마이그레이션
+   * 2가 CHECK 를 붙일 수 없어 택한 것과 같은 방법이다. */
+  const db = openDb(':memory:');
+  const project = repo.openProject(db, tempDir('juqode-x-'), 'p');
+  const a = repo.beginWork(db, project.id, 'A').work.id;
+  repo.saveDiff(db, a, { file: 'a.ts', patch: '+1\n' });
+  const aDiff = repo.diffsFor(db, a)[0].id;
+  repo.setWorkState(db, a, { status: 'ended', outcome: 'complete' });
+
+  const b = repo.beginWork(db, project.id, 'B').work.id;
+  repo.saveDiff(db, b, { file: 'b.ts', patch: '+2\n' });
+  const bDiff = repo.diffsFor(db, b)[0].id;
+
+  /* 작업 B 의 그룹이 자기 diff 와 **작업 A 의 diff** 를 함께 인용한다. */
+  repo.saveChangeGroups(db, b, [
+    { title: '섞인 인용', confidence: 'expected', explainable: true, files: [bDiff, aDiff] },
+  ]);
+
+  const back = repo.changeGroupsFor(db, b);
+  assert.strictEqual(back.length, 1, '그룹 자체는 살아남아야 한다 — 버리는 것은 링크 하나뿐이다');
+  /* `changeGroupsFor` 는 id 가 아니라 파일 경로를 돌려준다 — 화면이 쓰는 형태다. */
+  assert.deepStrictEqual(back[0].files, ['b.ts'],
+    `다른 작업의 diff 가 인용됐다: ${JSON.stringify(back[0].files)}`);
+
+  /* …그리고 DB 에도 그 링크가 없다. */
+  const rows = db.prepare(`select cgf.raw_diff_id from change_group_file cgf
+                             join change_group cg on cg.id = cgf.change_group_id
+                            where cg.work_id = ?`).all(b).map((r) => r.raw_diff_id);
+  assert.deepStrictEqual(rows, [bDiff]);
+  db.close();
+});
