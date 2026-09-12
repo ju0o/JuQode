@@ -382,7 +382,7 @@ function saveDiffs(db, workId, project, store) {
 
   /* Rows for files this Work no longer changes are removed FIRST — a retry that reverted a file
    * used to leave its diff on SC-04 for good, disagreeing with `changes()`, which reads git. */
-  repo.pruneDiffs(db, workId, files.map((f) => f.path));
+  repo.pruneDiffs(db, workId, files.map((f) => f.path), store);
 
   for (const file of files) {
     repo.saveDiff(db, workId, {

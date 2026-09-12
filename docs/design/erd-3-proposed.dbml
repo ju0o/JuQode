@@ -1,0 +1,29 @@
+// JuQode — 제안된 표
+//
+// **아직 schema.sql 에 없다.** 마이그레이션이 필요하고 아직 쓰지 않았다.
+// 재시작 뒤에 "이전 실행이 남긴 것" 과 "지금 실행이 만든 것" 을 가르기 위한 것이다.
+//
+// 함께 제안된 컬럼(전체 그림에서 note '제안' 으로 표시):
+//   work.runner_session_id · runner_pid · runner_started_at
+//   quick_command_run.runner_session_id · runner_pid · runner_started_at
+
+Project JuQode_Proposed {
+  database_type: 'PostgreSQL'
+}
+
+Table app_session {
+  id uuid [pk, note: '제안']
+  started_at timestamptz [not null, note: '제안']
+  app_version text [not null, note: '제안']
+  platform text [not null, note: '제안']
+  ended_at timestamptz [note: '제안']
+
+  Note: '제안 · 이 표는 schema.sql 에 없다. 마이그레이션이 필요하고 아직 쓰지 않았다. 지금은 프로세스 표식이 work_signal 의 payload JSON 안에 {juqodeProcess:{pid,startedAt}} 로 들어가고, repo.js processFor() 가 그 작업의 모든 신호를 훑어 꺼낸다.'
+}
+
+
+// ── 관계 ──
+
+TableGroup "제안 · 아직 없음" {
+  app_session
+}

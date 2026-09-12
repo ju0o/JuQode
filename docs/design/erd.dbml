@@ -1,47 +1,56 @@
 // JuQode ERD
-// local: app/main/db/schema.sql + MIGRATIONS 2,3
-// server: Supabase Postgres (auth, subscription, usage)
+//
+// 단계가 둘이다. 이 파일은 어느 표가 어느 단계의 것인지 구분해서 적는다.
+//   MVP  — 지금. 로컬 SQLite 만. 로그인 없음, 구독 없음, 서버 없음.
+//          확인하려는 것 하나: Claude Code 가 이 도구와 실제로 연동되는가.
+//   V1   — 배포부터. 서버가 생기고, 사용자와 구독과 엔진 분기가 들어온다.
+//
+// 표기 규칙 — 있는 것과 있을 것을 섞지 않는다
+//   (표시 없음)          : schema.sql + MIGRATIONS 에 **지금 있다.**
+//   note '제안'          : 아직 없다. 마이그레이션이 필요하고, 아직 쓰지 않았다.
+//   note 'V1'            : V1 부터 생긴다. MVP 스키마에는 없다.
+//   note 'MVP/미사용'     : 컬럼은 있으나 지금 아무도 값을 넣지 않는다.
+//   Note (표 단위)        : DBML 문법으로 표현할 수 없는 것만 — CHECK 제약, 부분 인덱스,
+//                         시드 데이터, 신뢰 경계, 알려진 구멍. 설명을 적는 자리가 아니다.
+//
+// database_type 은 'PostgreSQL' 이지만 **MVP 절반은 로컬 SQLite 다**(D-129). DBML 은
+// 프로젝트당 엔진을 하나만 갖고, DDL 은 양쪽에서 도는 방언으로 쓰여 있다.
+//
+// 원본: app/main/db/schema.sql (26개 표) + app/main/db/db.js MIGRATIONS
+// 설명: docs/design/ERD.md · 리뷰 대응: docs/design/DBML_REVIEW.md
 
 Project JuQode {
   database_type: 'PostgreSQL'
 }
 
 // ============================================================
-// LOOKUP
+// MVP · LOOKUP
 // ============================================================
 
 Table work_status {
   code text [pk]
 }
-
 Table work_outcome {
   code text [pk]
 }
-
 Table step_state {
   code text [pk]
 }
-
 Table confidence {
   code text [pk]
 }
-
 Table signal_kind {
   code text [pk]
 }
-
 Table block_kind {
   code text [pk]
 }
-
 Table qc_status {
   code text [pk]
 }
-
 Table evidence_kind {
   code text [pk]
 }
-
 Table quick_command_rule {
   code text [pk]
 }
@@ -52,20 +61,37 @@ Table schema_version {
 }
 
 // ============================================================
-// LOCAL - PROJECT
+// 제안 · 앱 실행 세션  —  아직 없다
+// 재시작 뒤에 "이전 실행이 남긴 것" 과 "지금 실행이 만든 것" 을 가르기 위한 것.
+// ============================================================
+
+Table app_session {
+  id uuid [pk, note: '제안']
+  started_at timestamptz [not null, note: '제안']
+  app_version text [not null, note: '제안']
+  platform text [not null, note: '제안']
+  ended_at timestamptz [note: '제안']
+
+  Note: '제안 · 이 표는 schema.sql 에 없다. 마이그레이션이 필요하고 아직 쓰지 않았다. 지금은 프로세스 표식이 work_signal 의 payload JSON 안에 {juqodeProcess:{pid,startedAt}} 로 들어가고, repo.js processFor() 가 그 작업의 모든 신호를 훑어 꺼낸다.'
+}
+
+// ============================================================
+// MVP · PROJECT
 // ============================================================
 
 Table project {
   id uuid [pk]
-  owner_id uuid [not null]
   path text [not null]
   name text [not null]
   first_opened_at timestamptz [not null]
   last_opened_at timestamptz [not null]
+  owner_id uuid [note: 'V1']
 
   indexes {
-    (owner_id, path) [unique]
+    path [unique]
   }
+
+  Note: 'V1 에서 path 단독 unique 가 (owner_id, path) 로 **교체된다** — 둘이 동시에 존재하지 않으므로 지금 있는 것만 그린다. SQLite 는 unique 제약을 떼려면 표를 다시 써야 한다. owner_id 는 서버 profile.id 를 가리키는 논리적 참조이고 외래키가 아니다 — 서버는 클라이언트가 보낸 이 값을 읽지 않는다.'
 }
 
 Table interpretation {
@@ -75,20 +101,26 @@ Table interpretation {
   source_hash text
   is_current boolean [not null, default: true]
   skipped_note text
+  engine text [note: 'V1']
+  engine_model text [note: 'V1']
   created_at timestamptz [not null]
   ended_at timestamptz
+
+  Note: 'CHECK: status in (「interpreting」,「interpreted」,「partial」,「failed」). 부분 UNIQUE: (project_id) WHERE is_current — 프로젝트당 현재 해석 한 건, 인덱스 이름 interpretation_one_current. DBML 에 부분 인덱스 문법이 없어 여기에 적는다.'
 }
 
 Table interpretation_answer {
   interpretation_id uuid [not null]
   q smallint [not null]
-  answer_text text
+  "text" text
   confidence text [not null]
   source_ref text
 
   indexes {
     (interpretation_id, q) [pk]
   }
+
+  Note: 'CHECK: q between 1 and 6 (여섯 질문) · confidence <> 「confirmed」 or source_ref is not null — D-114: 확인됨 주장은 근거를 지목한다. 이 CHECK 가 그 규칙의 유일한 강제 지점이다.'
 }
 
 Table interpretation_read_file {
@@ -101,7 +133,7 @@ Table interpretation_read_file {
 }
 
 // ============================================================
-// LOCAL - WORK
+// MVP · WORK
 // ============================================================
 
 Table work {
@@ -113,12 +145,17 @@ Table work {
   requested_at timestamptz [not null]
   started_at timestamptz [not null]
   ended_at timestamptz
-  stream_ref text
+  runner_session_id uuid [note: '제안']
+  runner_pid integer [note: '제안']
+  runner_started_at timestamptz [note: '제안']
+  stream_ref text [note: 'MVP/미사용']
   signals_truncated boolean [not null, default: false]
 
   indexes {
-    (project_id, ended_at)
+    (project_id, ended_at) [name: 'work_project_recent']
   }
+
+  Note: 'CHECK: (status = 「ended」) = (outcome is not null) · (status = 「ended」) = (ended_at is not null) — D-124 · V2 M-14. 부분 UNIQUE: (project_id) WHERE status <> 「ended」 — 프로젝트당 진행 중 작업 한 건 (D-117), 인덱스 이름 work_one_active_per_project. runner_* 는 제안이다: 지금 PID 는 work_signal 의 payload JSON 안에 있다. PID 는 재사용되므로 단독으로 믿지 않는다 — 프로세스 시작 시각이 work.started_at 보다 앞설 때만 살아 있는 것으로 본다.'
 }
 
 Table step {
@@ -146,8 +183,10 @@ Table work_signal {
 
   indexes {
     (work_id, seq) [unique]
-    (work_id, observed_at)
+    (work_id, observed_at) [name: 'work_signal_latest']
   }
+
+  Note: 'CHECK: source in (「claude」,「juqode」,「user」).'
 }
 
 Table evidence_basis {
@@ -162,10 +201,12 @@ Table evidence_basis {
   indexes {
     (work_id, phase) [unique]
   }
+
+  Note: 'CHECK: phase in (「before」,「after」). ref 는 kind 에 따라 다르다 — git_tree 면 Git 트리 오브젝트 ID(내용이 곧 해시라 Git 이 무결성을 스스로 관리한다), hash_manifest 면 매니페스트 해시다. 후자는 그 보장이 없다.'
 }
 
 // ============================================================
-// LOCAL - RESULT
+// MVP · RESULT
 // ============================================================
 
 Table work_result {
@@ -179,7 +220,7 @@ Table result_claim {
   id uuid [pk]
   work_id uuid [not null]
   ord smallint [not null]
-  claim_text text [not null]
+  "text" text [not null]
   confidence text [not null]
 
   indexes {
@@ -192,15 +233,17 @@ Table result_item {
   work_id uuid [not null]
   kind text [not null]
   ord smallint [not null]
-  item_text text [not null]
+  "text" text [not null]
 
   indexes {
     (work_id, kind, ord) [unique]
   }
+
+  Note: 'CHECK: kind in (「done」,「not_done」) — 부분 결과의 된 것 / 안 된 것.'
 }
 
 // ============================================================
-// LOCAL - CHANGE
+// MVP · CHANGE
 // ============================================================
 
 Table raw_diff {
@@ -210,12 +253,14 @@ Table raw_diff {
   displayable boolean [not null]
   unified_head text
   unified_ref text
-  before_hash text
-  after_hash text
+  before_hash text [note: 'MVP/미사용']
+  after_hash text [note: 'MVP/미사용']
 
   indexes {
     (work_id, file) [unique]
   }
+
+  Note: 'unified_ref 는 보통 null 이다 — 상한(256 KB)을 넘은 diff 에만 값이 생기고, 그때 증거 저장소의 실제 파일(diffs/<sha256>.patch) 이거나 문자열 truncated(=blob 을 쓰지 못함) 다. 이름이 내용의 해시이므로 두 행이 같은 blob 을 가리킬 수 있다 — 행을 지울 때 다른 행이 아직 가리키는지 확인한다.'
 }
 
 Table change_group {
@@ -242,6 +287,8 @@ Table change_group_file {
   indexes {
     (change_group_id, raw_diff_id) [pk]
   }
+
+  Note: '알려진 구멍: 두 참조가 같은 work_id 에 속하는지 DB 가 확인하지 않는다. 작업 A 의 그룹에 작업 B 의 diff 를 이을 수 있다. 지금 코드 경로로는 발생하지 않고 저장 계층 테스트가 그것을 고정한다. 정식 해법은 (id, work_id) UNIQUE + 복합 외래키이고, schema.sql 이 Canon 축자 사본이라 Canon 판정 대상이다.'
 }
 
 Table code_block {
@@ -259,10 +306,12 @@ Table code_block {
   indexes {
     (change_group_id, ord) [unique]
   }
+
+  Note: 'CHECK: line_end is null or line_start is null or line_end >= line_start. 알려진 구멍: change_group_file 과 같다 — 그룹과 diff 를 각각 참조하고, 둘이 같은 work_id 인지 DB 가 보지 않는다.'
 }
 
 // ============================================================
-// LOCAL - QUICK COMMAND
+// MVP · QUICK COMMAND
 // ============================================================
 
 Table quick_command_run {
@@ -273,20 +322,75 @@ Table quick_command_run {
   command text [not null]
   status text [not null]
   output_head text
-  output_ref text
+  output_ref text [note: 'MVP/미사용']
   exit_code integer
+  runner_session_id uuid [note: '제안']
+  runner_pid integer [note: '제안']
+  runner_started_at timestamptz [note: '제안']
   started_at timestamptz
   ended_at timestamptz
   stopped_at timestamptz
   created_at timestamptz [not null]
 
   indexes {
-    (project_id, created_at)
+    (project_id, created_at) [name: 'qc_project_recent']
   }
+
+  Note: '알려진 구멍: 프로세스 표식이 **하나도 없다.** 그래서 재시작 뒤 이전 실행의 run 을 물어볼 수조차 없고, 실제로 돌고 있는 개발 서버도 확인 불가로 닫힌다. runner_* 세 컬럼이 그 해법이고, 아직 제안이다.'
 }
 
 // ============================================================
-// SERVER - ACCOUNT
+// V1 · 룩업  (서버 Postgres — 다른 데이터베이스다)
+// MVP 절반이 쓰는 전략과 같다: 작은 표로 어휘를 고정하고 CHECK 를 쓰지 않는다.
+// ============================================================
+
+Table account_role {
+  code text [pk]
+}
+
+Table account_status {
+  code text [pk]
+}
+
+Table claude_code_state {
+  code text [pk]
+}
+
+Table auth_event_kind {
+  code text [pk]
+}
+
+Table plan_interval {
+  code text [pk]
+}
+
+Table subscription_status {
+  code text [pk]
+}
+
+Table payment_status {
+  code text [pk]
+}
+
+Table audit_kind {
+  code text [pk]
+}
+
+Table audit_outcome {
+  code text [pk]
+}
+
+Table engine {
+  code text [pk]
+  name text [not null]
+  paid_by text [not null]
+  is_active boolean [not null, default: true]
+
+  Note: '시드 필요: none(엔진 없음 · 규칙과 사실만) · claude_code(paid_by=user) · juqode_hosted(paid_by=juqode). plan.narrative_engine 의 기본값이 none 이고 그 외래키가 restrict 이므로, none 행이 없으면 어떤 plan 도 넣을 수 없다. 결제사(billing_provider)와 다른 것이다 — 이쪽은 추론 엔진이다.'
+}
+
+// ============================================================
+// V1 · 계정
 // ============================================================
 
 Table auth_users {
@@ -304,6 +408,8 @@ Table profile {
   status text [not null, default: 'active']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
+
+  Note: '신뢰 경계: 서버는 클라이언트가 보낸 사용자 ID 를 절대 읽지 않는다. 로그인 토큰에서 서버가 직접 꺼낸 값(auth.uid())만 쓴다. 시드 필요: account_role(admin · member) · account_status(active · suspended).'
 }
 
 Table device {
@@ -312,12 +418,16 @@ Table device {
   device_name text
   platform text
   app_version text
+  claude_code_state text [not null, default: 'unknown']
+  claude_code_checked_at timestamptz
   last_seen_at timestamptz [not null]
   revoked_at timestamptz
 
   indexes {
     (user_id, last_seen_at)
   }
+
+  Note: '신뢰 경계: 클라이언트가 보낸 device_id 는 그 사용자의 등록 장치인지 서버가 확인한 뒤에만 쓴다. claude_code_state 는 설치·로그인 여부만 담는다 — 자격증명은 서버로 나가지 않는다. 장치는 하드 삭제하지 않고 revoked_at 으로 은퇴시킨다: audit_usage 가 이 행을 참조하고 그것이 사용량 원장이기 때문이다. 시드 필요: claude_code_state(unknown · missing · logged_out · ready).'
 }
 
 Table auth_event {
@@ -331,12 +441,14 @@ Table auth_event {
   indexes {
     (user_id, occurred_at)
   }
+
+  Note: '시드 필요: auth_event_kind(login · logout · refresh · denied).'
 }
 
 // ============================================================
-// SERVER - SUBSCRIPTION
-// V1 scope: plan, subscription (tier only, no charging).
-// payment and billing_webhook are declared but stay empty until charging is turned on.
+// V1 · 구독
+// V1 범위: plan · subscription (등급 구분까지). 결제는 나중 —
+// payment 와 billing_webhook 은 선언만 하고 비워 둔다.
 // ============================================================
 
 Table plan {
@@ -345,9 +457,14 @@ Table plan {
   price_krw integer [not null]
   billing_interval text [not null]
   daily_work_limit integer [not null]
+  narrative_engine text [not null, default: 'none']
+  monthly_narrative_calls integer [not null, default: 0]
+  allow_terminal boolean [not null, default: true]
   seat_limit integer [not null, default: 1]
   is_active boolean [not null, default: true]
   sort_ord smallint [not null]
+
+  Note: '무료 등급은 narrative_engine=none 이다 — 프로젝트 읽기의 사실 층(scan.js, 모델 없음)과 Quick Command · 터미널은 그대로 돌고, 여섯 답의 서술 층(narrate.js)만 빠진다. Work(파일 변경)는 사용자 자기 Claude Code 구독으로 도므로 등급이 아니라 device.claude_code_state 가 가른다. 시드 필요: plan_interval(month · year), 그리고 free 등급 한 줄.'
 }
 
 Table subscription {
@@ -355,9 +472,9 @@ Table subscription {
   user_id uuid [not null]
   plan_code text [not null]
   status text [not null]
-  provider text [not null]
-  provider_customer_id text
-  provider_subscription_id text [unique]
+  billing_provider text [not null]
+  billing_customer_id text
+  billing_subscription_id text [unique]
   current_period_start timestamptz [not null]
   current_period_end timestamptz [not null]
   cancel_at_period_end boolean [not null, default: false]
@@ -370,6 +487,8 @@ Table subscription {
     (user_id, status)
     (current_period_end)
   }
+
+  Note: '부분 UNIQUE 필요: (user_id) WHERE status = 「active」 — 사용자당 활성 구독 한 건. billing_provider 는 결제사(toss · stripe)이고 engine 과 다른 것이다. 시드 필요: subscription_status(trialing · active · past_due · canceled).'
 }
 
 Table payment {
@@ -378,7 +497,7 @@ Table payment {
   user_id uuid [not null]
   amount_krw integer [not null]
   status text [not null]
-  provider_payment_id text [unique]
+  billing_payment_id text [unique]
   receipt_url text
   paid_at timestamptz
   failed_reason text
@@ -387,29 +506,40 @@ Table payment {
   indexes {
     (user_id, created_at)
   }
+
+  Note: 'V1 에서는 비어 있다 — 결제를 켤 때 채운다. 시드 필요: payment_status(pending · paid · failed · refunded).'
 }
 
 Table billing_webhook {
   id uuid [pk]
-  provider text [not null]
-  event_id text [not null, unique]
+  billing_provider text [not null]
+  event_id text [not null]
   event_type text [not null]
   payload text [not null]
   processed_at timestamptz
   received_at timestamptz [not null]
+
+  indexes {
+    (billing_provider, event_id) [unique]
+  }
+
+  Note: 'V1 에서는 비어 있다. 어느 표와도 이어지지 않는다 — 웹훅은 무엇을 바꿀지 알기 전에 도착하고, 처리하면서 subscription · payment 를 찾는다. 멱등 키는 event_id 단독이 아니라 (billing_provider, event_id) 다: 결제사가 다르면 같은 event_id 가 나올 수 있다.'
 }
 
 // ============================================================
-// SERVER - ENTITLEMENT AND USAGE
+// V1 · 권한과 사용량
 // ============================================================
 
 Table policy {
   user_id uuid [pk]
   daily_work_limit_override integer
+  narrative_engine_override text
   allow_file_edit boolean [not null, default: true]
   allow_terminal boolean [not null, default: true]
   allow_deploy boolean [not null, default: true]
   updated_at timestamptz [not null]
+
+  Note: '개인 예외. 값이 있으면 plan 을 이기고, null 이면 plan 이 정한다. narrative_engine_override 는 engine.code 와 같은 값 영역이지만 nullable 이라 관계선을 긋지 않는다 — dbdiagram 의 다대일 연산자가 NOT NULL 을 요구한다.'
 }
 
 Table usage_day {
@@ -417,31 +547,43 @@ Table usage_day {
   day date [not null]
   works integer [not null, default: 0]
   qc_runs integer [not null, default: 0]
+  narrative_calls integer [not null, default: 0]
   updated_at timestamptz [not null]
 
   indexes {
     (user_id, day) [pk]
   }
+
+  Note: '집계만 담는다. 세 칸 전부 audit_usage 의 행을 먼저 만든 뒤에만 오른다 — 그 표의 (device_id, kind, client_ref) UNIQUE 가 멱등 키다. 이 표 자체에는 멱등 키가 없다.'
 }
 
-Table audit_work {
+Table audit_usage {
   id uuid [pk]
   user_id uuid [not null]
   device_id uuid [not null]
+  kind text [not null]
+  client_ref uuid [not null]
   project_ref text [not null]
   outcome text [not null]
-  tools_granted text
+  engine_used text [not null]
   started_at timestamptz [not null]
   ended_at timestamptz
+
+  indexes {
+    (device_id, kind, client_ref) [unique]
+    (user_id, started_at)
+  }
+
+  Note: '사용량 원장. kind 는 usage_day 의 세 칸과 일대일이다(work · qc · narrative). client_ref 는 그 행을 만든 로컬 행의 id — work.id · quick_command_run.id · interpretation.id. (device_id, kind, client_ref) UNIQUE 가 멱등 키이고, 상한 소모는 이 행을 먼저 만든 뒤에만 올린다: 네트워크 재시도가 사용량을 두 번 올리지 못한다. project_ref 는 경로가 아니라 해시다. engine_used 가 none 이면 JuQode 가 낸 비용이 없다는 뜻이다. 시드 필요: audit_kind(work · qc · narrative) · audit_outcome(complete · partial · failed · cancelled · unknown).'
 }
 
 // ============================================================
-// REFS - LOCAL
+// REFS — MVP 로컬
 //
-// two foreign keys are not drawn because their columns are nullable and dbdiagram's
-// many-to-one operator requires NOT NULL on the child side:
-//   work.outcome           -> work_outcome.code   (set only when status = 'ended')
-//   change_group.confidence -> confidence.code    (null until the group is explained)
+// 그리지 않는 외래키 둘: 자식 컬럼이 nullable 이라 dbdiagram 의 다대일 연산자가
+// NOT NULL 을 요구한다. 컬럼은 실제로 nullable 이므로 NOT NULL 로 적으면 거짓이 된다.
+//   work.outcome           -> work_outcome.code   (status = 'ended' 일 때만 채워진다)
+//   change_group.confidence -> confidence.code    (설명 전에는 null)
 // ============================================================
 
 Ref: interpretation.project_id > project.id [delete: restrict]
@@ -477,34 +619,46 @@ Ref: quick_command_run.rule_id > quick_command_rule.code
 Ref: quick_command_run.status > qc_status.code
 
 // ============================================================
-// REFS - SERVER
+// REFS — V1 서버
+//
+// 그리지 않는 연결 둘:
+//   project.owner_id -> profile.id            두 데이터베이스에 걸쳐 있어 외래키로 강제되지
+//                                             않는다. 선을 그으면 강제된다고 읽힌다.
+//   policy.narrative_engine_override -> engine.code   nullable 이라 다대일 연산자를 못 쓴다.
 // ============================================================
 
 Ref: profile.id - auth_users.id [delete: cascade]
-
-// logical link across two databases: project lives in local SQLite, profile in Postgres.
-// not enforced by a foreign key.
-Ref: project.owner_id > profile.id [delete: restrict]
+Ref: profile.role > account_role.code
+Ref: profile.status > account_status.code
 
 Ref: device.user_id > profile.id [delete: cascade]
+Ref: device.claude_code_state > claude_code_state.code
 Ref: auth_event.user_id > profile.id [delete: cascade]
-Ref: auth_event.device_id > device.id [delete: cascade]
+Ref: auth_event.device_id > device.id [delete: restrict]
+Ref: auth_event.kind > auth_event_kind.code
 
 Ref: subscription.user_id > profile.id [delete: cascade]
 Ref: subscription.plan_code > plan.code [delete: restrict]
+Ref: subscription.status > subscription_status.code
+Ref: plan.narrative_engine > engine.code [delete: restrict]
+Ref: plan.billing_interval > plan_interval.code
 Ref: payment.subscription_id > subscription.id [delete: cascade]
 Ref: payment.user_id > profile.id [delete: cascade]
+Ref: payment.status > payment_status.code
 
 Ref: policy.user_id - profile.id [delete: cascade]
 Ref: usage_day.user_id > profile.id [delete: cascade]
-Ref: audit_work.user_id > profile.id [delete: cascade]
-Ref: audit_work.device_id > device.id [delete: cascade]
+Ref: audit_usage.user_id > profile.id [delete: cascade]
+Ref: audit_usage.device_id > device.id [delete: restrict]
+Ref: audit_usage.kind > audit_kind.code
+Ref: audit_usage.outcome > audit_outcome.code
+Ref: audit_usage.engine_used > engine.code [delete: restrict]
 
 // ============================================================
 // GROUPS
 // ============================================================
 
-TableGroup lookup {
+TableGroup "MVP · 룩업" {
   work_status
   work_outcome
   step_state
@@ -517,14 +671,14 @@ TableGroup lookup {
   schema_version
 }
 
-TableGroup local_project {
+TableGroup "MVP · 프로젝트와 해석" {
   project
   interpretation
   interpretation_answer
   interpretation_read_file
 }
 
-TableGroup local_work {
+TableGroup "MVP · Work 와 증거" {
   work
   step
   work_signal
@@ -534,33 +688,50 @@ TableGroup local_work {
   result_item
 }
 
-TableGroup local_change {
+TableGroup "MVP · 변경" {
   raw_diff
   change_group
   change_group_file
   code_block
 }
 
-TableGroup local_quick_command {
+TableGroup "MVP · Quick Command" {
   quick_command_run
 }
 
-TableGroup server_account {
+TableGroup "제안 · 아직 없음" {
+  app_session
+}
+
+TableGroup "V1 · 룩업" {
+  account_role
+  account_status
+  claude_code_state
+  auth_event_kind
+  plan_interval
+  subscription_status
+  payment_status
+  audit_kind
+  audit_outcome
+  engine
+}
+
+TableGroup "V1 · 계정" {
   auth_users
   profile
   device
   auth_event
 }
 
-TableGroup server_subscription {
+TableGroup "V1 · 구독" {
   plan
   subscription
   payment
   billing_webhook
 }
 
-TableGroup server_entitlement {
+TableGroup "V1 · 권한과 사용량" {
   policy
   usage_day
-  audit_work
+  audit_usage
 }

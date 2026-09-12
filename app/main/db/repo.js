@@ -294,13 +294,37 @@ function saveDiff(db, workId, { file, patch, displayable = true }, blobDir = nul
  * good: SC-04 showed a change that no longer exists, and disagreed with `changes()`, which
  * reads git. The stored diffs are a snapshot of one answer, not an accumulation of every answer.
  */
-function pruneDiffs(db, workId, keepFiles) {
+function pruneDiffs(db, workId, keepFiles, blobDir = null) {
   const keep = new Set(keepFiles);
   const stale = db.prepare('select id, file, unified_ref from raw_diff where work_id = ?').all(workId)
     .filter((d) => !keep.has(d.file));
   if (!stale.length) return [];
   const del = db.prepare('delete from raw_diff where id = ?');
   for (const d of stale) del.run(d.id);
+
+  /* …and the blob the row pointed at.
+   *
+   * MEASURED: the `unified_ref` column was already being SELECTed here and then never used, so
+   * every retry that reverted a large file left its `diffs/<sha256>.patch` behind for good —
+   * unreachable, because the only row naming it had just been deleted. The store grew with one
+   * orphan per pruned large diff and nothing could ever find them again.
+   *
+   * The name is the sha256 of the CONTENT, so two rows can legitimately name the same blob;
+   * a file still referenced by a surviving row is left alone. `truncated` is a sentinel, not a
+   * path — it means the blob was never written. */
+  if (!blobDir) return stale.map((d) => d.file);
+  const live = new Set(
+    db.prepare('select unified_ref from raw_diff where unified_ref is not null').all()
+      .map((r) => r.unified_ref)
+  );
+  for (const d of stale) {
+    const ref = d.unified_ref;
+    if (!ref || ref === 'truncated' || live.has(ref)) continue;
+    /* The ref is ours: it was composed here as `diffs/<hex>.patch`. Anything else is not a
+     * path this function wrote and is not a path this function deletes. */
+    if (!/^diffs\/[0-9a-f]{64}\.patch$/.test(ref)) continue;
+    try { fs.rmSync(path.join(blobDir, ref), { force: true }); } catch { /* already gone */ }
+  }
   return stale.map((d) => d.file);
 }
 

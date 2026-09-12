@@ -164,3 +164,55 @@ test('되돌리기: no basis at all is `no-basis`, not a crash', () => {
   assert.equal(out.ok, false);
   assert.equal(out.reason, 'no-basis');
 });
+
+/* ── WBS-27 · 잘린 diff 의 blob 파일 ─────────────────────────────────────────────────── */
+
+const repo = require(path.join(R, 'app/main/db/repo.js'));
+const { openDb } = require(path.join(R, 'app/main/db/db.js'));
+
+test('큰 diff 를 가지치기하면 그 blob 파일도 같이 지운다', () => {
+  /* MEASURED: `pruneDiffs` 는 지우기 직전에 `unified_ref`(파일 경로)를 SELECT 해 놓고 한 번도
+   * 쓰지 않았다. 그래서 큰 파일을 되돌린 재시도마다 `diffs/<sha256>.patch` 가 하나씩 남았고,
+   * 그 파일을 가리키던 유일한 행은 방금 지워졌으므로 **다시는 찾을 수 없었다.** 저장소는
+   * 가지치기할 때마다 고아 파일 하나씩 커졌다. */
+  const db = openDb(':memory:');
+  const store = tempDir('juqode-blob-');
+  const project = repo.openProject(db, tempDir('juqode-bp-'), 'p');
+  const workId = repo.beginWork(db, project.id, 'x').work.id;
+
+  const big = `--- a/big.ts\n+++ b/big.ts\n${'+x\n'.repeat(200000)}`;
+  repo.saveDiff(db, workId, { file: 'big.ts', patch: big }, store);
+  repo.saveDiff(db, workId, { file: 'small.ts', patch: '+y\n' }, store);
+
+  const blobs = () => {
+    try { return fs.readdirSync(path.join(store, 'diffs')); } catch { return []; }
+  };
+  assert.equal(blobs().length, 1, '큰 diff 의 blob 이 쓰이지 않았다 — 검사가 아무것도 재지 못한다');
+
+  /* `small.ts` 만 남기는 재시도. `big.ts` 의 행도 blob 도 사라져야 한다. */
+  repo.pruneDiffs(db, workId, ['small.ts'], store);
+  assert.deepEqual(repo.diffsFor(db, workId).map((d) => d.file), ['small.ts']);
+  assert.deepEqual(blobs(), [], `고아 blob 이 남았다: ${blobs().join(', ')}`);
+  db.close();
+});
+
+test('다른 행이 아직 가리키는 blob 은 지우지 않는다', () => {
+  /* blob 이름은 내용의 sha256 이므로, 서로 다른 두 파일이 같은 내용을 가지면 **같은 blob 을
+   * 가리킨다.** 한쪽을 가지치기했다고 지우면 남은 쪽의 원문이 사라진다. */
+  const db = openDb(':memory:');
+  const store = tempDir('juqode-blob2-');
+  const project = repo.openProject(db, tempDir('juqode-bp2-'), 'p');
+  const workId = repo.beginWork(db, project.id, 'x').work.id;
+
+  const same = `--- a/f\n+++ b/f\n${'+x\n'.repeat(200000)}`;
+  repo.saveDiff(db, workId, { file: 'a.ts', patch: same }, store);
+  repo.saveDiff(db, workId, { file: 'b.ts', patch: same }, store);
+  assert.equal(fs.readdirSync(path.join(store, 'diffs')).length, 1, '같은 내용이 두 blob 이 됐다');
+
+  repo.pruneDiffs(db, workId, ['b.ts'], store);
+  assert.equal(fs.readdirSync(path.join(store, 'diffs')).length, 1,
+    '아직 b.ts 가 가리키는 blob 을 지웠다 — 남은 행의 원문이 사라진다');
+  assert.equal(repo.diffsFor(db, workId)[0].ref, fs.readdirSync(path.join(store, 'diffs'))
+    .map((n) => `diffs/${n}`)[0], '남은 행의 참조가 실제 파일과 다르다');
+  db.close();
+});
