@@ -393,6 +393,53 @@ export const C = {
      * is a 확인됨 claim and must not be used when the answer is unknown. */
     readerUnknown:    '이 작업이 무엇을 바꿨는지 여기서 확인하지 못했어요.',
     readerUnknownFiles: (files) => `바뀐 것으로 확인된 파일: ${files}`,
+    /* ── WBS-19b · 되돌리기 ────────────────────────────────────────────────────────────
+     *
+     * `18` has `work.unwantedBody` and `rules.noRollback`, and both say 되돌리기 버튼은 없어요.
+     * That sentence was written for D-115, which is about a GLOBAL undo — and about that it is
+     * still right. It is NOT right about the narrow thing the evidence can carry: the before-
+     * basis holds the bytes of every file the Work changed, so putting those files back is a
+     * claim the product can keep.
+     *
+     * So the sentences live here rather than replacing Canon's: `18` and D-115 have to be
+     * re-judged before the approved dictionary changes, and until they are, a screen that shows
+     * a 되돌리기 button must not ALSO carry the sentence saying there is none. Filed as
+     * CANON_FINDINGS CF-22.
+     *
+     * The three limits are not softening. Each one is a fact about `restore()` that cannot be
+     * fixed there, and a user who finds out afterwards was misled by the button. */
+    revertTitle:   '이 작업 전으로 되돌릴 수 있어요',
+    revertBody:    '이 작업이 바꾼 파일을 작업 전 내용으로 되돌려요. 원하시면 대신 새 작업을 요청할 수도 있어요.',
+    revert:        '이 작업 전으로 되돌리기',
+    revertConfirm: '되돌리기 전에 알아 두실 것',
+    revertLimits: [
+      '기준에서 제외한 파일(.env · 키 파일 · node_modules · 중첩된 Git 폴더)은 되돌아가지 않아요 — 기준에 들어 있지 않았어요.',
+      '작업이 실행한 명령의 결과(설치된 패키지 · 바뀐 데이터)는 되돌아가지 않아요. 파일 내용만 되돌려요.',
+      '이 작업이 끝난 뒤 직접 고치신 내용이 있다면 그것도 함께 덮어써져요.',
+    ],
+    revertGo:      '되돌리기 진행',
+    revertDone:    (restored, removed) => `되돌렸어요 · 되돌린 파일 ${restored}개${removed ? ` · 지운 파일 ${removed}개` : ''}`,
+    revertNone:    '되돌릴 파일이 없었어요. 이 작업은 기준에 든 파일을 바꾸지 않았어요.',
+    revertPartial: (paths) => `되돌리지 못한 파일 ${paths.length}개: ${paths.join(' · ')}`,
+    revertExcl:    (n) => `기준에서 제외했던 파일 ${n}개는 그대로예요.`,
+    /* WBS-19b · 이 복원이 닿지 못한 파일을 **이름으로**. 개수만 말하면 사용자는 어느 파일인지
+     * 추측해야 하고, 이 파일들은 되돌리기로도 저장(qc.git.commit 이 같은 제외 목록을 쓴다)
+     * 으로도 복구되지 않는다 — 이름이 있어야 사용자가 직접 손을 쓸 수 있다.
+     * D-126a 의 원장은 (경로 · 크기 · mtime) 만 기록하므로 내용은 새어나가지 않는다. */
+    revertExclChanged: (paths) =>
+      `이 작업 중에 바뀌었지만 되돌리지 못한 파일이 ${paths.length}개 있어요 — ${paths.join(' · ')}. ` +
+      '비밀이 담기기 쉬운 파일이라 기준에 기록해 두지 않았어요. 이 파일들은 직접 확인해 주세요.',
+    /* 되돌릴 수 없는 이유들. 전부 실패가 아니라 사실이고, 그렇게 말한다. */
+    revertWhy: {
+      'not-git-basis':      '이 폴더는 Git 저장소가 아니어서 파일 내용을 기록해 두지 못했어요. 되돌릴 내용이 없어요.',
+      'no-basis':           '이 작업의 시작 전 기준을 찾지 못했어요. 되돌릴 기준이 없어요.',
+      'still-running':      '작업이 아직 진행 중이에요. 끝난 뒤에 되돌릴 수 있어요.',
+      'work-running':       '이 프로젝트에서 다른 작업이 돌고 있어요. 끝난 뒤에 되돌릴 수 있어요.',
+      'already-explaining': '지금 이 변경을 설명하는 중이에요. 끝난 뒤에 되돌릴 수 있어요.',
+      'restore-failed':     '파일을 되돌리는 중에 읽거나 쓰지 못했어요. 아무것도 바뀌지 않았을 수 있어요.',
+      'no-work':            '이 작업을 찾지 못했어요.',
+    },
+
     /* WBS-33 · the unsigned-build notice. `21` WBS-33 and `22` §95 require the product to say
      * that a build is not signed — 숨기지 않는다 (원칙 2) — and NO screen spec gives that
      * sentence a home, `18` no key, `16` no colour. Filed as CANON_FINDINGS CF-21.
@@ -413,6 +460,26 @@ export const C = {
      * the schema instead of on screen. These are files the SCAN read, so the reader can open
      * them; that is the whole difference between 예상됨 and 확인 못함 here. */
     briefCites:       '근거로 읽은 파일',
+    /* WBS-02b · 빈 폴더. `18` has `brief.*` for a project that HAS something and nothing at all
+     * for a folder with nothing in it — because `15` SC-01 assumes the user brings a project,
+     * which the person this product is for often does not. 지어낸 상태가 아니라 측정된 상태다:
+     * 폴더를 열 때의 readdir 하나가 근거이고, 문장은 그 사실만 말한다. CANON_FINDINGS CF-23. */
+    briefEmptyTitle: '이 폴더는 아직 비어 있어요',
+    briefEmptyBody:  '읽을 파일이 없어서 설명해 드릴 것도 아직 없어요. 무엇을 만들고 싶은지 적어 주시면 Claude Code가 첫 파일부터 만들어요.',
+    briefEmptyStart: '무엇을 만들지 적어 보기',
+    /* 요청 칸에 들어가는 초안. 보내지 않는다 — 사용자가 자기 말로 이어 쓰고 직접 누른다. */
+    briefEmptyIntent: '만들고 싶은 것: ',
+    /* WBS-02c · 첫 실행. `18` 은 `sc01.noHistory` 로 "기록이 없다" 는 사실만 말하고, 그 다음에
+     * 무엇을 하면 되는지는 어디에도 없다 — 개발자에게는 필요 없고, 이 제품의 사용자에게는
+     * 그것이 전부다. 세 줄은 이 저장소가 실제로 갖고 있는 흐름이고(폴더 열기 → Brief →
+     * 요청), 없는 기능을 약속하지 않는다. CANON_FINDINGS CF-23. */
+    firstRunTitle: '처음이시라면, 이렇게 시작해요',
+    firstRunSteps: [
+      '내 컴퓨터에서 폴더를 하나 고르세요. 빈 폴더여도 괜찮아요.',
+      'JuQode가 그 폴더가 무엇인지 먼저 읽어서 설명해 드려요.',
+      '하고 싶은 일을 말로 적어서 보내면, Claude Code가 그 일을 해요.',
+    ],
+    firstRunNote: '폴더를 새로 만들어 드리지는 않아요 — 이미 만들어 둔 폴더를 골라 주세요.',
     /* WBS-05 · a refresh that could not read the folder. `18` has `brief.failTitle` and
      * `brief.failNote` for a project that never read, and nothing for the case where an OLD
      * Brief is still on screen underneath — which is the whole point of the state. */
@@ -444,6 +511,10 @@ export const C = {
       'qc.test':          '테스트를 돌려 달라는 요청으로 이해했어요.',
       'qc.git.status':    '지금 어떤 파일이 바뀌었는지 Git 상태를 보여 달라는 요청으로 이해했어요.',
       'qc.terminal.open': '터미널을 열어 달라는 요청으로 이해했어요.',
+      /* WBS-22b · 22c — PM 판정(2026-09-12)로 열린 두 규칙. 나머지 여섯과 같은 어투를 쓰되,
+       * 출처가 다르다: `19` §C4 의 검증된 말뭉치는 이 두 문장을 아직 갖고 있지 않다. */
+      'qc.git.commit':    '지금까지 만든 것을 되돌아올 수 있는 저장점으로 남겨 달라는 요청으로 이해했어요.',
+      'qc.deploy':        '프로젝트를 배포해 달라는 요청으로 이해했어요.',
     },
     /* 실행할 명령 for the two rules whose action is FIXED rather than a package.json script.
      * Same source as the sentences above — q02 §1's table. A card that showed nothing on this
@@ -451,6 +522,9 @@ export const C = {
     qcAction: {
       'qc.dev.stop':      (pid, cmd) => `JuQode 가 켠 개발 서버 프로세스(pid ${pid}${cmd ? `, ${cmd}` : ''})에 종료 신호(SIGTERM)를 보내요. 5초 안에 안 꺼지면 강제 종료(SIGKILL)해요.`,
       'qc.terminal.open': (cwd) => `화면 아래에 터미널 창을 열어요. 셸은 ${cwd} 에서 시작하고, 아무 명령도 자동으로 실행하지 않아요.`,
+      /* 저장은 package.json 스크립트가 아니라 고정 동작이라 이 줄이 없으면 카드가 빈칸을
+       * 확인해 달라고 하게 된다 — `qc.dev.stop` 과 같은 이유로 여기에 있다. */
+      'qc.git.commit':    (init, message) => `${init ? '이 폴더를 Git 저장소로 만들고(git init), ' : ''}바뀐 파일을 모두 담아(git add -A) "${message}" 라는 이름으로 저장점을 남겨요(git commit).`,
     },
     qcMeaning: {
       'qc.dev.start':     '프로젝트를 브라우저에서 볼 수 있게 로컬 서버를 띄워요. 끄기 전까지 계속 돌아요.',
@@ -459,6 +533,10 @@ export const C = {
       'qc.test':          '프로젝트에 적힌 자동 검사들을 실행해서 통과/실패를 확인해요. 소스 파일은 바뀌지 않아요.',
       'qc.git.status':    '마지막 커밋 이후 새로 만들어졌거나 바뀌었거나 지워진 파일 목록을 보여줘요. 아무것도 바꾸지 않아요.',
       'qc.terminal.open': '여기에 직접 명령을 칠 수 있어요. 여기서 치는 명령은 JuQode가 아니라 사용자 본인이 실행하는 것이고, 컴퓨터에서 사용자 권한으로 그대로 돌아요.',
+      /* 저장의 뜻에는 제외 목록이 들어간다. D-126a 의 목록을 그대로 쓰므로 `.env` 는 저장점에
+       * 들어가지 않는데, 그것을 말하지 않으면 사용자는 전부 저장됐다고 읽는다. */
+      'qc.git.commit':    '지금 폴더 상태를 되돌아올 수 있는 지점으로 남겨요. 파일 내용은 바뀌지 않아요. 비밀이 담기기 쉬운 파일(.env · 키 파일 · node_modules · 중첩된 Git 폴더)은 저장점에 넣지 않아요.',
+      'qc.deploy':        '프로젝트에 적힌 배포 방법을 그대로 실행해요. 이건 바깥으로 나가는 동작이라 되돌리기가 없어요 — 실행 전에 무엇이 돌아가는지 위에서 확인해 주세요.',
     },
     /* The 사용 불가 reasons, keyed by what `availability()` returned. Same source. */
     qcWhy: {
@@ -469,6 +547,9 @@ export const C = {
       placeholder_script: 'package.json 의 test 스크립트가 npm 기본 자리표시자예요 — 실제 테스트가 없어요.',
       not_git:           '이 프로젝트 폴더는 Git 저장소가 아니에요.',
       unknown_rule:      '정해진 Quick Command 가 아니에요.',
+      /* WBS-22b. 둘 다 실패가 아니라 사실이다 (12 §16). */
+      no_changes:        '마지막 저장 이후 바뀐 게 없어요. 남길 것이 없어요.',
+      git_unavailable:   '이 컴퓨터에서 git 을 실행하지 못했어요. 설치돼 있는지 확인해 주세요.',
       /* The handler's OWN refusals, which are hyphenated where `availability()`'s are
        * underscored. Falling through to `unknown_rule` made the product say "정해진 Quick
        * Command 가 아니에요" about a command it had just explained as one of the six. */
@@ -494,6 +575,10 @@ export const C = {
     termNoTty:     'sudo · ssh · 비밀번호를 묻는 명령은 여기서 답할 수 없어요 — 묻지도 못한 채 끝나요.',
     /* 동반 조건 ③ — 색과 순서. 숨기면 사용자가 출력을 잘못 읽는다. */
     termNoColour:  '색은 나오지 않고, 나오는 순서가 실제 순서와 다를 수 있어요.',
+    /* WBS-25b · 배너의 같은 사실을, 방금 친 명령에 대해 그 순간에. 배너는 예방이고 이것은
+     * 설명이다 — 실측된 사용자 경험은 "쳤는데 아무 일도 안 일어났다" 이고, 그 침묵에 이름을
+     * 붙이지 않으면 사용자는 앱이 고장났다고 읽는다. 목록이 완전하다고는 말하지 않는다. */
+    termNoTtyNow:  '이 명령은 비밀번호나 확인을 물어볼 수 있어요. 여기서는 물음에 답할 수 없어서, 아무 말 없이 끝날 수 있어요. 이럴 땐 내 컴퓨터의 터미널 앱에서 직접 실행해 주세요.',
     /* 작업 제어가 없다는 사실을 버튼 옆에서 말한다 — 누르기 전에. */
     termStopNote:  '멈추면 이 터미널 세션이 끝나요. 명령 하나만 멈출 수는 없어요.',
     termRunning:   '실행 중',
@@ -510,6 +595,31 @@ export const C = {
      * what will run, and a body that is a strict subset of what executes is not that. */
     qcAlsoRuns:    '이 스크립트 앞뒤로 함께 실행되는 것',
     qcAsWork:      '▸ Claude Code 작업으로 보내기',
+    /* WBS-23c · `no_script` 막다른 길에서 나가는 길. 문장은 사용자의 말이 아니라 초안이고,
+     * 보내지 않는다 — 사용자가 고쳐 쓰고 직접 누른다. */
+    qcSetup:       '▸ 방법을 만들어 달라고 요청',
+    qcSetupIntent: {
+      'qc.deploy':    '이 프로젝트를 배포할 수 있게 해줘. package.json 에 deploy 스크립트를 만들고, 어디로 어떻게 배포되는지 알려줘.',
+      'qc.build':     'package.json 에 build 스크립트를 만들어줘. 이 프로젝트에 맞는 방법으로.',
+      'qc.test':      'package.json 에 test 스크립트를 만들고, 간단한 테스트를 하나 추가해줘.',
+      'qc.dev.start': 'package.json 에 dev 스크립트를 만들어줘. 브라우저에서 열어 볼 수 있게.',
+    },
+    /* WBS-22c · 배포 카드 전용 한 줄. `19` §C4 의 설명-확인 위에 하나 더 얹는 이유는, 이 동작만
+     * 이 컴퓨터 밖으로 나가고 JuQode 의 되돌리기(WBS-19b)가 닿지 않기 때문이다. */
+    /* WBS-23b · 실패한 Quick Command 를 다음 요청의 초안으로. 사실만 담는다 — 사용자의 말,
+     * 실행된 명령, 출력. 진단도 추측도 넣지 않는다. 출력은 끝에서 잘라 붙이는데, 실패 이유는
+     * 거의 항상 마지막에 있고 앞부분은 성공한 단계들이기 때문이다. */
+    qcFailIntent: (phrase, command, output) => {
+      const lines = String(output ?? '').split('\n').filter(Boolean);
+      const tail = lines.slice(-40).join('\n').slice(-2000);
+      return [
+        `"${phrase}" 를 했는데 실패했어요. 아래 출력을 보고 고쳐 주세요.`,
+        '',
+        command ? `실행된 명령: ${command}` : '',
+        tail ? `출력:\n${tail}` : '출력이 없었어요.',
+      ].filter((x) => x !== '').join('\n');
+    },
+    qcDeployNote:  '배포는 이 컴퓨터 밖으로 나가는 동작이에요. JuQode 의 되돌리기로는 되돌릴 수 없어요.',
     qcRunningFor:  (cmd) => `실행 중 · ${cmd}`,
     /* `15` TD-01 groups the discoverability list (`실행 · 빌드/테스트 · 확인 · 터미널`). Those
      * labels collide with approved keys that mean something else — `실행` is `18`'s RUN BUTTON —

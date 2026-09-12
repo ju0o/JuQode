@@ -99,3 +99,9 @@
   border: 1px dashed var(--unk);
 }
 .sc01 .buildnote.unk .t { color: var(--unk); font-weight: 500; }
+
+/* WBS-02c · 처음 쓰는 사람을 위한 세 줄. 카드가 아니라 최근 목록 안의 안내이므로 테두리를
+ * 갖지 않는다 — `16` §1 의 카드는 행동의 단위이고 이것은 읽을 것이다. */
+.sc01 .firstrun { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.sc01 .firstrun .t { font-weight: 600; }
+.sc01 .firstrun ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }

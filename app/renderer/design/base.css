@@ -21,6 +21,9 @@ body {
 .sm { font-size: 12px; line-height: 17px; }
 .xs { font-size: 11px; line-height: 15px; }
 .mut { color: var(--mut); }
+/* `16` §2.1: red is for failure and for nothing else. A partial restore that could not finish
+ * is a failure, and it is the one sentence on that card that must not read like a footnote. */
+.bad { color: var(--fail); }
 .mono { font-family: var(--font-mono); font-size: .92em; }
 
 /* ---------- surface primitives ---------- */
@@ -194,3 +197,8 @@ details > summary:hover { color: var(--ink); }
   color: var(--juq);
 }
 .nextacts .nagloss { min-width: 0; overflow-wrap: anywhere; }
+
+/* WBS-19b · the 되돌리기 confirmation. It lives inside a card on two different screens
+ * (SC-03 and SC-04), whose stylesheets are separate — so its few rules are here, once. */
+.revert-warn { padding: 10px 12px; margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.revert-warn ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }

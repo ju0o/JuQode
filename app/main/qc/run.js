@@ -20,7 +20,7 @@
  *      script prints, so masking is the only mechanism available and `19` §C4 is explicit that
  *      its effect is UNMEASURED. The product says so on screen, not only here — see `mask()`.
  */
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 /** `20` `quick_command_run.output_head`: the bounded head that goes on screen, in BYTES.
  *  (`output_ref` is the blob reference for the full output. Nothing writes one yet — see the
@@ -83,11 +83,41 @@ const tail = (text, n = TAIL_LINES) => String(text ?? '').split('\n').filter(Boo
  * @param {(update:object) => void} [spec.onUpdate]
  * @returns {{pid:number|null, startedAt:string, done:Promise<object>, stop:() => void}}
  */
-function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process.env }) {
+function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process.env, prepare = [] }) {
   const startedAt = new Date().toISOString();
   let out = '';
   let bytes = 0;
   let truncated = false;
+
+  /* `prepare` — argvs that must succeed BEFORE the one the card named.
+   *
+   * It exists for `qc.git.commit`, which cannot be one argv: there is no shell to chain
+   * `add` to `commit`, and `commit -a` would miss every file the Work CREATED — which for a
+   * non-developer's project is the ordinary case, not the corner one.
+   *
+   * Each is the same closed kind of vector as `argv` itself (from `availability()`, never from
+   * anything typed), each is synchronous because they are index operations that finish in
+   * milliseconds, and the FIRST failure stops the sequence with its own output attached. A
+   * prepare step that failed quietly would leave a commit of the wrong thing. */
+  for (const pre of prepare) {
+    const r = spawnSync(pre[0], pre.slice(1), {
+      cwd, env, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8',
+    });
+    if (r.error || r.status !== 0) {
+      const why = [r.stdout, r.stderr, r.error ? String(r.error.code ?? r.error.message) : '']
+        .filter(Boolean).join('\n');
+      const failed = { state: 'failed', code: r.status ?? null, signal: r.signal ?? null, startedAt,
+                       /* Masked like every other output path. A `git` failure prints the
+                        * remote URL, and a URL can carry credentials. */
+                       endedAt: new Date().toISOString(), output: mask(why),
+                       spawnError: r.error ? String(r.error.code ?? r.error.message) : null };
+      onUpdate(failed);
+      return { pid: null, startedAt, done: Promise.resolve(failed), stop: () => {} };
+    }
+    /* Its output is kept: `git init` says where it made the repository, and that is the one
+     * line telling a user their folder is now a Git project. */
+    if (r.stdout) out += r.stdout;
+  }
 
   let child;
   try {

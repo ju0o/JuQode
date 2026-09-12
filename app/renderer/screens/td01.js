@@ -242,6 +242,9 @@ function termRegion(api, state, repaint) {
       return;
     }
     state.termNote = null;
+    /* WBS-25b · 이 줄이 답할 수 없는 질문을 할 수 있다면, 출력이 (안) 오기 전에 말한다.
+     * 막지는 않는다 — 줄은 이미 셸에 들어갔고, `19` §C4 는 거르는 척하지 말라고 한다. */
+    state.termWarn = r.warn ?? null;
     state.termLine = '';
     repaint();
   };
@@ -255,6 +258,12 @@ function termRegion(api, state, repaint) {
   region.appendChild(row);
 
   if (state.termNote === 'busy') region.appendChild(el('p', 'xs mut', C.gap.termBusy));
+  /* 배너(`termNoTty`)는 늘 거기 있지만 명령을 치기 전에 읽히지 않는다. 이 줄은 방금 친 그
+   * 명령에 대해, 출력을 기다리는 바로 그 순간에 나온다 — 조용한 실패에 이름을 붙이는 것이
+   * 이 줄의 전부다. */
+  if (state.termWarn === 'no-tty') {
+    region.appendChild(el('p', 'sm td01-warn', C.gap.termNoTtyNow));
+  }
 
   const run = state.termRun;
   if (!run) { outBox.appendChild(el('p', 'sm mut', C.gap.termEmpty)); return region; }
@@ -366,9 +375,21 @@ function routeCard(api, state, repaint) {
     if (r.reason === 'already_running' && r.data?.pid) {
       card.appendChild(el('p', 'xs mut mono', `pid ${r.data.pid}`));
     }
-    card.appendChild(routes([[C.qc.discover, async () => {
+    /* WBS-23c · `no_script` is a DEAD END, and it is the most common one: the rule is real, the
+     * project simply has no such script, and `19` §C4 rightly forbids inventing one. But the
+     * product is not out of moves — writing a script is a file change, which is exactly what a
+     * Work is for. So the card hands the request to the one thing allowed to write it.
+     *
+     * Prefilled, NOT sent (`12`: 보내기 is consent to change files). And it stays a Work, so it
+     * goes through the D-117 guard and the evidence basis like any other change. */
+    const ways = [];
+    if (r.reason === 'no_script' && C.gap.qcSetupIntent[id]) {
+      ways.push([C.gap.qcSetup, () => { state.toWork = C.gap.qcSetupIntent[id]; repaint(); }]);
+    }
+    ways.push([C.qc.discover, async () => {
       state.qcDiscover = await api.qcList(state.project.id); repaint();
-    }]]));
+    }]);
+    card.appendChild(routes(ways));
     return card;
   }
 
@@ -396,8 +417,17 @@ function routeCard(api, state, repaint) {
       }
     }
   }
+  /* WBS-22b · 저장 — the exact argv is above in mono; this is the same thing in words. A
+   * non-developer confirming `git commit -m "…"` is confirming a string, not an action. */
+  if (id === 'qc.git.commit') {
+    card.appendChild(el('p', 'xs mut', C.gap.qcAction['qc.git.commit'](r.data?.init, r.data?.message ?? '')));
+  }
   card.appendChild(field3(C.qc.meaning, C.gap.qcMeaning[id]));
   if (r.rule?.kind === 'long_running') card.appendChild(el('p', 'xs mut', C.qc.longNote));
+  /* WBS-22c · 배포 is the one Quick Command whose effect leaves this machine. `16` §2.1 gives
+   * red to failure alone, and this is not a failure — it is the sentence that has to be read
+   * before 실행, so it carries the class the drawer already uses for a warning line. */
+  if (r.rule?.risk === 'deploy') card.appendChild(el('p', 'sm td01-warn', C.gap.qcDeployNote));
 
   const acts = el('div', 'row-acts');
   acts.appendChild(btn('btn sm pri', C.qc.run, async () => {
@@ -510,7 +540,21 @@ function runCard(api, state, repaint) {
     if (r.state === 'failed') {
       /* `15` TD-01 실패: ▸ 다시 실행 AND ▸ Work 로 요청. A failed build with only a re-run
        * button leaves the user with nothing but the same button. */
-      acts.appendChild(btn('btn sm ghost rec', C.qc.toWork, () => { state.toWork = state.qcPhrase; repaint(); }));
+      /* WBS-23b · the failure goes WITH the request.
+       *
+       * `15` TD-01 already gave a failed run this button, and it carried only the phrase — so
+       * the user arrived at SC-02 with `빌드해줘` in the field and a build error they could not
+       * read still on the card behind them. For the person this product is for, "무엇을
+       * 요청해야 하는지" is the whole difficulty: they cannot read the error, so they cannot
+       * describe it.
+       *
+       * The draft is FACTS ONLY — their own words, the command that ran, the output as it was
+       * printed. Nothing is diagnosed and nothing is suggested, and it is NOT submitted: `12`
+       * treats 보내기 as consent to change files, so the person presses it. */
+      acts.appendChild(btn('btn sm ghost rec', C.qc.toWork, () => {
+        state.toWork = C.gap.qcFailIntent(state.qcPhrase, r.command ?? '', r.output ?? '');
+        repaint();
+      }));
     }
     acts.appendChild(btn(`btn sm ghost${r.state === 'failed' ? ' rec' : ''}`, C.qc.rerun, async () => {
       const again = await api.qcRun(state.project.id, r.ruleId, state.qcPhrase);

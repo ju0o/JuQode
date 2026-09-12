@@ -522,7 +522,7 @@ function resultCard(snap, api, nav, state) {
       /* Open the panel in place rather than navigating: `15` puts the Unwanted-result state on
        * SC-03, and a user who is not sure yet must be able to go on reading. */
       if (card.querySelector('[data-el="unwanted"]')) return;
-      card.insertBefore(unwantedPanel(snap, nav, state), acts);
+      card.insertBefore(unwantedPanel(snap, nav, state, { api }), acts);
     }),
     btn('btn sm', C.work.toBench, () => nav.toWorkbench(state.project, state.interpretation)),
   ]);
@@ -568,23 +568,96 @@ function remainPanel(snap, nav, state) {
  * The prefilled sentence quotes the user's OWN words. JuQode does not paraphrase the request it
  * is about to resend, and it does not promise the change will be restored — nothing can.
  */
-export function unwantedPanel(snap, nav, state, { readMore = true } = {}) {
+export function unwantedPanel(snap, nav, state, { readMore = true, api = null } = {}) {
   const panel = el('div', 'card c-wide unwanted');
   panel.setAttribute('data-el', 'unwanted');
-  panel.appendChild(el('div', 'ct', C.work.unwantedTitle));
-  panel.appendChild(el('p', 'sm', C.work.unwantedBody));
 
-  panel.appendChild(nextActions([
-    btn('btn sm pri', C.work.correction, () => {
-      /* Straight to the intent field with the sentence already in it — and NOT submitted. The
-       * user sends it, because `12` treats submitting as consent to change files. */
-      nav.toWorkbench(state.project, state.interpretation,
-                      { intent: C.gap.correctionIntent(snap.work.intent) });
-    }),
-    /* `먼저 변경 더 읽기` goes to SC-04. On SC-04 itself that is a button that does nothing,
-     * and `15` DS §1 treats a control with no effect as not an action at all. */
-    ...(readMore ? [btn('btn sm ghost rec', C.work.readMore, () => nav.toReader(snap))] : []),
-  ]));
+  /* WBS-19b · 되돌리기 is offered only when this Work HAS both bases. Without them there is
+   * nothing to put back, and a button that can only ever answer "안 돼요" is not an action
+   * (`15` DS §1). Whether those bases are Git trees is not knowable here — the handler answers
+   * that, and `revertWhy` says it in words. */
+  const canOffer = Boolean(api?.workRevert) && snap.evidence?.before && snap.evidence?.after;
+
+  /* CF-22: a panel that shows a 되돌리기 button must not also carry `18`'s sentence saying
+   * there is none. Canon still owns the no-revert case, which is the one D-115 was about. */
+  panel.appendChild(el('div', 'ct', canOffer ? C.gap.revertTitle : C.work.unwantedTitle));
+  panel.appendChild(el('p', 'sm', canOffer ? C.gap.revertBody : C.work.unwantedBody));
+
+  const body = el('div', 'unwanted-body');
+  panel.appendChild(body);
+
+  /* Straight to the intent field with the sentence already in it — and NOT submitted. The
+   * user sends it, because `12` treats submitting as consent to change files. */
+  const correct = () => nav.toWorkbench(state.project, state.interpretation,
+                                        { intent: C.gap.correctionIntent(snap.work.intent) });
+  /* `먼저 변경 더 읽기` goes to SC-04. On SC-04 itself that is a button that does nothing,
+   * and `15` DS §1 treats a control with no effect as not an action at all. */
+  const more = () => (readMore ? [btn('btn sm ghost rec', C.work.readMore, () => nav.toReader(snap))] : []);
+
+  /* ── the three stages, each replacing the last IN PLACE ──
+   * The panel was inserted into a card that is already on screen, so it owns its own body
+   * rather than asking the router to repaint a screen the user is reading. */
+
+  const offer = () => {
+    body.innerHTML = '';
+    body.appendChild(nextActions([
+      btn('btn sm pri', C.work.correction, correct),
+      ...(canOffer ? [btn('btn sm ghost', C.gap.revert, confirm)] : []),
+      ...more(),
+    ]));
+  };
+
+  function confirm() {
+    /* `19` §C4's rule, applied to the one control that writes to the user's files: explain
+     * first, act only on a second, separate press. */
+    body.innerHTML = '';
+    const box = el('div', 'card revert-warn');
+    box.setAttribute('data-el', 'revert-confirm');
+    box.appendChild(el('div', 'ct', C.gap.revertConfirm));
+    const ul = el('ul', 'sm');
+    for (const line of C.gap.revertLimits) ul.appendChild(el('li', '', line));
+    box.appendChild(ul);
+    box.appendChild(nextActions([
+      btn('btn sm pri', C.gap.revertGo, run),
+      btn('btn sm ghost', C.qc.cancel, offer),
+    ]));
+    body.appendChild(box);
+  }
+
+  async function run() {
+    body.innerHTML = '';
+    body.appendChild(el('p', 'sm mut', C.gap.revertGo));
+    const out = await api.workRevert(snap.work.id);
+    body.innerHTML = '';
+
+    if (!out?.ok) {
+      /* A refusal is a REASON, never silence and never a red failure for a fact about the
+       * project (12 §16). An unmapped reason falls back to the one honest sentence we have. */
+      body.appendChild(el('p', 'sm', C.gap.revertWhy[out?.reason] ?? C.gap.revertWhy['restore-failed']));
+      body.appendChild(nextActions([btn('btn sm pri', C.work.correction, correct), ...more()]));
+      return;
+    }
+
+    if (out.restored === 0 && out.removed === 0 && out.failed.length === 0) {
+      body.appendChild(el('p', 'sm', C.gap.revertNone));
+    } else {
+      body.appendChild(el('p', 'sm', C.gap.revertDone(out.restored, out.removed)));
+    }
+    /* Partial is stated, with the names. A restore that could not finish and said nothing is
+     * the worst outcome this feature has. */
+    if (out.failed.length) body.appendChild(el('p', 'sm bad', C.gap.revertPartial(out.failed)));
+    /* The ones this restore could not reach, BY NAME. A count told the user a number and left
+     * them to guess which file; these are recoverable from nowhere, so the name is the only
+     * thing that makes the sentence actionable. */
+    if (out.excludedChanged?.length) {
+      body.appendChild(el('p', 'sm', C.gap.revertExclChanged(out.excludedChanged)));
+    } else if (out.excluded) {
+      body.appendChild(el('p', 'xs mut', C.gap.revertExcl(out.excluded)));
+    }
+    body.appendChild(nextActions([btn('btn sm pri', C.work.correction, correct), ...more()]));
+  }
+
+  offer();
   return panel;
 }
 

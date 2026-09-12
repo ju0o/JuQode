@@ -721,6 +721,58 @@ function watchQuiet(db, onUpdate, { everyMs = Math.min(15_000, Math.floor(QUIET_
   return () => clearInterval(tick);
 }
 
+/**
+ * WBS-19b · 되돌리기 — put this Work's changed files back to the before-basis.
+ *
+ * D-115 stands for what it was about: there is no global undo and the product must not promise
+ * one. This is the narrow thing the evidence can carry, and every way it can fail to be
+ * complete is REPORTED rather than smoothed over — see `restore()` in `../evidence/git.js` for
+ * the three structural limits the copy has to repeat.
+ *
+ * A Work with a `hash_manifest` basis cannot be reverted at all: a manifest holds hashes, not
+ * content, so there is nothing to put back. That is `not-git-basis`, and it is a fact about the
+ * project (no Git repository) rather than a failure.
+ */
+function revert(db, workId, project, store) {
+  const before = repo.basisFor(db, workId, 'before');
+  const after = repo.basisFor(db, workId, 'after');
+  if (!before || !after) return { ok: false, reason: 'no-basis' };
+  if (before.kind !== 'git_tree' || after.kind !== 'git_tree') return { ok: false, reason: 'not-git-basis' };
+  if (!store) return { ok: false, reason: 'no-basis' };
+
+  let files;
+  try {
+    files = gitEvidence.restore(project.path, store, before.ref, after.ref);
+  } catch (e) {
+    return { ok: false, reason: 'restore-failed', detail: e?.code ?? null };
+  }
+
+  /* F-13 · D-126a: the basis never held the excluded paths, so they were not restored — and a
+   * 되돌렸어요 that quietly skipped `.env` would be the product overstating its own evidence.
+   *
+   * A COUNT is not enough. If the Work changed the user's `.env`, that file is recoverable from
+   * nowhere — not from this restore, not from 저장(`qc.git.commit` uses the same exclusions) —
+   * and the one thing the product can do is NAME it. The ledger (D-126a) records
+   * `(path, size, mtimeNs)` for exactly this: it never opens the file, so a secret cannot leak
+   * through it, and it can still tell that the file changed. */
+  const parseLedger = (row) => { try { return row.excluded ? JSON.parse(row.excluded) : []; } catch { return []; } };
+  const beforeLedger = parseLedger(before);
+  let changedExcluded = [];
+  try { changedExcluded = exclude.ledgerDiff(beforeLedger, parseLedger(after)); } catch { changedExcluded = []; }
+
+  return {
+    ok: true,
+    files,
+    restored: files.filter((f) => f.action === 'restored').length,
+    removed: files.filter((f) => f.action === 'removed').length,
+    failed: files.filter((f) => f.action === 'failed').map((f) => f.path),
+    excluded: beforeLedger.length,
+    /* Paths the Work touched that this restore could not reach. Names only — the ledger has
+     * no contents to give away. */
+    excludedChanged: changedExcluded.map((c) => c.path),
+  };
+}
+
 module.exports = { start, allow, answer, cancel, snapshot, preflight, changes, captureAfter,
-                   finishResult, saveDiffs, blocksFor, readerFor, watchQuiet, live, starting,
+                   finishResult, saveDiffs, blocksFor, readerFor, revert, watchQuiet, live, starting,
                    QUIET_MS, CANCEL_CONFIRM_MS };

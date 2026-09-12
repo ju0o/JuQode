@@ -1214,8 +1214,21 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(400);
   out.unwantedText = await evalJs(`document.querySelector('[data-el="unwanted"]')?.innerText ?? null`);
   out.unwantedReds = await evalJs(RED_COUNT('[data-el="unwanted"], [data-el="unwanted"] *'));
-  /* No rollback control on this screen — `21` WBS-19 states it as an acceptance row. */
-  out.sc03Rollback = await evalJs(`[...document.querySelectorAll('.sc03 button')].map(b => b.textContent).join(' | ')`);
+  /* The Work card's OWN controls — the panel is inside `.sc03` and is excluded here on
+   * purpose. WBS-19b puts the rollback on exactly one surface, and the point of this capture
+   * is that the card is not it: a button that writes to the user's files must not sit among
+   * 변경 읽기 and 작업대로 돌아가기, where it is one mis-click away. */
+  out.sc03Rollback = await evalJs(`[...document.querySelectorAll('.sc03 button')].filter(b => !b.closest('[data-el="unwanted"]')).map(b => b.textContent).join(' | ')`);
+  /* WBS-19b (PM 판정 2026-09-12) · 되돌리기 must take TWO presses, and the second one is only
+   * reachable after the first has said what the restore cannot do. One press that writes to
+   * the user's files would be the thing D-115 was protecting against. */
+  await evalJs(`[...document.querySelectorAll('[data-el="unwanted"] button')].find(b => b.textContent.includes('이 작업 전으로 되돌리기'))?.click()`);
+  await sleep(400);
+  out.revertConfirm = await evalJs(`document.querySelector('[data-el="revert-confirm"]')?.innerText ?? null`);
+  /* …and 취소 puts the panel back, so opening the warning is not itself a commitment. */
+  await evalJs(`[...document.querySelectorAll('[data-el="revert-confirm"] button')].find(b => b.textContent.trim() === '취소')?.click()`);
+  await sleep(300);
+  out.revertCancelled = await evalJs(`document.querySelector('[data-el="revert-confirm"]') === null`);
   await evalJs(`[...document.querySelectorAll('[data-el="unwanted"] button')].find(b => b.textContent.includes('고치는 작업 요청'))?.click()`);
   await sleep(900);
   out.afterCorrection = await evalJs('window.__screen()');
@@ -2375,7 +2388,11 @@ assert.deepStrictEqual(bridge.keys.sort(),
    'onWorkUpdate', 'openPath', 'openProject', 'qcList', 'qcRoute', 'qcRun', 'qcRuns', 'qcStop',
    'routeIntent', 'termOpen', 'termStop', 'termWrite',
    'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges', 'workExplain', 'workGet',
-   'workReader', 'workSignals', 'workStart'],
+   /* WBS-19b (PM 판정 2026-09-12): the one method on this surface that WRITES to the user's
+    * worktree. It is listed here for the same reason as every other — the surface is exactly
+    * this and a method that appears without being added to this line is a method nobody
+    * decided to ship. */
+   'workReader', 'workRevert', 'workSignals', 'workStart'],
   'renderer API surface is not exactly the declared one');
 assert.strictEqual(bridge.require, 'undefined', 'require leaked into the renderer');
 assert.strictEqual(bridge.process, 'undefined', 'process leaked into the renderer');
@@ -2631,8 +2648,11 @@ assert.ok(/README\.md|src\/index\.js/.test(results.qcOutput),
 assert.strictEqual(results.qcRunReds, 0, 'a successful run was painted as a failure');
 assert.strictEqual(JSON.parse(results.qcRunState).run.state, 'ok');
 
-/* 할 수 있는 것 보기 — the closed set, with a reason on every one that cannot run. */
-assert.strictEqual(results.qcDiscoverRows, 6, 'the discoverability panel is not the closed six');
+/* 할 수 있는 것 보기 — the closed set, with a reason on every one that cannot run.
+ * Eight since PM 판정 2026-09-12 (WBS-22b 저장 · 22c 배포). The set is still CLOSED — the
+ * number is read from the rule table rather than typed here, so a ninth rule that arrives
+ * without a decision still has to pass `tests/qc.test.js`, which names each id. */
+assert.strictEqual(results.qcDiscoverRows, 8, 'the discoverability panel is not the closed set');
 
 /* ── TD-01 · 계속 실행 중 · 이미 켜져 있음 · 실패 · 고정 동작 ──────────────────────────
  * Nine surviving td01 mutants live in these five branches, and they survived because the
@@ -3212,11 +3232,17 @@ assert.strictEqual(results.screenReader, 'SC-04', `변경 읽기 did not reach S
   assert.ok(a.text.includes('다음 행동'), 'the block is not labelled');
   assert.ok(a.text.includes('이해했어요'), '이해했어요 · 다음 요청으로 is not offered on SC-04');
   assert.ok(a.text.includes('원하던 결과가'), '원하던 결과가 아니에요 is not offered on SC-04');
-  /* D-115 · WBS-19: no undo button, and the panel says so before offering the only thing that
-   * exists — a NEW Work. */
+  /* WBS-19b (PM 판정 2026-09-12): D-115 forbade a GLOBAL undo, and still does — what this
+   * panel offers is the narrow claim the before-basis can carry. The Canon sentence 되돌리기
+   * 버튼은 없어요 is no longer true of this panel and must not appear beside the button.
+   * `18` is to be re-judged: CANON_FINDINGS CF-22. */
   assert.ok(results.readerUnwanted, '원하던 결과가 아니에요 opened nothing on SC-04');
-  assert.ok(results.readerUnwanted.includes('되돌리기 버튼은 없어요'),
-    'the SC-04 unwanted panel does not say there is no undo');
+  assert.ok(results.readerUnwanted.includes('이 작업 전으로 되돌리기'),
+    'the SC-04 unwanted panel does not offer 되돌리기');
+  assert.ok(!results.readerUnwanted.includes('되돌리기 버튼은 없어요'),
+    'the panel says there is no undo while showing an undo button');
+  assert.ok(results.readerUnwanted.includes('고치는 작업 요청'),
+    '되돌리기 replaced the correction path instead of joining it');
   /* …and it does NOT offer 먼저 변경 더 읽기, which navigates to the screen we are already on. */
   assert.ok(!results.readerUnwanted.includes('먼저 변경 더 읽기'),
     'SC-04 offers a button that navigates to SC-04');
@@ -3464,14 +3490,24 @@ assert.strictEqual(results.historyToWork, 'SC-03', `결과 보기 did not reach 
 
 /* ── WBS-19 · the correction path ─────────────────────────────────────────────────────── */
 assert.ok(results.unwantedText, '원하던 결과가 아니에요 opened no panel');
-assert.ok(results.unwantedText.includes('되돌리기 버튼은 없어요'),
-  `the panel does not say there is no undo: ${results.unwantedText}`);
-assert.ok(results.unwantedText.includes('원래 그대로 돌아간다고 약속하진 못해요'),
-  'the panel promises a restoration it cannot deliver');
+assert.ok(results.unwantedText.includes('이 작업 전으로 되돌리기'),
+  `the panel does not offer 되돌리기: ${results.unwantedText}`);
+assert.ok(!results.unwantedText.includes('되돌리기 버튼은 없어요'),
+  'the panel says there is no undo while showing an undo button');
 assert.strictEqual(results.unwantedReds, 0, 'the correction panel renders red — wanting something else is not a failure');
-/* D-115 · `21` WBS-19: this screen has no rollback control at all. */
+/* WBS-19b · the rollback control exists on exactly ONE surface — inside the 원하던 결과가
+ * 아니라면 panel, which the user opened on purpose. The Work card itself still has none: a
+ * button that writes to the user's files must not sit among 변경 읽기 and 작업대로. */
 assert.ok(!/되돌리기|롤백|undo|revert/i.test(results.sc03Rollback),
-  `SC-03 offers a rollback control: ${results.sc03Rollback}`);
+  `SC-03's own card offers a rollback control: ${results.sc03Rollback}`);
+/* …and the panel's button does not act on the first press. It opens the three limits — each
+ * one a fact about `restore()` that cannot be fixed there — and 진행 is a separate press. */
+assert.ok(results.revertConfirm, '되돌리기 acted without showing what it cannot do');
+for (const must of ['.env', '설치된 패키지', '덮어써져요', '되돌리기 진행']) {
+  assert.ok(results.revertConfirm.includes(must),
+    `the 되돌리기 warning omits "${must}": ${results.revertConfirm}`);
+}
+assert.strictEqual(results.revertCancelled, true, '취소 did not close the 되돌리기 warning');
 
 assert.strictEqual(results.afterCorrection, 'SC-02', '고치는 작업 요청 did not return to the workbench');
 assert.ok(results.correctionIntent && results.correctionIntent.includes('README.md 의 첫 줄을 바꿔줘'),

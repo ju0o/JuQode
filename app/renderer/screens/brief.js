@@ -69,6 +69,28 @@ export function renderBrief(card, interp, opts = {}) {
   }
   card.appendChild(head);
 
+  /* WBS-02b · 빈 폴더.
+   *
+   * This branch comes BEFORE the interpreting/failed/answers ladder on purpose: for an empty
+   * folder every one of those states is technically correct and useless. 해석 중 is a promise
+   * about files that are not there; the six answers come back 확인 못함 six times, which reads
+   * as breakage. The honest answer is that there is nothing here yet — and the useful thing is
+   * the sentence that makes there be something.
+   *
+   * `15` SC-01 rules out project creation, templates and clone, and this is none of them:
+   * nothing is scaffolded, nothing is fetched. It puts a request in the field and the USER
+   * presses 보내기 — the same consent every other change goes through (`12`). CF-23. */
+  if (opts.empty) {
+    card.appendChild(el('div', 't', C.gap.briefEmptyTitle));
+    card.appendChild(el('p', 'sm', C.gap.briefEmptyBody));
+    if (opts.onStart) {
+      const acts = el('div', 'row-acts');
+      acts.appendChild(btn('btn sm pri', C.gap.briefEmptyStart, opts.onStart));
+      card.appendChild(acts);
+    }
+    return;
+  }
+
   if (!interp) {                                     /* 해석 중 — facts only, no percent (원칙 6) */
     card.appendChild(el('div', 'sm mut', C.brief.interpreting));
     /* `15` SC-02 Loading State: the intent field stays ENABLED and the Brief says so. `18` has

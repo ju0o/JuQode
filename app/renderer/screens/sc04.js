@@ -139,7 +139,7 @@ export function renderSC04(root, api, nav, state) {
     btn('btn sm', C.work.unwanted, () => {
       if (board.querySelector('[data-el="unwanted"]')) return;
       /* No `먼저 변경 더 읽기`: that button goes to SC-04, and this IS SC-04. */
-      board.insertBefore(unwantedPanel(snap, nav, state, { readMore: false }), acts);
+      board.insertBefore(unwantedPanel(snap, nav, state, { readMore: false, api }), acts);
     }),
   ]);
   board.appendChild(acts);

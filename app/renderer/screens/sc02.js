@@ -84,6 +84,19 @@ export function renderSC02(root, api, nav, state) {
   /* WBS-05 · the Brief's own controls. Re-rendering IS the interaction — the same pattern the
    * other screens use — so every one of these hands state back and redraws. */
   const paint = () => { placeBrief(); renderBrief(brief, state.interpretation, {
+    /* WBS-02b · the folder had nothing in it when it was opened, and nothing has been asked for
+     * yet. `projectEmpty` is cleared the moment a Work opens (see `nav.toWork`), so this is not
+     * a second look at the disk taken at a different time — it is the one measurement the open
+     * already made, held until it stops being the situation. */
+    empty: state.projectEmpty,
+    onStart: () => {
+      /* The sentence goes into the field and is NOT sent. `12` treats 보내기 as consent to
+       * change files, so the person presses it — with their own words in place of the stub. */
+      if (!field) return;
+      field.value = C.gap.briefEmptyIntent;
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+    },
     stale: state.stale,
     folded: state.briefFolded,
     refreshFailed: state.refreshFailed,

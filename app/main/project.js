@@ -52,16 +52,28 @@ function inspect(target) {
   }
   if (!st.isDirectory()) return { ok: false, reason: 'not-a-folder', detail: real };
 
+  let entries;
   try {
     /* The read itself is the test. `fs.accessSync(R_OK | X_OK)` used to run first, but on
      * Windows `X_OK` is documented as behaving like `F_OK` and `access` reflects only the
      * read-only attribute — it answers nothing on the target OS. One call, one behaviour. */
-    fs.readdirSync(real);
+    entries = fs.readdirSync(real);
   } catch (e) {
     return { ok: false, reason: errnoReason(e), detail: `${e.code} ${real}` };
   }
 
-  return { ok: true, path: real, name: path.basename(real) || real };
+  /* WBS-02b · an EMPTY folder is a state, not a failure.
+   *
+   * `15` SC-01 assumes the user has a project folder, which a developer does. The person this
+   * product is for does not: they make a folder and have nothing to put in it. The interpreter
+   * then answers 확인 못함 six times, which reads as "this thing is broken" and is a dead end
+   * on the first screen they ever see.
+   *
+   * It costs NO extra work to know — the readdir above is already the permission test. Dot
+   * files are not content for this purpose: a folder holding only `.git` or `.DS_Store` has
+   * nothing in it to explain. */
+  const empty = entries.filter((n) => !n.startsWith('.')).length === 0;
+  return { ok: true, path: real, name: path.basename(real) || real, empty };
 }
 
 /** Open a folder the user already named (recent row, or a retry of the same folder). */
@@ -79,7 +91,8 @@ function openPath(db, target) {
    * fails for reasons that pass (a folder locked by another process, a full disk). It is kept
    * in the store as history and simply not handed back as the current answer. */
   const current = currentInterpretation(db, row.id);
-  return { ok: true, project: row, interpretation: current?.status === 'failed' ? null : current };
+  return { ok: true, project: row, empty: seen.empty,
+           interpretation: current?.status === 'failed' ? null : current };
 }
 
 /** Native folder pick → project. Cancelling is not a failure and shows no card. */

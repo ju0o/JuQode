@@ -318,7 +318,7 @@ function makeHandlers(deps) {
       });
 
       const handle = qcRun.start({
-        argv: avail.data.argv, cwd: row.path, kind: rule.kind,
+        argv: avail.data.argv, cwd: row.path, kind: rule.kind, prepare: avail.data.prepare ?? [],
         onUpdate: (u) => deps.pushQc?.({ runId, projectId, ruleId, ...u }),
       });
       qcLive.set(runId, { runId, projectId, ruleId, handle, command: avail.data.command });
@@ -504,6 +504,26 @@ function makeHandlers(deps) {
       if (!w) return { ok: false, reason: 'no-work' };
       const row = db().prepare('select * from project where id = ?').get(w.project_id);
       return { ok: true, ...supervisor.changes(db(), workId, row, deps.evidenceStore(w.project_id)) };
+    },
+
+    /* WBS-19b · 되돌리기 — the ONE place JuQode writes to the user's worktree, and it happens
+     * only because the user pressed a button that said so.
+     *
+     * Three gates before any byte moves, and each one is a race that would corrupt the result:
+     *   · the Work must have ENDED — a live session is still writing the files we would revert;
+     *   · no other Work may be running in this project (D-117's reason, applied here);
+     *   · no explanation pass may be in flight — it spawns a child in the same repository.
+     */
+    'juqode:work-revert': (_e, workId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const w = workOr(workId);
+      if (!w) return { ok: false, reason: 'no-work' };
+      if (w.status !== 'ended') return { ok: false, reason: 'still-running' };
+      if (repo.activeWork(db(), w.project_id)) return { ok: false, reason: 'work-running' };
+      if (explaining.has(w.project_id)) return { ok: false, reason: 'already-explaining' };
+      const row = db().prepare('select * from project where id = ?').get(w.project_id);
+      return supervisor.revert(db(), workId, row, deps.evidenceStore(w.project_id));
     },
 
     /* WBS-28 · SC-04. One read: the groups, the diffs they cite, and the blocks already cut.

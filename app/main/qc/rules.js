@@ -140,6 +140,44 @@ const RULES = [
     risk: 'read',
   },
   {
+    /* WBS-22b · 저장. `19` §C4's contract is unchanged: the argv is FIXED and nothing the user
+     * typed reaches it — not even the commit message, which is a timestamp this file composes.
+     *
+     * Why it exists: the six rules could read the Git state and never write one, so a
+     * non-developer had no way to mark "여기까지 좋았어". Without a save point, 되돌리기
+     * (WBS-19b) can only ever go back to the start of one Work — the user cannot choose where
+     * to return to, because they were never able to name anywhere. The two are one feature. */
+    id: 'qc.git.commit',
+    understood: '지금 상태를 Git 저장점으로 남긴다',
+    patterns: ['저장', '커밋', 'commit', '깃커밋', 'gitcommit', '지금저장', '저장점'],
+    /* `지금상태` and `지금까지` are NOT here: `지금` is one of `19` §C4's six fillers and is
+     * removed before any object is matched, so an object containing it can never be eaten and
+     * would leave `상태` behind as residue. A word the algorithm cannot reach is not a word. */
+    objects: ['현재상태', '작업내용', '저장점', '체크포인트', '깃커밋', 'git커밋', '커밋', '스냅샷'],
+    /* NOT `RUN_VERBS`. `돌려줘` is a bare verb, and T2b would then offer 저장 as one of its
+     * readings — "돌려 달라"는 말이 "저장할까요?" 로 되돌아오는 것은 인식이 아니라 소음이다.
+     * `해` is here because objects are eaten first: `커밋해줘` → `커밋` gone → `해줘` left. */
+    verbs: ['저장해', '저장', '커밋해', '커밋', '남겨둬', '남겨', '기록해', '기록', '찍어', '해둬', '해두', '해'],
+    kind: 'oneshot',
+    risk: 'write',
+  },
+  {
+    /* WBS-22c · 배포. The command comes from `package.json` the same way `빌드` does — `19` §C4
+     * 빌드 방법을 지어내지 않는다 applies here with more force, not less: guessing a deploy
+     * target would publish a non-developer's work somewhere they did not choose. No script,
+     * no rule. */
+    id: 'qc.deploy',
+    understood: '프로젝트를 배포한다',
+    patterns: ['배포', 'deploy', 'npmrundeploy', 'pnpmrundeploy', 'yarndeploy', '디플로이'],
+    objects: ['배포', '디플로이', '배포판'],
+    /* Same reason as 저장 above, and `올려` is deliberately absent too: it is `qc.dev.start`'s
+     * verb, and sharing it would turn `올려줘` from `[dev.start, work]` into a choice between
+     * two Quick Commands — one of which publishes. */
+    verbs: ['배포해', '배포', '내보내', '해', '해봐', '실행해', '실행'],
+    kind: 'oneshot',
+    risk: 'deploy',
+  },
+  {
     id: 'qc.terminal.open',
     understood: '터미널 드로어를 연다',
     patterns: ['openterminal'],
@@ -156,6 +194,7 @@ const SYNONYMS = [
   ['devserver', '개발서버'], ['dev서버', '개발서버'], ['데브서버', '개발서버'],
   ['로컬서버', '개발서버'], ['dev', '개발'], ['데브', '개발'],
   ['build', '빌드'], ['test', '테스트'], ['git', '깃'], ['status', '상태'],
+  ['deploy', '배포'], ['commit', '커밋'], ['save', '저장'],
   ['stop', '중지'], ['start', '시작'], ['open', '열어'], ['run', '실행'],
   ['server', '서버'], ['terminal', '터미널'], ['console', '콘솔'], ['shell', '셸'],
 ];

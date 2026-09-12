@@ -16,6 +16,13 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
+/* D-126a's list, reused rather than restated. `저장` must not commit what the evidence basis
+ * refuses to record — a non-developer with no `.gitignore` would otherwise have JuQode put
+ * their `.env` into a permanent commit on the first press of the button. */
+const { pathspec } = require('../evidence/exclude');
+/* The git capability is contained to ONE module (`tests/unit.test.js`). This file asks it
+ * questions; it never spawns git itself. */
+const { worktreeDirty, hasIdentity } = require('../evidence/git');
 
 /** npm's own placeholder. A `test` script that is this one runs no tests (`19` §C4). */
 const PLACEHOLDER_TEST = /no test specified/i;
@@ -73,6 +80,22 @@ function hooksFor(scripts, name) {
   return out;
 }
 
+/* ── helpers for `qc.git.commit` ──────────────────────────────────────────────────────
+ * The two that need git live in `../evidence/git.js`, which is the one module allowed to spawn
+ * it; what is left here is filesystem work and a clock. */
+
+/** A folder with no `.git` yet: `git init` + `add -A` saves something only if a file exists. */
+function hasContent(root) {
+  try { return fs.readdirSync(root).some((n) => n !== '.git'); } catch { return null; }
+}
+
+/** The commit message is a CLOCK, never the user's words — `19` §C4 keeps typed text out of
+ *  the argv, and that has to stay true of the one rule that writes. */
+function stamp(d = new Date()) {
+  const two = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 function availability(ruleId, { root, devServer = null } = {}) {
   const no = (reason, data = {}) => ({ available: false, reason, data });
   const yes = (data = {}) => ({ available: true, reason: null, data });
@@ -93,6 +116,40 @@ function availability(ruleId, { root, devServer = null } = {}) {
     return yes({ command: 'git status --porcelain=v1 --branch',
                  argv: ['git', 'status', '--porcelain=v1', '--branch'],
                  cwd: root, readOnly: true });
+  }
+
+  if (ruleId === 'qc.git.commit') {
+    /* WBS-22b · 저장 — the FIRST rule that writes. `19` §C4's safety contract is kept whole:
+     * the argv is fixed here, the message is composed here from a clock, and nothing the user
+     * typed reaches either. There is still no code path from a sentence to a shell.
+     *
+     * `07` §1 forbids writing to the user's index and git directory WITHOUT THEIR INSTRUCTION;
+     * this is the instruction, given on a card that names the command first. */
+    const isRepo = fs.existsSync(path.join(root, '.git'));
+    const dirty = isRepo ? worktreeDirty(root, pathspec()) : hasContent(root);
+    if (dirty === null) return no('git_unavailable');
+    /* Nothing to save is not a failure and not an error — it is the ordinary answer to
+     * "저장해줘" right after a save. `12` §16: 사용 불가 ≠ 실패. */
+    if (!dirty) return no('no_changes');
+
+    const message = `JuQode 저장 · ${stamp()}`;
+    /* An unset `user.email` makes `git commit` fail with "Please tell me who you are", which is
+     * unactionable for the person this product is for. A fallback identity is injected ONLY
+     * when there is none — a user who has configured git keeps their own name on their own
+     * commits, which is the whole point of the config. */
+    const who = hasIdentity(root) ? [] : ['-c', 'user.name=JuQode', '-c', 'user.email=juqode@localhost'];
+    return yes({
+      command: `${isRepo ? '' : 'git init · '}git add -A · git commit -m "${message}"`,
+      argv: ['git', ...who, 'commit', '-m', message],
+      /* Run before the command the card named, in order, each one fatal. Staging cannot be part
+       * of the commit argv — there is no shell to chain them — and a `git commit -a` would miss
+       * every file the Work CREATED, which for this product is the common case. */
+      prepare: [
+        ...(isRepo ? [] : [['git', 'init', '-q']]),
+        ['git', 'add', '-A', '--', '.', ...pathspec()],
+      ],
+      init: !isRepo, message, excluded: true, cwd: root,
+    });
   }
 
   if (ruleId === 'qc.dev.stop') {
@@ -135,9 +192,19 @@ function availability(ruleId, { root, devServer = null } = {}) {
                  cwd: root, pm });
   }
 
+  if (ruleId === 'qc.deploy') {
+    /* WBS-22c · 배포. Exactly `qc.build`'s shape, and deliberately so: `19` §C4's 빌드 방법을
+     * 지어내지 않는다 is the rule, and inventing a deploy target would publish a
+     * non-developer's work somewhere they never chose. No `deploy` script, no rule. */
+    if (typeof scripts.deploy !== 'string' || !scripts.deploy.trim()) return no('no_script');
+    return yes({ command: `${pm} run deploy`, argv: [pm, 'run', 'deploy'],
+                 script: 'deploy', scriptBody: scripts.deploy, hooks: hooksFor(scripts, 'deploy'),
+                 cwd: root, pm });
+  }
+
   /* An id that is not one of the six. The rule set is CLOSED (`20`.quick_command_rule), so this
    * is a programming error rather than a user-facing state — but it must not be `available`. */
   return no('unknown_rule');
 }
 
-module.exports = { availability, packageManager, readPackage, PLACEHOLDER_TEST, LOCKFILES };
+module.exports = { availability, packageManager, readPackage, stamp, PLACEHOLDER_TEST, LOCKFILES };

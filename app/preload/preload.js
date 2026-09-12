@@ -56,6 +56,10 @@ contextBridge.exposeInMainWorld('juqode', {
   workChanges: (workId) => ipcRenderer.invoke('juqode:work-changes', workId),
   workSignals: (workId) => ipcRenderer.invoke('juqode:work-signals', workId),
 
+  /** WBS-19b — put this Work's changed files back to the before-basis. It WRITES to the
+   * worktree, which nothing else on this surface does; SC-03 confirms before calling it. */
+  workRevert: (workId) => ipcRenderer.invoke('juqode:work-revert', workId),
+
   /** WBS-20 — every Work this project started, newest first, with its orientation sentence. */
   history: (projectId) => ipcRenderer.invoke('juqode:history', projectId),
 

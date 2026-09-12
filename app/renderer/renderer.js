@@ -31,7 +31,9 @@ const state = { project: null, interpretation: null, recent: [], store: { ok: fa
                 /* TD-01 · the drawer and its Quick Command card. It lives OUTSIDE `#root`, so
                  * its state survives every screen render — `15`: 닫으면 화면 상태가 보존된다. */
                 drawerOpen: false, qcPhrase: '', qcCard: null, qcRun: null,
-                qcDiscover: null, qcOutputOpen: false, toWork: null, drawerProject: null,
+                qcDiscover: null, qcOutputOpen: false, toWork: null, drawerProject: null, termWarn: null,
+                /* WBS-02b · the folder had nothing in it when it was opened. */
+                projectEmpty: false,
                 /* WBS-25 · the shell line. `19` §C6 REC-010: the session belongs to the
                  * PROJECT, not to the drawer — closing the drawer keeps it, and changing the
                  * project ends it (`clearDrawerState`). */
@@ -74,6 +76,10 @@ const nav = {
   toWorkbench(project, interpretation = null, opts = {}) {
     state.project = project;
     state.interpretation = interpretation;
+    /* WBS-02b · carried only when the caller measured it. A navigation that is not an OPEN —
+     * coming back from SC-03, say — must not silently declare the folder full again, and must
+     * not declare it empty either: it did not look. */
+    if (opts.empty !== undefined) state.projectEmpty = Boolean(opts.empty);
     /* D-132: opening a project that already HAS an interpretation shows the Brief folded — the
      * user has read it before, and the screen's subject is the next request. A first open has
      * no interpretation yet, so it stays large. */
@@ -102,6 +108,9 @@ const nav = {
     if (focusIntent) field?.focus();
   },
   toWork(snapshot) {
+    /* WBS-02b · a Work exists, so the folder is no longer "an empty folder with nothing to
+     * explain" — whatever the disk said when it was opened. */
+    state.projectEmpty = false;
     /* WBS-37 · `17`: 보드의 Work 카드가 공유 요소로 모프해 SC-03 의 Work 가 된다.
      *
      * On the way from a submit the shared element is the pending placeholder (M-04: pending →

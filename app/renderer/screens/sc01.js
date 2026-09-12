@@ -58,6 +58,23 @@ export function renderSC01(root, api, nav, state) {
   recent.appendChild(el('h2', null, C.sc01.recent));
   if (state.recent.length === 0) {
     recent.appendChild(el('div', 'empty', C.sc01.noHistory));
+    /* WBS-02c · 처음 쓰는 사람.
+     *
+     * `15` SC-01 rules out creation, templates, clone, remote, workspaces, login and settings —
+     * and this is none of them. It is three sentences saying what the next three minutes look
+     * like, shown ONLY when the store has no project at all, and gone for good after the first
+     * one. There is no dismiss control because there is nothing to dismiss twice.
+     *
+     * It is here rather than in the hero on purpose: the hero holds the one primary action, and
+     * `15` SC-01 is explicit that there is exactly one. CANON_FINDINGS CF-23. */
+    const first = el('div', 'firstrun');
+    first.setAttribute('data-el', 'firstrun');
+    first.appendChild(el('div', 't', C.gap.firstRunTitle));
+    const ol = el('ol', 'sm');
+    for (const line of C.gap.firstRunSteps) ol.appendChild(el('li', '', line));
+    first.appendChild(ol);
+    first.appendChild(el('p', 'xs mut', C.gap.firstRunNote));
+    recent.appendChild(first);
   } else {
     const list = el('div', 'rows');
     for (const p of state.recent) list.appendChild(recentRow(p, () => run(() => api.openPath(p.path))));
@@ -85,7 +102,7 @@ export function renderSC01(root, api, nav, state) {
       openBtn.textContent = label;
     }
     main.querySelector('[data-el="fail"]')?.remove();
-    if (res?.ok) return nav.toWorkbench(res.project, res.interpretation ?? null);
+    if (res?.ok) return nav.toWorkbench(res.project, res.interpretation ?? null, { empty: res.empty === true });
     if (res?.reason === 'cancelled') return;            // 15: cancelling shows nothing
     main.appendChild(failCard(res, () => run(() => api.openPath(res.path)), () => run(() => api.openProject(), false)));
   }

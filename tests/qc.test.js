@@ -25,6 +25,8 @@ const R = path.resolve(__dirname, '..');
 const { code: srcOf, text: rawOf } = require(path.join(__dirname, 'src.js'));
 const { match, normalize, RULES, ruleById } = require(path.join(R, 'app/main/qc/rules.js'));
 const { availability, packageManager } = require(path.join(R, 'app/main/qc/availability.js'));
+/* The store's half of the closed set — `schema.sql` seeds Canon's six, migrations carry the rest. */
+const { MIGRATIONS } = require(path.join(R, 'app/main/db/db.js'));
 
 /* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
  * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
@@ -98,10 +100,8 @@ const CORPUS = [
   ['git reset --hard 해줘', 'unrecognized'],
   ['서버 켜줘 && rm -rf /', 'unrecognized'],
   ['sudo npm run dev', 'unrecognized'],
-  ['커밋해줘', 'unrecognized'],
 
   // ── negative.other
-  ['배포해줘', 'unrecognized'],
   ['서버 켜고 빌드도 해줘', 'unrecognized'],
   ['서버 다시 켜줘', 'unrecognized'],        // 재시작은 MVP 아님
   ['', 'unrecognized'],
@@ -112,6 +112,21 @@ const CORPUS = [
   ['테스트 서버 켜줘', 'unrecognized'],       // 두 규칙 대상어 충돌 → 어느 쪽도 residue 0 아님
   ['개발 서버 켜줘 (5173 포트로)', 'unrecognized'],  // 옵션 미지원
   ['테스트 실행해서 결과 알려줘', 'unrecognized'],    // 복문
+
+  // ── PM 판정 2026-09-12 · 저장 · 배포 (WBS-22b · 22c)
+  //
+  // Canon's corpus lists BOTH of the first two as 미인식, and it was right to for the rule set it
+  // was validated against: with no 저장 and no 배포 rule, the honest answer to either sentence
+  // was the Work path. The judgment that reopened F-17 is recorded in
+  // `app/main/db/db.js` migration 3 and in `docs/design/PRODUCT_GAPS.md`; `19` §C4's corpus has
+  // to be re-validated to match, and until it is these six rows are this repository's own.
+  ['커밋해줘', 'qc.git.commit'],
+  ['배포해줘', 'qc.deploy'],
+  ['저장', 'qc.git.commit'],
+  ['배포', 'qc.deploy'],
+  ['현재 상태 저장해줘', 'qc.git.commit'],
+  // …and the residue-zero rule still governs both: a second clause leaves characters behind.
+  ['배포하고 테스트도 해줘', 'unrecognized'],
 ];
 
 test('Canon\'s documented Quick Command corpus', () => {
@@ -236,22 +251,118 @@ test('정리/치워 is two readings, and the other one is a Work', () => {
 
 /* ── the rule set is closed ── */
 
-test('there are exactly the six rules `20` has a foreign key for', () => {
+test('the rule table and the STORE agree — a rule cannot be added in one place alone', () => {
+  /* `20`'s `quick_command_rule` is a foreign key, so a rule that exists only in `rules.js` is
+   * rejected by the engine on every run. The set is still closed; it is closed at what the
+   * schema seeds PLUS what the migrations add, because `schema.sql` is the verbatim copy of
+   * Canon's file and is not edited here (see `db.js`'s header). */
   const schema = rawOf('app/main/db/schema.sql');
   /* The statement is one line of `('a'),('b'),…;` — read to the semicolon, not to the first
    * closing paren, or this counts one rule and passes for the wrong reason. */
   const stmt = /insert into quick_command_rule values([^;]*);/.exec(schema);
   assert.ok(stmt, 'the schema no longer seeds quick_command_rule at all');
-  const declared = [...stmt[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
-  assert.strictEqual(declared.length, 6, 'the schema no longer declares six rules');
-  assert.deepStrictEqual(RULES.map((r) => r.id).sort(), declared.sort(),
-    'the rule table and the schema disagree — a seventh rule cannot be added in one place alone');
+  const seeded = [...stmt[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  assert.strictEqual(seeded.length, 6, 'the schema no longer seeds the six Canon rules');
+
+  const migrated = MIGRATIONS.flatMap((m) => (/insert (?:or ignore )?into quick_command_rule/.test(m.sql)
+    ? [...m.sql.matchAll(/'([^']+)'/g)].map((x) => x[1]) : []));
+  assert.deepStrictEqual(RULES.map((r) => r.id).sort(), [...seeded, ...migrated].sort(),
+    'the rule table and the store disagree — every rule needs a row the foreign key can find');
 });
 
-test('no rule is `write` class — `19` §C4 keeps those out of the MVP', () => {
+test('exactly two rules write, and both are the ones the PM opened', () => {
+  /* `19` §C4 kept write-class rules out of the MVP, and the reason was good: every one of them
+   * is a way for a sentence to change something. Two were opened by PM judgment (2026-09-12),
+   * and this test is what keeps that a DECISION rather than a drift — a third write rule
+   * arriving quietly fails here.
+   *
+   * `deploy` is its own class, not `write`: it changes nothing on this machine and cannot be
+   * taken back, which is a different promise from the one 저장 makes. */
+  const byRisk = (k) => RULES.filter((r) => r.risk === k).map((r) => r.id);
+  assert.deepStrictEqual(byRisk('write'), ['qc.git.commit']);
+  assert.deepStrictEqual(byRisk('deploy'), ['qc.deploy']);
   for (const r of RULES) {
-    assert.ok(['read', 'run'].includes(r.risk), `${r.id} is risk=${r.risk}`);
+    assert.ok(['read', 'run', 'write', 'deploy'].includes(r.risk), `${r.id} is risk=${r.risk}`);
   }
+});
+
+test('저장 never stages what the evidence basis refuses to record', () => {
+  /* D-126a's exclusion list exists because a user who never wrote a `.gitignore` would
+   * otherwise get plaintext secrets in permanent evidence. A 저장 button that committed the
+   * same files would reintroduce the hole through the other door — and a commit is worse than
+   * a basis, because it is the user's own history and they may push it. */
+  const { pathspec } = require(path.join(R, 'app/main/evidence/exclude.js'));
+  const dir = tempDir('juqode-commit-');
+  fs.writeFileSync(path.join(dir, 'app.js'), 'x\n');
+  const a = availability('qc.git.commit', { root: dir });
+  assert.strictEqual(a.available, true);
+  const add = a.data.prepare.find((v) => v[1] === 'add');
+  assert.ok(add, 'nothing stages the files');
+  for (const spec of pathspec()) assert.ok(add.includes(spec), `add -A does not exclude ${spec}`);
+});
+
+test('저장 keeps typed text out of the argv — the message is a clock', () => {
+  /* `19` §C4's safety argument is that no free-text sentence reaches a spawn. The first rule
+   * that WRITES is exactly where that would quietly stop being true. */
+  const dir = tempDir('juqode-commit-msg-');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'x\n');
+  const a = availability('qc.git.commit', { root: dir });
+  assert.match(a.data.message, /^JuQode 저장 · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  /* The WHOLE vector, not a spot check: every element is named here, so a phrase appended to
+   * it anywhere fails this rather than hiding among arguments nobody asserted on. */
+  assert.deepStrictEqual(a.data.argv.slice(-3), ['commit', '-m', a.data.message]);
+  assert.strictEqual(a.data.argv[0], 'git');
+  /* …and `availability()` is never handed the user's words in the first place — the handler
+   * passes `{ root, devServer }` and nothing else. Structure, not discipline. */
+  assert.ok(!/phrase/.test(srcOf('app/main/qc/availability.js')),
+    'availability() can see the phrase the user typed');
+});
+
+test('저장: 바뀐 게 없으면 사용 불가이고 실패가 아니다', () => {
+  const dir = tempDir('juqode-commit-clean-');
+  /* An empty folder with no `.git`: `git init` + `add -A` would save nothing. */
+  assert.strictEqual(availability('qc.git.commit', { root: dir }).reason, 'no_changes');
+});
+
+test('저장: 제외 대상만 바뀐 저장소는 `저장할 것 없음` 이지 실패가 아니다', () => {
+  /* The dirty check and the staging step must ask the SAME question. If the check says "there
+   * is something" and the staging excludes all of it, `git commit` fails with an English
+   * `nothing to commit` painted red — about a save that was never possible. */
+  const { execFileSync } = require('node:child_process');
+  const dir = tempDir('juqode-commit-excl-');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'x\n');
+  execFileSync('git', ['init', '-q'], { cwd: dir, env });
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '-A'], { cwd: dir, env });
+  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'base'], { cwd: dir, env });
+  /* The ONLY change is an excluded path. */
+  fs.writeFileSync(path.join(dir, '.env'), 'SECRET=1\n');
+  assert.strictEqual(availability('qc.git.commit', { root: dir }).reason, 'no_changes');
+});
+
+test('no_script 로 끝나는 모든 규칙에는 거기서 나가는 길이 있다', () => {
+  /* WBS-23c · `19` §C4 forbids inventing a script, which is right — and leaves the card as a
+   * dead end for exactly the projects that need it most. Writing a script IS a file change, so
+   * the way out is a Work. This test is what keeps a NEW script-based rule from shipping
+   * without one: it derives the list from `availability()` rather than naming it. */
+  const C = require(path.join(R, 'app/renderer/copy.js'));
+  const bare = project({ 'package.json': JSON.stringify({ name: 'x' }) });
+  const dead = RULES.map((r) => r.id)
+    .filter((id) => availability(id, { root: bare }).reason === 'no_script');
+  assert.ok(dead.length >= 2, `no rule reaches no_script — the check is testing nothing (${dead})`);
+  for (const id of dead) {
+    assert.ok(C.C.gap.qcSetupIntent[id], `${id} can end at no_script with no way out`);
+  }
+});
+
+test('배포: package.json 에 deploy 스크립트가 없으면 방법을 지어내지 않는다', () => {
+  const withOut = project({ 'package.json': JSON.stringify({ scripts: { build: 'tsc' } }) });
+  assert.strictEqual(availability('qc.deploy', { root: withOut }).reason, 'no_script');
+  const withIt = project({ 'package.json': JSON.stringify({ scripts: { deploy: 'vercel --prod' } }) });
+  const a = availability('qc.deploy', { root: withIt });
+  assert.strictEqual(a.available, true);
+  assert.deepStrictEqual(a.data.argv, ['npm', 'run', 'deploy']);
+  assert.strictEqual(a.data.scriptBody, 'vercel --prod');
 });
 
 test('exactly one rule is long-running, and it names its stop rule', () => {
@@ -734,7 +845,7 @@ test('the discoverability list names every rule and why each cannot run', () => 
   /* `15` TD-01: 전부 사용 불가 여도 이유와 함께 나열한다. */
   const b = qcBench({ });                                    // no package.json, no .git
   const r = b.h['juqode:qc-list'](null, b.project.id);
-  assert.strictEqual(r.rules.length, 6, 'the list is the closed set');
+  assert.strictEqual(r.rules.length, RULES.length, 'the list is the closed set');
   for (const rule of r.rules) {
     if (rule.available) continue;
     assert.ok(rule.reason, `${rule.id} is unavailable and says nothing about why`);

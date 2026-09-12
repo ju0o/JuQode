@@ -29,6 +29,9 @@
 const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { mask, OUTPUT_LIMIT, DRAIN_MS, stopGroup } = require('../qc/run.js');
+/* WBS-25b · 이 줄이 답할 수 없는 질문을 할 수 있는가. **판단만 하고 아무것도 막지 않는다** —
+ * 왜 이것이 이 파일 안에 있으면 안 되는지는 `./tty.js` 머리말에 적혀 있다. */
+const { needsTty } = require('./tty.js');
 
 /* 마커 프로토콜 — 한 줄이 어디서 끝났고 무엇을 반환했는지 아는 유일한 방법.
  *
@@ -201,7 +204,8 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
        * 끝나는 줄에 이어 붙이면 마커가 그 줄의 일부가 되어 영영 오지 않는다. */
       child.stdin.write(`${text}\nprintf '\\n%s %s\\n' ${JSON.stringify(mark)} "$?"\n`);
       flush(false);
-      return { ok: true, id, line: text };
+      /* 줄은 이미 셸에 들어갔다 — `needsTty` 는 아무것도 막지 않는다. 답만 한 줄 더 들고 간다. */
+      return { ok: true, id, line: text, warn: needsTty(text) ? 'no-tty' : null };
     },
     /* 작업 제어가 없으니 이것은 **세션을 끝낸다.** `../qc/run.js` 의 SIGTERM→5초→SIGKILL 을
      * 그대로 쓴다 — 같은 계약을 두 번 구현하지 않는다. */

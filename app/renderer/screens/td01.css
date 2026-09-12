@@ -153,3 +153,7 @@
 /* `18` `term.out` — the name of the pane below it. Quiet: it is a label on a region the user is
  * already looking at, not an announcement. */
 .td01-outlabel { padding-bottom: 2px; }
+
+/* WBS-22c · 배포 카드의 경고 한 줄. 실패가 아니므로 빨강이 아니고(`16` §2.1), 읽히지 않으면
+ * 뜻이 없으므로 본문색도 아니다 — 주의 색은 이미 디자인 시스템이 갖고 있다. */
+.td01-warn { border-left: 3px solid var(--wait); padding-left: 8px; }

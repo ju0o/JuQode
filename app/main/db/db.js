@@ -43,6 +43,21 @@ const MIGRATIONS = [
    * seeds version 1, so a fresh store runs this migration exactly like an old one. One path,
    * exercised on every first run, instead of a second path only old stores ever take. */
   { to: 2, sql: 'alter table change_group add column source_ref text;' },
+  /* 3 — two more Quick Command rules. `20`'s `quick_command_rule` is a foreign key, so a rule
+   * cannot be added to `qc/rules.js` alone; the store has to agree or every run of it is
+   * rejected by the engine.
+   *
+   * F-17 said the set was CLOSED at six, and `19` §C4's validated corpus lists `커밋해줘` and
+   * `배포해줘` as 미인식 on purpose. Both are reopened here by PM judgment (2026-09-12): a
+   * product for non-developers that can READ the Git state but never write one leaves its user
+   * with no way to mark a point to return to, and no way to put what they built in front of
+   * anyone. Canon `19` §C4 and `20` must be updated to match — see
+   * `docs/design/BACKEND_A.md` §Canon 변경 요청. Until they are, this migration is the only
+   * place the new ids exist, and `schema.sql` stays the verbatim copy `20` publishes. */
+  /* `or ignore`: a migration that cannot be applied twice is a migration that turns a store
+   * into `db-corrupt` the first time anything replays it. There is nothing to lose by being
+   * idempotent — the rows are a fixed lookup set, not user data. */
+  { to: 3, sql: "insert or ignore into quick_command_rule values ('qc.git.commit'),('qc.deploy');" },
 ];
 /* A getter, not a constant: computed at module load it could never see a migration a test
  * pushes, so the whole migrate loop below was unreachable from any test. */

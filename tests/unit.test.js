@@ -274,7 +274,11 @@ test('capability containment: each privileged capability lives in exactly one mo
                        'app/main/term/session.js'],
     /* the ONLY synchronous spawn in the product: Windows cancel, which has no process group
        to signal and so must call `taskkill /T` on the child's own pid */
-    'spawnSync(':     ['app/main/claude/session.js'],
+    /* `qc/run.js` joined this list with WBS-22b's `prepare` steps (PM 판정 2026-09-12). It is
+     * not a new spawner — it already owns `spawn(` — and the capability is unchanged: an argv
+     * from `qc/availability`, never a shell, never anything typed. Synchronous because a
+     * `git add` finishes in milliseconds and a half-staged index is not a state worth having. */
+    'spawnSync(':     ['app/main/claude/session.js', 'app/main/qc/run.js'],
     'taskkill':       ['app/main/claude/session.js'],
   };
   // never, anywhere: nothing in the built packages needs these, and each is a real hazard

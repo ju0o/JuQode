@@ -42,7 +42,7 @@ function baseEnv() {
   return env;
 }
 
-function git(args, { cwd, env, maxBuffer = 256 * 1024 * 1024, raw = false } = {}) {
+function git(args, { cwd, env, maxBuffer = 256 * 1024 * 1024, raw = false, encoding = 'utf8' } = {}) {
   const out = execFileSync('git', [
     '--no-optional-locks',
     /* `GIT_INDEX_FILE` redirects the index, but a split index writes its SHARED half into the
@@ -51,7 +51,7 @@ function git(args, { cwd, env, maxBuffer = 256 * 1024 * 1024, raw = false } = {}
     '-c', 'core.splitIndex=false',
     ...args,
   ], {
-    cwd, env: { ...baseEnv(), ...env }, encoding: 'utf8', maxBuffer,
+    cwd, env: { ...baseEnv(), ...env }, encoding, maxBuffer,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return raw ? out : out.trim();
@@ -365,4 +365,131 @@ const treePaths = (root, store, ref) => git(['ls-tree', '-r', '--name-only', ref
   },
 }).split('\n').filter(Boolean);
 
-module.exports = { capture, diff, changedPaths, fileAt, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };
+/* ── WBS-22b · what `저장` has to ask git before it can offer itself ────────────────────
+ *
+ * These live HERE, not in `qc/availability.js`, because the git capability is contained to one
+ * module by design (`tests/unit.test.js` · capability containment): a second file that can
+ * spawn git is a second file that has to be read to know what JuQode can do to a repository.
+ *
+ * Each one answers `null` when it could not ask at all. A question we could not put becomes
+ * `git_unavailable` on screen, never a confident "no".
+ */
+function ask(root, args) {
+  try { return git(args, { cwd: root, raw: true }); }
+  catch { return null; }
+}
+
+/**
+ * Is there anything to save? `null` when git could not be asked.
+ *
+ * The caller passes the SAME pathspec the staging step will use. Without it the two questions
+ * differ: a worktree dirty only because of a `.env` reads as "there is something to save", the
+ * excluded staging then stages nothing, and `git commit` fails with `nothing to commit` — an
+ * English error, painted red, about a 저장 that was never possible. One question, asked once.
+ */
+function worktreeDirty(root, pathspec = []) {
+  const out = ask(root, ['status', '--porcelain=v1', '--', '.', ...pathspec]);
+  return out === null ? null : out.trim() !== '';
+}
+
+/** Does this machine have a committer identity? Without one `git commit` fails with
+ *  "Please tell me who you are", which is not a sentence this product's user can act on. */
+function hasIdentity(root) {
+  const email = ask(root, ['config', '--get', 'user.email']);
+  const name = ask(root, ['config', '--get', 'user.name']);
+  return Boolean(email && email.trim() && name && name.trim());
+}
+
+/* ── WBS-19b · 되돌리기 ─────────────────────────────────────────────────────────────
+ *
+ * D-115 says there is no undo button, and about a GLOBAL undo it is right: nothing can promise
+ * a machine returns to a previous moment. What follows makes a much narrower claim, and it is
+ * one the evidence already in the store can actually carry — **the files this Work changed, put
+ * back to the bytes the before-basis recorded.**
+ *
+ * Three limits are structural and the copy has to say all three, because none of them can be
+ * fixed here:
+ *   1. Only files IN the basis. `exclude.js` keeps `.env*`, `*.pem`, `node_modules` and nested
+ *      repositories out of every basis (D-126a), so they are not restored — the basis never
+ *      held them.
+ *   2. Only file CONTENT. A command the Work ran (an install, a migration, a write to a
+ *      database) left effects outside the worktree and nothing here reaches them.
+ *   3. Edits the USER made after the Work ended are overwritten. The before-basis is the only
+ *      thing this knows about; it has no record of anything that happened afterwards.
+ *
+ * `07` §1 forbids writing to the user's INDEX or GIT DIRECTORY, and nothing here does: this
+ * writes to the worktree, which is the user's own files, on the user's explicit instruction.
+ * That is the one write JuQode makes and it is the point of the feature.
+ */
+
+/** One file's BYTES at a basis, or null when it is absent on that side (an add or a delete).
+ *  `fileAt` decodes as UTF-8, which silently corrupts anything that is not text. */
+function bytesAt(root, store, ref, filePath) {
+  const env = {
+    GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
+  };
+  try { return git(['show', `${ref}:${filePath}`], { cwd: root, env, raw: true, encoding: 'buffer' }); }
+  catch { return null; }
+}
+
+/** `path → mode` for one tree. `-z` because a path with a non-ASCII name — the ordinary case
+ *  for this product — is C-quoted by the default output and would not match the worktree. */
+function treeModes(root, store, ref) {
+  const env = {
+    GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
+  };
+  const out = git(['ls-tree', '-r', '-z', ref], { cwd: root, env, raw: true });
+  const modes = new Map();
+  for (const entry of out.split('\0')) {
+    /* `<mode> SP <type> SP <object> TAB <path>` */
+    const m = /^(\d{6}) \w+ [0-9a-f]+\t([\s\S]*)$/.exec(entry);
+    if (m) modes.set(m[2], parseInt(m[1].slice(-4), 8));
+  }
+  return modes;
+}
+
+/**
+ * Put every file this Work changed back to its before-basis content.
+ *
+ * @returns {{path:string, action:'restored'|'removed'|'failed'}[]} one entry per file, in the
+ *   order the basis names them. A `failed` entry is REPORTED, never swallowed: a partial
+ *   restore that claimed success would be the worst possible outcome of this feature.
+ */
+function restore(root, store, beforeRef, afterRef) {
+  const paths = changedPaths(root, store, beforeRef, afterRef);
+  const modes = treeModes(root, store, beforeRef);
+  const done = [];
+
+  for (const rel of paths) {
+    const abs = path.resolve(root, rel);
+    /* The list comes from our own tree, so this should never fire — which is exactly why it is
+     * here. It makes "nothing outside the project is written" a property of the code rather
+     * than a property of the data. */
+    if (abs !== root && !abs.startsWith(root + path.sep)) { done.push({ path: rel, action: 'failed' }); continue; }
+
+    const bytes = bytesAt(root, store, beforeRef, rel);
+    if (bytes === null) {
+      /* Absent in the before tree: the Work created this file, so removing it IS the restore.
+       * `force` so an already-deleted path is not an error — the end state is what matters. */
+      try { fs.rmSync(abs, { force: true }); done.push({ path: rel, action: 'removed' }); }
+      catch { done.push({ path: rel, action: 'failed' }); }
+      continue;
+    }
+
+    try {
+      const existed = fs.existsSync(abs);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, bytes);
+      /* A file the Work DELETED is being recreated, and a new file gets the umask's mode — an
+       * executable script would come back without its `+x` and fail at the next run with a
+       * permission error that names nothing. An existing file keeps the mode it has. */
+      if (!existed && modes.has(rel)) { try { fs.chmodSync(abs, modes.get(rel)); } catch { /* best effort */ } }
+      done.push({ path: rel, action: 'restored' });
+    } catch { done.push({ path: rel, action: 'failed' }); }
+  }
+  return done;
+}
+
+module.exports = { capture, diff, changedPaths, fileAt, bytesAt, restore, worktreeDirty, hasIdentity, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };

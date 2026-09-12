@@ -267,3 +267,33 @@ test('사용자가 친 줄은 그대로 간다 — 걸러내는 척하지 않는
       `the terminal line has grown a filter (${forbidden}) — 19 §C4 forbids the pretence`);
   }
 });
+
+test('WBS-25b · 경고는 경고일 뿐 — 일치한 줄도 글자 하나 안 바뀌고 그대로 실행된다', async () => {
+  /* `./tty.js` 는 프로그램 이름 목록을 갖고 있고, 그 목록이 언젠가 차단 목록이 되는 것이
+   * 위 검사가 막으려는 것이다. 위 검사는 그 이름들이 셸 파일에 없다는 것만 볼 수 있으므로,
+   * 아무것도 막히지 않는다는 것은 **행동으로** 측정한다: 일치하는 줄을 보내고, 셸이 실제로
+   * 그 줄을 실행했는지 본다. 이것이 깨지면 제품은 걸러내기 시작한 것이다. */
+  const { needsTty } = require(path.join(R, 'app/main/term/tty.js'));
+  /* 이 줄은 `needsTty` 가 참이라고 답하는 모양이면서, 실제로는 TTY 를 쓰지 않는다 —
+   * 목록에 든 프로그램을 정말로 부르면 검사가 환경에 따라 달라진다. */
+  const line = 'git push --help-does-not-exist 2>/dev/null; echo RAN_ANYWAY';
+  assert.strictEqual(needsTty(line), true, '이 줄이 경고 대상이 아니면 검사가 아무것도 안 한다');
+
+  const s = session(tempDir('juqode-term-warn'));
+  try {
+    const w = s.write(line);
+    assert.strictEqual(w.ok, true, '경고 대상인 줄이 거절되었다 — 그것은 차단이다');
+    assert.strictEqual(w.line, line, '보낸 줄이 바뀌었다 — 그것은 필터다');
+    assert.strictEqual(w.warn, 'no-tty', '경고가 붙지 않았다');
+    /* 그리고 셸이 그 줄을 정말로 실행했는지 — 반환값만 보면 쓰는 시늉도 통과한다. */
+    const ran = await new Promise((resolve) => {
+      const off = s.watch((u) => { if (u.code != null) { off(); resolve(u); } });
+    });
+    assert.match(ran.output ?? '', /RAN_ANYWAY/, '줄이 셸에서 실제로 실행되지 않았다');
+  } finally { s.stop(); }
+});
+
+test('WBS-25b · 목록에 없는 줄에는 경고가 붙지 않는다', () => {
+  const s = session(tempDir('juqode-term-nowarn'));
+  try { assert.strictEqual(s.write('echo hi').warn, null); } finally { s.stop(); }
+});
