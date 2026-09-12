@@ -100,13 +100,22 @@ function renderDrawer(host, api, state, repaint) {
 function qcRegion(api, state, repaint) {
   const region = el('div', 'td01-qc');
 
+  /* WBS-22d · 두 덩어리.
+   *
+   * 전에는 라벨·입력칸·결과 카드가 모두 한 스크롤 영역 안에 있었다. 결과 카드나 목록이 길어지면
+   * **입력칸이 위로 스크롤아웃돼 사라진다** — 바로 아래 셸 칸은 고정되어 있는데(`.td01-term` 은
+   * `flex: 0 0 auto`) 이 칸만 그렇지 않았고, 같은 서랍 안의 두 Input 이 서로 다르게 행동했다.
+   * `15` 는 둘 다 Input 이라고 말한다. 둘 다 제자리에 있어야 한다. */
+  const head = el('div', 'td01-qchead');
+  const bodyBox = el('div', 'td01-qcbody');
+
   const label = el('div', 'td01-qclabel');
   label.appendChild(el('span', 'kicker', C.term.qcTitle));
   /* `18` term.qcHint says what the engine is; qc.notClaude says who is acting. Both, because
    * D-134 separates this field from SC-02's and the difference has to be readable. */
   label.appendChild(el('span', 'xs mut', C.term.qcHint));
   label.appendChild(el('span', 'xs mut', C.qc.notClaude));
-  region.appendChild(label);
+  head.appendChild(label);
 
   const row = el('div', 'td01-qcrow');
   const field = el('input', 'td01-qcinput');
@@ -128,19 +137,42 @@ function qcRegion(api, state, repaint) {
   field.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); route(); } });
   row.appendChild(field);
   row.appendChild(btn('btn sm pri', C.term.qcSend, route));
-  region.appendChild(row);
+  head.appendChild(row);
+  region.appendChild(head);
 
-  if (state.qcRun) region.appendChild(runCard(api, state, repaint));
-  else if (state.qcCard) region.appendChild(routeCard(api, state, repaint));
+  if (state.qcRun) bodyBox.appendChild(runCard(api, state, repaint));
+  else if (state.qcCard) bodyBox.appendChild(routeCard(api, state, repaint));
   /* `15` TD-01: nothing run yet is a STATE, and it says what to do — `18` `term.qcEmpty`.
    * An empty region says nothing, and a drawer that opens on nothing looks broken. */
-  else region.appendChild(el('p', 'sm mut', C.term.qcEmpty));
-  if (state.qcDiscover) region.appendChild(discoverCard(state, repaint));
-  else region.appendChild(btn('btn sm ghost rec td01-discover', C.qc.discover, async () => {
+  else bodyBox.appendChild(el('p', 'sm mut', C.term.qcEmpty));
+
+  /* WBS-22d · 목록에서 고르면 그 말이 칸에 적히고 라우팅된다.
+   *
+   * 전에는 목록의 모든 행이 `span` 이었다. 무엇을 할 수 있는지 보여 주고서 **실행할 방법은 주지
+   * 않았고**, 사용자는 목록을 닫고 그 문장을 직접 타이핑해야 했다. 규칙이 여덟 개가 된 지금 그
+   * 왕복은 이 서랍에서 가장 비싼 동작이다.
+   *
+   * 문구를 칸에 적어 넣는 것이 핵심이다 — 바로 실행해 버리면 `19` §C4 의 설명-확인을 건너뛰고,
+   * 사용자는 다음번에 뭐라고 말해야 하는지도 여전히 모른다. 이렇게 하면 카드가 뜨고(확인은
+   * 그대로 사람이 한다), 칸에는 다음에 직접 칠 수 있는 말이 남는다. */
+  const pick = async (id) => {
+    const phrase = C.gap.qcExample[id];
+    if (!phrase) return;
+    field.value = phrase;
+    state.qcPhrase = phrase;
+    state.qcDiscover = null;
+    state.qcRun = null;
+    state.qcCard = await api.qcRoute(state.project.id, phrase);
+    repaint();
+  };
+
+  if (state.qcDiscover) bodyBox.appendChild(discoverCard(state, repaint, pick));
+  else bodyBox.appendChild(btn('btn sm ghost rec td01-discover', C.qc.discover, async () => {
     state.qcDiscover = await api.qcList(state.project.id);
     repaint();
   }));
 
+  region.appendChild(bodyBox);
   return region;
 }
 
@@ -568,15 +600,25 @@ function runCard(api, state, repaint) {
 }
 
 /* ── 무엇을 말할 수 있나요? ── */
-function discoverCard(state, repaint) {
+function discoverCard(state, repaint, onPick) {
   const card = el('article', 'card td01-card');
   card.setAttribute('data-el', 'qc-discover');
   card.appendChild(el('div', 'ct', C.qc.discoverTitle));
+  card.appendChild(el('p', 'xs mut', C.gap.qcPickHint));
 
   for (const rule of state.qcDiscover.rules ?? []) {
-    const row = el('div', 'td01-rule');
-    row.appendChild(el('span', 'sm', C.gap.qcUnderstood[rule.id] ?? rule.id));
+    const name = C.gap.qcUnderstood[rule.id] ?? rule.id;
+    /* 지금 할 수 있는 것만 고를 수 있다. 사용 불가인 행은 이유를 읽는 자리이지 누르는 자리가
+     * 아니고, `15` DS §1 은 효과 없는 컨트롤을 동작으로 치지 않는다. */
+    const row = rule.available && onPick
+      ? btn('td01-rule td01-pick', '', () => onPick(rule.id))
+      : el('div', 'td01-rule');
+    row.appendChild(el('span', 'sm', name));
     row.appendChild(el('span', 'grow'));
+    /* 누를 수 있는 행에는 그 말이 무엇인지 함께 보인다 — 다음엔 직접 칠 수 있도록. */
+    if (rule.available && onPick && C.gap.qcExample[rule.id]) {
+      row.appendChild(el('span', 'xs mut td01-example', `"${C.gap.qcExample[rule.id]}"`));
+    }
     /* `15` TD-01: 전부 사용 불가여도 이유와 함께 나열한다. */
     row.appendChild(el('span', `chip ${rule.available ? 'ok' : 'unavail'}`,
                        rule.available ? C.qc.available : C.qc.notAvailable));

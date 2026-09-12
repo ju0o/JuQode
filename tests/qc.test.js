@@ -340,6 +340,44 @@ test('저장: 제외 대상만 바뀐 저장소는 `저장할 것 없음` 이지
   assert.strictEqual(availability('qc.git.commit', { root: dir }).reason, 'no_changes');
 });
 
+test('제외를 말하는 문구가 코드보다 많이 주장하지 않는다', () => {
+  /* MEASURED: 되돌리기와 저장의 문구가 `node_modules` 를 제외 목록으로 적고 있었는데,
+   * `exclude.js` 의 목록에는 그런 항목이 없다. 그것이 빠지는 이유는 **`.gitignore`** 이고,
+   * `.gitignore` 가 없는 프로젝트 — 이 제품의 사용자가 처음 만드는 폴더가 바로 그것이다 —
+   * 에서는 그대로 들어간다. 안전하다고 말해 놓고 안 지키는 것이 이 저장소가 가장 싫어하는
+   * 종류의 거짓이므로, 이름을 적으려면 코드가 그 이름을 갖고 있어야 한다. */
+  const { GLOBS } = require(path.join(R, 'app/main/evidence/exclude.js'));
+  const C = require(path.join(R, 'app/renderer/copy.js'));
+  const claims = [...C.C.gap.revertLimits, C.C.gap.qcMeaning['qc.git.commit']].join('\n');
+
+  /* 코드가 갖고 있지 않은 이름을 문구가 무조건적으로 적으면 안 된다. */
+  for (const name of ['node_modules', 'dist', 'build']) {
+    assert.ok(!GLOBS.some((g) => g.includes(name)),
+      `이 검사가 낡았다 — exclude.js 가 이제 ${name} 를 갖고 있다`);
+    assert.ok(!claims.includes(name),
+      `문구가 ${name} 를 제외한다고 말하지만 exclude.js 는 그 항목을 갖고 있지 않다`);
+  }
+  /* …그리고 실제로 갖고 있는 것은 말해도 된다. 둘 다 사실이어야 한다. */
+  assert.ok(claims.includes('.env'), '문구가 실제 제외 대상(.env)을 말하지 않는다');
+  assert.ok(claims.includes('.gitignore'), '문구가 무시 파일이 빠지는 진짜 이유를 말하지 않는다');
+});
+
+test('목록이 가르치는 문구는 실제로 그 규칙으로 인식된다', () => {
+  /* WBS-22d · 목록에서 고르면 `qcExample` 의 문장이 입력칸에 적힌다. 그 문장이 제 규칙으로
+   * 돌아오지 않으면 제품이 사용자에게 **틀린 말을 가르치는** 것이 된다 — 다음번에 그대로 쳤을
+   * 때 미인식이 나오거나, 더 나쁘게는 다른 규칙이 걸린다. 규칙의 낱말 목록은 바뀔 수 있으므로
+   * 이 검사가 그 둘을 묶어 둔다. */
+  const C = require(path.join(R, 'app/renderer/copy.js'));
+  const examples = C.C.gap.qcExample;
+  assert.deepStrictEqual(Object.keys(examples).sort(), RULES.map((r) => r.id).sort(),
+    '규칙과 예시 문구가 일대일이 아니다 — 목록의 어떤 줄은 누를 수 없거나, 없는 규칙을 가르친다');
+  for (const [id, phrase] of Object.entries(examples)) {
+    const r = match(phrase);
+    assert.strictEqual(r.kind, 'qc', `"${phrase}" 는 ${r.kind} 다 (${id})`);
+    assert.strictEqual(r.id, id, `"${phrase}" 가 ${r.id} 로 갔다 — 가르치는 말과 도착지가 다르다`);
+  }
+});
+
 test('no_script 로 끝나는 모든 규칙에는 거기서 나가는 길이 있다', () => {
   /* WBS-23c · `19` §C4 forbids inventing a script, which is right — and leaves the card as a
    * dead end for exactly the projects that need it most. Writing a script IS a file change, so

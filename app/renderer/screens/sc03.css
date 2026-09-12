@@ -82,7 +82,10 @@
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
-@media (max-width: 900px) {
+/* 쉬핑 최소 폭은 880 px(`window.js`)인데 경계가 900 이어서 900~1023 구간이 6칼럼으로 남아
+   있었다 — 950 px 창에서 칼럼 하나가 145 px 다. sc02 와 같은 경계로 맞춘다. 1024 는 e2e 가
+   같은 서열을 요구하며 재는 폭이므로 건드리지 않는다. */
+@media (max-width: 1023px) {
   .sc03 { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 20px; }
   .sc03 .c-l, .sc03 .c-wide, .sc03 .c-m { grid-column: span 2; grid-row: span 1; }
 }

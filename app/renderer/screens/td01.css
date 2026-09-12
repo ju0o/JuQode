@@ -45,7 +45,12 @@
 
 /* `min-height: 0` or a flex child refuses to shrink below its content and pushes the shell
    line off the bottom of the drawer — MEASURED: the input was cut by the window edge. */
-.td01-qc { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+/* WBS-22d · 입력칸은 제자리에 있고, 결과만 스크롤한다.
+   전에는 라벨·입력칸·결과가 한 스크롤 영역 안에 있어서 카드가 길어지면 입력칸이 위로 사라졌다.
+   바로 아래 셸 칸은 고정되어 있었으므로, 같은 서랍의 두 Input 이 서로 다르게 행동했다. */
+.td01-qc { flex: 1 1 auto; min-height: 0; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.td01-qchead { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; }
+.td01-qcbody { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .td01-qclabel { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .td01-qclabel .kicker { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--juq); }
 
@@ -89,6 +94,16 @@
 }
 
 .td01-rule { display: flex; align-items: center; gap: 8px; }
+/* 누를 수 있는 행. 버튼이지만 목록의 한 줄로 읽혀야 하므로 버튼의 기본 표면을 갖지 않는다 —
+   `16` §1 의 카드 위에 또 하나의 표면을 얹으면 무엇이 눌리는 것인지 오히려 흐려진다. */
+.td01-pick {
+  font: inherit; text-align: left; width: 100%;
+  background: transparent; border: 1px solid transparent; border-radius: var(--r-inner);
+  padding: 4px 6px; margin: 0 -6px; color: inherit; cursor: pointer;
+}
+.td01-pick:hover { background: var(--card2); border-color: var(--line); }
+.td01-pick:focus-visible { outline: 2px solid var(--juq); outline-offset: 1px; }
+.td01-example { font-family: var(--font-mono); }
 .td01-rule .grow { flex: 1; }
 .td01-why { padding-left: 2px; }
 .td01-discover { align-self: flex-start; }
@@ -157,3 +172,18 @@
 /* WBS-22c · 배포 카드의 경고 한 줄. 실패가 아니므로 빨강이 아니고(`16` §2.1), 읽히지 않으면
  * 뜻이 없으므로 본문색도 아니다 — 주의 색은 이미 디자인 시스템이 갖고 있다. */
 .td01-warn { border-left: 3px solid var(--wait); padding-left: 8px; }
+
+/* ── 짧은 창 ───────────────────────────────────────────────────────────────────────────
+   창 최소 높이는 600 px(`window.js`)이고, 48vh 는 거기서 288 px 다. 머리·배너·셸 칸을 빼면
+   Quick Command 에 60 px 쯤 남아 카드 한 장이 들어가지 않는다 — 서랍이 열려도 아무것도
+   읽을 수 없었다. 짧은 창에서는 서랍이 화면을 더 쓰고, 셸 출력이 먼저 양보한다. */
+@media (max-height: 780px) {
+  .td01 { height: min(64vh, 460px); }
+  .td01-termout { max-height: 60px; }
+  .td01-output { max-height: 26vh; }
+}
+@media (max-height: 660px) {
+  .td01 { height: 72vh; }
+  .td01-banner { padding: 6px 16px; }
+  .td01-termout { max-height: 44px; }
+}

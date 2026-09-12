@@ -1532,6 +1532,49 @@ const results = await cdp(async ({ send, evalJs }) => {
   out.qcDiscover = await evalJs(`document.querySelector('[data-el="qc-discover"]')?.innerText ?? null`);
   out.qcDiscoverRows = await evalJs(`document.querySelectorAll('[data-el="qc-discover"] .td01-rule').length`);
 
+  /* WBS-22d · 목록의 줄을 고르면 그 말이 칸에 적히고 설명 카드가 뜬다 — 실행되지는 않는다.
+   * 전에는 모든 줄이 span 이어서, 무엇을 할 수 있는지 보여 주고 실행할 방법은 주지 않았다. */
+  out.qcPickable = await evalJs(`document.querySelectorAll('[data-el="qc-discover"] .td01-pick').length`);
+  await evalJs(`document.querySelector('[data-el="qc-discover"] .td01-pick')?.click()`);
+  await sleep(700);
+  out.qcAfterPick = await evalJs(`JSON.stringify({
+    field: document.querySelector('[data-el="qc-input"]')?.value ?? null,
+    card: Boolean(document.querySelector('[data-el="qc-card"]')),
+    ran: document.querySelectorAll('[data-el="qc-run"]').length,
+    listClosed: document.querySelector('[data-el="qc-discover"]') === null })`);
+
+  /* ── 쉬핑 최소 창에서도 두 Input 이 다 보이는가 ────────────────────────────────────────
+   * `window.js` 는 880×600 아래로 줄어들지 못하게 하고, 그것이 사용자가 실제로 만들 수 있는
+   * 가장 작은 창이다. 서랍은 그 창에서 Quick Command 칸과 셸 칸을 **둘 다** 화면 안에 두어야
+   * 한다 — `15` 는 둘 다 Input 이라고 말하고, 보이지 않는 Input 은 Input 이 아니다.
+   *
+   * 목록을 다시 펴 둔 채로 잰다: 결과가 길어졌을 때 입력칸이 스크롤 밖으로 밀려나던 것이
+   * 고친 문제 자체이므로, 빈 서랍에서 재면 아무것도 증명하지 못한다. */
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.includes('할 수 있는 것'))?.click()`);
+  await sleep(500);
+  await send('Emulation.setDeviceMetricsOverride',
+             { width: 880, height: 600, deviceScaleFactor: 1, mobile: false });
+  await sleep(500);
+  out.td01Min = await evalJs(`(() => {
+    const vis = (sel) => {
+      const n = document.querySelector(sel);
+      if (!n) return null;
+      const r = n.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width),
+               inside: r.top >= 0 && r.bottom <= innerHeight && r.width > 0 };
+    };
+    return JSON.stringify({
+      qc: vis('[data-el="qc-input"]'), term: vis('[data-el="term-input"]'),
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth }); })()`);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'td01-min-880x600.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  await send('Emulation.clearDeviceMetricsOverride');
+  await sleep(400);
+  await evalJs(`[...document.querySelectorAll('[data-el="qc-discover"] button')].find(b => b.textContent.trim() === '취소')?.click()`);
+  await sleep(300);
+
   for (const theme of ['light', 'dark']) {
     await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
     await sleep(200);
@@ -2653,6 +2696,24 @@ assert.strictEqual(JSON.parse(results.qcRunState).run.state, 'ok');
  * number is read from the rule table rather than typed here, so a ninth rule that arrives
  * without a decision still has to pass `tests/qc.test.js`, which names each id. */
 assert.strictEqual(results.qcDiscoverRows, 8, 'the discoverability panel is not the closed set');
+
+/* WBS-22d · 고를 수 있는 줄이 있고, 고르면 그 말이 칸에 적힌다 — 실행되지는 않는다. */
+assert.ok(results.qcPickable > 0, '할 수 있는 것 목록에 누를 수 있는 줄이 하나도 없다');
+{
+  const p = JSON.parse(results.qcAfterPick);
+  assert.ok(p.field && p.field.trim(), `고른 뒤에도 입력칸이 비어 있다: ${results.qcAfterPick}`);
+  assert.strictEqual(p.card, true, '고른 뒤 설명 카드가 뜨지 않았다');
+  assert.strictEqual(p.ran, 0, '고르는 것만으로 실행됐다 — `19` §C4 의 설명-확인을 건너뛰었다');
+  assert.strictEqual(p.listClosed, true, '목록이 카드 위에 그대로 남아 있다');
+}
+
+/* 880×600 은 `window.js` 가 허용하는 가장 작은 창이다. 거기서도 두 Input 이 다 보여야 한다. */
+{
+  const m = JSON.parse(results.td01Min);
+  assert.strictEqual(m.overflow, 0, `최소 창에서 가로 넘침 ${m.overflow}px`);
+  assert.ok(m.qc?.inside, `최소 창에서 Quick Command 칸이 화면 밖이다: ${results.td01Min}`);
+  assert.ok(m.term?.inside, `최소 창에서 셸 칸이 화면 밖이다: ${results.td01Min}`);
+}
 
 /* ── TD-01 · 계속 실행 중 · 이미 켜져 있음 · 실패 · 고정 동작 ──────────────────────────
  * Nine surviving td01 mutants live in these five branches, and they survived because the
