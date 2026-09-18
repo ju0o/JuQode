@@ -12,10 +12,10 @@ JuQode 는 비개발자가 소프트웨어 프로젝트를 이해하고, Claude 
 
 ## 실사용 영상 (1분 22초)
 
-[![JuQode 실사용 — 권한이 거절된 채로 도착하고, 허용하면 같은 세션이 재개된다](docs/dev-evidence/demo/preview.gif)](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/juqode-usage.mp4)
+[![JuQode 실사용 — 권한이 거절된 채로 도착하고, 허용하면 같은 세션이 재개된다](docs/dev-evidence/demo/preview.gif)](https://youtu.be/0wTQGH99Hxs)
 
-▶ **[전체 영상 내려받기 (mp4 · 0.9 MB · 1분 22초)](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/juqode-usage.mp4)**
-— GitHub 은 저장소 안의 mp4 를 README 에서 재생해 주지 않는다. 위 GIF 는 그중 8초다.
+▶ **[YouTube 에서 전체 영상 보기 (1분 22초)](https://youtu.be/0wTQGH99Hxs)**
+— 위 GIF 는 그중 8초다. mp4 원본: [내려받기 (0.9 MB)](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/juqode-usage.mp4)
 
 **이 영상에 연출은 없다.** `scripts/demo/record-demo.mjs` 가 e2e 테스트와 **같은 fixture** 로
 진짜 Electron 앱을 띄우고, 진짜 CDP 로 클릭하고, Xvfb 화면을 ffmpeg 으로 그대로 받아 적었다.
