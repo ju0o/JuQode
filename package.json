@@ -12,7 +12,8 @@
     "test:e2e": "node tests/e2e/boot.test.mjs && node tests/e2e/visual.mjs && node tests/e2e/offline-shutdown.mjs",
     "pack:linux": "electron-builder --linux dir",
     "pack:win": "electron-builder --win dir zip --x64",
-    "test:unit": "node --test --test-timeout=60000 \"tests/*.test.js\""
+    "test:erd": "node docs/design/check-dbml.mjs",
+    "test:unit": "npm run test:erd && node --test --test-timeout=60000 \"tests/*.test.js\""
   },
   "devDependencies": {
     "electron": "44.3.0",
