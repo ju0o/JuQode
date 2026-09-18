@@ -1,9 +1,18 @@
 # RESUME — JuQode Autonomous MVP Long Run V2
 
-**마지막 체크포인트:** 배치 36 · 브랜치 `dev/mvp-autonomous-v01` (**푸시 완료** · Draft PR [#4](https://github.com/ju0o/JuQode/pull/4))
-**작업 트리:** clean · 백그라운드 프로세스 없음 · stash 없음
-**스위트:** unit 576/576 · `visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
-**정지 사유:** 남은 작업이 **전부 사람의 판단을 기다린다** (§3).
+**마지막 체크포인트:** 배치 37 (2026-09-18) · 브랜치 `dev/mvp-autonomous-v01` (**푸시 완료** · Draft PR [#4](https://github.com/ju0o/JuQode/pull/4))
+**작업 트리:** clean · 백그라운드 프로세스 없음 · stash 없음 · worktree 없음
+**스위트:** unit **597/597** · `check-dbml` 통과(49표 · MVP 26표를 `schema.sql` 과 대조) ·
+`visual.mjs` PASS · `boot.test.mjs` PASS · `offline-shutdown.mjs` PASS
+**정지 사유:** 사람이 더 시킬 때까지. **§3 ③ 은 여전히 닫혀 있고**, 게이트 없는 Phase A
+작업 둘(R-0 · P0-1)이 남아 있다 — 배치 36 때와 달리 「할 것이 없다」가 아니다 (§4).
+
+> **저장소는 PUBLIC 이다** (2026-09-18 확인). 배치 37 에서 히스토리 전체를 훑었다 —
+> 모든 브랜치 끝점 · 모든 blob · 민감해 보이는 파일 이름. 걸린 것은 전부 **합성 픽스처**다
+> (`ghp_0123456789…` · `AKIA0123456789ABCDEF` — JuQode 가 비밀을 **가리는지** 재는 테스트의
+> 재료다). `experiments/a1/exp4-credentials.sh` 는 자격증명이 아니라 OS 키링이 **있는지**
+> 묻는 탐침이다. 진짜 자격증명은 히스토리에 없다.
+
 **세 게이트가 전부 닫혔다.** ① · ② 는 Founder 개정 D-138 (2026-09-11) 로 열려 배치 36 에서
 닫혔고, ② 의 마지막 둘은 PM 이 **폐기**로 판정했다. 남은 것은 §3 ③ — **사람과 Windows** 뿐이다.
 
@@ -19,19 +28,25 @@
 CONTINUE THE SAME JUQODE AUTONOMOUS MVP LONG RUN.
 Do NOT restart planning. Do NOT create a new run. Do NOT reset the branch.
 Current remote branch: dev/mvp-autonomous-v01
-Last checkpoint: batch 36. Working tree clean, all suites green.
+Last checkpoint: batch 37 (2026-09-18). Working tree clean, all suites green (unit 597/597).
 
-Read RESUME.md first.
+Read RESUME.md first, then docs/design/WBS_REMAINING.md.
 
-ALL AUTOMATED FOUNDER/PM PRODUCT DECISIONS ARE EXHAUSTED. Gates ① and ② are CLOSED
-(Founder D-138 + amended `18`/`15`, then the PM's 2026-09-11 retirement ruling).
-Gate ③ is still shut and may NOT be done by the agent.
+Gates ① and ② are CLOSED. Gate ③ is still shut and may NOT be done by the agent.
+Batch 36 said there was nothing left outside the gates; the 2026-09-13 Owner/PM ruling
+reopened planning/reconciliation work, and batch 37 did four of Phase A's seven.
 
 Do this, in order:
-  1. Ask the PM whether §3 ③ has opened, and hand them its "무엇이 있어야 풀리나".
-  2. If it is open, do that item.
-  3. If it is not, there is NOTHING left that the agent may do alone. STOP and say so.
-     Do not invent work.
+  1. Do the two Phase A items that need NO gate — R-0 (e2e assertion impact map) and
+     P0-1 (screen ↔ Canon matrix). WBS_REMAINING.md §12 rows 5 and 6 define them.
+  2. Then ask the PM the three one-line questions in RESUME §4 (G-G · G-F · G-C). Each one
+     unblocks work that is already specified — do not invent the answers.
+  3. Ask the PM whether §3 ③ has opened, and hand them its "무엇이 있어야 풀리나".
+  4. If ③ is shut and the three questions are unanswered, there is NOTHING left that the
+     agent may do alone. STOP and say so. Do not invent work.
+
+Do NOT start P1 / P2 / P3 / P4 production implementation. They are held until MVP_CERTIFIED
+(WBS_REMAINING.md §7). The single exception is X-6, and only if G-F says yes.
 
 Do NOT build `work.requested` or `qc.terminal`. They are RETIRED (PM, 2026-09-11), the
 implementation already has neither, and `tests/e2e/visual.mjs` now MEASURES that absence
@@ -133,6 +148,46 @@ PENDING 문구 목록 **12 → 3** (`work.ago` · `term.mock` · `qc.full` 은 �
 
 ---
 
+### 2.3 배치 37 (2026-09-18) — Owner/PM 판정을 받아 적고, Phase A 를 열고, 영상을 찍었다
+
+배치 36 이후 **2026-09-13 Owner/PM 조건부 승인**이 도착했다. 그것이 「할 것이 없다」를
+「게이트 없이 지금 할 것이 일곱」으로 바꿨다 (`WBS_REMAINING.md` §12).
+
+| 커밋 | 내용 |
+|---|---|
+| `55d49c1` | **X-1 판정 기록** — `SPEC_RECONCILE.md` · `WBS_REMAINING.md`, 그리고 낡아진 세 문서에 낡았다고 적음 |
+| `ed031a3` | **X-3 + P3-7** — ERD ↔ `schema.sql` 대조 검사기, `npm run test:unit` 이 먼저 돈다 |
+| `d526c9f` | **실사용 영상** + `tests/e2e/fixture.mjs` 추출 + README 교체 |
+| `77e6a8d` | README — GIF 8초를 앞에 (GitHub 은 저장소 mp4 를 재생하지 않는다) |
+| `77c5cb6` | `security.test.js` 의 userData 검사가 **파일 이름에 묶여 있던 것** 수정 |
+
+**Phase A 진척: 7 중 4.** ① e2e 기준선 ✅ · ② X-1 ✅ · ③ X-3 ✅ · ④ P3-7 ✅ ·
+⑤ R-0 ❌ · ⑥ P0-1 ❌ · ⑦ X-7 (G-G 대기).
+
+**측정된 것:**
+- `check-dbml.mjs` 가 이제 **MVP 26표의 표·컬럼·not null** 을 `schema.sql` + `db.js`
+  MIGRATIONS 와 대조한다. `schema.sql` 에서 `stopped_at` 을 지우면, `project.name` 의
+  not null 을 떼면 **빨개진다** — 둘 다 직접 지워 확인했다.
+- 실사용 영상 **81.6초 · 0.9 MB** · 1280x800 @24. 릴리스 `demo-v0.1` 자산.
+- GitHub 은 저장소 raw 도 릴리스 자산도 `application/octet-stream` + `nosniff` 로 내려준다 —
+  `<video>` 태그는 **재생되지 않는 빈 상자**가 된다. 실측.
+
+**검사기 자체에서 나온 결함 둘** (그림의 결함이 아니었다):
+1. `-- user's words` 의 **아포스트로피 하나**가 문자열 시작으로 읽혀 `quick_command_run` 의
+   표 끝 `)` 까지 삼켰다. 그래서 그 표는 통째로 잘린 채 비교되고 있었다.
+2. dbdiagram 은 예약어 컬럼을 `"text"` 로 따옴표 친다. 따옴표를 벗기지 않아 세 표의 그 컬럼이
+   **파일 전체에서 존재하지 않는 것**이 되어 있었다 — `Ref:` 검사까지 같이 눈감고 있었다.
+
+**내 리팩터에서 나온 것 하나:** `fixture.mjs` 추출이 `security.test.js` 를 빨갛게 만들었다.
+규칙이 깨진 게 아니라 **검사가 `visual.mjs` 안의 글자를 찾고 있었다.** 고치면서 드러난 것:
+`scripts/demo/record-demo.mjs` 도 앱을 띄우는데 **그 검사 밖에 있었다.** 목록에 넣었고,
+녹화기에서 `JUQODE_USER_DATA` 를 빼면 빨개지는 것을 확인했다.
+
+**`main` 에도 푸시했다** — README 와 영상만. **구현은 머지하지 않았다** (PR #4 는 Draft 그대로).
+인수 판정이 나지 않은 것을 기본 브랜치에 두지 않는다는 규칙은 그대로다.
+
+---
+
 ## 3. ⚠️ HUMAN GATE — 남은 것은 ③ 하나
 
 ### ① 문구 중복 4개 — **닫힘 (2026-09-11 · D-138 개정과 함께)**
@@ -173,9 +228,28 @@ SC-03 breadcrumb 의 라벨 5곳). **지운 것은 라벨이고 요청문이 아
 
 ## 4. 게이트 밖에 남은 작업
 
-**없다.** 배치 35 가 마지막 스윕(`app/main/term/session.js`)을 끝냈고, 배치 36 은 D-138 이
-열어 준 것을 전부 구현했으며, PM 이 §3 ② 의 마지막 둘을 폐기로 판정했다.
-**자동화된 Founder/PM 제품 결정은 전부 소진되었다** — 남은 것은 §3 ③, 사람과 Windows 다.
+> **배치 36 은 여기에 「없다」고 적었다. 2026-09-13 Owner/PM 판정이 그것을 바꿨다.**
+> 판정문이 *"Planning/reconciliation work for X may continue"* 라고 열어 주었고,
+> `WBS_REMAINING.md` 가 그것을 Phase A 일곱 작업으로 풀었다. 넷은 배치 37 이 했다.
+
+**게이트 없이 지금 할 수 있는 것 — 둘 남았다.**
+
+| | 작업 | 산출물 | 소요 |
+|---|---|---|---|
+| **R-0** | e2e 단언 영향 지도 — `visual.mjs` 618 단언 중 R 트랙이 깨뜨릴 것을 「고칠 것/지울 것/그대로」로 분류 | `docs/dev-evidence/readability-assertion-map.md` | 60분 |
+| **P0-1** | 화면 ↔ Canon 대조표 | `docs/design/SCREEN_MATRIX.md` | 60분 |
+
+**판정 하나를 기다리는 것 — 셋.**
+
+| 게이트 | 한 줄로 물어야 할 것 | 막고 있는 것 |
+|---|---|---|
+| **G-G** | `SPEC_RECONCILE.md` §2 의 컬럼 해석 ①②③ 이 맞는가 | X-7 → X-4 → (V1 의 P1-2) |
+| **G-F** | X-6(프로세스 추적)이 MVP 인증 **전에** 필요한 재조정 진실성 결함 수정인가 | X-6 |
+| **G-C** | Canon `18`/`15`/`20` 개정 8건 | R-6 · P2-4 · P2-6 · X-5 · X-6 |
+
+**자동화된 Founder/PM 제품 결정은 여전히 소진되어 있다.** 위 셋은 새로 만들 결정이 아니라
+**이미 받은 판정을 컬럼·문구 단위로 옮겨도 되는지 확인**하는 것이다. MVP 인증 자체는 §3 ③,
+사람과 Windows 다.
 
 | | 어디 |
 |---|---|

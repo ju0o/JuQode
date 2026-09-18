@@ -111,7 +111,7 @@ npm test           # 단위 + e2e (Linux 는 xvfb-run 이 필요하다)
 ```
 app/main/          Electron 메인 — db · claude · work · change · qc · term · interpret
 app/renderer/      화면 다섯 (SC-01 · SC-02 · SC-03 · SC-04 · TD-01) + 디자인 토큰
-docs/design/       ERD · DBML · 백엔드 A안 · 남은 작업 WBS · ScreenSpec 캔버스 25장
+docs/design/       ERD · DBML · 백엔드 A안 · 남은 작업 WBS · ScreenSpec 캔버스 생성기(25장)
 docs/dev-evidence/ 배치별 QA 보고 · 스크린샷 · 뮤테이션 스윕 · WBS 원장
 scripts/demo/      실사용 영상 녹화기
 tests/             단위 597 + e2e 3종 (visual.mjs 는 단언 618개)
