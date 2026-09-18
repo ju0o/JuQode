@@ -12,14 +12,26 @@ JuQode 는 비개발자가 소프트웨어 프로젝트를 이해하고, Claude 
 
 ## 실사용 영상 (1분 22초)
 
-<video src="https://github.com/ju0o/JuQode/raw/main/docs/dev-evidence/demo/juqode-usage.mp4" controls muted width="100%"></video>
+[![JuQode 실사용 — 권한이 거절된 채로 도착하고, 허용하면 같은 세션이 재개된다](docs/dev-evidence/demo/preview.gif)](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/juqode-usage.mp4)
 
-▶ **재생이 안 되면 [juqode-usage.mp4 내려받기](https://github.com/ju0o/JuQode/raw/main/docs/dev-evidence/demo/juqode-usage.mp4)**
+▶ **[전체 영상 내려받기 (mp4 · 0.9 MB · 1분 22초)](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/juqode-usage.mp4)**
+— GitHub 은 저장소 안의 mp4 를 README 에서 재생해 주지 않는다. 위 GIF 는 그중 8초다.
 
 **이 영상에 연출은 없다.** `scripts/demo/record-demo.mjs` 가 e2e 테스트와 **같은 fixture** 로
 진짜 Electron 앱을 띄우고, 진짜 CDP 로 클릭하고, Xvfb 화면을 ffmpeg 으로 그대로 받아 적었다.
 영상에 나오는 카드·문구·색은 전부 제품이 그린 것이고, **화면 아래 검은 자막 띠 하나만** 녹화
 스크립트가 얹은 것이다.
+
+| 구간 | 무엇을 보여주나 |
+|---|---|
+| 0:07 | 프로젝트를 열면 **시키지 않아도** 먼저 읽는다 |
+| 0:15 | 여섯 답 — `확인됨` 인 답은 근거 파일을 지목한다 |
+| 0:20 | 자연어로 요청 → 보낸 말이 곧 작업의 이름 |
+| 0:28 | **권한은 거절된 채로 도착한다.** JuQode 가 대신 허용하지 않는다 (D-133) |
+| 0:33 | 허용 → **같은 세션이 그 자리에서 재개된다** |
+| 0:39 | 변경 읽기 — 없는 설명은 지어내지 않고, 요청해야 읽는다 |
+| 0:54 | Quick Command — 설명 → 확인, 두 번의 왕복. 모르는 말은 짐작하지 않는다 |
+| 1:15 | 테마 둘 |
 
 직접 다시 찍으려면:
 
