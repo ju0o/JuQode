@@ -327,6 +327,9 @@ test('a test run cannot write into the real application data directory', () => {
    * One variable moves ALL of it. This checks the mechanism exists and that every harness uses
    * it, because the failure is invisible: the tests pass either way, and the only symptom is a
    * directory growing in someone's home. */
+  /* USER_DATA 를 **만드는** 곳은 이제 하나다. 나머지는 가져다 쓴다. */
+  assert.match(read('tests/e2e/fixture.mjs'), /const USER_DATA = fs\.mkdtempSync\(/,
+    'the shared fixture points userData somewhere that is not a fresh temp directory');
   const main = read('app/main/main.js');
   assert.match(main, /if \(process\.env\.JUQODE_USER_DATA\) app\.setPath\('userData', process\.env\.JUQODE_USER_DATA\);/,
     'main.js cannot relocate userData');
@@ -340,10 +343,18 @@ test('a test run cannot write into the real application data directory', () => {
   assert.ok(code.indexOf('JUQODE_USER_DATA') < code.indexOf("app.getPath('userData')"),
     'a path is read from userData before it is relocated');
 
-  for (const f of ['tests/e2e/visual.mjs', 'tests/e2e/boot.test.mjs', 'tests/e2e/offline-shutdown.mjs']) {
+  /* 이 목록은 **앱을 띄우는 모든 파일**이다. 하나를 빠뜨리면 그 파일만 조용히 개발자의 진짜
+   * `~/.config/juqode` 에 쓴다 — 이 검사가 있는 이유 그대로다. `record-demo.mjs` 는 영상을
+   * 찍기 위해 앱을 띄우므로 같은 규칙 아래 있다. */
+  for (const f of ['tests/e2e/visual.mjs', 'tests/e2e/boot.test.mjs', 'tests/e2e/offline-shutdown.mjs',
+                   'scripts/demo/record-demo.mjs']) {
     const src = read(f);
     assert.ok(/JUQODE_USER_DATA: USER_DATA/.test(src), `${f} does not relocate userData`);
-    assert.ok(/const USER_DATA = fs\.mkdtempSync\(/.test(src),
+    /* 새 임시 디렉터리를 **직접 만들거나**, 그것을 만드는 fixture 에서 **가져오거나**. 둘 중
+     * 하나여야 한다. 원래는 앞의 것만 봤고, fixture 를 visual.mjs 밖으로 뺀 순간 빨개졌다 —
+     * 규칙이 깨진 것이 아니라 규칙이 한 파일 이름에 묶여 있었다. */
+    assert.ok(/const USER_DATA = fs\.mkdtempSync\(/.test(src)
+              || /USER_DATA[^\n]*from '[^']*fixture\.mjs'/.test(src),
       `${f} points userData somewhere that is not a fresh temp directory`);
     /* Every spawn in the file must carry it — one that does not is one that writes to the
      * real directory, and it would pass every other assertion in the suite. */
