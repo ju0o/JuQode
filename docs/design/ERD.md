@@ -78,12 +78,32 @@
 | 2 | `change_group.source_ref` 추가 | D-114: 확인됨 주장은 근거를 지목한다 (CF-13) |
 | **3** | `quick_command_rule` 에 `qc.git.commit` · `qc.deploy` 추가 | **PM 판정 2026-09-12** — F-17 의 닫힌 6개를 8개로 (아래 §4) |
 
-> **앞으로 적용될 것 (A안):** 마이그레이션 4 = `project.owner_id` + `unique(owner_id, path)`.
-> SQLite 는 유니크 제약 해제에 테이블 재작성이 필요하므로 `project_new` → 복사 → `rename` 형태가 된다.
+> **앞으로 적용될 것 — 번호가 확정됐다 (Owner/PM 판정 2026-09-13 · `SPEC_RECONCILE.md` §2):**
+>
+> | 버전 | 내용 | 언제 |
+> |---|---|---|
+> | **4** | 프로세스 추적 — `app_session` + `work`·`quick_command_run` 의 `runner_session_id`·`runner_pid`·`runner_started_at` (X-6) | **MVP 인증 전** (기존 재조정 진실성 결함 수정) |
+> | **5** | `project.owner_id` + `unique(owner_id, path)` (P1-5) | V1 · **MVP 인증 후** |
+>
+> 번호는 재사용하지 않는다. 마이그레이션 5 는 SQLite 가 유니크 제약 해제에 테이블 재작성을
+> 요구하므로 `project_new` → 복사 → `rename` 형태가 된다.
 
 ---
 
-## 3. 서버 (Supabase) — 11개 테이블
+## 3. 서버 (Supabase)
+
+> ⚠️ **이 절과 `erd.dbml` 의 V1 절반은 Owner/PM 판정(2026-09-13)에 아직 맞춰지지 않았다.**
+> 판정 전문은 `SPEC_RECONCILE.md`. 반영 작업은 **X-7** 이고, 그 전에는 P1-2 를 시작하지 않는다.
+> 판정이 바꾸는 것 셋:
+> - **`usage_day` 는 `works` 하나만** 제품 상한이다 (X-1b). `qc_runs` · `narrative_calls` 는
+>   사용자에게 보이는 등급 상한이 **아니다** — 종류가 필요하면 `audit_usage.kind` 가 적는다.
+> - **`policy` 의 투기적 컬럼 넷**(`narrative_engine_override` · `allow_file_edit` ·
+>   `allow_terminal` · `allow_deploy`)은 V1 프로덕션 스키마에 넣지 않는다 (X-1e · D-A3).
+>   `daily_work_limit_override` 는 **남는다** — 관리자 수동 조정 경로다.
+> - **`plan.narrative_engine` · `monthly_narrative_calls` 로 서술층을 막지 않는다** (X-1f).
+>   서술은 사용자 **자기** Claude 구독으로 돈다 — 서버 등급이 가를 대상이 아니다.
+>
+> 아래 그림과 표는 **판정 이전 상태**로 남겨 둔다. 무엇을 알고 결정했는지가 결정만큼 중요하다.
 
 ```
 auth.users (Supabase 관리)
