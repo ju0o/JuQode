@@ -1,0 +1,189 @@
+/* TD-01 · Terminal Drawer — WBS-25.
+ *
+ * `15`: 290 px, slides up over the current screen with a 12 % scrim; closing preserves the
+ * screen beneath. The drawer is a sibling of `#root`, not a child — every screen render clears
+ * `#root`, and a drawer inside it would be destroyed by the screen it is supposed to sit over.
+ */
+.td01-host { position: fixed; inset: 0; pointer-events: none; z-index: 40; }
+.td01-host[data-open="true"] { pointer-events: auto; }
+/* The scrim is what makes the screen beneath read-only-looking without hiding it. */
+.td01-host.open::before {
+  content: ""; position: absolute; inset: 0;
+  background: rgb(0 0 0 / 12%);
+}
+
+.td01 {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  /* CF-22 · `15` asks for TWO Inputs in a drawer it also fixes at 290 px / 40 %, and MEASURED
+     they do not both fit: at 40vh on a 770 px window the shell prompt was cut off by the
+     window edge and the Quick Command field was a clipped sliver. The drawer grows by 8vh
+     rather than hiding one of the two Inputs `15` requires. See CANON_FINDINGS CF-22. */
+  height: min(48vh, 460px);
+  display: flex; flex-direction: column;
+  background: var(--card); border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 28px rgb(0 0 0 / 10%);
+  animation: td01-up var(--d-base) var(--ease) both;
+}
+@keyframes td01-up { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.td01-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line);
+}
+.td01-title { font-weight: 700; letter-spacing: .02em; }
+.td01-head .grow { flex: 1; }
+
+/* `19` §S · Q-03 — always visible, never closable. It states that this is NOT isolation, so it
+   is not styled as a warning to be dismissed: it is a standing fact about the product. */
+.td01-banner {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  background: var(--grey); color: var(--ink2);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px; line-height: 17px;
+}
+
+/* `min-height: 0` or a flex child refuses to shrink below its content and pushes the shell
+   line off the bottom of the drawer — MEASURED: the input was cut by the window edge. */
+/* WBS-22d · 입력칸은 제자리에 있고, 결과만 스크롤한다.
+   전에는 라벨·입력칸·결과가 한 스크롤 영역 안에 있어서 카드가 길어지면 입력칸이 위로 사라졌다.
+   바로 아래 셸 칸은 고정되어 있었으므로, 같은 서랍의 두 Input 이 서로 다르게 행동했다. */
+.td01-qc { flex: 1 1 auto; min-height: 0; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.td01-qchead { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; }
+.td01-qcbody { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.td01-qclabel { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.td01-qclabel .kicker { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--juq); }
+
+/* `15`: the Quick Command field is natural language and is VISUALLY DISTINCT from a shell line.
+   It reads like the request field on SC-02, not like a terminal. */
+.td01-qcrow { display: flex; gap: 8px; align-items: stretch; }
+.td01-qcinput {
+  flex: 1; font: inherit; font-size: 13px;
+  padding: 9px 12px;
+  border: 1px solid var(--line2); border-radius: var(--r-inner);
+  background: var(--board); color: var(--ink);
+}
+.td01-qcinput:focus-visible { outline: 2px solid var(--juq); outline-offset: 1px; }
+
+.td01-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.td01-card .ct { font-weight: 600; }
+/* Caps from here, words from `18` — see the note on `.sc04-actor`. */
+.td01-actor { align-self: flex-start; font-size: 10px; letter-spacing: .06em; font-weight: 600;
+              text-transform: uppercase; }
+/* 미인식 is NEUTRAL — `15` says so explicitly, and `19` §C4 explains why: the product recognises
+   six things and declines the rest; it does not claim to have detected anything. */
+.td01-card[data-kind="unrecognized"] { border-color: var(--line2); }
+/* 모호함 is not 알 수 없음. `16` §2 gives dashed BLUE-GREY to "we do not know" and dashed INK to
+   "a JuQode rule stopped this" — and this card says exactly that: 실행하지 않았어요. Painting it
+   as unknown claimed the product could not tell, when it could tell perfectly well and declined
+   to choose. */
+.td01-card[data-kind="ambiguous"]    { border-color: var(--line3); border-style: dashed; }
+
+.td01-field { display: flex; gap: 10px; align-items: baseline; }
+.td01-field .k { flex: 0 0 auto; min-width: 5.5em; }
+.td01-field .v { min-width: 0; overflow-wrap: anywhere; }
+
+.td01-readings { display: flex; gap: 8px; flex-wrap: wrap; }
+.td01-runhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.td01-output {
+  margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 17px;
+  white-space: pre; overflow-x: auto; max-height: 40vh; overflow-y: auto;
+  background: var(--card2); border: 1px solid var(--line);
+  border-radius: var(--r-inner); padding: 8px 10px;
+}
+
+.td01-rule { display: flex; align-items: center; gap: 8px; }
+/* 누를 수 있는 행. 버튼이지만 목록의 한 줄로 읽혀야 하므로 버튼의 기본 표면을 갖지 않는다 —
+   `16` §1 의 카드 위에 또 하나의 표면을 얹으면 무엇이 눌리는 것인지 오히려 흐려진다. */
+.td01-pick {
+  font: inherit; text-align: left; width: 100%;
+  background: transparent; border: 1px solid transparent; border-radius: var(--r-inner);
+  padding: 4px 6px; margin: 0 -6px; color: inherit; cursor: pointer;
+}
+.td01-pick:hover { background: var(--card2); border-color: var(--line); }
+.td01-pick:focus-visible { outline: 2px solid var(--juq); outline-offset: 1px; }
+.td01-example { font-family: var(--font-mono); }
+.td01-rule .grow { flex: 1; }
+.td01-why { padding-left: 2px; }
+.td01-discover { align-self: flex-start; }
+
+/* A script body is judged line by line, so it keeps its lines. Collapsing them reflows the
+   thing the user is being asked to approve into a shape it does not have in the file. */
+.td01-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+
+/* `18` `term.safetyTag` — the banner's label. It reads as a tag, not as another sentence. */
+.td01-banner .td01-safetytag {
+  /* `inline-block`, not `inline`: an inline-block is a boundary in the accessibility tree, so
+   * the label and the sentence are read as two runs rather than as `안전 안내여기서…`. */
+  display: inline-block;
+  font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  margin-right: 8px; opacity: .85;
+}
+
+/* ── WBS-25 · the shell line (DV-11: pipe shell) ───────────────────────────────────────────
+   `15`: the Quick Command field and the shell line are both Inputs and must be VISUALLY
+   DISTINCT. Above is a sentence in the body font on the board colour; this is a command, in
+   the mono font on the terminal's own darker ground, behind a `$`. The difference is not
+   decoration: what happens when you press Enter is different, and the field has to say so
+   before it is pressed. */
+/* The shell line keeps its natural height and does NOT shrink: it holds the drawer's Primary
+   Action, and a flexible region shrank it until the prompt was cut off by the window edge
+   (MEASURED, twice). The Quick Command region above is the one that gives way — it scrolls. */
+.td01-term {
+  flex: 0 0 auto; border-top: 1px solid var(--line);
+  padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px;
+  background: var(--card2);
+}
+.td01-termlimits { margin: 0; }
+/* The output scrolls; the prompt does not move. A Primary Action that scrolls out of the
+   drawer is not one. */
+/* Bounded on purpose: the drawer is 40vh (`15`) and an unbounded output would push the prompt
+   out again. ~5 lines here, the full text one scroll away. */
+.td01-termout { flex: 0 1 auto; max-height: 88px; overflow: auto; }
+.td01-termout .td01-card { padding: 0; }
+.td01-termrow { flex: 0 0 auto; display: flex; gap: 8px; align-items: stretch; }
+.td01-prompt {
+  display: flex; align-items: center; padding: 0 2px;
+  font-family: var(--font-mono); font-weight: 700; color: var(--ink2);
+}
+.td01-terminput {
+  flex: 1; font-family: var(--font-mono); font-size: 12.5px;
+  padding: 8px 10px;
+  border: 1px solid var(--line2); border-radius: var(--r-inner);
+  background: var(--card); color: var(--ink);
+}
+.td01-terminput:focus-visible { outline: 2px solid var(--juq); outline-offset: 1px; }
+
+/* Human Gate ② (2026-09-11) · the QC card's own head: WHO acted (the JUQODE chip) and under
+ * WHICH rule set (`18` `qc.kicker`). Two facts on one row, the same pairing the approved
+ * prototype draws. The kicker is not upper-cased here — it is a product name, and `16` reserves
+ * the tracked upper case for the actor badge. */
+.td01-cardhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.td01-cardhead .td01-actor { align-self: center; }
+.td01-cardhead .kicker {
+  font-size: 11px; font-weight: 600; letter-spacing: 0; color: var(--juq);
+}
+
+/* `18` `term.out` — the name of the pane below it. Quiet: it is a label on a region the user is
+ * already looking at, not an announcement. */
+.td01-outlabel { padding-bottom: 2px; }
+
+/* WBS-22c · 배포 카드의 경고 한 줄. 실패가 아니므로 빨강이 아니고(`16` §2.1), 읽히지 않으면
+ * 뜻이 없으므로 본문색도 아니다 — 주의 색은 이미 디자인 시스템이 갖고 있다. */
+.td01-warn { border-left: 3px solid var(--wait); padding-left: 8px; }
+
+/* ── 짧은 창 ───────────────────────────────────────────────────────────────────────────
+   창 최소 높이는 600 px(`window.js`)이고, 48vh 는 거기서 288 px 다. 머리·배너·셸 칸을 빼면
+   Quick Command 에 60 px 쯤 남아 카드 한 장이 들어가지 않는다 — 서랍이 열려도 아무것도
+   읽을 수 없었다. 짧은 창에서는 서랍이 화면을 더 쓰고, 셸 출력이 먼저 양보한다. */
+@media (max-height: 780px) {
+  .td01 { height: min(64vh, 460px); }
+  .td01-termout { max-height: 60px; }
+  .td01-output { max-height: 26vh; }
+}
+@media (max-height: 660px) {
+  .td01 { height: 72vh; }
+  .td01-banner { padding: 6px 16px; }
+  .td01-termout { max-height: 44px; }
+}

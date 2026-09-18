@@ -1,0 +1,1023 @@
+# AUTONOMOUS MVP RUN — CHECKPOINT LOG
+
+Branch: `dev/mvp-autonomous-v01`, cut from PR #3 head `d03a21f`.
+Working Canon: JuQode-Private `canon/wbs00-implementation-findings` (PR #13, `956a8c3`) —
+a TYPE-1 technical correction of `270ee4e` main. Verified as such before adoption:
+6 files, docs only, no product-scope change.
+
+A checkpoint records that a batch is done. It is not a stopping point.
+
+| # | Batch | Packages | State | Commit |
+|---|---|---|---|---|
+| 01 | WBS-21 · WBS-02 · WBS-09 | persistence (local SQLite, Canon schema) · project open · Claude Code detection | 21 IMPLEMENTED_PENDING_VALIDATION · 02 IMPLEMENTED_PENDING_VALIDATION · 09 PARTIAL (card deferred with its trigger) | see below |
+
+## Batch 01
+
+Report: `BATCH-01.md`. Canon proposals raised: `CANON_FINDINGS.md` (CF-1 … CF-5).
+Deferred target-OS items added: DV-9 (Windows CLI resolution), DV-10 (NTFS case canonicalisation).
+
+45 unit tests, 3 e2e files, all passing from a clean checkout with no orphan processes.
+Three independent reviewers returned 3 BLOCKER + 9 HIGH; all fixed and re-tested.
+Mutation testing: 9 of 21 mutants survived the first suite; after the fixes, 12 of 12 killed.
+
+Next eligible set, read from `21` §1 `Deps`: WBS-03 (deps 02) · WBS-06 (deps 02) ·
+WBS-07 (deps 21) · WBS-25 (deps 00, 01) · WBS-20 (deps 21, 05 — blocked on 05).
+
+## Batch 02
+
+Report: `BATCH-02.md`. Canon proposals added: CF-6, CF-7. Measured findings filed to the
+Private repo as `07` §9 (branch `canon/mvp-run-implementation-findings`, `393472e`).
+
+| Package | State |
+|---|---|
+| WBS-03 interpretation facts layer | IMPLEMENTED_PENDING_VALIDATION — the SC-02 Brief is real |
+| WBS-06 intent routing | ENGINE IMPLEMENTED · UI deferred to the batch where a Work can start |
+| WBS-07 single active Work guard | ENGINE IMPLEMENTED · card deferred with the same trigger |
+
+124 unit tests, 3 e2e files, all passing from a clean checkout with no orphan processes.
+Three reviewers returned 2 BLOCKER + 12 HIGH; all fixed and re-tested. Mutation testing found
+21 killed / 25 survived — including **every** secret-exclusion mutant, because the test guarding
+that property could not fail. After the fixes, 21 of 21 killed.
+
+Next eligible: WBS-08 (deps 00, 21) · WBS-10 (deps 09, 21) · WBS-25 (deps 00, 01) ·
+WBS-04 (deps 03, 10) · WBS-05 (deps 03, 04, 21). The Work chain — 08 · 10 · 11 — is next,
+and it is what lets WBS-06's field, WBS-07's card and WBS-09's 사용 불가 card land with the
+triggers Canon specifies for them.
+
+## Batch 03
+
+Report: `BATCH-03.md`. The Work chain's engines: evidence basis, session launch, reducer.
+
+| Package | State |
+|---|---|
+| WBS-08 evidence basis | IMPLEMENTED_PENDING_VALIDATION — corrected D-126a contract in production |
+| WBS-10 session launch | IMPLEMENTED_PENDING_VALIDATION — validated against the real CLI 2.1.266 |
+| WBS-11 stream → state | IMPLEMENTED — pure, driven by a real recorded stream |
+
+146 unit tests, 3 e2e files, all passing, no orphan processes.
+
+Two corrections came out of building it. The excluded-path ledger had been recording
+`"undefined"` for every mtime — `fs.statSync` has no `mtimeNs` without `{ bigint: true }` — so
+it could only detect a size change, and **the WBS-00 spike that validated the contract carried
+the same defect**. And D-133's resume mechanics have changed since the CLI version that
+validated them: `--allowedTools` is variadic and was swallowing the prompt, and `--resume`
+alone no longer reconstructs the blocked call. The safety property — that the grant bounds what
+the retry may touch — was re-measured and holds.
+
+Next: SC-03 and the surfaces these engines feed. Every deferred card now has a working engine
+underneath it.
+
+## Batch 04
+
+Report: `BATCH-04.md`. The Work loop becomes real: SC-03, the Intent field, and every card a
+submit can produce.
+
+| Package | State |
+|---|---|
+| WBS-12 Steps · NEXT | IMPLEMENTED |
+| WBS-13 input request · answer | IMPLEMENTED — the panel is built; no headless CLI event maps to `input_request` today, so the state is reachable from the signal and not yet from the CLI |
+| WBS-14 permission pass-through | IMPLEMENTED — D-133 contract B, end to end through the real app |
+| WBS-15 liveness · no-signal · unknown | IMPLEMENTED |
+| WBS-16 cancel · cancel-unconfirmed | IMPLEMENTED |
+| WBS-17 after-snapshot · diff capture | IMPLEMENTED |
+| WBS-06 · WBS-07 · WBS-09 UI halves | LANDED — each now has a destination |
+
+`npm test` runs unit **and** e2e: 199 tests plus three e2e files. The packaged Linux binary
+ships the new modules and boots.
+
+Three reviewers returned 3 BLOCKER + 24 HIGH. Two BLOCKERs shared one root cause — `apply()`
+invented a `running` state for any Work not in the live map, so cancel could never end a Work
+(D-117's slot pinned until restart) and cancelling an ended Work erased its outcome.
+
+The structural test findings mattered more than the mutation score: `main.js` had **zero**
+executed coverage, both Canon thresholds were untestable because the test built its offset from
+the constant under test, the progress check exempted the newest screen by construction, and
+`npm test` never ran the e2e at all.
+
+Next eligible, from `21` §1 `Deps`: WBS-04 (03, 10) · WBS-18 (11, 17) · WBS-19 (06, 07, 08) ·
+WBS-22 (06) · WBS-25 (00, 01) · WBS-26 (17, 18) · WBS-27 (17) · WBS-29 (11) · WBS-34 (21, 11).
+
+## Batch 05
+
+Report: `BATCH-05.md`. Canon findings raised: CF-8 · CF-9 · CF-10 · CF-11.
+
+| Package | State |
+|---|---|
+| WBS-18 Work finish & result | IMPLEMENTED |
+| WBS-27 Code Blocks | IMPLEMENTED — blocks derived on demand until WBS-26 gives them a group |
+
+230 unit tests and three e2e files. `typescript` is now a production dependency (D-127's S1
+path); the packaged binary resolves it from inside the asar and reports `segmenter: "semantic"`.
+
+Next eligible: WBS-26 (17, 18) · WBS-28 (26, 27) · WBS-19 (06, 07, 08) · WBS-22 (06) ·
+WBS-25 (00, 01) · WBS-29 (11) · WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-20 (21, 05).
+The change reader — WBS-26 then WBS-28 (SC-04) — is the next surface.
+
+## Batch 05 QA
+
+Report: `BATCH-05-QA.md`. 2 BLOCKER · 8 HIGH · 5 MEDIUM · 6 false comments, all fixed.
+
+Both BLOCKERs were one root cause — two regexes parsing one patch, neither able to read git's
+C-quoted paths. The 확인됨 claim named the wrong file for a Work that edited `결제.js`. The
+changed-file list now comes from `diff-tree -r -z --name-only`, and `changes()` and `saveDiffs()`
+share it. 19 mutants, 19 killed.
+
+## Batch 06
+
+Report: `BATCH-06.md`.
+
+| Package | State |
+|---|---|
+| WBS-26 Change Groups | IMPLEMENTED |
+| WBS-28 SC-04 Change Reader | IMPLEMENTED |
+
+285 unit tests, three e2e files, SC-04 screenshots in both themes.
+
+Adding SC-04 to the e2e required a fixture that really edits files, which required a real git
+repo — and that immediately exposed a defect no unit test could see: `git add` exits 1 whenever
+the pathspec carries any `:(exclude)` element and the project gitignores a file, so JuQode could
+not take a basis for most REAL projects. Fixed by checking the artifact rather than the status.
+
+Next eligible: WBS-19 (06, 07, 08) · WBS-22 (06) · WBS-25 (00, 01) · WBS-29 (11) · WBS-04 (03, 10) ·
+WBS-05 (03, 04, 21) · WBS-20 (21, 05) · WBS-34 (21, 11).
+
+## Batch 06 QA
+
+Report: `BATCH-06-QA.md`. Three independent audits — product, technical/security, test adversary.
+Two of them found the same BLOCKER: the explanation pass documented as "no tools at all" ran with
+the CLI's entire default tool set, because `allowedTools: []` adds no argument. `--tools ""` is
+the flag that empties the built-in set, measured on a disposable scratch directory.
+
+The adversary's headline: 20 of 29 mutants survived, including `pre.innerHTML = f.patch` (passed
+unit AND e2e) and `renderSC04` returning nothing at all. Its incidental finding was the biggest
+one — the suite leaked temp directories until the tmpfs quota broke it, producing a 50% flake
+that made every previous "N tests pass" claim unreliable. Chasing that flake turned up CF-14.
+
+Also landed here: **WBS-22 Quick Command rules & availability** — `app/main/qc/rules.js` and
+`app/main/qc/availability.js`, the deterministic half of the package. The UI card and the
+executor belong to TD-01 (WBS-25) and are not built. Canon's validated corpus is not in either
+repository (CF-12), so the recognition layer is IMPLEMENTED_PENDING_VALIDATION.
+
+334 tests, three e2e files, flake 0/10.
+
+Next eligible: WBS-25 (00, 01 — TD-01, and WBS-22's card depends on it) · WBS-19 (06, 07, 08) ·
+WBS-20 (21, 05) · WBS-34 (21, 11) · WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
+Unfinished inside SC-04: per-block Raw selection, 원문 복사, the evidence-gap card.
+
+## Batch 07
+
+Report: `BATCH-07.md`.
+
+| Package | State |
+|---|---|
+| WBS-20 History & re-entry orientation | IMPLEMENTED |
+
+SC-02's History had only an empty state, so Canon's `변경 보기` entry into SC-04 did not exist.
+It now lists every Work newest-first with a measured `변경 n개` (or nothing, when the evidence
+pair could not tell), and both destinations `15` names are reached by the e2e for a Work that is
+no longer on screen.
+
+Visual QA found the History card drawing on top of the Brief the moment History had rows — a
+591 px card in a 449 px auto row, with `grid-auto-flow: dense` packing another card into the
+space it was already painting. SC-02 is now two column stacks, which cannot overlap. The existing
+overlap check ran while SC-03 was on screen, so its `.sc02 .card` half matched nothing and could
+never have caught it.
+
+341 tests, three e2e files.
+
+Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs) · WBS-19 (06, 07, 08) ·
+WBS-34 (21, 11) · WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
+
+## Batch 07 QA — WBS-19 문구 누락
+
+`sc03.js` 의 `원하던 결과가 아니에요` 패널(WBS-19)과 `sc04.js` 의 사용 불가 · 원문 복사가
+**`copy.js` 에 없는 키를 참조한 채 커밋돼 있었다.** 화면이 그 자리에 닿는 순간 `undefined` 를
+그린다. 유닛 스위트가 이것을 못 잡는 이유는 렌더러 문구 검사가 *존재하는* 문자열의 출처만
+확인하고, *참조되는데 없는* 키는 보지 않기 때문이다.
+
+WBS-19 은 이로써 IMPLEMENTED — 되돌리기 버튼은 없고(D-115), 본문이 그 사실을 먼저 말하고,
+프리필된 문장은 사용자 본인의 말을 인용하며 **제출하지 않는다**(제출은 `12` 에서 파일 변경에
+대한 동의다).
+
+| Package | State |
+|---|---|
+| WBS-19 Unwanted result → correction Work | IMPLEMENTED |
+
+341 tests · e2e 3종. 뮤턴트 13/13 killed(배치 06 QA 수정분 재검증).
+
+Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs) · WBS-34 (21, 11) ·
+WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
+
+## Batch 08
+
+Report: `BATCH-08.md`.
+
+| Package | State |
+|---|---|
+| WBS-19 Unwanted result → correction Work | IMPLEMENTED |
+| WBS-34 Startup reconciliation | IMPLEMENTED (no QC rows to reconcile — WBS-22 has no executor) |
+
+D-115's "no undo button" is stated by the panel before it offers the only thing that exists, and
+the correction is prefilled but NOT sent — sending is the user's act, because `12` treats it as
+consent to change files. WBS-34 gained the half it was missing: an interpretation the app died
+inside becomes 실패, keeping whatever answers it had and inventing none.
+
+`orient.unknown` reads the LATEST Work, not any Work ever — `some()` would have made one
+reconciled Work say 확인할 수 없어요 for the rest of the project's life. That in turn requires
+History's order to be deterministic, so `worksFor` breaks millisecond ties on `rowid`.
+
+352 tests, three e2e files. 8 mutants, 8 killed.
+
+Next eligible: WBS-25 (TD-01 terminal drawer — WBS-22's card and `qc.terminal.open` need it) ·
+WBS-04 (03, 10) · WBS-05 (03, 04, 21) · WBS-29 (11).
+
+### 동시 작업 — 이 브랜치에 두 세션이 붙어 있었다
+
+배치 07~08 구간에서 `dev/mvp-autonomous-v01` 에 **두 개의 에이전트 세션이 동시에** 커밋했다.
+`1ad31c4` · `92f5149` · `f24bfac` 는 다른 세션의 것이고, `2e5bceb` · `38da688` 는 이쪽이다.
+
+관측된 결과:
+
+- **같은 패키지를 두 번 구현했다.** 둘 다 WBS-34 를 했다. 최종 트리에는 구현이 하나만 남았고
+  중복 정의도 중복 테스트 이름도 없다(확인함). 낭비지 손상은 아니다.
+- **`git add -A` 로 남의 작업을 내 커밋에 쓸어 담았다.** `38da688` 에 들어간
+  `app/main/interpret/narrate.js` (181줄, WBS-04) 는 이쪽 세션이 쓴 것이 아니다. 되돌리지
+  않았다 — 커밋된 상태가 작업 중인 파일을 지우는 것보다 안전하다.
+- **남의 증거 문서를 덮어썼다.** `BATCH-08.md` 가 그것이다. `f24bfac` 에서 복원해 두 절을
+  합쳤다.
+- 이쪽이 계속 겪은 "파일이 내가 읽은 것과 다르다" 는 현상의 정체가 이것이었다 —
+  `git.js` 의 인덱스 블록, `sc04.js` 의 `when`/`OUTCOME`, `ipc.js` 의 `orientationOf`,
+  `repo.js` 의 `rowid` 동률 처리. 전부 다른 세션의 편집이었다.
+
+**한 브랜치에 두 자율 세션을 붙이면 안 된다.** 붙일 거라면 `git add -A` 대신 경로를 지정해
+커밋하고, 매 커밋 전에 `git log` 로 새 커밋이 들어왔는지 확인해야 한다. 이 런의 남은 구간은
+그렇게 한다.
+
+## Batch 09
+
+Report: `BATCH-09.md`.
+
+| Package | State |
+|---|---|
+| WBS-04 Project interpretation — narrative layer | IMPLEMENTED |
+
+`19` §C1's second layer. Same shape as WBS-26 and for the same reason: a pure `merge()` holds
+every rule, so the rules are testable without a CLI or a model. A narrative answer can never be
+확인됨 — only the facts layer's own output can be, and for these three questions it measured
+nothing. A citation the scan really read makes it 예상됨; anything else is 확인 못함 with the
+sentence still shown.
+
+Visual QA caught the Brief contradicting itself: 하는 일 shown with an answer while 확인 못한 것
+still listed it as unanswered. The narrative layer now re-states that row.
+
+379 tests, three e2e files, 18/18 mutants killed.
+
+Next eligible: WBS-05 (03, 04, 21 — now open) · WBS-25 (00, 01 — TD-01, which WBS-22's card
+needs) · WBS-29 (11).
+
+## Batch 10
+
+Report: `BATCH-10.md`. Canon findings raised: CF-16 · CF-17.
+
+| Package | State |
+|---|---|
+| WBS-05 Project brief · fold · stale · refresh | IMPLEMENTED |
+
+Both acceptance rows are about what the product must NOT do on its own: `juqode:brief` is
+read-only (it re-runs the deterministic scan, compares `source_hash`, asks no model and writes
+nothing), and a refresh that cannot read the folder keeps the interpretation the user can still
+read instead of replacing it with a card saying nothing was read.
+
+A new test — "every copy key the renderer NAMES actually exists" — immediately found two more
+places where the product drew blank text: the Brief's failure band had no title, and the result
+card's 한 것 / 못 한 것 headings were empty over the two lists that ARE the 부분 state. The
+existing copy test checks the provenance of strings that exist; it cannot see a missing one.
+
+389 tests, three e2e files, 8/8 mutants killed.
+
+Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs) · WBS-29 (11).
+
+## Batch 11
+
+Report: `BATCH-11.md`.
+
+| Package | State |
+|---|---|
+| WBS-29 Error model & state color grammar | IMPLEMENTED |
+
+`21` asks for "visual regression against the VD frames". Pixel-comparing rendered app output to
+design artefacts fails on legitimate differences, so the six state chips are rendered and their
+computed styles MEASURED instead — in both themes, against the properties `16` §2.1 names.
+
+It found 실패 and 사용 불가 separated by hue alone: neither carried a mark, and their light-theme
+backgrounds measured luminance 244 and 241. That is the one pair `12` §16 turns into a product
+promise (사용 불가 ≠ 실패), and only the words were keeping them apart. Both now carry a mark.
+
+389 tests, three e2e files, 5/5 mutants killed.
+
+Next eligible: WBS-25 (00, 01 — TD-01, which WBS-22's card needs).
+
+## Batch 12
+
+Report: `BATCH-12.md`. Canon findings raised: CF-18. Deferred: DV-11.
+
+| Package | State |
+|---|---|
+| WBS-22 Quick Command rules & explanation | IMPLEMENTED |
+| WBS-25 Terminal drawer | PARTIAL — the drawer and Quick Command are in; the SHELL LINE is not |
+
+`19` §C6 marks the pty unvalidated, and this repository's own capability-containment test bans
+`node-pty` outright. But REC-010 says long-running Quick Commands run in their OWN child
+processes rather than the drawer pty — so everything except the user-typed shell line ships
+without one. That line, and the decision behind it, is DV-11.
+
+"No shell" now holds all the way to the spawn: `availability()` yields an argv, `spawn` is
+called with a program and arguments, and the test passes `&& touch CANARY` and `$(id)` as
+arguments and measures that neither happens.
+
+414 tests, three e2e files, 20/20 mutants killed.
+
+Next eligible: an independent QA pass over batches 07–12 · the SC-04 evidence-gap and
+per-block work listed in BATCH-06 · DV-11's decision.
+
+## Batch 12 QA + WBS-23 · WBS-24 · WBS-30 · WBS-31
+
+Reports: `BATCH-12-QA.md`. Canon findings raised: CF-18. Deferred: DV-11.
+
+| Package | State |
+|---|---|
+| WBS-23 Quick Command execution & result | IMPLEMENTED |
+| WBS-24 Long-running Quick Command | IMPLEMENTED |
+| WBS-30 Security boundaries | IMPLEMENTED |
+| WBS-31 Testing harness | IMPLEMENTED |
+
+Two independent QA passes (product, technical/security) ran over batches 10–12.
+
+**The central safety claim was attacked and held.** The security review traced `phrase` end to
+end (three destinations, none of them the spawn), COUNTED the reachable argv space (13), and
+threw zero-width characters, RTL marks, homoglyphs, NFC/NFD variants, negations and multi-clause
+sentences at the matcher. Nothing with dangerous content reached residue zero. It also verified
+that no state, reason key or error path can produce a drawer panel without the `19` §S banner.
+
+What it found instead: a card confirmed in one project could RUN in another (the drawer lives
+outside `#root`, so navigation did not clear it, and `실행` reads the project at click time);
+output truncation deleted the MIDDLE of a log and spliced the ends; the mask deleted the file
+and line from build errors; a dev server outlived the app while `reconcileQcRuns` was written,
+tested and called nowhere; and two of the six rules dead-ended because their action is FIXED
+rather than a script — the product explained `터미널 열어줘` and then said it was not one of its
+commands.
+
+The product review found the D-134 card still saying the terminal did not exist, and that the
+batch-11 grammar measurement examined synthetic chips rather than the surfaces the app renders —
+the 오래됨 band was plain card furniture while every chip assertion passed.
+
+444 tests, three e2e files. A Quick Command is now actually EXECUTED in the e2e, so the run-card
+states have rendered evidence for the first time.
+
+Next eligible: WBS-35 (Agent Presence) · WBS-36/37/38 (theme, screen differentiation, 다음 행동)
+· DV-11's pty decision · WBS-32/33 (need humans and Windows).
+
+## Batch 13 · WBS-35
+
+Report: `BATCH-13.md`. Canon findings raised: CF-19 (and the duplicated CF-18 entry removed).
+
+| Package | State |
+|---|---|
+| WBS-35 Agent Presence component | IMPLEMENTED |
+
+469 tests, three e2e files. The Presence card is on SC-02 and SC-03 and appears in the
+light/dark screenshots for both.
+
+The acceptance's hard half — **no mode reachable by a timer alone** — is held structurally:
+there is no timer in the component at all, `setMode` is the only writer of the mode, and the two
+quiet modes arrive already decided from `livenessOf()`, which `17` exempts by name. The
+precedence (waiting-on-the-user before liveness) exists for the same reason: a Work waiting for
+a permission is supposed to be silent, so letting `quiet` win would move the mode on elapsed
+time and nothing else.
+
+Two things were found by measurement rather than by reading. The prototype's point count painted
+the sphere SOLID at 56 px, hiding both rings — which made `input` and `permission` the same
+still frame, the exact thing the second ring exists to prevent; the cloud was thinned and the
+screenshots re-checked. And a mutation showed SC-02 could map a HISTORY ROW straight to a mode,
+announcing 최근 활동이 보여요 for a Work that was stopped waiting for the user; `activity` now
+requires a positive liveness verdict, and the e2e measures SC-02's mode while a Work is actually
+`permission_waiting`.
+
+Next eligible: WBS-36 (light/dark theme completeness) · WBS-37 (screen differentiation ·
+transitions) · WBS-38 (다음 행동 ≠ NEXT) · DV-11's pty decision · WBS-32/33 (need humans and
+Windows).
+
+## Batch 14 · WBS-36 · WBS-38
+
+Report: `BATCH-14.md`. No new Canon findings.
+
+| Package | State |
+|---|---|
+| WBS-36 Light / Dark theme | IMPLEMENTED |
+| WBS-38 다음 행동 강조 (≠ NEXT) | IMPLEMENTED |
+
+485 tests, three e2e files.
+
+WBS-36's named unit test — 토큰 대비비 — did not exist, and writing it found that the LIGHT
+theme was failing WCAG AA: `--mut2` was 3.11:1 on a card and 2.72:1 on the board, for a rank
+that carries real sentences (the presence card's 진행 정도를 뜻하지 않아요 among them). The
+amber pair was 4.40:1 on the board, and dark's `--mut2` failed on two surfaces. Fixing `--mut2`
+squeezed it toward `--mut`, so `--mut` moved too — the test asserts AA AND four separated ranks
+so neither can be paid for the other.
+
+WBS-38's copy keys (`next.label`, `next.gloss`) were in `18` and used by nothing: JuQode's
+choices were unlabelled button rows a user had no way to tell from something the agent had
+announced. They now go through one block that carries JuQode's teal against the NEXT slot's
+Claude purple, is buttons against the slot's text, and says the difference in words. The e2e
+measures both blocks' computed styles in both themes, and measures `17`'s second table row —
+an empty NEXT with the offer still standing.
+
+Next eligible: WBS-37 (screen differentiation · transition motion) · DV-11's pty decision ·
+WBS-32/33 (need humans and Windows).
+
+## Batch 15 · WBS-37
+
+Report: `BATCH-15.md`. No new Canon findings.
+
+| Package | State |
+|---|---|
+| WBS-37 화면 구성 차별화 · 전환 모션 | IMPLEMENTED |
+
+493 tests, three e2e files. **All 39 MVP WBS packages are now IMPLEMENTED except WBS-32
+(dogfood with real people) and WBS-33 (packaging · signing), which need humans and Windows,
+and WBS-25's shell command line, which is DV-11.**
+
+The five surfaces' compositions are now measured as geometry — card count, distinct card
+SIZES (SC-02 is two equal columns on purpose, so width says nothing), the widest card's share,
+density, and which card is the biggest. Each surface is checked against its own sentence from
+`17` rather than against a ranking, and no two signatures may match: 텍스트만 바뀐 같은
+페이지로 읽히면 실패다, measured.
+
+The three named transitions are one FLIP. The first implementation used a hard-coded source
+selector and the e2e showed the SC-02 → SC-03 morph never fired — SC-02 does not draw a Work
+card, and what was on screen was the guard panel. Widening the selector would have been worse:
+for a History list `querySelector` picks the FIRST row, so the morph would have been asserting
+that two different Works are the same thing. The source is now the card the user actually
+pressed, recorded in the capture phase, which makes the morph's statement true by construction.
+
+The reduced-motion guard is in JavaScript because it has to be: `animation: none !important`
+does not reach a Web Animations call. The e2e sails the same two navigations twice and counts
+1/1 with motion on and 0/0 with it off, plus zero horizontal overflow while a FLIP is scaled
+past its own box.
+
+A mutation showed the geometry check could not tell `15`'s Work-card size from a smaller one —
+the card's content keeps it dominant either way. "Is it dominant" and "is it the size `15` says"
+are two claims; only the first was being made. Both are now.
+
+Next eligible: DV-11's pty decision · an independent QA pass over batches 13–15 · WBS-32/33
+(need humans and Windows).
+
+## Batch 16 QA · batches 13–15
+
+Report: `BATCH-16-QA.md`. Canon findings raised: **CF-20**.
+
+3 HIGH · 2 MEDIUM · 0 BLOCKER. 493 tests, three e2e files.
+
+The worst of them was a comment that was not true: `presence.js` said "There is no timer in
+this file. Not one." while using `performance.now()` and `requestAnimationFrame`, and the test's
+banned-word list had been shaped to let that through. The claim is now stated precisely — there
+IS a clock, and what there is not is a clock that can reach a MODE — and the test asserts the
+clock's presence before checking that nothing schedules a callback and that `setMode` has
+exactly three callers, none of them the loop.
+
+Two false claims of the same family: SC-02 reported 대기 중 when the store refused to answer at
+all (the sibling of a bug already fixed for a missing snapshot), and `15` SC-04's
+`원하던 결과가 아니에요` had never been built on SC-04 — a user who had just been shown why a
+change happened could not say it was not what they wanted from the screen that showed them.
+
+CF-20: `16` §2.1 states 보조 텍스트 대비 ≥ 4.5:1 on the same line as values that measure
+3.11:1 and 2.72:1. The requirement wins over the draft hex, and `tokens.css` now says so rather
+than continuing to describe itself as a pure transcription.
+
+Two mutants in this run have now passed the unit suite and been killed only by the e2e, both
+because the check was reading source text. Recorded: a claim about the SCREEN is the e2e's;
+a source check earns its place only when it shows the structure makes the claim impossible.
+
+Next eligible: DV-11's pty decision · WBS-32/33 (need humans and Windows).
+
+## Batch 17 · WBS ledger + traceability tags
+
+Report: `WBS-LEDGER.md`. No new Canon findings.
+
+All 39 packages accounted for in one table, with the code and the tests for each. Building it
+surfaced a traceability gap `22` cares about: **WBS-23, 24, 25, 29 and 30 could not be found by
+number** — their implementations carried no `WBS-NN` tag, so a reader following `21` §1 to the
+code hit nothing. Tagged: `qc/run.js` (23 · 24), `td01.js`/`td01.css` (25 · 23 · 24),
+`tokens.css`/`base.css` (29), `security.js`/`exclude.js` (30), and the corresponding test files.
+
+The ledger's state column means one thing and says so: the acceptance is in the code and a test
+exists that can actually fail on it. Windows behaviour, real users' understanding and a signed
+build's first run stay in `DEFERRED_VALIDATION.md`.
+
+**Three packages are not finished, and each for a reason that is not a scheduling one:**
+WBS-25's shell command line (DV-11 — a product decision between node-pty, a TTY-less pipe shell,
+and the mock `18` already has copy for), WBS-32 (needs people), WBS-33 (needs Windows and a
+signing certificate).
+
+## Batch 18 QA · Work loop core (WBS-18 · D-114)
+
+Report: `BATCH-18-QA.md`. No new Canon findings. 2 HIGH · 0 BLOCKER. 496 tests.
+
+Both findings are `확인됨` chips that were not earning them.
+
+The observed-tools count on the result card was derived from `signals.filter(...).length` — so
+it counted MESSAGES, not blocks (one `user` message can carry several parallel `tool_result`
+blocks, which the reducer's own `toolsUsed` had already been fixed for), and it was read through
+a 500-row cap, which made a long Work's count depend on how much of its own history had been
+read. `build()` no longer takes the signal list at all: the count is the caller's measurement,
+and when nobody measured, no claim is made.
+
+**The first fix was wrong and the unit test could not tell.** `countToolResults` read the
+reducer's `all` shape, but the supervisor persists the RAW CLI LINE, where the blocks live in
+`message.content[]` — the unit test was putting in a shape it had invented and reading it back.
+The e2e cross-check against the app's own recorded signals caught it, and then that check turned
+out to have made the same mistake. Both now read the raw line, the recording carries a real
+parallel call, and the check asserts it CAN tell the bug from the fix before it asserts anything
+else.
+
+Second: a 부분 완료 card drew only 안 된 것 when the evidence pair could not tell what changed,
+which reads as "nothing was done". `verify()` had been reporting that all along and
+`buildChecked` could only write it to the record. The heading is now always drawn for a 부분
+outcome and says 확인 못함 when there is nothing measured to put under it.
+
+Next eligible: DV-11's pty decision · WBS-32/33 (need humans and Windows).
+
+## Batch 19 · DV-11 judgement material (WBS-00 spike)
+
+Report: `DV-11-PIPE-SHELL-SPIKE.md`. Script: `scripts/spikes/pipe-shell.mjs`.
+
+DV-11 is a product decision and stays one. What was missing was its cost, so the one option
+that needs no native module — a TTY-less pipe shell — was MEASURED on Linux instead of guessed
+at. `19` §C6 REC-010 marks itself unvalidated and asks for exactly this.
+
+The measurement that would change a decision: a pipe shell has no `/dev/tty`, so `sudo`, `ssh`
+and git credential prompts **cannot ask at all** — they fail, and to the user the command simply
+did not work. And a closed stdin is not a stall: `read` returns an empty value and the program
+carries on, so a wrong answer is delivered silently with nothing visibly wrong on screen.
+
+Against that: stopping already works (group signal — the mechanism WBS-23 measured), a program
+that reads stdin CAN be answered if the drawer's input line is wired to it, and batch-mode
+programs run. Colour is gone and stdout/stderr order becomes an approximation, which `19` §C4's
+"stderr is not hidden and not separated" can only meet approximately.
+
+**Windows was not measured and the document says so on every axis.** Neither was Electron's own
+main process, nor node-pty itself (the capability-containment test forbids it).
+
+Next eligible: WBS-32/33 (need humans and Windows) · the DV-11 decision itself.
+
+## Batch 20 · WBS-33's two testable release rules
+
+No separate report — the change is three tests in `tests/security.test.js`. 499 tests.
+
+`21` WBS-33 depends on WBS-32 and needs Windows and a signing certificate, so it stays NOT
+STARTED. But two of its four named failure cases need neither, and both were untested:
+
+- **텔레메트리·크래시 리포팅 코드가 빌드에 들어감.** `02` §2 puts cloud dependency outside the
+  MVP — a rule the WBS explicitly says it did not invent for itself. Now checked in two places:
+  no declared dependency whose name carries a telemetry vendor, and no code that uses Electron's
+  `crashReporter`, `net.request`, `fetch`, `XMLHttpRequest`, `WebSocket` or `node:http(s)`.
+- **the CSP the renderer ships with.** The offline e2e boots with no network and counts zero
+  external requests — that measures the app as it is today. The code and CSP scans catch a new
+  outbound call when it is WRITTEN, which is the only moment it is cheap.
+
+Four mutants, all killed: a `@sentry/electron` devDependency, a `fetch(` in `ipc.js`, a
+`crashReporter` require in `main.js`, and `connect-src https:` in the CSP.
+
+Next eligible: WBS-32/33 proper (need humans, Windows and a certificate) · the DV-11 decision.
+
+## Batch 21 QA · `15` conformance sweep — dead copy and missing elements
+
+Report: `BATCH-21-QA.md`. No new Canon findings. 2 HIGH · 5 MEDIUM. 500 tests.
+
+One question: does `18` give copy that no screen draws? Twenty-one keys, and two of them had
+become FALSE — the product was telling the user that recovery paths did not exist after WBS-04,
+22 and 25 shipped them. `15` asks for those as 세 개 / 네 개의 복구 버튼, and they are now
+buttons that go to three different places. The Claude-unavailable state — `12` §16's flagship
+사용 불가 ≠ 실패 — had no rendered evidence at all; the fixture CLI can now be flipped
+logged-out by a marker file, so the e2e reaches it through the real detection path and measures
+the card, the chip, zero reds, exactly four buttons, the kept text, and the drawer carrying the
+user's own sentence.
+
+Copy rots more quietly than code: an unreferenced key raises nothing while the world changes
+underneath it. `tests/unit.test.js` now checks every leaf key is referenced by a screen, with
+two traps closed — dynamically indexed parents count as used, and a key named only in a COMMENT
+does not (that one made `history.more` look alive). Seven keys that could not be rendered yet
+are listed with reasons, and the list is itself checked for staleness, so it cannot quietly
+become permanent.
+
+Rendered in passing: the Steps legend and state words (`16` §2.1 — a glyph alone never carries
+a state), History's 더 보기 / 접기 (`15` §0 Board M → L), the ambiguity card's ▸ 다시 적기, the
+drawer banner's 안전 안내 label, and TD-01's empty Quick Command state. Seven keys were deleted
+instead, each with its reason in the report.
+
+Next eligible: the PENDING list · WBS-32/33 · the DV-11 decision.
+
+## Batch 22 · emptying the PENDING list
+
+Report: `BATCH-22.md`. No new Canon findings. 501 tests.
+
+Batch 21's PENDING list — `18` copy with no screen behind it — went from seven to four, and the
+four that remain are states the product **cannot enter** until DV-11 is decided (`15` TD-01's
+지금 안 됨 is a SHELL that failed to start, and there is no shell yet).
+
+Drawn: `15` SC-01 · UF-RETURN's last-Work summary on each recent row (last by `started_at`, so a
+running Work is the one shown; a running Work gets the waiting chip, never one of the five
+terminal titles; a project with no Work draws nothing rather than an empty summary), and `15`
+SC-03's Remaining-unknown panel — dashed and neutral, with `15`'s three ways out. That state had
+the CLAIM but not the STATE: a user whose cancel left an unconfirmed remainder was told so and
+offered nothing.
+
+Deliberately NOT drawn: `work.ago`. A relative time is only true while it keeps refreshing, and
+the only push that could refresh it is a 15 s tick — so `12초 전` would stand while it had been
+27. A per-second redraw with no signal behind it is what this product refuses everywhere else,
+and it would buy a fact the wall clock already states exactly and never gets wrong. The duration
+IS on screen where it carries a decision: 2분 동안 새 활동이 보이지 않아요, refreshed by the tick
+that judges it. The PENDING note now records that decision rather than a to-do.
+
+The Remaining-unknown panel has no rendered evidence: the e2e's project is a git repo whose
+evidence pair always answers, so the flow cannot reach it. Source-level checks plus two mutants
+cover it, and the gap is stated rather than papered over.
+
+Next eligible: WBS-32/33 · the DV-11 decision.
+
+## Batch 23 QA · the tests were writing into the user's real application data
+
+Report: `BATCH-23-QA.md`. 1 HIGH. 502 tests.
+
+`JUQODE_DB` relocated the store; `evidenceStore` derives from `app.getPath('userData')` and did
+not. So every e2e run left a bare git repository per project in the developer's own
+`~/.config/juqode/evidence` — **201 had accumulated**, unbounded, with nothing to clean them up.
+That is directly against this run's own constraint that tests use disposable scratch storage,
+and the failure is invisible: the suite passes either way and the only symptom is a directory
+quietly growing in someone's home.
+
+Fixed by relocating `userData` itself rather than adding a variable per path — the store, the
+evidence and the Chromium profile all follow one `JUQODE_USER_DATA`, set before
+`app.whenReady()`. Three checks, each looking at something different: the e2e OBSERVES that its
+own temp directory received a written evidence store; a unit test checks the relocation happens
+before anything reads a path; and it checks each harness relocates as many times as it launches
+the app, because one missed spawn would pass everything else.
+
+The existing 201 directories were left alone — there is no way to tell this run's test residue
+from the user's own app runs, and deleting under their home is their call. `BATCH-23-QA.md`
+records where they are and that removing the `evidence` directory is safe.
+
+Third time this run a string scan was fooled by a file DESCRIBING what it does not do (this
+one's own comment named `app.getPath('userData')`). Recorded as a rule: strip comments first.
+
+Next eligible: WBS-32/33 · the DV-11 decision.
+
+## Batch 24 · source scans that read prose instead of code
+
+Report: `BATCH-24.md`. No new Canon findings. 503 tests.
+
+Four times this run a check was fooled by a file DESCRIBING what it does not do — `presence.js`
+naming `setInterval` in the comment that says it has none, `nextaction.js` explaining what a
+declared Step is, `main.js`'s comment naming `app.getPath('userData')` inside the check that the
+relocation comes first — and once in the other direction, where `history.more` looked used
+because another file's prose contained the word.
+
+`tests/src.js` now has `code()` (comments stripped) and `text()` (raw, for the checks whose
+subject IS what the file says), and `tests/unit.test.js` makes going around it a failure: no
+test may read `app/` as text directly. Byte-for-byte comparisons are exempt and stay undecoded.
+
+The stripper is a small lexer rather than a regex, because the regex version creates its own
+false passes: `'http://x//y'` in a string, `/a\/\/b/` in a regex literal, and a `/* … */` inside
+a template literal all survive it. The meta-test also checks the helper is real — `text()` finds
+`setInterval` in `presence.js` and `code()` does not — since a `code()` that did not strip would
+satisfy every other line while changing nothing.
+
+Migrating turned up one more of the same: `presence.test.js`'s no-face check proved the points
+were evenly distributed by finding the word `fibonacci`, which appears only in a comment. It now
+checks the golden-angle constant, which is the distribution.
+
+Next eligible: WBS-32/33 · the DV-11 decision.
+
+## Batch 25 QA · systematic mutation sweep (not hand-picked)
+
+Report: `BATCH-25-QA.md`. No new Canon findings. 515 tests, three e2e files.
+
+Every mutation in this run so far was one I CHOSE — aimed at what I had just changed, so code
+nobody was looking at was never checked. This sweep generated them mechanically over five core
+files (comparison and logical operators and return constants, on comment-stripped code only),
+79 + 62 mutants: **12 real gaps and 3 equivalents.**
+
+The evidence layer held three of them. `measure()`'s `.git` skip could be inverted so it measured
+`.git` ALONE and the whole suite passed — `19` §E's size ceiling would have stopped firing on
+every real project, silently. `firstUnreadable` answers `rel || '.'` and the root's `rel` is the
+empty string, so without the fallback a project whose root cannot be listed at all is allowed to
+start a Work and the basis gets built by `add -A`, which only WARNS about what it cannot read.
+And the nested-repo ledger's `.git` skip was only ever exercised by a file at the nested repo's
+root, where it cannot matter.
+
+Two more were claims nothing could check: `toSignal`'s `system/status` branch had no coverage at
+all (the recorded fixture carries no such event, and the recording was the only place that
+mapping was exercised), and the permission GRANT matcher was only ever asked to resolve the
+FIRST outstanding refusal — so a matcher that ignored the id entirely passed everything, which
+makes D-116's record a guess. Both now have written-down tables.
+
+Two were code that could not be reached: `buildChecked`'s 확인됨 downgrade (extracted as
+`downgrade()` so a test can hand it the shape `build()` cannot produce) and a per-block `isError`
+that nothing read (deleted — the raw line still carries it).
+
+The sweep also found the suite could HANG: `node --test` has no default per-test deadline, so a
+mutant that never settled a promise produced a CI job that never reports. `--test-timeout=60000`,
+and a test that checks it is set.
+
+Its load then shook the e2e twice, both times by sampling after a fixed sleep rather than waiting
+for the outcome — focus read as `BODY`, and a second Electron's renderer read as
+`window.__screen is not a function`, which looks like a product failure and is not one. Both now
+poll to a bounded deadline and fail in the words of what actually did not happen.
+
+Next eligible: finish the sweep over the remaining main-process files · WBS-32/33 · DV-11.
+
+## Batch 26 QA · mutation sweep, stage two (security · evidence · session · detection)
+
+Report: `BATCH-26-QA.md`. Deferred added: **DV-12**. 525 tests, three e2e files.
+
+The worst of it: **nobody had ever called the offline guard.** Any `||` in `security.js`'s
+local-scheme list could be flipped to `&&` — making it cancel every request including the app's
+own `file:` load — and the unit suite passed. The existing checks read the source, and the e2e
+only counted requests that were BLOCKED. A guard that is too strict is not "safe": it is an app
+that does not start, and it could have shipped as one. The handler is now driven directly, with
+the app's own five schemes asserted to pass and nine shapes of outbound asserted to be cancelled.
+
+Three in the evidence layer. The excluded-path ledger could walk into `.git` (which would report
+git's own churn as "an excluded file changed" on every Work). Its size comparison — deliberate
+belt-and-braces beside the mtime one, because D-126a must never MISS a change to something the
+product may not read — was carried by the OR in every test. And `manifest.diff`'s unreadable
+branch had never been reached at all: no test ever produced an entry with `unreadable: true`,
+which is the branch that exists because `null !== null` made a file that grew read as unchanged.
+The non-Git basis also still had the root-unreadable hole `git.js` was fixed for.
+
+`stop()`'s SECOND guard — the one inside the grace timer — could not be reached without waiting,
+and it is the worse of the two: SIGKILL to a process GROUP whose pid has since been recycled
+takes an unrelated tree down. Driven now with an injected `graceMs`, both directions.
+
+Five survivors remain in `claude-detect.js` and all five sit behind `process.platform ===
+'win32'`. They cannot be killed from Linux, and faking `process.platform` would test the fake.
+Recorded as **DV-12** rather than papered over, for the same reason as DV-6 and DV-7.
+
+Next eligible: the sweep's remaining files (`change/blocks.js`, `change/explain.js`,
+`work/supervisor.js`, `interpret/scan.js`, `interpret/narrate.js`, `router/intent.js`) ·
+WBS-32/33 · DV-11.
+
+## Batch 27 QA · mutation sweep, stage three — and a bug in the sweep itself
+
+Report: `BATCH-27-QA.md`. No new Canon findings. 533 tests, three e2e files.
+
+**The sweep was reporting killed mutants as survivors.** A mutant that makes a test file HANG is
+cut off by `--test-timeout` at the FILE level, which prints `not ok 1 - tests/x.test.js` and
+still prints `# fail 0` — and the sweep's verdict was "killed if `# fail 0` is absent". It reads
+the exit code now. The same misreading was visible in batch 25's `not ok 7 - tests/loop.test.js`
+and was not chased then. A checking tool needs checking too.
+
+(It was also leaking orphans: the timeout killed the parent `node --test` and not its per-file
+children, and twelve `node tests/qc.test.js` processes had been running for 38 minutes. Own
+process group now, killed as a group.)
+
+The three files it swept are the ones that turn a model's output into the product's claims, and
+the worst finding is in the narrative prompt: the filter that selects MEASURED answers could be
+inverted, handing the model the answers the facts layer could not establish under a heading that
+calls them 측정된 사실 — and the placeholder could be flipped so the prompt says there are no
+measured facts while carrying them. Both produce a plausible-looking prompt, which is why
+nothing else caught them.
+
+Also: a tool result belonging to a DIFFERENT tool could stand in for the run that a 확인됨 group
+rests on; a two-file group could be titled `a.ts · b.ts 외 0개`; the citation record that CF-13
+makes the only home for a 확인됨 group's evidence had no test at all; the routing TIER — which
+`20` records and `19` §C4 leaves unvalidated, so it is what a wrong synonym guess is traced
+through — was printed in failure messages and never asserted; the tail-stripping loop could run
+once instead of to a fixed point; and `qc.readings.map((r) => (r === 'work' ? 'work' : r))` was
+an identity dressed as a rule, deleted.
+
+Twelve survivors remain and every one is equivalent or unreachable, each with its reason written
+down in the report rather than left as a number.
+
+Next eligible: the sweep's remaining files (`change/blocks.js`, `work/supervisor.js`,
+`interpret/scan.js`) · WBS-32/33 · DV-11.
+
+## Batch 28 QA · mutation sweep, stage four (code blocks · project scan)
+
+Report: `BATCH-28-QA.md`. No new Canon findings. 539 tests, three e2e files.
+
+`change/blocks.js` is the file that actually produces "what changed" for the user, and chasing
+its mutants found a defect nothing else would have: **one rename was three cards.** `renames()`
+was concatenated onto the blocks it was derived from, so a single edit produced `newName 추가`,
+`oldName 삭제` and `newName 이름변경` — three things happening where one did, and three units
+where `19` §C5-B counts one. A rename now replaces the pair it came from, carrying both sides'
+line numbers so nothing the pair knew is lost. The same nested loop also let two additions with
+identical bodies each claim the same deletion.
+
+A path that itself contains ` b/` had no test, in the very branch that exists BECAUSE
+`lastIndexOf(' b/')` gets such a path wrong: `a/x b/y.ts b/x b/y.ts` is one file named
+`x b/y.ts`, and reading it wrongly attributes the change to a file that does not exist while the
+file that did change goes unmentioned.
+
+And `facts.entryHints` was collected by the scan and read by no line of the product — a fact
+nobody reads is a claim nobody can check, and it cost a scan of every manifest. Deleted, with a
+test that now enumerates every key the scan collects and requires each to be read.
+
+Fifteen survivors remain, and the report gives each one its reason: most are branches on AST
+shapes the TypeScript compiler does not actually produce, or comparisons whose two sides reach
+the same answer through a different path.
+
+Next eligible: `work/supervisor.js` (52 sites, the last large one) · WBS-32/33 · DV-11.
+
+## Batch 29 QA · mutation sweep, stage five (the Work supervisor) — and the programme's ledger
+
+Report: `BATCH-29-QA.md`. No new Canon findings. 541 tests, three e2e files.
+
+**Nobody had ever called `watchQuiet`.** Every part of its push condition could be flipped with
+the suite passing. It is the one place a timer is legitimate — `15` defines 새 신호 없음 and
+취소 확인 불가 by the ABSENCE of a signal, and the only event that would deliver that news is the
+event that makes it untrue — so a wrong condition raises nothing at all: the screen simply never
+shows those states. It is now driven through all four cases, including the one that isolates the
+cancel half of the condition from the silence half.
+
+**The sweep programme is complete: 348 mutants over 17 main-process files, 68 survivors, and
+every survivor has a written reason.** It found sixteen product defects, three defects in the
+sweep tool itself, and two in the suite. The ones that would have shipped: the offline guard
+nobody had called (any `||` → `&&` made it cancel the app's own `file:` load), the size cap that
+did not measure the working tree, an unreadable project root that was allowed to start a Work in
+both evidence mechanisms, a rename rendered as three cards, a narrative prompt that could hand
+the model the answers the facts layer could NOT establish under a heading calling them measured,
+and a 확인됨 tool count that undercounted two different ways.
+
+Of the 68: five are Windows-only (DV-12, unmeasurable here) and 63 are equivalent or unreachable
+— comparisons the preceding line already returned past, two paths that reach the same answer, or
+branches on AST shapes the TypeScript compiler does not produce. The point of the ledger is not
+the number; it is that each one carries its reason.
+
+Next eligible: WBS-32 (needs people) · WBS-33 (needs Windows and a certificate) · DV-11's pty
+decision. All three are outside what this run can measure.
+
+## Batch 30 QA · renderer mutation sweep — the claims the screen makes
+
+Report: `BATCH-30-QA.md`. No new Canon findings. 542 tests, three e2e files.
+
+Every sweep so far was `app/main`. The renderer is what the user sees, and two of this run's
+worst findings were there. Renderer mutants are judged by the unit suite AND the visual e2e —
+the first pass judged them by the e2e alone and reported as survivors the mutants the unit
+suite kills, and two workers shared CDP port 9223 and failed each other rather than failing on
+the mutation. Both fixed; that is the fifth defect found in the sweep tooling itself.
+
+Three product findings, and all three share a shape: **being wrong raises nothing.**
+
+The drawer's per-project clearing — the batch-12 HIGH where a Quick Command card confirmed in
+one project would RUN in another — had no test at all; inverting the comparison so it clears
+when the project is the SAME passed everything. It is now driven the way a user does it, through
+the picker.
+
+The presence resolves its colour from a token through a theme-keyed cache, and inverting that
+cache's invalidation left it painted in the previous theme's colour forever. Nothing noticed
+because every pixel check was taken under one theme — while D-135 names Agent Presence among the
+things that must keep working in both. Measured now in light and dark: `[73,58,142]` vs
+`[180,165,242]`, the two values of `--claude`.
+
+And a live update for a DIFFERENT Work could overwrite the snapshot being held off-screen, which
+would put another Work's changes on the SC-04 a user opened for this one — silently, because
+that screen deliberately does not redraw.
+
+Next eligible: the rest of the renderer sweep (`sc02`/`sc03`/`sc04`/`td01`, 68 sites) ·
+WBS-32/33 · DV-11.
+
+---
+
+## 배치 31 — Windows 실행 로그 (사용자 제공)
+
+이 런에서 처음으로 **다른 OS 의 실측 로그**가 들어왔다. 사용자가 Windows PC 에서
+`verify-windows.ps1` 을 돌린 결과이고, 여섯 항목이 실패했다.
+
+여섯 개 중 **제품 결함은 0개, 하네스/스크립트 결함이 6개** 였다. 그리고 그 로그를 따라가다
+제품 결함 하나를 별도로 찾았다 — Windows 에서 **취소가 아무 프로세스도 죽이지 않는다**
+(`process.kill(-pid)` 는 Windows 에 그룹이 없어 던진다). `session.js` 의 spawn 버그와 같은
+계열이고, 같은 이유로 리눅스 테스트가 전부 통과하는 동안 아무도 몰랐다.
+
+가장 값비싼 오진은 3번이었다. SC-01 단계가 electron 4개를 남겼고, 앱은 단일 인스턴스 잠금을
+잡으므로, 다음 단계에서 뜬 패키징된 exe 가 **아무 로그도 없이 즉시 종료**했다. 하네스는 그것을
+"패키징 실패"로 적었다. **한 단계의 누수가 다음 단계를 엉뚱한 이유로 실패시킨다** — 그래서
+단계 사이 정리를 넣되, 정리한 사실 자체를 `$Leaks` 에 남겨 누수는 여전히 실패로 보고한다.
+
+사용자 질문에 대한 답: 여섯 개 중 **어느 것도 spawn 버그와 관련이 없다**. 그 버그는 Work 를
+시작할 때만 발현하고 이 하네스는 Work 를 시작하지 않는다. 둘은 독립된 결함이며 둘 다 고쳤다.
+
+line 243 은 리눅스에 PowerShell 7.6.6 을 받아 **격리 재현한 뒤** 고쳤다 — `$R.host` 는
+`status` 가 없는 dictionary 이고, `Set-StrictMode -Version Latest` 아래에서 없는 속성 읽기는
+종료 오류다. 바로 아래 markdown 루프는 이미 `.Contains('status')` 로 묻고 있었다.
+
+spikes 가 왜 죽었는지는 **모른다**. 로그가 사용자 머신에 있고 나는 못 봤다. 추측 대신,
+다음 실행이 스스로 이유를 말하도록 스크립트와 하네스 양쪽을 고쳤다 (DV-15).
+
+Next eligible: 나머지 렌더러 스윕 (`sc02`/`sc03`/`sc04`/`td01`, 68 sites) · WBS-32/33 · DV-11.
+
+---
+
+## 배치 34 — 막혀 있던 빨간 단언, 그리고 DV-11 GO
+
+배치 33 이 **빨간불로 미완 커밋**한 e2e 패치를 풀었다. 막고 있던 단언 하나의 원인은 배치 33 이
+적어 둔 것(행 선택)이 **아니었다** — 값을 찍어 보니 전환은 정확했고, 드로어가 프로젝트와 함께
+닫히는 것이 제품 규칙이었다. 통과하던 옛 버전이 읽기 직전에 토글로 열고 있었을 뿐이다.
+세 번의 추측보다 한 번의 `results.json` 이 쌌고, 이제 매 실행이 그 파일을 남긴다.
+
+td01 생존자 9개는 **픽스처가 그 상태를 만들 수 없어서** 살아 있었다. `dev` 를 계속 살아 있는
+프로세스로 바꾸자 계속 실행 중 · 이미 켜져 있음 · 실패(코드 127) · 고정 동작 둘이 처음으로
+그려졌다.
+
+그리고 처음으로 **스윕을 재측정했다**: 생존자 35 중 6은 코드가 사라졌고(배치 33 이 다시 썼다),
+29 를 다시 돌려 13 을 죽였다. 현재 트리 기준 kill rate 49% → 74%.
+
+PM 이 DV-11 을 판정했고(파이프 셸 GO · 동반 조건 네 개), `15` TD-01 의 Primary Action —
+사용자가 직접 명령을 치는 줄 — 이 이 배치에서 처음 존재하게 됐다. VISUAL QA 가 레이아웃
+결함 둘을 잡았고, 두 번째는 Canon 충돌이었다: `15` 가 요구한 입력칸 둘이 `15` 가 준 높이에
+들어가지 않는다(367px 대 308px). **CF-22** 로 적고 서랍을 8vh 키웠다.
+
+전체 기록은 `BATCH-34-QA.md`.
+
+Next eligible: 살아 있는 뮤턴트 16개(td01 5 · sc02 4 · sc04 4 · sc03 3) · WBS-32(사람) ·
+DV-13~16(Windows, 파이프 셸 검증 포함).
+
+---
+
+## 배치 35 — 렌더러 생존자 16개, 전부
+
+`5 mutants · 5 killed · 0 SURVIVED` (측정). 다섯 개가 전부 같은 모양이었다 — **카드는 그렸는데
+그 카드의 버튼을 눌러 본 적이 없다.** 모호함 카드의 읽기 고르기 · 실행 중 카드의 멈추기 버튼 ·
+실패 카드의 복구 동작 표시.
+
+배치 34 가 **동등 뮤턴트로 보인다**고 적었던 다섯 번째는 동등하지 않았다. 카드는 스냅샷이고
+확인 시점에 availability 를 다시 묻는데, 거절되면 **설명 시점의 `data` 가 그대로 남는다** —
+정지 카드의 그 data 에는 pid 가 있다. `||` 면 "그 서버는 지금 없어요" 라고 말하면서 그 pid 를
+보여 준다. e2e 가 앱 밖에서 서버를 죽여 그 경로를 실제로 만든다. 덤으로 `19` §C4 의
+설명↔확인 두 왕복 규칙이 처음으로 검사된다.
+
+단언 하나가 틀렸다가 고쳐졌다: 정지 카드에 `npm run dev` 가 없어야 한다고 썼는데 제품이 옳았다
+— 그 카드는 신호를 보낼 프로세스를 그 명령으로 가리킨다. 두 카드를 가르는 것은 스크립트 본문이다.
+
+부수 확인: `btn ... rec` 는 15곳에서 쓰이는데 **어떤 CSS 도 `.rec` 를 정의하지 않는다.**
+적어 두고 넘긴다 (`BATCH-35-QA.md` §3).
+
+전체 기록은 `BATCH-35-QA.md`.
+
+이어서 남은 11개도 같은 배치에서 정리했다. sc02 2 사살 · sc03 1 사살 · sc04 4 사살, 그리고
+**4개는 GONE** — 도달 불가 분기 하나를 지웠고(`cannot-scope`: 화면의 `scopable` 과
+supervisor 의 거절이 같은 함수라 두 계산이 다를 수 없다), presence staleness 가드를 순수
+함수로 뺐다. 추출로 **새로 생긴 사이트 3개도 측정**했다 — 빼면서 사이트를 숨기지 않는다.
+
+처음 그려진 상태 셋: `15` SC-02 시작 실패(카드는 뜨고 기록은 3 → 3 그대로) · SC-04 Empty
+State · **두 그룹짜리 읽기면**.
+
+그 마지막 것이 이 배치의 교훈이다. sc04 뮤턴트 셋이 단언을 쓰고도 **살아남았다** — probe 가
+`if (groups().length > 1)` 뒤에 있었고 이 런의 SC-04 는 그룹이 하나였다. 내가 쓴 단언 셋이 한
+번도 실행되지 않았고, 물려받은 검사도 같은 이유로 이미 공허했다. 픽스처가 두 그룹을 만들게
+하고 두 자리 모두 **개수를 단언**하도록 고쳤다.
+
+> 조용히 건너뛰는 길이 검사는 검사가 아니다. 이 배치에서 두 번 봤다 — 하나는 물려받은 것,
+> 하나는 내가 만든 것.
+
+Next eligible: 셸 줄의 남은 구멍(RESUME §4) · `rec` 클래스(CSS 가 없다) · WBS-32(사람) ·
+DV-13~16(Windows).
+
+---
+
+## 배치 36 — D-138, 게이트 ①② 가 닫혔다
+
+Founder 가 **D-138**(2026-09-11 · 시각 단순화 개정)을 열었고, `18` · `15` 가 함께 고쳐지면서
+Human Gate ① 과 ② 가 풀렸다. 배치 35 가 "게이트 밖에 남은 작업이 없다" 로 멈춘 뒤의 첫 배치다.
+
+SC-02 의 두 열이 더 이상 동등하지 않다 — **주 열이 그 상태의 주어를 들고, 레일이 보조 맥락을
+든다.** 측정: 기본 화면의 가장 큰 물체가 `brief` → `intent`, 밀도 **0.765 → 0.424**, Work 가
+도는 동안에는 주어가 `stream` 으로 바뀐다. **1440 · 1280 · 1024 에서 주어도 순서도 같고 가로
+스크롤 0** — 외부 리뷰가 "창을 줄이면 더 이해하기 쉬워진다" 고 한 것이 넓은 배치가 틀렸다는
+증거였으므로 넓은 쪽을 잰다.
+
+제품 결함 셋: Work 가 도는 중에도 `아직 요청한 작업이 없어요` 라고 말했다(현재 Work 표면이
+없었다) · 실패한 Work 의 `변경 읽기` 가 조건 없이 붙어 빈 리더를 여는 버튼이었다 · 가드 카드가
+`15` 의 네 동작 중 하나만 만들었다. 마지막 것은 앞 배치의 내 판단이 틀린 것이다 — `기다리기` 를
+"안 누르면 되는 일" 로 접었는데, 닫을 길이 없으면 알림이 사용자가 들고 있는 요청 위에 앉아 있는다.
+
+**이 배치는 재부팅으로 끊겼다.** 크래시 시점에 12개 파일이 커밋되지 않은 채 남아 있었고
+빨간 단언이 하나 있었다: `visual.mjs` 가 Brief 의 여섯 답을 **도착 직후** 읽고 있었는데
+D-138 은 해석이 끝나면 접힘이 기본이라 그 자리에서 0 이다.
+
+> 검사도 개정을 따라간다. `17` 의 옛 규칙을 단언하던 블록이 **외부 리뷰가 혼란스럽다고 한 바로
+> 그 배치를 통과시키고 있었다.** 검사는 카드의 벽을 금지하는 것만큼 쉽게 강제한다.
+
+시각 QA 가 하나 더 잡았다 — **단언이 전부 초록인 상태에서** 레일의 머리줄이 자기 버튼을
+라벨보다 좁게 눌러 `펼치\n기` 로 낱말이 가운데서 끊겼다. 고치고, Range 의 줄 수를 세는 검사를
+남겼다.
+
+후속으로 PM 이 Gate ② 의 남은 둘(`work.requested` · `qc.terminal`)을 **폐기**로 판정했다.
+구현은 이미 둘 다 만든 적이 없어 고칠 코드가 없었고, 문제는 **부재가 측정되지 않았다는 것**
+이었다. 다섯 검사를 쌍으로 넣고 일곱 가지 위반을 주입해 전부 빨개지는 것을 확인했다.
+
+전체 기록은 `BATCH-36-QA.md`.
+
+Next eligible: **없다 — 남은 것은 사람이다.** WBS-32(비개발자 도그푸드) · DV-13~16(Windows).
+Canon 쓰기가 이 세션에서 막혀 `JuQode-Private` 에 커밋 안 된 상태 표기 정리와 Gate ② 폐기
+기록이 남아 있다 (Owner 처리).

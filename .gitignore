@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+tmp-visual/
+
+# mutation sweep worker copies (scripts/mutate)
+.mutate-work/

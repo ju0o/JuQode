@@ -1,0 +1,107 @@
+/* SC-01 · Project Open.
+ * Composition per 17: "진입 · 조용하고 가운데로 모인 성긴 화면 — 카드가 적고 여백이 많다".
+ * This is deliberately NOT the SC-02 card grid. The screens must be recognisable apart. */
+
+.sc01 {
+  flex: 1 1 auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 22px;
+  padding: 40px 24px 64px;
+  overflow: auto;
+}
+
+/* the entry block: one statement, one button — 15 SC-01 Default State */
+.sc01 .hero {
+  width: 100%; max-width: 560px;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  text-align: center;
+  padding: 32px 28px;
+}
+.sc01 .hero .lead { max-width: 46ch; }
+.sc01 .hero .actions { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 6px; }
+
+/* recent list — A-8, removable. Quiet by design: it must not compete with the button. */
+.sc01 .recent {
+  width: 100%; max-width: 560px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.sc01 .recent h2 {
+  font-size: 12px; font-weight: 600; letter-spacing: .04em;
+  color: var(--mut); margin: 0 0 2px;
+}
+.sc01 .recent .empty {
+  padding: 14px 16px; color: var(--mut);
+  border: 1px dashed var(--line2); border-radius: var(--r-inner);
+  background: transparent; font-size: 13px;
+}
+
+/* 열 수 없음 — the one red on this screen (15 SC-01 Failure State) */
+.sc01 .failcard {
+  width: 100%; max-width: 560px;
+  padding: 14px 16px;
+  border: 1px solid var(--failline); background: var(--failbg); border-radius: var(--r-card);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.sc01 .failcard .t { font-weight: 600; color: var(--fail); }
+
+.sc01 .footnote { font-size: 12px; color: var(--mut2); }
+
+/* recent rows — A-8. Quiet: they must not compete with the primary button. */
+.sc01 .recent .rows { display: flex; flex-direction: column; gap: 6px; }
+.sc01 .recentrow {
+  font: inherit; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  padding: 10px 14px;
+  color: var(--ink); background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--r-inner);
+}
+.sc01 .recentrow:hover { border-color: var(--line3); background: var(--card2); }
+.sc01 .recentrow .nm { font-weight: 600; }
+.sc01 .recentrow .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* store refused — not a folder failure, so not red (12 §16) */
+.sc01 .storecard {
+  width: 100%; max-width: 560px;
+  padding: 14px 16px; background: var(--grey);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.sc01 .storecard .head { display: flex; align-items: center; gap: 8px; }
+
+/* `15` SC-01 · UF-RETURN — the recent row's last-Work summary. */
+.sc01 .recentlast { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.sc01 .recentlast .lbl { color: var(--mut2); flex: 0 0 auto; }
+.sc01 .recentlast .val { min-width: 0; overflow-wrap: anywhere; }
+
+/* WBS-33 · 서명되지 않은 빌드 (CF-21).
+ *
+ * NOT red: `16` §2.1 keeps `--fail` as the only red on the screen and gives it to the folder
+ * that could not be opened. NOT amber: fill means 부분 완료 and outline means 대기, and this is
+ * neither. It is JuQode saying something about itself, so it takes JuQode's teal — the same
+ * voice separation `17` enforces between JuQode and Claude everywhere else.
+ *
+ * Quiet on purpose. The screen's primary action is opening a folder; a build fact that shouts
+ * would compete with it, and 숨기지 않는다 asks for present, not loud. */
+.sc01 .buildnote {
+  width: 100%; max-width: 560px;
+  padding: 12px 14px;
+  background: var(--juqbg);
+  border: 1px solid var(--juq); border-left-width: 3px;
+  border-radius: var(--r-inner);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sc01 .buildnote .t { font-weight: 600; color: var(--juq); }
+.sc01 .buildnote .sm { color: var(--ink2); }
+
+/* 확인 못함 is a different claim from 서명되지 않음, so it is a different mark: the dashed
+ * unknown `16` §2.1 reserves for exactly this. */
+.sc01 .buildnote.unk {
+  background: var(--unkbg);
+  border: 1px dashed var(--unk);
+}
+.sc01 .buildnote.unk .t { color: var(--unk); font-weight: 500; }
+
+/* WBS-02c · 처음 쓰는 사람을 위한 세 줄. 카드가 아니라 최근 목록 안의 안내이므로 테두리를
+ * 갖지 않는다 — `16` §1 의 카드는 행동의 단위이고 이것은 읽을 것이다. */
+.sc01 .firstrun { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.sc01 .firstrun .t { font-weight: 600; }
+.sc01 .firstrun ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }

@@ -1,0 +1,78 @@
+{
+  "utc": "2026-09-09T09:12:34.305Z",
+  "host": {
+    "platform": "linux",
+    "release": "7.0.0-31-generic",
+    "git": "git version 2.53.0"
+  },
+  "purpose": "Validate a corrected change-evidence contract before amending Canon 19 §E.",
+  "syntheticSecretsOnly": "all secret bodies contain the literal marker JUQODE_SYNTHETIC_SECRET — no real credential exists in this fixture",
+  "exclusionList": [
+    ".env",
+    ".env.*",
+    "*.pem",
+    "*.key",
+    "id_rsa",
+    "id_dsa",
+    "*.p12",
+    "*.pfx"
+  ],
+  "results": {
+    "secretExclusion": {
+      "question": "Does a JuQode-owned exclusion keep secrets out even when .gitignore does not list them, INCLUDING secrets the user already committed?",
+      "gitignoreListsSecrets": false,
+      "alreadyTrackedSecretsDroppedFromCopiedIndex": [
+        ".env",
+        ".env.local",
+        ".env.production",
+        "certs/deploy.key",
+        "keys/server.pem",
+        "src/nested/local.key"
+      ],
+      "note": "A :(exclude) pathspec alone is NOT sufficient — it only filters what `add` considers. Already-tracked secrets survive in the copied index and would still be referenced by write-tree.",
+      "secretPathsInBasisTree": [],
+      "objectsWrittenByJuQode": 8,
+      "objectsContainingSyntheticMarker": 0,
+      "PASS": true
+    },
+    "oldIgnoredCheck": {
+      "question": "Can `git status --ignored=matching` before/after see a MODIFICATION to an existing ignored file?",
+      "before": [
+        "! app.log"
+      ],
+      "after": [
+        "! app.log"
+      ],
+      "identical": true,
+      "appLogWasModified": true,
+      "conclusion": "Identical output despite a real modification — the approved mechanism is silent exactly when it matters."
+    },
+    "replacementLedger": {
+      "question": "Does a (path,size,mtime_ns) ledger detect a change to an EXCLUDED file without reading it?",
+      "beforeCount": 6,
+      "afterCount": 6,
+      "detected": [
+        {
+          "path": ".env.local",
+          "change": "modified"
+        }
+      ],
+      "detectedTheModifiedEnvLocal": true,
+      "contentsNeverRead": true,
+      "PASS": true
+    },
+    "userRepoUntouched": {
+      "question": "Is the user index/worktree byte-identical after both captures?",
+      "fingerprintLinesCompared": 59,
+      "objectsWrittenIntoUserGit": "0",
+      "partiallyStagedSurvived": true
+    },
+    "coverage": {
+      "tracked": true,
+      "untrackedIncluded": true,
+      "addedIncluded": true,
+      "ignoredExcluded": true,
+      "secretsExcluded": true
+    }
+  }
+}

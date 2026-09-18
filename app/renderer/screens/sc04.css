@@ -1,0 +1,129 @@
+/* SC-04 · Change Reader.
+ *
+ * `15` §0 Board: SC-04 is Change Group M · Code Block M · Raw Diff WIDE2. Three columns, and
+ * the left-to-right order IS the reading order the product argues for — meaning, then code,
+ * then raw. The columns collapse to one on a narrow window in that same order, so a small
+ * screen never puts syntax before meaning.
+ */
+
+.sc04 {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 24px 32px 40px;
+  max-width: 1440px; width: 100%; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+.sc04-head { display: flex; flex-direction: column; gap: 6px; }
+/* The title, the outcome chip and the Work's time sit on one line and must not touch. */
+.sc04-headtop { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+/* 부분 — amber FILL (`16` §2.1). A cancelled Work's leftover change is 부분, not 실패, so it
+   must never borrow the one red this product has. */
+.sc04-cancelled {
+  border: 1px solid var(--part); background: var(--partbg); color: var(--part);
+  border-radius: var(--r-inner); padding: 8px 12px;
+}
+
+.sc04-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 4fr) minmax(0, 5fr);
+  gap: 16px;
+  align-items: start;
+}
+.sc04-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.sc04-collabel { letter-spacing: .06em; font-weight: 600; text-transform: none; }
+.sc04-col .card { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+/* ---------- left · 변경 묶음 ---------- */
+.sc04-group { cursor: pointer; transition: border-color var(--d-fast) var(--ease); }
+.sc04-group:hover { border-color: var(--line3); }
+/* The selected group is what the other two columns are showing. A left rule is legible in
+   greyscale and to a colour-blind reader; the tint alone is not. */
+.sc04-group.on { border-color: var(--juq); box-shadow: inset 3px 0 0 var(--juq); }
+/* 설명 불가 is 알 수 없음 — dashed, never red. Nothing failed; we could not describe it. */
+.sc04-group.unexplained { border-style: dashed; border-color: var(--unk); }
+
+.sc04-grouphead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sc04-grouptitle { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.sc04-actor {
+  align-self: flex-start;
+  font-size: 10px; letter-spacing: .06em; font-weight: 600;
+  /* The Claude actor chip takes its caps from the stylesheet (`.actor`, SC-02/SC-03) and its
+     words from `18`. This one hardcoded `JUQODE` into the string instead — a word `18` does not
+     have. Same rule, same place: the dictionary says JuQode, the sheet says how it is set. */
+  text-transform: uppercase;
+}
+.sc04-field { display: flex; gap: 8px; align-items: baseline; }
+.sc04-fieldlabel { flex: 0 0 auto; min-width: 4.5em; letter-spacing: .04em; }
+.sc04-rawbtn { align-self: flex-start; }
+.sc04-files { overflow-wrap: anywhere; }
+.sc04-explain { align-self: flex-start; }
+
+/* ---------- centre · 코드 단위 ---------- */
+.sc04-filename { overflow-wrap: anywhere; color: var(--ink2); }
+/* A block is a BUTTON — `15` makes it selectable — but it must not look like one until it is
+   hovered or chosen, or the middle column becomes a wall of controls. */
+.sc04-block {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  width: 100%; text-align: left;
+  font: inherit; color: inherit;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-inner); padding: 4px 6px; margin: 0;
+  cursor: pointer;
+  transition: background var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease);
+}
+.sc04-block:hover { background: var(--card2); border-color: var(--line); }
+/* The selected block is what the raw panel is showing. A left rule survives greyscale. */
+.sc04-block.on { background: var(--card2); border-color: var(--juq); box-shadow: inset 3px 0 0 var(--juq); }
+.sc04-blockname { min-width: 0; overflow-wrap: anywhere; }
+/* The kind chips carry a WORD, not a colour: 추가 · 삭제 · 수정 · 이름 변경 are facts about the
+   change, and none of them is a failure — so none of them is red. */
+.sc04-kind { flex: 0 0 auto; }
+/* 추가 was painted with `--rec`. `16` reserves green for a RECOVERY action — never for a
+   status, never for navigation — and an added function is not a recovery. All four kinds are
+   neutral; the word is the whole signal, which is also what survives a greyscale print. */
+.sc04-kind.k-add,
+.sc04-kind.k-delete,
+.sc04-kind.k-rename { border-color: var(--line3); color: var(--ink2); }
+
+/* 단위화 불가 · 표시 불가 — statements about the file's kind. Grey, per 12 §16: 사용 불가 ≠ 실패. */
+.sc04-unblocked, .sc04-undisplayable {
+  background: var(--grey); border-radius: var(--r-inner); padding: 8px 12px; color: var(--mut);
+}
+.sc04-truncated { color: var(--mut); }
+/* A block the reader has opened. Same left rule as the selected group — legible in greyscale. */
+.sc04-block.on { box-shadow: inset 3px 0 0 var(--juq); padding-left: 6px; border-radius: var(--r-badge); }
+.sc04-blockraw { margin-left: auto; }
+
+/* 증거 공백 — `19` §E. 알 수 없음 is DASHED, and never red: nothing failed, we simply do not
+   cover these paths. Paths only; the contents were never read. */
+.sc04-gap {
+  border-style: dashed; border-color: var(--unk); background: var(--unkbg);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.sc04-gap .mono { overflow-wrap: anywhere; }
+.sc04-gapalt { color: var(--rec); }
+.sc04-copy { align-self: flex-start; }
+
+/* ---------- right · 원문 diff ---------- */
+.sc04-raw.closed .sc04-collabel { opacity: .55; }
+.sc04-patch {
+  margin: 0;
+  font-family: var(--font-mono); font-size: 12px; line-height: 17px;
+  /* The patch is the one place horizontal scrolling belongs: wrapping a diff line changes what
+     the reader sees the file to be. It scrolls INSIDE its own box; the board never does. */
+  overflow-x: auto; overflow-y: auto; max-height: 60vh;
+  background: var(--card2); border: 1px solid var(--line);
+  border-radius: var(--r-inner); padding: 10px 12px;
+  white-space: pre;
+  tab-size: 2;
+}
+.sc04-scoped { padding-left: 2px; }
+
+.sc04-empty { align-self: start; }
+
+@media (max-width: 1080px) {
+  /* One column, in reading order: meaning first. Raw last, so a narrow window never opens on
+     syntax — which would invert the whole point of the screen. */
+  .sc04-cols { grid-template-columns: minmax(0, 1fr); }
+}

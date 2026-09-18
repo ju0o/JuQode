@@ -1,0 +1,234 @@
+[
+ {
+  "rel": "app/renderer/screens/sc02.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "f (state.screen === 'SC-02' && state.project === project) setPresenceMode('unknown'); return;",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc02.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": ", project)); return n; } if (reason === 'start-failed') { const n = el('div', 'p",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc02.js",
+  "old": " && ",
+  "new": " || ",
+  "ctx": "'keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/sc02.js",
+  "old": " && ",
+  "new": " || ",
+  "ctx": "if (!r?.ok) { if (state.screen === 'SC-02' && state.project === project) setPresenceMode('u",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc02.js",
+  "old": " || ",
+  "new": " && ",
+  "ctx": "pi.brief(p.id).then((r) => { if (!r?.ok || !r.stale?.changed) return; state.stale",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/sc02.js",
+  "old": " || ",
+  "new": " && ",
+  "ctx": "works.length - shown.length; if (hidden > 0 || expanded) { const more = el('div', 'row-a",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc02.js",
+  "old": " > ",
+  "new": " >= ",
+  "ctx": "= r.works.length - shown.length; if (hidden > 0 || expanded) { const more = el('div', '",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/sc03.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "el(snap, api, state)); } if (snap.status === 'input_waiting') card.appendChild(inputPanel",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/sc03.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "if (snap.status !== 'ended' && snap.liveness === 'unknown') card.appendChild(unknownPanel(sna",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/sc03.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "seId ?? null); if (!r?.ok && r?.reason === 'cannot-scope') panel.appendChild(el('div',",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc03.js",
+  "old": "!==",
+  "new": "===",
+  "ctx": "ndChild(quietPanel(snap)); if (snap.status !== 'ended' && snap.liveness === 'unknown') card",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/sc03.js",
+  "old": " && ",
+  "new": " || ",
+  "ctx": "el(snap, api)); if (snap.status !== 'ended' && snap.liveness === 'quiet') card.appendChild(q",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/sc03.js",
+  "old": " && ",
+  "new": " || ",
+  "ctx": "etPanel(snap)); if (snap.status !== 'ended' && snap.liveness === 'unknown') card.appendChild",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/sc03.js",
+  "old": " && ",
+  "new": " || ",
+  "ctx": "rk.id, d.toolUseId ?? null); if (!r?.ok && r?.reason === 'cannot-scope') panel.appendChi",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc03.js",
+  "old": " || ",
+  "new": " && ",
+  "ctx": "tener('toggle', async () => { if (!d.open || box.textContent) return; const r = await",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc04.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": ") => select(i, !(state.readerRaw && selected === i)))); card.appendChild(el('p', 'xs mut",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc04.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "EventListener('click', (e) => { if (e.target === card) select(i, state.readerRaw); }); co",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc04.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "= scoped ? group.files.filter((f) => f.file === scoped) : group.files; for (const f of sh",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/sc04.js",
+  "old": " && ",
+  "new": " || ",
+  "ctx": "tn', state.readerRaw && selected === i ? C.gap.readerRawClose : C.rea",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/sc04.js",
+  "old": " || ",
+  "new": " && ",
+  "ctx": "return { shell, board }; } if (!reader || !reader.groups?.length) { const empty = e",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/td01.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "const id of r.route.readings) { if (id === 'work') { list.appendChild(btn('btn",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/td01.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "const found = one.rules?.find((x) => x.id === id); if (found) Object.assign(state.",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/td01.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "C.gap.qcWhy.unknown_rule)); if (r.reason === 'already_running' && r.data?.pid) { ca",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/td01.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "d, r.data.commandStarted))); } else if (id === 'qc.terminal.open') { card.appendChild(f",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/td01.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "g, C.gap.qcMeaning[id])); if (r.rule?.kind === 'long_running') card.appendChild(el('p', 'xs",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/td01.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "const stop = listed.rules?.find((x) => x.id === 'qc.dev.stop'); if (!stop) return;",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/td01.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "ll; repaint(); })); if (r.kind === 'long_running') { acts.appendChild(btn",
+  "killed": true,
+  "by": "e2e"
+ },
+ {
+  "rel": "app/renderer/screens/td01.js",
+  "old": "===",
+  "new": "!==",
+  "ctx": "acts.appendChild(btn(`btn sm ghost${r.state === 'failed' ? ' rec' : ''}`, C.qc.rerun, async",
+  "killed": false,
+  "by": null
+ },
+ {
+  "rel": "app/renderer/screens/td01.js",
+  "old": " && ",
+  "new": " || ",
+  "ctx": "ule)); if (r.reason === 'already_running' && r.data?.pid) { card.appendChild(el('p',",
+  "killed": false,
+  "by": null
+ }
+]

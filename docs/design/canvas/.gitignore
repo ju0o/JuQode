@@ -1,0 +1,6 @@
+# 전부 `node build.mjs` 가 만드는 것이다. 고치는 곳은 bodies/ 이고, 여기 있는 것은 결과물이다.
+*.dc.html
+canvas.json
+juqode-screenspec.html
+screenspec.html
+JuQode-ScreenSpec.pdf

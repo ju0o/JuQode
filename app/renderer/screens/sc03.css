@@ -1,0 +1,118 @@
+/* SC-03 · Work.
+ * Composition per 17: the Work card is L (2×2) and dominates; the board is quieter than
+ * SC-02's because one thing is happening and the screen should say which. */
+
+.sc03 {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 24px 32px 40px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-rows: minmax(148px, auto);
+  gap: 16px;
+  align-content: start;
+  max-width: 1440px; width: 100%; margin: 0 auto;
+}
+.sc03 .c-s { grid-column: span 1; }
+.sc03 .c-m { grid-column: span 2; }
+.sc03 .c-l { grid-column: span 2; grid-row: span 2; }
+.sc03 .c-wide { grid-column: span 3; }
+.sc03 .card {
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+  min-width: 0; align-self: start;
+}
+.sc03 .chead { display: flex; align-items: center; gap: 8px; }
+.sc03 .chead .ct { font-size: 12px; font-weight: 600; letter-spacing: .03em; color: var(--mut); }
+.sc03 .chead .grow { flex: 1; }
+.sc03 .foot { margin-top: auto; padding-top: 8px; }
+
+.sc03 .actor {
+  font-size: 10px; letter-spacing: .06em; font-weight: 600;
+  color: var(--claude); border: 1px solid var(--claude);
+  border-radius: var(--r-badge); padding: 2px 6px; text-transform: uppercase;
+}
+.sc03 .wname { overflow-wrap: anywhere; }
+.sc03 .routeline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* the liveness line — a fact and a time, and nothing that moves on its own */
+.sc03 .liveness { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+
+/* cancel is ink-outlined everywhere it appears: never recovery-green, never red (15 §0) */
+.sc03 .cancelrow { display: flex; flex-direction: column; gap: 4px; margin-top: auto; }
+.btn.cancel { border-color: var(--ink); color: var(--ink); background: transparent; }
+.btn.cancel:hover { background: var(--card2); border-color: var(--ink); }
+
+/* state panels. amber OUTLINE for waiting — never a fill, which means 부분 (16 §2.1) */
+.sc03 .panel {
+  padding: 10px 12px; border-radius: var(--r-inner);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.sc03 .panel.wait { border: 1px solid var(--wait); border-left-width: 3px; background: transparent; }
+.sc03 .panel.unk { border: 1px dashed var(--unk); background: var(--unkbg); }
+.sc03 .panel .t { font-weight: 600; }
+.sc03 .panel > * { overflow-wrap: anywhere; }
+
+.sc03 .steps { display: flex; flex-direction: column; gap: 4px; }
+.sc03 .step { display: flex; align-items: baseline; gap: 8px; }
+.sc03 .step .mark { font-size: 11px; width: 12px; color: var(--mut); }
+.sc03 .step.done .mark { color: var(--rec); }
+.sc03 .step.running .mark { color: var(--claude); }
+.sc03 .step.not_executed { color: var(--mut2); }
+
+/* the NEXT slot is always rendered; empty is a correct answer (D-107) */
+/* WBS-38 · the NEXT slot is CLAUDE's, and it is text.
+ *
+ * `17`'s absolute rule is that JuQode's 다음 행동 and Claude's NEXT never share a treatment.
+ * They are separated by voice (Claude's purple here, JuQode's teal on `.nextacts`), by shape
+ * (this slot holds no control — 다음 행동 is buttons) and by words (`next.stepLabel` names the
+ * speaker). Changing either colour to match the other is the failure the package is about. */
+.sc03 .nextslot {
+  border-top: 1px solid var(--line);
+  border-left: 3px solid var(--claude);
+  padding: 8px 0 0 10px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.sc03 .nextslot .nlabel { color: var(--claude); font-weight: 600; letter-spacing: .03em; }
+.sc03 .unknownline { border-left: 1px dashed var(--unk); padding-left: 8px; }
+
+.sc03 .rawout {
+  margin: 0; padding: 10px 12px; max-height: 320px; overflow: auto;
+  background: var(--grey); border-radius: var(--r-inner);
+  font-family: var(--font-mono); font-size: 11px; line-height: 16px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* 쉬핑 최소 폭은 880 px(`window.js`)인데 경계가 900 이어서 900~1023 구간이 6칼럼으로 남아
+   있었다 — 950 px 창에서 칼럼 하나가 145 px 다. sc02 와 같은 경계로 맞춘다. 1024 는 e2e 가
+   같은 서열을 요구하며 재는 폭이므로 건드리지 않는다. */
+@media (max-width: 1023px) {
+  .sc03 { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 20px; }
+  .sc03 .c-l, .sc03 .c-wide, .sc03 .c-m { grid-column: span 2; grid-row: span 1; }
+}
+
+/* label · value rows: the label must not run into the value it introduces */
+.sc03 .fieldrow { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.sc03 .fieldrow .k { color: var(--mut2); flex: 0 0 auto; }
+.sc03 .fieldrow .v { min-width: 0; overflow-wrap: anywhere; }
+.sc03 .times { display: flex; gap: 16px; flex-wrap: wrap; }
+
+/* a claim that is Claude Code's own report, not a measured fact — chipped 예상됨 (D-114) */
+.sc03 .claim { display: flex; gap: 8px; align-items: baseline; }
+.sc03 .claim .chip { flex: 0 0 auto; }
+
+/* the permission chip is amber like 대기, but without the clock glyph: the request is already
+   denied (D-133), and a quarter-pie pictogram reads as elapsed progress. */
+.chip.perm { border: 1px solid var(--wait); border-left-width: 3px; color: var(--wait); background: var(--card); }
+
+/* one claim, one chip — the chip sits beside the sentence it qualifies, never above a list */
+.sc03 .claim { display: flex; gap: 8px; align-items: baseline; }
+.sc03 .claim .chip { flex: 0 0 auto; }
+.sc03 .claim .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sc03 .claim .body > * { overflow-wrap: anywhere; }
+.sc03 .claim .src { font-family: var(--font-mono); font-size: 10px; }
+
+/* 부분 완료 · 된 것 / 안 된 것 — two lists, because one of them alone is half an answer */
+.sc03 .itemlist { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+/* A chip is a LABEL, so it is as wide as its word. In a flex COLUMN it would otherwise stretch
+ * to the card and read as a band — which is a different thing in `16` §2.1's grammar. */
+.sc03 .itemlist .chip { align-self: flex-start; }

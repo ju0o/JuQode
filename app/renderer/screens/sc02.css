@@ -1,0 +1,192 @@
+/* SC-02 · Workbench.
+ * Composition per 17: "모듈 보드 · 6열 격자 — 크기가 다른 카드가 여럿 놓인다".
+ * This is deliberately NOT SC-01's centred sparse entry screen. */
+
+.sc02 {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 24px 32px 40px;
+  /* TWO COLUMN STACKS. `17` asks for a module board of differently sized cards; the first
+     implementation read that as a six-column grid with `grid-auto-flow: dense` and auto rows,
+     and MEASURED it drew the Brief on top of the card below it — an auto row sized to 449 px
+     around a 591 px card, with dense flow packing a second card into the space the Brief was
+     already painting on. `align-self: stretch` only moved the failure: the card then clipped
+     its own content, which `16` §4 forbids. A stack cannot overlap. */
+  /* D-138 · the two stacks are no longer peers. The MAIN column carries the subject of
+     whatever state the screen is in; the RAIL carries supporting context (folded Brief,
+     History). 1.62 : 1 is wide enough that the main column reads as the subject at 1024 and
+     narrow enough that the rail is still a usable list — the ratio is what keeps the hierarchy
+     the SAME at 1440, 1280 and 1024 rather than only at the width it was designed on. */
+  display: grid;
+  grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  max-width: 1440px;
+  width: 100%;
+  margin: 0 auto;
+}
+.sc02-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* The rail is quieter than the main column, and says so in weight rather than in colour:
+   `16` §2 spends colour on STATE, and "this is secondary" is not a state. */
+.sc02-rail .card { padding: 12px 14px; }
+.sc02-rail .chead .ct { font-size: 11px; }
+/* MEASURED in the rail: the header row could only SHRINK, so its own controls were squeezed
+   below their labels and broke mid-word — `다시 읽\n기` · `펼치\n기`, and worse at 1024. Every
+   assertion passed while that was on screen. The row wraps now and the buttons keep their own
+   width: a control whose label is cut in half is one the reader has to decode first. */
+.sc02-rail .chead { flex-wrap: wrap; row-gap: 6px; }
+.sc02-rail .chead .btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* `16` §4 sizes are about WIDTH; inside a stack every card fills its column and is exactly as
+   tall as its content. The classes stay so the markup keeps saying what each card weighs. */
+.sc02 .c-s, .sc02 .c-m, .sc02 .c-wide, .sc02 .c-wide2 { width: 100%; }
+
+.sc02 .card {
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 0;                               /* long paths must wrap, not widen the column */
+  align-self: start;                          /* 16 §4: a card is as tall as its content */
+}
+
+
+.sc02 .chead { display: flex; align-items: center; gap: 8px; }
+.sc02 .chead .ct { font-size: 12px; font-weight: 600; letter-spacing: .03em; color: var(--mut); }
+.sc02 .chead .grow { flex: 1; }
+.sc02 .foot { margin-top: auto; padding-top: 8px; }
+
+/* actor badge — 15 §0: every Work / QC card says who acts */
+.sc02 .actor {
+  font-size: 10px; letter-spacing: .06em; font-weight: 600;
+  color: var(--claude); border: 1px solid var(--claude);
+  border-radius: var(--r-badge); padding: 2px 6px; text-transform: uppercase;
+}
+
+.sc02 [data-card="unavail"] { background: var(--grey); }
+
+/* D-138 §9 · the hierarchy must be the SAME at every width, and the external review's own
+   observation — that shrinking the window produced a *better* order — is evidence that it was
+   not. It is the same order now at every width because the DOM order is the hierarchy:
+   main column (subject) first, rail second. Collapsing to one stack therefore reads top to
+   bottom as subject → context, which is what the wide layout reads as left → right.
+
+   Below 1024 the rail loses its own column rather than being squeezed into an unreadable one.
+   Nothing is reordered on the way down — if it had to be, the desktop order would be wrong. */
+@media (max-width: 1023px) {
+  .sc02 { grid-template-columns: minmax(0, 1fr); padding: 20px; }
+  .sc02-rail .card { padding: 14px 16px; }
+}
+
+/* Brief — the six answers. Each row is label + chip, then the answer, then the file the
+ * 확인됨 chip rests on. 16 §5: the card grows its row rather than clipping. */
+.sc02 [data-card="brief"] .answers { display: flex; flex-direction: column; gap: 10px; }
+.sc02 .ans { display: flex; flex-direction: column; gap: 3px; }
+.sc02 .ans .label { display: flex; align-items: center; gap: 6px; }
+.sc02 .ans .label .qn { font-size: 12px; font-weight: 600; color: var(--ink2); }
+.sc02 .ans .body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sc02 .ans .body > * { overflow-wrap: anywhere; }
+.sc02 .ans .src { font-family: var(--font-mono); font-size: 10px; }
+.sc02 .fieldrow { display: flex; gap: 8px; align-items: baseline; }
+.sc02 .fieldrow .k { color: var(--mut2); flex: 0 0 auto; }
+.sc02 .fieldrow .v { min-width: 0; overflow-wrap: anywhere; }
+.sc02 .readfiles { margin-top: 4px; }
+.sc02 .readfiles > div { overflow-wrap: anywhere; padding-top: 4px; }
+
+/* 부분 해석 — amber, per 16 §2's state grammar. It is a line, not a fill, because the
+   partial state describes the card and not any one answer. */
+.sc02 .partial-line {
+  color: var(--part);
+  border-left: 3px solid var(--part);
+  padding-left: 8px;
+}
+
+/* 해석 실패 — a band inside the card, not a red screen. The rest of SC-02 stays usable
+ * (11 F-C1-02: 해석 실패가 제품 전체의 정지가 아니다). */
+.sc02 .failband {
+  padding: 10px 12px; border-radius: var(--r-inner);
+  border: 1px solid var(--failline); background: var(--failbg);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sc02 .failband .t { font-weight: 600; color: var(--fail); }
+
+/* the request field and everything a submit can produce (15 SC-02) */
+.sc02 .intentfield {
+  font: inherit; font-size: 13px; line-height: 19px;
+  width: 100%; resize: vertical; min-height: 46px;
+  padding: 10px 12px; color: var(--ink);
+  background: var(--card2); border: 1px solid var(--line2); border-radius: var(--r-inner);
+}
+.sc02 .intentfield:focus-visible { border-color: var(--line3); }
+.sc02 .consequence { display: flex; flex-direction: column; gap: 8px; }
+.sc02 .routeline { color: var(--ink2); }
+
+.sc02 .panel {
+  padding: 10px 12px; border-radius: var(--r-inner);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.sc02 .panel > * { overflow-wrap: anywhere; }
+.sc02 .panel .t { font-weight: 600; }
+/* waiting is an amber OUTLINE — a fill would read as 부분 (16 §2.1) */
+.sc02 .panel.wait { border: 1px solid var(--wait); border-left-width: 3px; }
+/* 사용 불가 and 자리 안내 are neutral: neither is a failure (12 §16) */
+.sc02 .panel.grey { background: var(--grey); border: 1px solid var(--line); }
+.sc02 .panel.failband { border: 1px solid var(--failline); background: var(--failbg); }
+.sc02 .panel.failband .t { color: var(--fail); }
+
+/* ---------- History (WBS-20) ----------
+ * A row is a fact sheet, not a link: name, outcome, what it changed, when. The two actions are
+ * explicit buttons because `15` gives them different destinations — the result and the changes
+ * are two different questions about the same Work. */
+.sc02 .histrows { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sc02 .hist-orient { margin: 0 0 2px; }
+.sc02 .histrow {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 0; border-top: 1px solid var(--line); min-width: 0;
+}
+.sc02 .histrow:first-of-type { border-top: 0; padding-top: 0; }
+.sc02 .histtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+/* The user's own words name the Work. They can be long; they wrap rather than being cut, because
+   a truncated intent is a different sentence. */
+.sc02 .histname { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+.sc02 .histfacts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* WBS-05 · 오래됨 — a STATEMENT OF FACT, so it is neutral. `16` reserves red for failure and
+   amber fill for 부분; an aged Brief is neither. Dashed 알 수 없음 would be wrong too: what
+   changed is KNOWN, it is the answers that may no longer match. */
+/* `15` SC-02 Stale State: "오래됨 — amber line on Brief". `16` §2 assigns amber OUTLINE to a
+   state waiting on the user, and this band is exactly that — it offers 다시 읽기 and 이대로
+   계속 and does neither on its own. It was ordinary card furniture, so the one state that is
+   waiting for a decision looked like the ones that are not. */
+.sc02 .staleband {
+  border: 1px solid var(--wait); border-left-width: 3px; background: var(--card);
+  border-radius: var(--r-inner); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+/* A refresh that failed over a Brief that still WORKS. `16` §2 keeps red for a closed list of
+   failures, and this is not on it: nothing was lost, the previous reading is still on screen
+   underneath. So it is the neutral 사용 불가 grey — 지금 안 됨 · 실패 아님 (12 §16) — and not
+   red-and-dashed, which is not a combination the grammar defines at all. */
+.sc02 .failband.soft {
+  /* The same tokens as `.panel.grey` — 사용 불가 has one look, and a second grey that is nearly
+     the same is a sixth state nobody declared. */
+  border: 1px solid var(--line); background: var(--grey);
+}
+.sc02 .failband.soft .t { color: var(--ink2); }
+
+/* ── D-138 · the Work Stream, SC-02's subject while a Work is running ──────────────────
+ * `15` SC-02 ③ / Running State (compact): name · state · last observed fact · ✓ ● ○ · 열기.
+ * Nothing here is a progress reading — every row is an observation or a declared count. */
+.sc02 [data-card="stream"] .streambody { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sc02 .streamtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+/* The user's own words name the Work, and they wrap rather than being cut — a truncated intent
+   is a different sentence. Same rule as the History row, same class. */
+.sc02 .streamtop .histname { flex: 1 1 auto; }
+.sc02 .streamlive { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.sc02 .streamlive .mono { font-family: var(--font-mono); }
+.sc02 .streamcounts { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+
+/* While a Work is live this card is the visual winner of the primary column — D-138 §7. The
+   weight comes from the card's own `.active` grammar (`16` §5), not from a new colour. */
+.sc02 [data-card="stream"][data-live="work"] {
+  border-color: var(--line3);
+  box-shadow: 0 1px 2px rgba(20, 23, 28, .05), 0 14px 32px -18px rgba(20, 23, 28, .22);
+}

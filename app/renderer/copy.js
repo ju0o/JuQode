@@ -1,0 +1,760 @@
+/* Korean UX copy.
+ *
+ * SOURCE OF TRUTH: JuQode-Private docs/current/18_KOREAN_UX_COPY.md.
+ * Every string below is TRANSCRIBED from that dictionary by key. Do not edit here —
+ * edit 18 first. Keys not yet needed by a built screen are deliberately absent.
+ */
+export const C = {
+  app: {
+    name: 'JuQode',
+  },
+  actor: {
+    claude: 'Claude Code',
+    juq:    'JuQode',
+  },
+  nav: {
+    /* `18` §0 rule 10 adopts this exact label for the change-project action. */
+    otherProject: '다른 프로젝트 열기',
+  },
+  sc01: {
+    title:      '프로젝트 열기',
+    lead:       '내 컴퓨터에 있는 프로젝트 폴더를 열면, JuQode가 먼저 이 프로젝트가 무엇인지 읽어 드려요.',
+    open:       '프로젝트 폴더 열기',
+    openHint:   '이미 있는 폴더를 고르면 돼요. 새로 만들지는 않아요.',
+    opening:    '폴더를 읽고 있어요…',
+    recent:     '최근에 연 프로젝트',
+    recentNote: '최근에 연 폴더만 보여요.',
+    noHistory:  '아직 기록이 없어요 — 처음 열기',
+    failTitle:  '이 폴더는 열 수 없어요',
+    failReason: '읽기 권한이 없어요',
+    retry:      '▸ 같은 폴더 다시 시도',
+    other:      '▸ 다른 폴더 고르기',
+    tech:       '자세한 내용 보기',
+    lastWork:   '마지막 작업',
+  },
+  brief: {
+    title: '이 프로젝트가 하는 일',
+    at:    '읽은 시점',
+    interpreting: '프로젝트를 읽고 있어요',
+    interpretingHint: '읽는 동안에도 요청할 수 있어요.',
+    readFiles:    '지금 읽는 파일',
+    /* WBS-05 · every one of these is a USER action. `19` §C1 ⑤ and D-132 forbid an automatic
+     * re-read, so `reread` is the only thing that starts one and `stale` only ANNOUNCES.
+     *
+     * `stale` carries an example number — `18` writes "3일" — and `19` §C1 ⑤ asks for that
+     * style with the real number. `brief.js` substitutes the digit and leaves every character
+     * of the approved sentence alone. See CANON_FINDINGS CF-16. */
+    reread:    '다시 읽기',
+    fold:      '접기',
+    unfold:    '펼치기',
+    stale:     '3일 전에 읽은 내용이에요. 그 뒤로 프로젝트가 바뀌었을 수 있어요.',
+    staleKeep: '이대로 계속',
+    failTitle: '프로젝트를 읽지 못했어요',
+    failNote:  '요청과 Quick Command, 터미널은 그대로 쓸 수 있어요.',
+    partial:  "여섯 가지 중 일부는 확인하지 못했어요. 나머지는 '확인 못함'으로 남겨 두었어요.",
+    q: ['하는 일', '주요 기능', '쓰인 기술', '폴더가 하는 일', '실행 방법', '확인 못한 것'],
+    chips: { ok: '확인됨', exp: '예상됨', no: '확인 못함' },
+  },
+  history: {
+    title:   '기록',
+    more:    '개 더',
+    empty:   '아직 끝난 작업이 없어요. 첫 작업을 보내면 여기에 남아요.',
+    note:    '끝난 작업은 사라지지 않아요. 실패하거나 멈춘 작업도 남아요.',
+    result:  '결과 보기',
+    changes: '변경 보기',
+    collapse: '접기',
+  },
+
+  /* `18` orient.* — SC-02's one orientation sentence. `unknown` is reserved for a Work whose
+   * process could not be found after reconciliation; it never stands in for "not looked yet". */
+  orient: {
+    idle:     '진행 중인 작업은 없어요. 지난 작업은 기록에 있어요.',
+    running:  '진행 중인 작업이 있어요.',
+    finished: '마지막 작업이 끝났어요.',
+    unknown:  '이전 작업이 지금 어떤 상태인지 확인할 수 없어요.',
+  },
+  intent: {
+    label:   '요청 · 프로젝트를 바꾸는 요청',
+    ph:      '이 프로젝트에서 바꾸고 싶은 것을 말로 적어요',
+    submit:  '보내기',
+    helper:  '여기는 프로젝트를 바꾸는 요청만 받아요.',
+    examples: '예: "로그인 오류 고쳐줘" · "회원가입 화면을 추가해줘" · "이 버튼을 왼쪽으로 옮겨줘"',
+    toTermHint: '개발 서버 · 테스트 · 빌드 · git 같은 기술 명령은 터미널의 Quick Command에서 해요.',
+    openTerm: '터미널 열기',
+    approvalNote: '작업을 보내면 파일을 바꾸는 데 동의한 것으로 봐요. Claude Code가 따로 허용을 물으면 그대로 전달해요.',
+    routeWork:  'Claude Code에게 작업으로 보내요.',
+    routeQc:    '기술 명령이에요. 터미널의 Quick Command에서 실행해요.',
+    routeUnrec: '프로젝트를 바꾸는 요청으로 읽히지 않아요.',
+    ambiguousTitle: '두 가지로 읽혀요',
+    ambiguousBody:  '어느 쪽인지 골라 주세요. JuQode가 대신 정하지 않아요.',
+    rephrase: '▸ 다시 적기',
+    toWork:   'Claude Code 작업으로 보내기',
+  },
+  pending: { label: '요청 보냄' },
+  guard: {
+    title:  '지금 진행 중인 작업이 있어요',
+    body:   '한 프로젝트에서는 한 번에 하나의 작업만 해요. 끝나거나 취소된 뒤에 다시 보낼 수 있어요. 적은 내용은 아래 칸에 그대로 두었어요.',
+    open:   '열기',
+    answer: '답하기',
+    cancel: '이 작업 취소',
+    wait:   '기다리기',
+    rule:   '요청을 줄 세우거나 동시에 돌리지 않아요.',
+  },
+  evidence: {
+    title:  '이 프로젝트에서는 변경 작업을 시작하지 않아요',
+    body:   '무엇이 바뀌었는지 정확히 확인할 방법이 없어서요. 확인할 수 없는 변경은 만들지 않아요.',
+    remain: '지금 할 수 있는 것',
+    paths:  ['▸ 프로젝트 설명 읽기', '▸ Quick Command 쓰기', '▸ 터미널로 직접 확인'],
+  },
+  startFail: {
+    title: '작업을 시작하지 못했어요',
+    body:  'Claude Code가 시작하자마자 꺼졌어요. 프로젝트 파일은 바뀌지 않았어요. 시작되지 않은 작업은 기록에 남지 않아요.',
+    resubmit: '▸ 다시 보내기',
+    raw:   '▸ 자세한 출력 보기',
+  },
+  work: {
+    now:       '지금 하는 일',
+    empty:     '아직 요청한 작업이 없어요.',
+    open:      '열기',
+    toBench:   '작업대로 돌아가기',
+    cancel:    '이 작업 취소',
+    cancelSub: '취소하면 다음 실행을 멈춰요. 이미 바뀐 파일은 그대로 남아요.',
+    route:     'Claude Code 작업 · 시작 전 상태를 기록해 두었어요',
+    /* `work.requested` was RETIRED in `18` (PM, 2026-09-11): the SC-03 head is the user's own
+     * sentence, and a `요청한 말` label over it is the furniture D-138 §6 removes. The sentence
+     * is still drawn — `workCard` renders `snap.work.intent` as the heading. What went is the
+     * label, and `tests/e2e/visual.mjs` measures both halves so neither can drift back. */
+    started:   '시작',
+    ended:     '끝',
+    stepsTitle:'Step — Claude Code가 실제로 알린 것만',
+    noSteps:   '아직 Step이 없어요. Claude Code가 알려 주면 여기에 보여요.',
+    /* ONE liveness line, two exclusive branches — never both on screen (`18`, 2026-09-11).
+     * `observed` is the branch before any Step signal, and its value is `sessionStart`; from
+     * the first observed signal on it is `lastSeen` + what was seen. `15` No-Step State · M-08:
+     * every Work starts in the first branch. */
+    observed:  '마지막 활동',
+    sessionStart: '시작',
+    lastSeen:  '마지막 활동',
+    ago:       '전',
+    nextEmpty: 'Claude Code가 아직 다음 단계를 보내지 않았어요.',
+    nosignalTitle: '2분 동안 새 활동이 보이지 않아요',
+    nosignalBody:  '멈춘 건지 일하는 중인지 JuQode는 판단하지 않아요. 보인 것만 알려 드려요.',
+    unknownTitle:  '지금은 작업 상태를 확인할 수 없어요',
+    unknownBody:   '실패한 건 아니에요. 지금 상태를 모르는 거예요.',
+    wait:      '▸ 기다리기',
+    terminal:  '▸ 터미널로 직접 확인',
+    cancelReq:     '취소를 요청했어요',
+    cancelReqBody: '실제로 멈추는지 확인하고 있어요. 멈춘 것이 확인되면 결과를 보여 드려요.',
+    cancelUnconfTitle: '멈췄는지 확인할 수 없어요',
+    cancelUnconfBody:  '취소를 요청한 뒤 90초가 지났지만 멈춘 것을 확인하지 못했어요. 아직 실행 중일 수 있어요.',
+    keepWaiting: '▸ 계속 기다리기',
+    verify:      '▸ 보인 것 확인하기',
+    legend:      '끝남 · 진행 중 · 다음',
+    notRun:      '실행되지 않았어요',
+    nextDeclared:'다음',
+    inputTitle: 'Claude Code가 물어요',
+    inputHint:  '답하면 같은 작업이 이어져요. 새 작업이 되지 않아요.',
+    inputPh:    '답을 적어요',
+    answer:     '답 보내기',
+    rawQ:       '원문 보기',
+    /* 계약 B — the MVP path. `work.permTitle`/`permGloss`/`allow`/`deny` belong to contract A,
+     * which `15` says is NOT built, so they are deliberately absent from this file. */
+    permTitleB: 'Claude Code가 이 동작을 하지 못했어요',
+    permGlossB: '허용하면 이 동작만 다시 해 볼게요. 허용하지 않으면 여기서 멈춰요.',
+    permRetry:  '허용하고 다시 해 보기',   // `permStop` is in `gap:` — `18` has no key for it
+    /* Key names follow `18`'s own: `cancelled_none`, not the schema's `cancelled_nochange`.
+     * The mapping from one to the other belongs in the renderer, where it is visible. */
+    resultTitle: {
+      complete:          '끝났어요',
+      partial:           '일부만 끝났어요',
+      failed:            '끝내지 못했어요',
+      cancelled_partial: '취소했어요 · 바뀐 곳이 남아 있어요',
+      cancelled_none:    '취소했어요 · 바뀐 것은 없어요',
+    },
+    /* `15` WBS-18: a 부분 완료 result needs BOTH lists, and these are their labels. They were
+     * named by `sc03.js` and never declared, so the result card drew two empty headings over
+     * the two lists that are the whole point of the 부분 state. */
+    done:        '한 것',
+    notDone:     '못 한 것',
+    readChanges: '변경 읽기',
+    noChanges:   '바뀐 파일이 없어요',
+    unwanted:    '원하던 결과가 아니에요',
+    /* WBS-19 · `15` SC-03 Unwanted result. D-115: there is NO undo button, and the body says so
+     * before offering the only thing that exists — a new Work. It also refuses to promise that
+     * the new Work restores anything, because nothing can promise that. */
+    unwantedTitle: '원하던 결과가 아니라면',
+    unwantedBody:  '되돌리기 버튼은 없어요. 방금 읽은 변경 설명을 바탕으로 새 작업을 요청할 수 있어요. 원래 그대로 돌아간다고 약속하진 못해요.',
+    correction:    '고치는 작업 요청',
+    readMore:      '먼저 변경 더 읽기',
+    raw:         '자세한 출력 보기',
+    resubmit:    '▸ 다시 보내기',
+    /* `15` SC-03 Remaining-unknown (UF-REMAIN-UNKNOWN). Dashed, never red: not being able to
+     * tell what is left is 확인 못함, and `16` §2.1 keeps red for failure alone. */
+    remainTitle: '남은 변경을 다 확인하지 못했어요',
+    remainBody:  '취소할 때 일부 파일 상태를 읽지 못했어요. 확인된 부분만 아래에서 읽을 수 있어요.',
+    remainRead:  '▸ 확인된 변경 읽기',
+    remainNew:   '▸ 새 작업으로 정리 요청',
+  },
+  rules: {
+    noFake:     '진행률이나 남은 시간은 짐작해서 보여 드리지 않아요.',
+    noRollback: '멈춤은 되돌리기가 아니에요 · 되돌리기 버튼은 없어요',
+  },
+  /* SC-02 · Claude Code 지금 안 됨 (`18` §1). 사용 불가 ≠ 실패 (12 §16). */
+  unavailable: {
+    title:    '지금은 Claude Code를 쓸 수 없어요',
+    chip:     '지금 안 됨 · 실패 아님',
+    body:     '실패한 게 아니에요. 해결되면 같은 요청을 다시 보낼 수 있어요.',
+    reason:   'Claude Code에 로그인이 필요해요',
+    paths:    ['▸ 프로젝트 설명 읽기', '▸ Quick Command 쓰기', '▸ 터미널로 직접 확인'],
+    resubmit: '▸ 해결한 뒤 다시 보내기',
+  },
+  /* WBS-35 · Agent Presence (`18` §presence). Three keys, and only three — the nine mode
+   * labels are NOT in `18`; they are in `gap.presenceLabel` with the reason. */
+  presence: {
+    /* `presence.title` was FOLDED in `18` (2026-09-11): it carried the same four characters as
+     * `kicker`, and one card cannot say who is acting twice (`18` §0.8). The kicker is the one
+     * name on this surface. */
+    kicker: 'Claude Code',
+    hint:   '모양은 지금 상태만 나타내요. 진행 정도를 뜻하지 않아요.',
+  },
+  next: {
+    label:     '다음 행동',
+    gloss:     'JuQode가 드리는 선택 — Claude Code가 알린 일이 아니에요',
+    stepLabel: 'NEXT · Claude Code가 알린 다음 Step',
+  },
+  /* SC-04 · Change Reader. Every key below is `18` §SC-04 VERBATIM, including the key names.
+   * An earlier draft transcribed `15`'s prose instead — `15` describes the screen, `18` is the
+   * copy, and where they differ `18` wins. The strings the dictionary has no key for are in
+   * `gap:` with the rest, not invented here where they would look approved. */
+  reader: {
+    title:        '변경 읽기',
+    flow:         '뜻 → 코드 → 원문',
+    groups:       '무엇이 바뀌었나요',
+    blocks:       '어떤 코드가 바뀌었나요',
+    raw:          'Raw Diff — 실제로 바뀐 글자',
+    what:         '무엇',
+    why:          '왜',
+    affects:      '어떤 동작에',
+    openRaw:      'Raw Diff 보기',
+    copy:         '원문 복사',
+    back:         '작업으로 돌아가기',
+    understood:   '이해했어요 · 다음 요청으로',
+
+    /* 설명 못함. The body says out loud that no reason will be invented — the sentence IS the
+     * guarantee, so it is not paraphrased and not shortened. */
+    unexplained:     '이 변경은 말로 설명하지 못했어요',
+    unexplainedBody: '그럴듯한 이유를 지어내지 않아요. 아래에서 코드로 직접 볼 수 있어요.',
+    toBlocks:        '▸ 코드로 보기',
+    toRaw:           '▸ 원문으로 보기',
+
+    unblocked:    '이 파일은 단위로 나누지 못했어요',
+    binary:       '이미지 파일이어서 여기서는 보여 드릴 수 없어요',
+    scoped:       '이 작업이 바꾼 부분만 보여요.',
+    none:         '이 작업은 프로젝트 파일을 바꾸지 않았어요.',
+    cancelledNote: '취소한 작업이 남긴 변경이에요. 마무리되지 않았을 수 있어요.',
+    remainNote:   '남은 변경을 다 확인하지는 못했어요. 아래는 확인된 부분이에요.',
+
+    /* 증거 공백 — `19` §E. Paths only. The `why` line says these are files the project itself
+     * asked to ignore, which is a fact; nothing here says what changed inside them. */
+    evidenceGap:      '증거에 담기지 않은 변경이 있어요',
+    /* Canon's own placeholder is `{paths}`. Keeping it in the literal and substituting is what
+     * makes this string checkable as `18` verbatim — a template literal quietly rewrites the
+     * approved text into something the dictionary does not contain. */
+    evidenceGapPaths: (paths) => '담기지 않은 경로: {paths}'.replace('{paths}', paths),
+    evidenceGapWhy:   '이 파일들은 프로젝트가 무시하도록 설정해 둔 파일이에요.',
+    evidenceGapAlt:   '▸ 터미널로 직접 확인',
+
+    kinds: { add: '추가', modify: '수정', delete: '삭제', rename: '이름 변경', unblocked: '나누지 못함' },
+  },
+
+  /* TD-01 · the drawer and Quick Command. Every key here is `18` §TD-01 VERBATIM. The banner is
+   * the one string that can never be hidden or shortened: it is the product saying, on screen,
+   * that this is not isolation (`19` §S, Q-03). */
+  term: {
+    title:           '터미널',
+    banner:          '여기서 치는 명령은 내 컴퓨터에서 내 권한으로 바로 실행돼요.',
+    hint:            '보조 도구 · 어떤 흐름에도 꼭 필요하지는 않아요',
+    close:           '닫기',
+    unavailable:     '터미널을 열 수 없어요',
+    unavailableBody: '터미널을 시작하지 못했어요. 같은 내용은 다른 곳에서도 볼 수 있어요.',
+    altQc:           '▸ Quick Command 출력으로 확인',
+    altRaw:          '▸ Raw Diff로 확인',
+    mock:            'JuQode mock shell — 실제 셸이 아니에요.',
+    /* The drawer's own labels. `18` gives the Quick Command panel its OWN title, subtitle,
+     * placeholder and send button, all distinct from SC-02's request field — D-134 keeps the
+     * two apart on purpose, and reusing SC-02's placeholder invited exactly the sentences this
+     * engine refuses. */
+    safetyTag:       '안전 안내',
+    out:             '터미널 출력',
+    qcTitle:         'Quick Command',
+    qcHint:          '말로 적으면 정해진 규칙에 있는 명령만 실행해요',
+    qcPh:            '예: "개발 서버 켜줘" · "테스트 돌려줘" · "빌드해줘" · "Git 상태 보여줘"',
+    qcSend:          '보내기',
+    qcEmpty:         '아직 실행한 Quick Command가 없어요. 위 칸에 말로 적어 보세요.',
+  },
+
+  qc: {
+    kicker:        'Quick Command',
+    notClaude:     'Claude Code 작업이 아니에요 — JuQode가 정해진 규칙대로 실행해요',
+    understood:    '이해한 것',
+    action:        '실행할 명령',
+    meaning:       '하는 일',
+    run:           '실행',
+    cancel:        '취소',
+    rule:          '명령은 정해진 규칙에서만 나와요 — AI가 명령을 지어내지 않아요',
+    ok:            '끝났어요',
+    failed:        '실행이 실패했어요',
+    running:       '계속 실행 중',
+    stopReq:       '멈춤 요청함',
+    stopped:       '멈췄어요',
+    unknownEnd:    '끝났는지 확인할 수 없어요',
+    unavailable:   '지금 안 됨',
+    notFail:       '실패 아님',
+    stop:          '멈추기',
+    output:        '출력 보기',
+    fold:          '출력 접기',
+    full:          '출력 전체 보기',
+    /* `qc.terminal` was RETIRED in `18` (PM, 2026-09-11): this card is already INSIDE the TD-01
+     * drawer with the shell pane beside it, so a `▸ 터미널에서 보기` here points at the surface
+     * the reader is already on. A control whose destination is where you are is not an action.
+     * Quick Command does not move — D-134 is unchanged. (Not to be confused with the rule id
+     * `qc.terminal.open`, which is a different thing and still live.) */
+    rerun:         '▸ 다시 실행',
+    toWork:        '▸ Claude Code 작업으로 요청',
+    leave:         '켜 둔 채로 다음 요청',
+    unrec:         '바로 할 수 있는 동작은 아니에요',
+    unrecBody:     '정해진 Quick Command에 없어요. 짐작해서 실행하지는 않아요.',
+    discover:      '▸ 할 수 있는 것 보기',
+    discoverTitle: '무엇을 말할 수 있나요?',
+    available:     '가능',
+    notAvailable:  '지금은 안 돼요',
+    longNote:      '끄기 전까지 계속 켜져 있는 동작이에요.',
+    exit:          '종료 코드',
+  },
+
+  theme: {
+    label:  '테마',
+    light:  '밝게',
+    dark:   '어둡게',
+    system: '시스템',
+  },
+
+  /* ── CANON GAP ─────────────────────────────────────────────────────────────
+   * `18` is the single copy source and it does NOT carry a string for these states.
+   * The words below are taken from `15` (SCREEN SPEC) where `15` states them, and are
+   * marked so they cannot be mistaken for dictionary entries. Filed back to Canon as a
+   * copy gap; when `18` adopts keys for them these move up into the blocks above.
+   *   gap.failMissing    — `15` SC-01 Failure State says `폴더가 존재하지 않습니다`, but `15`'s
+   *                        own header gives `18` precedence and `18` §0.1 requires `-요`.
+   *                        `18` already applied that rewrite to the sibling reason in the same
+   *                        `15` cell (`읽기 권한이 없습니다` → `읽기 권한이 없어요`), so `15`'s
+   *                        un-rewritten wording is not a safe fallback. Written in the `18` voice.
+   *   gap.failNotFolder  — neither `15` nor `18` states it. Written in the `18` §0 voice.
+   *   gap.storeTitle/Body— DB refusal is a runtime state no planning document reaches.
+   *   gap.claudeMissing  — `15` SC-02 names 설치되지 않음 · 응답 없음 as reasons; `18`
+   *                        supplies only the 로그인 필요 sentence.
+   */
+  gap: {
+    /* WBS-35 · the nine Agent Presence mode labels. `16` §9 requires a label in every mode and
+     * `15` §42 names the nine, but `18` carries only `presence.title/kicker/hint` — no label for
+     * any mode. The words below are transcribed from the Canon visual prototype's own LABEL
+     * table (`../JuQode-Private/docs/visual/visual-design.html`, `JQPresenceLabel`), which is
+     * the only place they are written down. Filed as CANON_FINDINGS CF-19.
+     *
+     * SEVEN of the nine are here. The other two are strings `18` already carries under other
+     * keys, so they are wired to those keys below the object rather than copied — a second
+     * literal of an approved string is a second thing to drift. */
+    presenceLabel: {
+      idle:       '대기 중',
+      activity:   '최근 활동이 보여요',
+      input:      '답을 기다리고 있어요',
+      permission: '허용을 기다리고 있어요',
+      nosignal:   '잠시 새 활동이 보이지 않아요',
+      unknown:    '지금은 상태를 확인할 수 없어요',
+      complete:   '작업이 끝났어요',
+    },
+    /* The canvas's accessible name. A canvas has no text, so without this the mode is invisible
+     * to a screen reader even though `16` §9 requires the label to be always present. */
+    presenceAria: (label) => `Agent 상태: ${label}`,
+    /* SC-04 states `18` has no key for. Each one is a state the SCREEN has and the dictionary
+     * does not, so it is marked rather than dressed up as approved copy. */
+    readerRawClose:   'Raw Diff 닫기',
+    readerExplain:    '이 변경 설명 받기',
+    readerExplaining: '설명을 받는 중…',
+    readerFiles:      (n) => `파일 ${n}개`,
+    /* The head-limit note. `18` has no truncation string; `20` bounds the head at 256 KB and
+     * the whole patch is kept in a blob, so the sentence states both halves (D-129). */
+    readerTruncated:  '변경이 너무 커서 여기에는 앞부분만 실었어요. 원문 전체는 그대로 남아 있어요.',
+    /* `18` has `reader.unexplained` for a pass that FAILED and nothing for a pass that has not
+     * run. Using the failure sentence for it made the product announce its own failure for work
+     * it never attempted, so this states the actual state instead. */
+    readerNotAsked:   '아직 이 변경을 말로 설명하지 않았어요.',
+    /* …and `18` has no key for "we could not tell what changed" on SC-04 either. `reader.none`
+     * is a 확인됨 claim and must not be used when the answer is unknown. */
+    readerUnknown:    '이 작업이 무엇을 바꿨는지 여기서 확인하지 못했어요.',
+    readerUnknownFiles: (files) => `바뀐 것으로 확인된 파일: ${files}`,
+    /* ── WBS-19b · 되돌리기 ────────────────────────────────────────────────────────────
+     *
+     * `18` has `work.unwantedBody` and `rules.noRollback`, and both say 되돌리기 버튼은 없어요.
+     * That sentence was written for D-115, which is about a GLOBAL undo — and about that it is
+     * still right. It is NOT right about the narrow thing the evidence can carry: the before-
+     * basis holds the bytes of every file the Work changed, so putting those files back is a
+     * claim the product can keep.
+     *
+     * So the sentences live here rather than replacing Canon's: `18` and D-115 have to be
+     * re-judged before the approved dictionary changes, and until they are, a screen that shows
+     * a 되돌리기 button must not ALSO carry the sentence saying there is none. Filed as
+     * CANON_FINDINGS CF-22.
+     *
+     * The three limits are not softening. Each one is a fact about `restore()` that cannot be
+     * fixed there, and a user who finds out afterwards was misled by the button. */
+    revertTitle:   '이 작업 전으로 되돌릴 수 있어요',
+    revertBody:    '이 작업이 바꾼 파일을 작업 전 내용으로 되돌려요. 원하시면 대신 새 작업을 요청할 수도 있어요.',
+    revert:        '이 작업 전으로 되돌리기',
+    revertConfirm: '되돌리기 전에 알아 두실 것',
+    revertLimits: [
+      '기준에 기록하지 않은 파일은 되돌아가지 않아요 — `.env` 로 시작하는 파일, 키 파일(.pem · .key 등), 중첩된 Git 폴더, 그리고 `.gitignore` 가 무시하는 파일이에요.',
+      '작업이 실행한 명령의 결과(설치된 패키지 · 바뀐 데이터)는 되돌아가지 않아요. 파일 내용만 되돌려요.',
+      '이 작업이 끝난 뒤 직접 고치신 내용이 있다면 그것도 함께 덮어써져요.',
+    ],
+    revertGo:      '되돌리기 진행',
+    revertDone:    (restored, removed) => `되돌렸어요 · 되돌린 파일 ${restored}개${removed ? ` · 지운 파일 ${removed}개` : ''}`,
+    revertNone:    '되돌릴 파일이 없었어요. 이 작업은 기준에 든 파일을 바꾸지 않았어요.',
+    revertPartial: (paths) => `되돌리지 못한 파일 ${paths.length}개: ${paths.join(' · ')}`,
+    revertExcl:    (n) => `기준에서 제외했던 파일 ${n}개는 그대로예요.`,
+    /* WBS-19b · 이 복원이 닿지 못한 파일을 **이름으로**. 개수만 말하면 사용자는 어느 파일인지
+     * 추측해야 하고, 이 파일들은 되돌리기로도 저장(qc.git.commit 이 같은 제외 목록을 쓴다)
+     * 으로도 복구되지 않는다 — 이름이 있어야 사용자가 직접 손을 쓸 수 있다.
+     * D-126a 의 원장은 (경로 · 크기 · mtime) 만 기록하므로 내용은 새어나가지 않는다. */
+    revertExclChanged: (paths) =>
+      `이 작업 중에 바뀌었지만 되돌리지 못한 파일이 ${paths.length}개 있어요 — ${paths.join(' · ')}. ` +
+      '비밀이 담기기 쉬운 파일이라 기준에 기록해 두지 않았어요. 이 파일들은 직접 확인해 주세요.',
+    /* 되돌릴 수 없는 이유들. 전부 실패가 아니라 사실이고, 그렇게 말한다. */
+    revertWhy: {
+      'not-git-basis':      '이 폴더는 Git 저장소가 아니어서 파일 내용을 기록해 두지 못했어요. 되돌릴 내용이 없어요.',
+      'no-basis':           '이 작업의 시작 전 기준을 찾지 못했어요. 되돌릴 기준이 없어요.',
+      'still-running':      '작업이 아직 진행 중이에요. 끝난 뒤에 되돌릴 수 있어요.',
+      'work-running':       '이 프로젝트에서 다른 작업이 돌고 있어요. 끝난 뒤에 되돌릴 수 있어요.',
+      'already-explaining': '지금 이 변경을 설명하는 중이에요. 끝난 뒤에 되돌릴 수 있어요.',
+      'restore-failed':     '파일을 되돌리는 중에 읽거나 쓰지 못했어요. 아무것도 바뀌지 않았을 수 있어요.',
+      'no-work':            '이 작업을 찾지 못했어요.',
+    },
+
+    /* WBS-33 · the unsigned-build notice. `21` WBS-33 and `22` §95 require the product to say
+     * that a build is not signed — 숨기지 않는다 (원칙 2) — and NO screen spec gives that
+     * sentence a home, `18` no key, `16` no colour. Filed as CANON_FINDINGS CF-21.
+     *
+     * TWO sentences, because it is two states in D-114's vocabulary and one of them must not
+     * borrow the other's certainty: an empty PE certificate table is 확인됨 서명 없음, while a
+     * table we cannot judge is 확인 못함. Saying `서명되지 않았어요` for the second would be the
+     * product claiming a check it did not run. */
+    unsignedTitle:    '서명되지 않은 빌드예요',
+    unsignedBody:     'Windows 가 이 앱을 처음 열 때 경고를 보여 줄 수 있어요. 앱이 하는 일은 달라지지 않아요.',
+    unsignedUnknown:  '이 빌드가 서명되었는지 확인하지 못했어요.',
+    /* `15` SC-04 Empty State names `▸ 결과 설명으로` · `▸ 다음 의도로`; `18` carries neither. */
+    readerToResult:   '▸ 결과 설명으로',
+    readerToIntent:   '▸ 다음 의도로',
+    readerToGroups:   '▸ 설명으로',
+    /* WBS-04 · the files a narrative answer cited. `18` has `brief.q[*]` and the chips, and no
+     * key for the evidence line under an answer — the facts layer's rows carry `source_ref` in
+     * the schema instead of on screen. These are files the SCAN read, so the reader can open
+     * them; that is the whole difference between 예상됨 and 확인 못함 here. */
+    briefCites:       '근거로 읽은 파일',
+    /* WBS-02b · 빈 폴더. `18` has `brief.*` for a project that HAS something and nothing at all
+     * for a folder with nothing in it — because `15` SC-01 assumes the user brings a project,
+     * which the person this product is for often does not. 지어낸 상태가 아니라 측정된 상태다:
+     * 폴더를 열 때의 readdir 하나가 근거이고, 문장은 그 사실만 말한다. CANON_FINDINGS CF-23. */
+    briefEmptyTitle: '이 폴더는 아직 비어 있어요',
+    briefEmptyBody:  '읽을 파일이 없어서 설명해 드릴 것도 아직 없어요. 무엇을 만들고 싶은지 적어 주시면 Claude Code가 첫 파일부터 만들어요.',
+    briefEmptyStart: '무엇을 만들지 적어 보기',
+    /* 요청 칸에 들어가는 초안. 보내지 않는다 — 사용자가 자기 말로 이어 쓰고 직접 누른다. */
+    briefEmptyIntent: '만들고 싶은 것: ',
+    /* WBS-02c · 첫 실행. `18` 은 `sc01.noHistory` 로 "기록이 없다" 는 사실만 말하고, 그 다음에
+     * 무엇을 하면 되는지는 어디에도 없다 — 개발자에게는 필요 없고, 이 제품의 사용자에게는
+     * 그것이 전부다. 세 줄은 이 저장소가 실제로 갖고 있는 흐름이고(폴더 열기 → Brief →
+     * 요청), 없는 기능을 약속하지 않는다. CANON_FINDINGS CF-23. */
+    firstRunTitle: '처음이시라면, 이렇게 시작해요',
+    firstRunSteps: [
+      '내 컴퓨터에서 폴더를 하나 고르세요. 빈 폴더여도 괜찮아요.',
+      'JuQode가 그 폴더가 무엇인지 먼저 읽어서 설명해 드려요.',
+      '하고 싶은 일을 말로 적어서 보내면, Claude Code가 그 일을 해요.',
+    ],
+    firstRunNote: '폴더를 새로 만들어 드리지는 않아요 — 이미 만들어 둔 폴더를 골라 주세요.',
+    /* WBS-05 · a refresh that could not read the folder. `18` has `brief.failTitle` and
+     * `brief.failNote` for a project that never read, and nothing for the case where an OLD
+     * Brief is still on screen underneath — which is the whole point of the state. */
+    briefRefreshKept: '아래는 지난번에 읽은 내용이에요. 그대로 남겨 두었어요.',
+    /* `15` SC-02 갱신 중: the old interpretation stays visible until it is replaced (F-C1-03),
+     * and the header says a re-read is happening. `18` has `brief.interpreting` for a FIRST
+     * read and nothing for a re-read over a Brief that is still on screen. */
+    briefRereading:   '다시 읽는 중…',
+    /* `18` brief.stale is written as `3일 전에 읽은 내용이에요…` — it presumes the read is a day
+     * or more old. Staleness is really about the HASH, not the age, so a project can change
+     * minutes after it was read; "0일 전에 읽은 내용이에요" is not Korean anyone writes. This
+     * states the same fact for that case. CANON_FINDINGS CF-16. */
+    /* `12` §16, 오래됨 row: 최신이라고도 틀렸다고도 주장하지 않는다. `18` brief.stale and `15`
+     * both hedge — "바뀌었을 수 있어요" — and this dropped the hedge, asserting a change on the
+     * strength of a hash that covers only manifests and the tree shape (`19` §C1 ⑤): a
+     * reformatted package.json produced "the project changed". */
+    briefStaleToday:  '읽은 뒤로 프로젝트가 바뀌었을 수 있어요.',
+
+    /* TD-01 · the SIX rules' explanation sentences — 이해한 것 · 실행할 명령 · 하는 일.
+     *
+     * `19` §C4 requires the card to explain before it runs, and `18` gives the three LABELS and
+     * none of the six sentences: they live in Canon's own planning evidence
+     * (`../evidence/planning/q02-q03-quick-command-validation.md` §1), which is where these are
+     * transcribed from. `18` needs them — CANON_FINDINGS CF-18. */
+    qcUnderstood: {
+      'qc.dev.start':     '개발 서버를 켜 달라는 요청으로 이해했어요.',
+      'qc.dev.stop':      '개발 서버를 꺼 달라는 요청으로 이해했어요.',
+      'qc.build':         '프로젝트를 빌드해 달라는 요청으로 이해했어요.',
+      'qc.test':          '테스트를 돌려 달라는 요청으로 이해했어요.',
+      'qc.git.status':    '지금 어떤 파일이 바뀌었는지 Git 상태를 보여 달라는 요청으로 이해했어요.',
+      'qc.terminal.open': '터미널을 열어 달라는 요청으로 이해했어요.',
+      /* WBS-22b · 22c — PM 판정(2026-09-12)로 열린 두 규칙. 나머지 여섯과 같은 어투를 쓰되,
+       * 출처가 다르다: `19` §C4 의 검증된 말뭉치는 이 두 문장을 아직 갖고 있지 않다. */
+      'qc.git.commit':    '지금까지 만든 것을 되돌아올 수 있는 저장점으로 남겨 달라는 요청으로 이해했어요.',
+      'qc.deploy':        '프로젝트를 배포해 달라는 요청으로 이해했어요.',
+    },
+    /* 실행할 명령 for the two rules whose action is FIXED rather than a package.json script.
+     * Same source as the sentences above — q02 §1's table. A card that showed nothing on this
+     * line for the stop rule would be asking the user to confirm a blank. */
+    qcAction: {
+      'qc.dev.stop':      (pid, cmd) => `JuQode 가 켠 개발 서버 프로세스(pid ${pid}${cmd ? `, ${cmd}` : ''})에 종료 신호(SIGTERM)를 보내요. 5초 안에 안 꺼지면 강제 종료(SIGKILL)해요.`,
+      'qc.terminal.open': (cwd) => `화면 아래에 터미널 창을 열어요. 셸은 ${cwd} 에서 시작하고, 아무 명령도 자동으로 실행하지 않아요.`,
+      /* 저장은 package.json 스크립트가 아니라 고정 동작이라 이 줄이 없으면 카드가 빈칸을
+       * 확인해 달라고 하게 된다 — `qc.dev.stop` 과 같은 이유로 여기에 있다. */
+      'qc.git.commit':    (init, message) => `${init ? '이 폴더를 Git 저장소로 만들고(git init), ' : ''}바뀐 파일을 모두 담아(git add -A) "${message}" 라는 이름으로 저장점을 남겨요(git commit).`,
+    },
+    qcMeaning: {
+      'qc.dev.start':     '프로젝트를 브라우저에서 볼 수 있게 로컬 서버를 띄워요. 끄기 전까지 계속 돌아요.',
+      'qc.dev.stop':      '브라우저에서 보던 로컬 서버가 멈춰요. 파일은 바뀌지 않아요. 다시 켤 수 있어요.',
+      'qc.build':         '소스 코드를 배포용 결과물로 묶어요. 소스 파일은 바뀌지 않아요. 끝나면 성공/실패와 실제 출력을 보여드려요.',
+      'qc.test':          '프로젝트에 적힌 자동 검사들을 실행해서 통과/실패를 확인해요. 소스 파일은 바뀌지 않아요.',
+      'qc.git.status':    '마지막 커밋 이후 새로 만들어졌거나 바뀌었거나 지워진 파일 목록을 보여줘요. 아무것도 바꾸지 않아요.',
+      'qc.terminal.open': '여기에 직접 명령을 칠 수 있어요. 여기서 치는 명령은 JuQode가 아니라 사용자 본인이 실행하는 것이고, 컴퓨터에서 사용자 권한으로 그대로 돌아요.',
+      /* 저장의 뜻에는 제외 목록이 들어간다. D-126a 의 목록을 그대로 쓰므로 `.env` 는 저장점에
+       * 들어가지 않는데, 그것을 말하지 않으면 사용자는 전부 저장됐다고 읽는다. */
+      'qc.git.commit':    '지금 폴더 상태를 되돌아올 수 있는 지점으로 남겨요. 파일 내용은 바뀌지 않아요. `.env` 로 시작하는 파일과 키 파일(.pem · .key 등)은 저장점에 넣지 않고, `.gitignore` 가 무시하는 파일도 들어가지 않아요.',
+      'qc.deploy':        '프로젝트에 적힌 배포 방법을 그대로 실행해요. 이건 바깥으로 나가는 동작이라 되돌리기가 없어요 — 실행 전에 무엇이 돌아가는지 위에서 확인해 주세요.',
+    },
+    /* The 사용 불가 reasons, keyed by what `availability()` returned. Same source. */
+    qcWhy: {
+      no_script:         '이 프로젝트 package.json 에 그 스크립트가 없어서 정해진 방법을 몰라요. 방법을 지어내지 않아요.',
+      no_package_json:   '프로젝트 루트에 package.json 이 없어요. 지금 Quick Command 는 Node 프로젝트만 지원해요.',
+      already_running:   '개발 서버가 이미 돌고 있어요. 다시 켜려면 먼저 꺼 주세요.',
+      not_running:       'JuQode 가 켠 개발 서버가 지금 없어요. JuQode 밖에서 켠 서버는 JuQode 가 끄지 않아요.',
+      placeholder_script: 'package.json 의 test 스크립트가 npm 기본 자리표시자예요 — 실제 테스트가 없어요.',
+      not_git:           '이 프로젝트 폴더는 Git 저장소가 아니에요.',
+      unknown_rule:      '정해진 Quick Command 가 아니에요.',
+      /* WBS-22b. 둘 다 실패가 아니라 사실이다 (12 §16). */
+      no_changes:        '마지막 저장 이후 바뀐 게 없어요. 남길 것이 없어요.',
+      git_unavailable:   '이 컴퓨터에서 git 을 실행하지 못했어요. 설치돼 있는지 확인해 주세요.',
+      /* The handler's OWN refusals, which are hyphenated where `availability()`'s are
+       * underscored. Falling through to `unknown_rule` made the product say "정해진 Quick
+       * Command 가 아니에요" about a command it had just explained as one of the six. */
+      'already-running':  '이 동작은 지금 돌고 있어요. 끝나면 다시 할 수 있어요.',
+      'unknown-rule':     '정해진 Quick Command 가 아니에요.',
+      'not-executable':   '이 동작을 실행할 방법을 찾지 못했어요.',
+      'no-project':       '열려 있는 프로젝트가 없어요.',
+    },
+    /* WBS-25 · 셸 명령줄. DV-11 판정(파이프 셸 · PM 2026-09-10) 이후에야 존재하는 화면이고,
+     * `18` 은 이 줄에 대한 키를 갖고 있지 않다 — `term.mock` 은 고르지 않은 선택지의 문구이고,
+     * `15` TD-01 은 입력칸이 있다는 것만 적는다. 아래는 `18` §0 의 어투로 썼고, 내용은
+     * DV-11-DECISION §4 의 동반 조건 네 개와 DV-11-PIPE-SHELL-SPIKE 의 실측에서만 가져왔다.
+     * **지어낸 한계는 하나도 없다** — 한계 문장은 `term/session.js` 의 `limits` 가 사실로
+     * 들고 있는 것과 일대일이다. */
+    termTitle:     '셸 명령줄',
+    termHint:      '내가 직접 치는 명령이에요 — JuQode가 고르지 않아요',
+    termPh:        '예: git status · ls -al · npm ls',
+    /* 보내기 버튼의 말은 `18` 이 이미 갖고 있다 — `qc.run`. 같은 낱말을 gap 에 다시 적는 것은
+     * 승인된 사전을 두 벌 만드는 것이고, 검사가 그걸 잡았다. */
+    termEmpty:     '아직 친 명령이 없어요.',
+    termWhere:     (cwd, shell) => `${shell} · ${cwd}`,
+    /* 동반 조건 ① — 치기 전에 알아야 한다. 실패한 뒤에 알면 늦다: 그때는 이미 "왜 안 되지" 다. */
+    termNoTty:     'sudo · ssh · 비밀번호를 묻는 명령은 여기서 답할 수 없어요 — 묻지도 못한 채 끝나요.',
+    /* 동반 조건 ③ — 색과 순서. 숨기면 사용자가 출력을 잘못 읽는다. */
+    termNoColour:  '색은 나오지 않고, 나오는 순서가 실제 순서와 다를 수 있어요.',
+    /* WBS-25b · 배너의 같은 사실을, 방금 친 명령에 대해 그 순간에. 배너는 예방이고 이것은
+     * 설명이다 — 실측된 사용자 경험은 "쳤는데 아무 일도 안 일어났다" 이고, 그 침묵에 이름을
+     * 붙이지 않으면 사용자는 앱이 고장났다고 읽는다. 목록이 완전하다고는 말하지 않는다. */
+    termNoTtyNow:  '이 명령은 비밀번호나 확인을 물어볼 수 있어요. 여기서는 물음에 답할 수 없어서, 아무 말 없이 끝날 수 있어요. 이럴 땐 내 컴퓨터의 터미널 앱에서 직접 실행해 주세요.',
+    /* 작업 제어가 없다는 사실을 버튼 옆에서 말한다 — 누르기 전에. */
+    termStopNote:  '멈추면 이 터미널 세션이 끝나요. 명령 하나만 멈출 수는 없어요.',
+    termRunning:   '실행 중',
+    termBusy:      '앞 명령이 아직 돌고 있어요.',
+    termEnded:     '세션이 끝났어요. 다음 명령을 치면 새로 시작해요.',
+    /* Two readings, and the second is always a Work. `15` TD-01 has no key for the sentence. */
+    qcAmbiguous:   '두 가지로 읽을 수 있어서 실행하지 않았어요. 어느 쪽인지 골라 주세요.',
+    /* `19` §C4 requires the PRODUCT to say this, not only the source: 「가림은 화면 노출을 줄이는
+     * 것이지 누락 방지가 아니며 완전하지 않다」. Seeing `***` without it reads as "JuQode
+     * protected me", which is the false confidence q02 §5.7 exists to prevent. `18` has no key
+     * for the sentence, so it is marked. */
+    qcMaskNote:    '토큰처럼 보이는 값은 화면에서만 가려요. 전부 걸러내지는 못하고, 원래 내용은 터미널과 로그에 그대로 있어요.',
+    /* `19` §C4: `npm run <script>` also runs `pre<script>` and `post<script>`. The card shows
+     * what will run, and a body that is a strict subset of what executes is not that. */
+    qcAlsoRuns:    '이 스크립트 앞뒤로 함께 실행되는 것',
+    qcAsWork:      '▸ Claude Code 작업으로 보내기',
+    /* WBS-22d · 각 규칙의 대표 문구. 목록에서 고르면 이 말이 입력칸에 적히고 라우팅된다 —
+     * 바로 실행하지 않는 이유는 `19` §C4 의 설명-확인이고, 칸에 적어 두는 이유는 사용자가
+     * 다음번엔 직접 칠 수 있게 하기 위해서다.
+     *
+     * 지어낸 문장이 아니다: `tests/qc.test.js` 가 여덟 개 전부를 `match()` 에 넣어 제 규칙으로
+     * 돌아오는지 검사한다. 규칙의 낱말 목록이 바뀌어 이 문장이 더 이상 인식되지 않으면 거기서
+     * 깨진다 — 화면이 잘못된 예시를 가르치는 일은 없다. */
+    qcExample: {
+      'qc.dev.start':     '개발 서버 켜줘',
+      'qc.dev.stop':      '개발 서버 꺼줘',
+      'qc.build':         '빌드해줘',
+      'qc.test':          '테스트 돌려줘',
+      'qc.git.status':    '변경사항 보여줘',
+      'qc.terminal.open': '터미널 열어줘',
+      'qc.git.commit':    '커밋해줘',
+      'qc.deploy':        '배포해줘',
+    },
+    qcPickHint:    '지금 할 수 있는 것을 누르면 그 말이 위 칸에 적혀요. 다음엔 직접 적으셔도 돼요.',
+    /* WBS-23c · `no_script` 막다른 길에서 나가는 길. 문장은 사용자의 말이 아니라 초안이고,
+     * 보내지 않는다 — 사용자가 고쳐 쓰고 직접 누른다. */
+    qcSetup:       '▸ 방법을 만들어 달라고 요청',
+    qcSetupIntent: {
+      'qc.deploy':    '이 프로젝트를 배포할 수 있게 해줘. package.json 에 deploy 스크립트를 만들고, 어디로 어떻게 배포되는지 알려줘.',
+      'qc.build':     'package.json 에 build 스크립트를 만들어줘. 이 프로젝트에 맞는 방법으로.',
+      'qc.test':      'package.json 에 test 스크립트를 만들고, 간단한 테스트를 하나 추가해줘.',
+      'qc.dev.start': 'package.json 에 dev 스크립트를 만들어줘. 브라우저에서 열어 볼 수 있게.',
+    },
+    /* WBS-22c · 배포 카드 전용 한 줄. `19` §C4 의 설명-확인 위에 하나 더 얹는 이유는, 이 동작만
+     * 이 컴퓨터 밖으로 나가고 JuQode 의 되돌리기(WBS-19b)가 닿지 않기 때문이다. */
+    /* WBS-23b · 실패한 Quick Command 를 다음 요청의 초안으로. 사실만 담는다 — 사용자의 말,
+     * 실행된 명령, 출력. 진단도 추측도 넣지 않는다. 출력은 끝에서 잘라 붙이는데, 실패 이유는
+     * 거의 항상 마지막에 있고 앞부분은 성공한 단계들이기 때문이다. */
+    qcFailIntent: (phrase, command, output) => {
+      const lines = String(output ?? '').split('\n').filter(Boolean);
+      const tail = lines.slice(-40).join('\n').slice(-2000);
+      return [
+        `"${phrase}" 를 했는데 실패했어요. 아래 출력을 보고 고쳐 주세요.`,
+        '',
+        command ? `실행된 명령: ${command}` : '',
+        tail ? `출력:\n${tail}` : '출력이 없었어요.',
+      ].filter((x) => x !== '').join('\n');
+    },
+    qcDeployNote:  '배포는 이 컴퓨터 밖으로 나가는 동작이에요. JuQode 의 되돌리기로는 되돌릴 수 없어요.',
+    qcRunningFor:  (cmd) => `실행 중 · ${cmd}`,
+    /* `15` TD-01 groups the discoverability list (`실행 · 빌드/테스트 · 확인 · 터미널`). Those
+     * labels collide with approved keys that mean something else — `실행` is `18`'s RUN BUTTON —
+     * so the panel lists the six flat rather than duplicating Canon copy for a heading. */
+    /* `18` has `reader.copy` for the button; it has no key for what the button says afterwards. */
+    readerCopied:     '복사했어요',
+    readerCopyFailed: '복사하지 못했어요',
+    /* `18` has `history.changes` for the BUTTON and no key for the count on a row. `15` writes
+     * it as `변경 3개`, which is what SC-03's result card already says. */
+    historyChanged:   (n) => `변경 ${n}개`,
+    historyRunning:   '진행 중',
+    /* The prefilled correction intent. `15` writes it as `"○○ 변경을 다시 수정해줘"`; `18` has
+     * no key for the sentence itself, only for the button that produces it. The user's OWN words
+     * are what is quoted — JuQode does not paraphrase the request it is about to resend. */
+    correctionIntent: (intent) => `${intent} — 이 작업의 결과가 원하던 것이 아니에요. 다시 고쳐 주세요.`,
+    /* A read the main process refused. `18` has SC-01's 저장소 copy and nothing for this — the
+     * screen still has to SAY it rather than going blank (12 §16). */
+    readerUnavailable: '이 변경을 지금 불러오지 못했어요.',
+    /* The copy button's own feedback. `18` carries the label (`reader.copy`) and not the
+     * result, and the result is a fact about what just happened on this machine. */
+    /* `18` has `history.changes` for the BUTTON and no key for the count on a row. `15` writes
+     * it as `변경 3개`, which is what SC-03's result card already says. */
+    /* The prefilled correction intent. `15` writes it as `"○○ 변경을 다시 수정해줘"`; `18` has
+     * no key for the sentence itself, only for the button that produces it. The user's OWN words
+     * are what is quoted — JuQode does not paraphrase the request it is about to resend. */
+
+    /* Brief ANSWER bodies. `18` is a dictionary of fixed UI strings; a Brief answer is
+     * generated from what the scan found, so `18` cannot carry it and does not try. These are
+     * the smallest sentences that state a fact without adding a judgement. CF-6. */
+    briefTech:      '프로젝트예요.',
+    /* FIELD LABELS, not sentences — the same shape as Canon's own `brief.at` (읽은 시점) and
+     * `brief.readFiles` (지금 읽는 파일). `18` §0.1's `-요` rule governs sentences; a label
+     * that introduces a value is a label in Canon too.
+     * NOT the earlier wording: the dependency list is the first twelve ALPHABETICALLY, so
+     * calling it a 주요 list is a judgement the scan cannot support (`18` §0.2). */
+    briefPm:        '패키지 매니저',
+    briefDeps:      '의존성',
+    briefFolders:   '이 폴더들이 있어요.',
+    briefFolderRole:'각 폴더가 무슨 일을 하는지는 아직 읽지 않았어요.',
+    briefRun:       '이 프로젝트가 스스로 적어 둔 실행 방법이에요.',
+    briefNoManifest:'어떤 기술을 쓰는지 알려 주는 파일을 찾지 못했어요.',
+    briefNoFolders: '하위 폴더가 없어요.',
+    briefNoScripts: '실행 방법이 프로젝트에 적혀 있지 않아요.',
+    /* NOT "아직 읽지 않았어요" — the card's own disclosure says it read two files. What is
+     * missing is the reading that turns files into an explanation, not the reading itself. */
+    briefNarrative: '파일만으로는 답할 수 없는 질문이에요.',
+    briefUnknownQ:  '아직 답하지 못한 것',
+    briefSkipped:   '상한을 넘겨서 읽지 못한 파일',
+    briefUnreadDirs:'읽을 수 없던 폴더',
+    briefDeepDirs:  '더 깊이 들어가지 않은 폴더',
+    briefRoles:     '폴더가 각각 무슨 일을 하는지',
+    briefTechMeaning:'그 기술이 이 프로젝트에서 무슨 뜻인지',
+    briefFailNoAccess:'폴더를 읽을 권한이 없어요.',
+    briefFailGone:  '폴더가 없어졌어요.',
+    briefFailOther: '폴더를 읽는 중에 막혔어요.',
+    /* SC-03 states `18` has no key for. Written in the `18` §0 voice; filed as CF-8. */
+    workDenialTool: '하려던 동작',
+    workNoScope:    '이 동작은 좁게 허용할 방법이 없어서 허용 버튼을 드리지 않아요.',
+    /* Short labels for the header chip. `18`'s panel TITLES are sentences and belong in the
+     * panel; a chip that repeats a 17-word sentence says the same thing twice (`18` §0.8). */
+    chipRunning:    '진행 중',
+    chipPermission: '허용 필요',
+    chipInput:      '답 필요',
+    workAbout:        '이 작업에 대해',
+    workActor:        '실행자',
+    workBasis:        '변경 기준',
+    workBasisOk:      '확립됨',
+    workStepsNote:    'Step은 Claude Code가 알린 것만 보여요.',
+    /* Result claim bodies — generated from what was measured, so `18` cannot carry them (CF-6). */
+    claimChanged:     '바뀐 파일',
+    claimUnknown:     '무엇이 바뀌었는지 확인하지 못했어요.',
+    claimTools:       'JuQode가 지켜본 도구 실행',
+    claimNotDone:     '허용되지 않아서 하지 못한 것',
+    /* `15` SC-03 contract B names this button; `18` carries the other three of the four. */
+    permStop:       '그만두기',
+    claudeUnknown:  'Claude Code를 쓸 수 없는 이유를 확인하지 못했어요.',
+    workRefused:    '작업을 시작하지 않았어요.',
+    /* The liveness line names WHAT was last seen. The signal kinds are machine words and
+     * `18` §0.7 keeps those out of user sentences, so each gets a plain one. They are
+     * observations, not judgements — none of them says whether the Work is progressing. */
+    signal: {
+      session_start:      '세션 시작',
+      status:             '상태 알림',
+      step:               '단계 알림',
+      file_change:        '파일 변경',
+      tool_use:           '도구 사용',
+      tool_result:        '도구 결과',
+      input_request:      '질문',
+      answer:             '답 보냄',
+      permission_denied:  '허용되지 않은 동작',
+      permission_granted: '허용함',
+      cancel_request:     '취소 요청',
+      cancel_confirmed:   '멈춘 것 확인',
+      rate_limit:         '사용량 안내',
+      finish:             '응답 끝',
+      reconciled:         '상태 확인 불가',
+      evidence_gap:       '증거 빈틈',
+      raw:                '그 밖의 신호',
+    },
+
+    failMissing:   '폴더가 없어요',
+    failNotFolder: '폴더가 아니에요',
+    failUnknown:   '이 폴더를 읽지 못했어요',
+    claudeMissing: 'Claude Code가 설치되어 있지 않아요',
+    claudeNoResp:  'Claude Code가 응답하지 않아요',
+    storeTitle:    '저장소를 열지 못했어요',
+    storeBody:     '기존 파일을 그대로 두었어요. 지운 것은 없어요. 프로젝트를 열려면 이 문제를 먼저 해결해야 해요.',
+  }
+};
+
+/* WBS-35 · the two presence labels `18` DOES carry, taken from their approved keys.
+ *
+ * `cancelled` is `18` `qc.stopped` (멈췄어요) — filed under TD-01 for a Quick Command that was
+ * stopped, and it is the dictionary's words for exactly this state. `failure` is
+ * `work.resultTitle.failed` (끝내지 못했어요), SC-03's own failure title.
+ *
+ * Referencing them rather than re-typing them is the point: an approved string that exists
+ * twice in this file can be edited once and be wrong in the other place. */
+C.gap.presenceLabel.cancelled = C.qc.stopped;
+C.gap.presenceLabel.failure = C.work.resultTitle.failed;
