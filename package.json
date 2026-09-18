@@ -13,6 +13,7 @@
     "pack:linux": "electron-builder --linux dir",
     "pack:win": "electron-builder --win dir zip --x64",
     "test:erd": "node docs/design/check-dbml.mjs",
+    "demo": "node scripts/demo/record-demo.mjs",
     "test:unit": "npm run test:erd && node --test --test-timeout=60000 \"tests/*.test.js\""
   },
   "devDependencies": {
