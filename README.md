@@ -81,30 +81,28 @@ npm run demo          # → docs/dev-evidence/demo/juqode-usage.mp4
 | ③ | `MVP_WINDOWS_CERTIFIED` — **Win10 1809+ 와 Win11 둘 다** | Windows 두 환경. 한 대로는 `STARTED` 까지다 |
 | ④ | 가독성(R) 트랙 + 재측정 | ① 이 먼저 — 우선순위를 코드 계수가 아니라 사람이 막힌 지점이 정한다 |
 
-계획 전문: **[`docs/design/WBS_REMAINING.md`](https://github.com/ju0o/JuQode/blob/dev/mvp-autonomous-v01/docs/design/WBS_REMAINING.md)** (56작업 · 약 72시간 · 게이트 7개)
+계획 전문: **[`docs/design/WBS_REMAINING.md`](docs/design/WBS_REMAINING.md)** (56작업 · 약 72시간 · 게이트 7개)
 
 ---
 
-## 코드는 어디에 있나
-
-**이 `main` 브랜치에는 이 README 와 영상만 있다.** 구현 193개 파일은 아직 열려 있는
-Draft PR 위에 있고, 인수 판정이 나지 않았다 — 판정 나지 않은 것을 기본 브랜치에 두지 않는다.
-
-| | |
-|---|---|
-| 구현 브랜치 | [`dev/mvp-autonomous-v01`](https://github.com/ju0o/JuQode/tree/dev/mvp-autonomous-v01) |
-| Draft PR | [#4 — JUQODE MVP · Autonomous Implementation Run](https://github.com/ju0o/JuQode/pull/4) |
+## 직접 돌려보기
 
 ```bash
-git clone -b dev/mvp-autonomous-v01 https://github.com/ju0o/JuQode.git
+git clone https://github.com/ju0o/JuQode.git
 cd JuQode
 npm ci
 npm start          # Electron 앱
-npm test           # 단위 + e2e (Linux 는 xvfb-run 이 필요하다)
+npm test           # 단위 597 + e2e 3종 (Linux 는 xvfb-run 이 필요하다)
+npm run demo       # 실사용 영상 다시 찍기 (Xvfb + ffmpeg 필요)
 ```
 
-> Windows 10 1809+ / Windows 11 은 **대상 OS 이지만 아직 검증되지 않았다.** `npm start` 는
+> **Windows 10 1809+ / Windows 11 은 대상 OS 이지만 아직 검증되지 않았다.** `npm start` 는
 > 돌 것으로 보이지만, 그렇게 적힌 곳은 `DEFERRED_VALIDATION.md` 의 13행이고 전부 미측정이다.
+> ConPTY · `PATHEXT` · 프로세스 트리 종료 · NTFS 대소문자는 **Windows 에서만 진짜다.**
+
+> **`main` 이 곧 현재 상태다.** 구현은 `dev/mvp-autonomous-v01` 에서 자란 뒤
+> [PR #4](https://github.com/ju0o/JuQode/pull/4) 로 병합되었다. 병합은 **인수 판정이 아니다** —
+> 위의 `MVP_CERTIFIED = NO` 가 그대로 유효하다.
 
 ### 저장소 지도
 
