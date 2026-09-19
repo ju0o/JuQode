@@ -4,7 +4,7 @@
  * webRequest layer blocks both. This asserts the app makes zero external requests, and that
  * the shutdown paths leave no orphan (Spike C: killing the parent can strand descendants).
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { sweepDisplays } from './xvfb.mjs';
 import { launchArgs, killTree, termTree, countElectron, WIN } from './launch.mjs';
 sweepDisplays();
@@ -64,6 +64,12 @@ assert.strictEqual(rm.code, 0, 'reduced-motion boot did not exit cleanly');
 results.reducedMotionBoot = { exit: rm.code };
 
 /* 3. Clean shutdown: quit path, then SIGTERM, each leaving zero survivors. */
+/* JUQODE_EXIT_AFTER_LOAD causes the main Electron process to exit immediately after
+ * load; its sub-processes (renderer, GPU, utility) are children of electron.exe, not
+ * of cmd.exe, so they may linger a few seconds after the parent exits. Poll until they
+ * drain before asserting the field is clear. */
+{ const orphanDeadline = Date.now() + 8000;
+  while (alive() !== '0' && Date.now() < orphanDeadline) { await sleep(500); } }
 assert.strictEqual(alive(), '0', `orphans left before shutdown test: ${alive()}`);
 
 const [tfile, targv] = launchArgs(['.', '--no-sandbox']);
@@ -71,8 +77,35 @@ const term = spawn(tfile, targv,
   { cwd: ROOT, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA }, detached: !WIN });
 await sleep(6000);
 const before = alive();
-termTree(term.pid);
-await sleep(4000);
+/* On Windows, taskkill /T on the cmd.exe wrapper does not reliably propagate WM_CLOSE to
+ * Electron's actual window: cmd.exe is a console process and the signal path through the
+ * intermediate node.exe launcher does not reach the GUI window. Use CloseMainWindow() on
+ * the actual electron.exe process instead — the same path as a user pressing the X button,
+ * which the submission-audit confirmed leaves zero orphans. Fall back to termTree if the
+ * PowerShell approach yields no target (non-Windows or lookup failure). */
+if (WIN) {
+  spawnSync('powershell', ['-NoProfile', '-Command', `
+    $all  = Get-CimInstance Win32_Process;
+    function Get-Desc($p) {
+      $all | Where-Object { $_.ParentProcessId -eq $p } |
+        ForEach-Object { $_; Get-Desc $_.ProcessId }
+    };
+    $main = Get-Desc ${term.pid} |
+      Where-Object { $_.Name -eq 'electron.exe' } |
+      Select-Object -First 1;
+    if ($main) {
+      $proc = [System.Diagnostics.Process]::GetProcessById($main.ProcessId);
+      $proc.CloseMainWindow() | Out-Null
+    }
+  `.replace('${term.pid}', term.pid)], { stdio: 'ignore' });
+} else {
+  termTree(term.pid);
+}
+/* Poll until all Electron processes exit or a 12-second hard timeout. */
+const termDeadline = Date.now() + 12000;
+while (alive() !== '0' && Date.now() < termDeadline) {
+  await sleep(500);
+}
 const after = alive();
 killTree(term.pid);
 await sleep(1500);

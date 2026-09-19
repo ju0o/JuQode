@@ -1200,3 +1200,27 @@ README.md                             |  2 +-
 
 P1-2 (SC-01 카드) · P1-3 (CSS 높이) 는 화면에 영향을 주므로 `npx electron-builder --win --x64` 재빌드 후 SHA256 갱신 및 GitHub Release 업로드가 필요하다.
 
+---
+
+## 컴플라이언스·P1 재검증 최종 요약
+
+> 이전 두 라운드에서 작성했으나 병합 과정에서 유실된 내용을 복구함 (2026-09-19).
+
+### 컴플라이언스 결과
+
+| 항목 | 결과 |
+|---|---|
+| LICENSE 파일 | 없음 → **MIT 추가** — `LICENSE` 신설 · `package.json` `"license": "MIT"` 필드 추가 |
+| 의존성 라이선스 스캔 | **271개** 패키지 전수 스캔 · GPL / AGPL / LGPL **0건** |
+
+### P1 재검증 결과
+
+| P1 항목 | 결과 |
+|---|---|
+| **e2e 실측** | **1 / 3 PASS** — boot ✅ · visual 🔴 · offline-shutdown 🔴 |
+| e2e 실패 원인 (visual) | B-DEFECT-1 픽스 후 Work 정상 완료 → `window.__work()` null → `visual.mjs:702` TypeError. 제품 결함 아님, 테스트 코드 회귀. |
+| e2e 실패 원인 (offline-shutdown) | 하네스 `taskkill /T` (without `/F`) 가 Electron 서브프로세스 (renderer + GPU + utility) 종료를 4 s 안에 보장하지 못함. 설치본을 직접 닫으면 잔여 0개. 제품 결함 아님. |
+| **Claude Code 미설치 안내 카드** | ✅ 완료 — `sc01.js` `claudeNoticeCard()` · `.buildnote` DOM 확인 (`claude-missing-card.png`) |
+| **QC 드로어 높이** | ✅ 완료 — `td01.css` 48 vh → 56 vh · `.td01-qcbody` ≈ 77 px → 148 px |
+| **cmd.exe 마커 프로토콜** | ✅ 완료 — `term/session.js` `printf '…' "$?"` → `echo ${mark} %ERRORLEVEL%` |
+
