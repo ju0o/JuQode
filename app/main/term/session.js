@@ -104,7 +104,7 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
   };
 
   const take = (chunk) => {
-    let s = String(chunk);
+    let s = String(chunk).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     /* 마커 줄은 프로토콜이지 출력이 아니다 — 화면에서 뺀다. 종료 코드는 카드가 따로 말한다. */
     const hit = new RegExp(`^${mark} (\\d+)$`, 'm').exec(s);
     if (hit) s = s.replace(hit[0], '');
@@ -202,7 +202,13 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
       truncated = false;
       /* 줄 끝의 `printf` 는 사용자의 줄과 **다른 줄**에 있어야 한다: `cmd &` 나 주석 `#` 으로
        * 끝나는 줄에 이어 붙이면 마커가 그 줄의 일부가 되어 영영 오지 않는다. */
-      child.stdin.write(`${text}\nprintf '\\n%s %s\\n' ${JSON.stringify(mark)} "$?"\n`);
+      if (shell.posix) {
+        child.stdin.write(`${text}\nprintf '\\n%s %s\\n' ${JSON.stringify(mark)} "$?"\n`);
+      } else {
+        /* cmd.exe: %ERRORLEVEL% is expanded after the previous line runs in interactive mode.
+         * Sent on a separate line so line-continuation (^) at the end of `text` cannot swallow it. */
+        child.stdin.write(`${text}\r\necho ${mark} %ERRORLEVEL%\r\n`);
+      }
       flush(false);
       /* 줄은 이미 셸에 들어갔다 — `needsTty` 는 아무것도 막지 않는다. 답만 한 줄 더 들고 간다. */
       return { ok: true, id, line: text, warn: needsTty(text) ? 'no-tty' : null };

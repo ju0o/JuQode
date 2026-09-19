@@ -10,6 +10,7 @@
  * directory, a way to push updates, and the dialog's owning window.
  */
 const path = require('node:path');
+const { shell } = require('electron');
 const repo = require('./db/repo');
 const project = require('./project');
 const claude = require('./claude-detect');
@@ -425,6 +426,11 @@ function makeHandlers(deps) {
     'juqode:claude-detect': () => {
       if (!detecting) detecting = claude.detect().finally(() => { detecting = null; });
       return detecting;
+    },
+
+    /* HTTPS only — the renderer cannot reach arbitrary protocols. */
+    'juqode:open-external': (_e, url) => {
+      if (typeof url === 'string' && url.startsWith('https://')) shell.openExternal(url);
     },
 
     'juqode:route-intent': (_e, text) => ({ ok: true, route: classify(String(text ?? '')) }),

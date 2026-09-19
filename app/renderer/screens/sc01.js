@@ -27,6 +27,14 @@ export function renderSC01(root, api, nav, state) {
   const main = el('main', 'sc01 fade-in');
   main.setAttribute('data-screen', 'SC-01');
 
+  /* Check Claude Code availability after initial paint so boot is not delayed.
+   * Only 'not-installed' gets the card — 'no-response'/'logged-out' are transient states. */
+  api.claudeStatus().then(r => {
+    if (!r.available && r.reason === 'not-installed') {
+      main.insertBefore(claudeNoticeCard(api), main.firstChild);
+    }
+  }).catch(() => { /* detection failure is silent — the card is advisory, not blocking */ });
+
   const hero = el('div', 'card hero');   /* 16 §1: everything is a card */
   hero.appendChild(el('h1', 'h1', C.sc01.title));
   hero.appendChild(el('p', 'lead', C.sc01.lead));
@@ -108,6 +116,20 @@ export function renderSC01(root, api, nav, state) {
   }
 
   return { shell, main, openBtn };
+}
+
+const CLAUDE_INSTALL_URL = 'https://claude.ai/code';
+
+/* Shown when Claude Code is confirmed not-installed — a prerequisite for any Work. */
+function claudeNoticeCard(api) {
+  const n = el('div', 'buildnote');
+  n.setAttribute('data-el', 'claude-notice');
+  n.appendChild(el('div', 't', C.gap.claudeNeedTitle));
+  n.appendChild(el('div', 'sm', C.gap.claudeNeedBody));
+  const link = btn('btn sm rec', C.gap.claudeNeedLink, () => api.openExternal(CLAUDE_INSTALL_URL));
+  link.setAttribute('data-act', 'claude-install');
+  n.appendChild(link);
+  return n;
 }
 
 /* The build's own signature (WBS-33).

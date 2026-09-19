@@ -743,8 +743,11 @@ export const C = {
     failMissing:   '폴더가 없어요',
     failNotFolder: '폴더가 아니에요',
     failUnknown:   '이 폴더를 읽지 못했어요',
-    claudeMissing: 'Claude Code가 설치되어 있지 않아요',
-    claudeNoResp:  'Claude Code가 응답하지 않아요',
+    claudeMissing:   'Claude Code가 설치되어 있지 않아요',
+    claudeNoResp:    'Claude Code가 응답하지 않아요',
+    claudeNeedTitle: 'Claude Code가 필요해요',
+    claudeNeedBody:  'JuQode를 쓰려면 Claude Code CLI가 설치되어 있어야 해요.',
+    claudeNeedLink:  '설치 페이지 열기',
     storeTitle:    '저장소를 열지 못했어요',
     storeBody:     '기존 파일을 그대로 두었어요. 지운 것은 없어요. 프로젝트를 열려면 이 문제를 먼저 해결해야 해요.',
   }

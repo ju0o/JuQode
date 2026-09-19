@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('juqode', {
   /** WBS-09 — is Claude Code usable right now, and if not, why. Never carries credentials. */
   claudeStatus: () => ipcRenderer.invoke('juqode:claude-detect'),
 
+  /** Open a URL in the system browser. Main validates that it is HTTPS before forwarding. */
+  openExternal: (url) => ipcRenderer.invoke('juqode:open-external', url),
+
   /** WBS-06 — which of the four routes this request reads as. Classifies; runs nothing. */
   routeIntent: (text) => ipcRenderer.invoke('juqode:route-intent', text),
 

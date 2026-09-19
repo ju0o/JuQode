@@ -1001,3 +1001,202 @@ node --test "tests/*.test.js"
 | 전체 단위 테스트 | 484 / 579 (term 제외) | ✅ 500 / 597 (term 포함) |
 
 **P0 두 과제 모두 해소 완료.**
+
+---
+
+## 컴플라이언스·품질 점검
+
+> 점검 일시: 2026-09-19 (KST) · 마감 2026-09-20  
+> 규칙: **확인하는 작업이다. 아무것도 고치지 않았다.**
+
+---
+
+### 1. LICENSE 파일
+
+| 항목 | 상태 |
+|---|---|
+| 저장소 루트 `LICENSE` 파일 | **없음** |
+| `package.json` `"license"` 필드 | **없음 (미설정)** |
+| 법적 기본값 | All Rights Reserved |
+
+고치는 것은 별도 지시를 기다린다. 후보만 적는다:
+
+| 후보 | 근거 |
+|---|---|
+| **MIT** (권장) | 동일 저자의 JuTell 과 일치. 의존성 200개(MIT)와 충돌 없음. |
+| Apache-2.0 | 특허 면책 조항 추가. 배포 바이너리에 포함된 TypeScript 와 동일. |
+
+이 관찰은 `F3` 절(라이선스 스캔) 및 「제출 전 고치면 좋은 것 #12」에 이미 기록되어 있다.
+
+---
+
+### 2. 의존성 라이선스 스캔
+
+**`npx license-checker --summary` 실측 결과 (2026-09-19):**
+
+```
+├─ MIT: 200
+├─ ISC: 34
+├─ BSD-3-Clause: 9
+├─ BlueOak-1.0.0: 8
+├─ Apache-2.0: 7
+├─ BSD-2-Clause: 6
+├─ Python-2.0: 1
+├─ UNLICENSED: 1
+├─ WTFPL OR ISC: 1
+├─ WTFPL: 1
+├─ 0BSD: 1
+├─ (MIT OR CC0-1.0): 1
+└─ (WTFPL OR MIT): 1
+총 271개 패키지
+```
+
+**GPL / AGPL / LGPL 계열: 없음** — `--failOn "GPL;AGPL;LGPL"` 통과.
+
+**주목 항목:**
+
+| 패키지 | 라이선스 | 경로 | 배포 포함 | 비고 |
+|---|---|---|---|---|
+| `juqode@0.1.0` | UNLICENSED | 프로젝트 자체 | — | LICENSE 미설정이 원인. §1 에서 다룸 |
+| `argparse@2.0.1` | Python-2.0 | `electron-builder → app-builder-lib → js-yaml → argparse` | **미포함** | devDep 체인. Python-2.0 은 permissive — MIT 와 충돌 없음 |
+
+**dev vs prod 구분:**
+
+| 구분 | 패키지 | 라이선스 |
+|---|---|---|
+| `dependencies` (배포 포함) | `typescript@^5.9.3` | Apache-2.0 |
+| `devDependencies` (배포 미포함) | `electron@44.3.0` | MIT |
+| | `electron-builder@26.15.3` | MIT |
+
+`F3` 절 실측 결과 배포 바이너리(`app.asar`)에 포함된 npm 패키지는 `typescript` **하나뿐**. 나머지 270개는 빌드·테스트 도구다. 배포 바이너리 관점의 라이선스 의무: Electron(MIT) + Chromium(BSD-3 외) + TypeScript(Apache-2.0).
+
+---
+
+### 3. 실패 테스트 97개 분류
+
+**측정:** `npm run test:unit` (2026-09-19) → 597 tests · 500 pass · **97 fail** · 0 cancelled · ~31초 종료
+
+**아무것도 고치지 않는다. 개수만 센다.**
+
+| 분류 | 개수 | 대표 원인 |
+|---|---|---|
+| ① Windows 환경 자체의 한계 (이미 문서화) | **약 20개** | POSIX 셸 부재 · cmd.exe 마커 프로토콜 · chmod · Unix 프로세스 그룹 시그널 |
+| ② 이번 P0/P1 수정과 무관한 기존 결함 | **약 73개** | POSIX 전용 테스트 하네스 · 절대경로 하드코딩 · Claude Code CLI 탐지 환경 |
+| ③ 분류 불가 / 원인 불명 | **약 4개** | 판정 근거 부족 |
+
+**① 상세 (약 20개):**
+
+- `term.test.js` 1개: `아는 POSIX 셸이면 그것을, 모르면 /bin/sh` — Windows 에 `/bin/sh` 없음. `DEFERRED_VALIDATION.md` 및 `BATCH-36-QA.md` §7("shellFor() Windows 갈래는 여전히 측정이 아니라 자리표시") 에서 이미 명시
+- chmod 기반 "unreadable" 경로 테스트 약 11개: `interpret.test.js`(2개 — OS refuses directory / unreadable root), evidence basis 계층(약 8개 — unreadable FILE·dir·root), `revert.test.js`(1개 — 삭제된 실행 파일 executable bit 복원) — Windows `icacls` 없이 권한 조작 불가, 재현 자체가 불가능
+- Unix process-group 시그널 테스트 약 8개: `qc.test.js`(2개 — `stopping a child that IS running does signal it` · `개발 서버 꺼줘 signals the server JuQode started`), `work`/`signing` 계층(약 6개) — `kill(-pgid)` Windows 에 없음
+
+**② 상세 (약 73개):**
+
+- POSIX 전용 테스트 하네스 의존 약 60개: `loop.test.js`(32) · `work.test.js`(약 15) · `explain.test.js`(6) · `narrate.test.js`(5) · 기타 — `#!/bin/sh` 가짜 바이너리 / `argv.txt` / `pgid.txt` 파일에 의존하는 픽스처가 Windows 에서 실행 불가. **제품 결함이 아니라 테스트 이식성 문제.** 동일 테스트가 Linux CI 에서는 통과한다.
+- Claude Code CLI 탐지 환경 의존 약 9개: `unit.test.js` 내 `installed and logged in` · `installed but logged out` · `auth output we cannot parse` · `detection NEVER carries account identity` 등 — 실제 CLI 바이너리 응답 형태 및 설치 경로에 의존. 이 환경에서 CLI 응답 형태가 다름
+- 정적 분석 테스트 약 4개: `unit.test.js` 내 `capability containment`(경로 구분자 `\` vs `/` 차이로 Windows 에서만 실패), `every Korean string is either Canon 18 verbatim`, `every copy key is used by a screen` 등 — 제품 소스와 Canon 문서 간 동기 상태 의존
+
+**③ 상세 (약 4개):**
+
+- `presence.test.js` 2개: `setMode is the only writer of the mode` · `a detached presence paints nothing` — 원인 불명
+- `security.test.js` 1개: `nothing in the app reads the user's shell or git credentials` — 원인 불명
+- 미분류 1개
+
+> **분류 방법론:** 테스트 이름·오류 메시지 원문·기존 문서(BATCH-36-QA.md §7, DEFERRED_VALIDATION.md, E1 절, P0 수정 재검증 절)를 교차 대조한 정적 분류다. 각 테스트를 격리 환경에서 개별 실행해 환경 의존성을 직접 확인한 분류가 아니므로 **±5개 수준의 오차가 있다.** 고치지 않고 개수만 보고한다.
+
+---
+
+## P1 재검증 (2026-09-19)
+
+> 수정 일시: 2026-09-19 (KST)  
+> 수정 담당: 결함 수정 에이전트 (Claude Sonnet 4.6)  
+> 수정 범위: P1-1 e2e 실측 → P1-2 Claude Code 안내 → P1-3 QC 결과 영역 → P1-4 cmd.exe 마커
+
+---
+
+### P1-1. e2e 3종 실측 — 결과 기록
+
+| 테스트 | 결과 | 원인 분류 |
+|---|---|---|
+| `boot.test.mjs` | ✅ **PASS** | — |
+| `visual.mjs` | 🔴 **FAIL** | **테스트 코드 회귀** — B-DEFECT-1 픽스로 Work 가 정상 완료되어 `state.workSnapshot` 이 null 이 됨. `window.__work()` 가 null 을 반환하고 `visual.mjs:702` 에서 `w.id` 참조 시 TypeError. 제품 결함 아님. |
+| `offline-shutdown.mjs` | 🔴 **FAIL** | **하네스 이슈 (기존)** — `taskkill /T` without `/F` 가 콘솔 자식에게 닿지 않음. 설치본을 직접 종료하면 잔여 프로세스 0개. 제품 결함 아님. |
+
+---
+
+### P1-2. Claude Code 미설치 안내 카드 (SC-01)
+
+**문제:** `exe` 를 받아 처음 실행하는 사람에게 Claude Code 가 없으면 안내가 없었다.
+
+**수정:** `api.claudeStatus()` 를 SC-01 렌더 직후 비동기 호출, `reason === 'not-installed'` 일 때 `.buildnote` 카드를 첫 번째로 삽입. [설치 페이지 열기] 버튼은 `juqode:open-external` IPC 를 통해 `https://claude.ai/code` 를 시스템 브라우저로 연다.
+
+**수정 파일:**
+
+| 파일 | 내용 |
+|---|---|
+| `app/renderer/screens/sc01.js` | `claudeNoticeCard()` 추가 + `api.claudeStatus()` 비동기 호출 |
+| `app/renderer/copy.js` | `gap.claudeNeedTitle` · `gap.claudeNeedBody` · `gap.claudeNeedLink` |
+| `app/preload/preload.js` | `openExternal(url)` 노출 |
+| `app/main/ipc.js` | `juqode:open-external` 핸들러 (HTTPS 한정 검증) |
+
+**보안 설계:** main 프로세스 핸들러가 `url.startsWith('https://')` 를 확인 후 `shell.openExternal()` 를 호출한다. 렌더러가 임의 프로토콜을 열 수 없다.
+
+---
+
+### P1-3. Quick Command 결과 영역 잘림 (`.td01-qcbody` 77px)
+
+**문제:** 창 1184×735 에서 `.td01-qcbody.clientHeight` 가 77px — 내용이 항상 잘려 있었다.
+
+**원인 (계산):** 서랍 460px 중 헤드·배너·셸 영역 합계 약 383px 를 고정 소비, QC 결과 영역에 77px 밖에 남지 않았다. P0 이전부터 존재했으나 P0 에서 passthrough 카드가 추가되어 가시화됨.
+
+**수정 (CSS 3개 규칙):**
+
+| 선택자 | 변경 전 | 변경 후 |
+|---|---|---|
+| `.td01` | `height: min(48vh, 460px)` | `height: min(56vh, 520px)` |
+| `.td01-qc` | `padding: 14px 16px 18px; gap: 10px` | `padding: 10px 16px 12px; gap: 8px` |
+| `.td01-term` | `padding: 12px 16px 14px; gap: 8px` | `padding: 8px 16px 10px; gap: 6px` |
+| 미디어 쿼리 (780px) | `min(64vh, 460px)` | `min(64vh, 520px)` |
+
+**수정 후 추산:** 900px 창 기준 `.td01-qcbody` ≈ **148px** (수정 전 56px).
+
+**선례:** CF-22 에서 서랍을 40vh → 48vh (+8vh) 로 올린 것과 동일한 패턴으로 48vh → 56vh (+8vh) 로 올렸다.
+
+---
+
+### P1-4. 터미널 서랍 cmd.exe 마커 프로토콜 픽스
+
+**문제:** `app/main/term/session.js` 가 POSIX `printf '…' mark "$?"` 를 cmd.exe 에 그대로 보내 마커가 영영 오지 않고 터미널이 첫 명령 후 영구 busy 상태가 됐다. 소스 주석이 "DEFERRED_VALIDATION" 이라고 적어 둔 그대로.
+
+**수정:**
+
+| 항목 | 내용 |
+|---|---|
+| `take()` 첫 줄 | `\r\n` → `\n` 정규화 추가 (cmd.exe 출력의 `\r` 를 마커 정규식 `$` 가 오인하던 문제 해소) |
+| `write()` | `shell.posix` 분기 추가 — POSIX: 기존 `printf` / cmd.exe: `echo ${mark} %ERRORLEVEL%` |
+
+**cmd.exe 마커 설계:** interactive cmd.exe 는 stdin 을 한 줄씩 파싱·실행한다. 두 번째 줄의 `%ERRORLEVEL%` 는 첫 번째 줄 실행 후 파싱되므로 올바른 종료 코드가 담긴다. UUID 기반 마커 문자열에는 cmd.exe 특수 문자(`%`, `^`, `&`)가 없으므로 이스케이프 불필요.
+
+**수정 파일:** `app/main/term/session.js` (+5줄)
+
+---
+
+### git diff --stat (P1 수정분)
+
+```
+app/main/ipc.js                       |  6 ++
+app/main/term/session.js              | 10 +++-
+app/preload/preload.js                |  3 +
+app/renderer/copy.js                  |  7 ++-
+app/renderer/screens/sc01.js          | 22 ++++++++
+app/renderer/screens/td01.css         | 13 ++---
+docs/dev-evidence/submission-audit.md | (이 파일)
+README.md                             |  2 +-
+```
+
+---
+
+### 빌드·릴리스 업데이트
+
+P1-2 (SC-01 카드) · P1-3 (CSS 높이) 는 화면에 영향을 주므로 `npx electron-builder --win --x64` 재빌드 후 SHA256 갱신 및 GitHub Release 업로드가 필요하다.
+

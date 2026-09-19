@@ -74,7 +74,7 @@ npm run demo          # → docs/dev-evidence/demo/juqode-usage.mp4
 | | 값 | 어떻게 쟀나 |
 |---|---|---|
 | 단위 테스트 | **500 / 597** (`term.test.js` 포함 · 전체 스위트 정상 종료) | `npm run test:unit` |
-| e2e | 실측 재확인 필요 | `npm run test:e2e` |
+| e2e | boot **PASS** · visual **FAIL**(테스트 코드 회귀 — B-DEFECT-1 픽스로 `window.__work()` null 반환) · offline-shutdown **FAIL**(하네스 `taskkill /T` 미완 — 제품 결함 아님) | `npm run test:e2e` |
 | ERD ↔ 스키마 대조 | **MVP 26표 일치** | `npm run test:erd` |
 | 렌더러 뮤테이션 생존자 | **0** | 배치 35 스윕 (`docs/dev-evidence/mvp-run/`) |
 | 구현 코드 / 테스트 코드 | 12,749줄 / **15,321줄** | `wc -l` |

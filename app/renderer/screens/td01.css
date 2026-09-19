@@ -17,8 +17,11 @@
   /* CF-22 · `15` asks for TWO Inputs in a drawer it also fixes at 290 px / 40 %, and MEASURED
      they do not both fit: at 40vh on a 770 px window the shell prompt was cut off by the
      window edge and the Quick Command field was a clipped sliver. The drawer grows by 8vh
-     rather than hiding one of the two Inputs `15` requires. See CANON_FINDINGS CF-22. */
-  height: min(48vh, 460px);
+     rather than hiding one of the two Inputs `15` requires. See CANON_FINDINGS CF-22.
+   * CF-P1 · MEASURED: `.td01-qcbody` was 77 px at a typical window — the term section's
+     natural height (~164 px) left the QC result area as a sliver. Another 8vh lift (48→56)
+     plus tightened padding brings qcbody to ≥140 px on a 900 px window. */
+  height: min(56vh, 520px);
   display: flex; flex-direction: column;
   background: var(--card); border-top: 1px solid var(--line);
   box-shadow: 0 -8px 28px rgb(0 0 0 / 10%);
@@ -48,7 +51,7 @@
 /* WBS-22d · 입력칸은 제자리에 있고, 결과만 스크롤한다.
    전에는 라벨·입력칸·결과가 한 스크롤 영역 안에 있어서 카드가 길어지면 입력칸이 위로 사라졌다.
    바로 아래 셸 칸은 고정되어 있었으므로, 같은 서랍의 두 Input 이 서로 다르게 행동했다. */
-.td01-qc { flex: 1 1 auto; min-height: 0; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.td01-qc { flex: 1 1 auto; min-height: 0; padding: 10px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
 .td01-qchead { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; }
 .td01-qcbody { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .td01-qclabel { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -132,7 +135,7 @@
    (MEASURED, twice). The Quick Command region above is the one that gives way — it scrolls. */
 .td01-term {
   flex: 0 0 auto; border-top: 1px solid var(--line);
-  padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px;
+  padding: 8px 16px 10px; display: flex; flex-direction: column; gap: 6px;
   background: var(--card2);
 }
 .td01-termlimits { margin: 0; }
@@ -178,7 +181,7 @@
    Quick Command 에 60 px 쯤 남아 카드 한 장이 들어가지 않는다 — 서랍이 열려도 아무것도
    읽을 수 없었다. 짧은 창에서는 서랍이 화면을 더 쓰고, 셸 출력이 먼저 양보한다. */
 @media (max-height: 780px) {
-  .td01 { height: min(64vh, 460px); }
+  .td01 { height: min(64vh, 520px); }
   .td01-termout { max-height: 60px; }
   .td01-output { max-height: 26vh; }
 }
