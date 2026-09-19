@@ -85,6 +85,8 @@ export const C = {
     routeWork:  'Claude Code에게 작업으로 보내요.',
     routeQc:    '기술 명령이에요. 터미널의 Quick Command에서 실행해요.',
     routeUnrec: '프로젝트를 바꾸는 요청으로 읽히지 않아요.',
+    passthroughTitle: 'Claude Code에게 그대로 보낼까요?',
+    passthroughBody:  '이 요청을 작업으로 Claude Code에 보내요. JuQode가 읽지 못한 요청도 Claude Code는 처리할 수 있어요.',
     ambiguousTitle: '두 가지로 읽혀요',
     ambiguousBody:  '어느 쪽인지 골라 주세요. JuQode가 대신 정하지 않아요.',
     rephrase: '▸ 다시 적기',

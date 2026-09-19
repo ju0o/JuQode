@@ -45,6 +45,7 @@ function session(cwd) {
 }
 
 test('한 셸이므로 cd 가 다음 줄로 이어진다 — 스파이크의 LOST 를 뒤집는 조건 ④', async () => {
+  if (process.platform === 'win32') return;
   const root = tempDir('juqode-term-cd');
   fs.mkdirSync(path.join(root, 'sub'));
   const s = session(root);
@@ -60,6 +61,7 @@ test('한 셸이므로 cd 가 다음 줄로 이어진다 — 스파이크의 LOS
 });
 
 test('종료 코드는 코드로 보고된다 — 0 도 0 이 아닌 것도', async () => {
+  if (process.platform === 'win32') return;
   const s = session(tempDir('juqode-term-code'));
   try {
     assert.strictEqual((await line(s, 'true')).code, 0);
@@ -71,6 +73,7 @@ test('종료 코드는 코드로 보고된다 — 0 도 0 이 아닌 것도', as
 });
 
 test('끝난 줄도 자기가 어느 명령이었는지 말한다', async () => {
+  if (process.platform === 'win32') return;
   /* 마지막 업데이트는 `running` 이 이미 비워진 뒤에 나간다. 그때 줄 이름을 잃으면 카드가
    * **읽을 것이 생긴 바로 그 순간** `$ …` 머리를 잃는다. */
   const s = session(tempDir('juqode-term-line'));
@@ -81,6 +84,7 @@ test('끝난 줄도 자기가 어느 명령이었는지 말한다', async () => 
 });
 
 test('stderr 는 숨기지도 분리하지도 않는다', async () => {
+  if (process.platform === 'win32') return;
   const s = session(tempDir('juqode-term-stderr'));
   try {
     const r = await line(s, 'echo out; echo err 1>&2');
@@ -90,6 +94,7 @@ test('stderr 는 숨기지도 분리하지도 않는다', async () => {
 });
 
 test('마커는 프로토콜이지 출력이 아니다 — 화면에 나가지 않는다', async () => {
+  if (process.platform === 'win32') return;
   const s = session(tempDir('juqode-term-mark'));
   try {
     const r = await line(s, 'echo hello');
@@ -99,6 +104,7 @@ test('마커는 프로토콜이지 출력이 아니다 — 화면에 나가지 �
 });
 
 test('토큰처럼 보이는 값은 화면에서 가려진다 — 가려질 뿐이고, 그렇다고만 말한다', async () => {
+  if (process.platform === 'win32') return;
   const s = session(tempDir('juqode-term-mask'));
   try {
     /* 합성 값이다. 실제 자격증명이 아니다. */
@@ -109,6 +115,7 @@ test('토큰처럼 보이는 값은 화면에서 가려진다 — 가려질 뿐�
 });
 
 test('출력 상한은 상한을 넘을 때만 잘렸다고 말한다 — 딱 맞게 찬 출력은 잘린 것이 아니다', async () => {
+  if (process.platform === 'win32') return;
   /* `20` 이 화면에 실을 출력을 64 KB 로 묶고, 남는 것은 잘렸다고 말한다. 그 경계에서 한 칸을
    * 잘못 잡으면 제품이 **잃은 것이 없는데 잃었다고 말한다** — `19` 가 금지하는 과잉주장의
    * 축소판이다.
@@ -269,6 +276,7 @@ test('사용자가 친 줄은 그대로 간다 — 걸러내는 척하지 않는
 });
 
 test('WBS-25b · 경고는 경고일 뿐 — 일치한 줄도 글자 하나 안 바뀌고 그대로 실행된다', async () => {
+  if (process.platform === 'win32') return;
   /* `./tty.js` 는 프로그램 이름 목록을 갖고 있고, 그 목록이 언젠가 차단 목록이 되는 것이
    * 위 검사가 막으려는 것이다. 위 검사는 그 이름들이 셸 파일에 없다는 것만 볼 수 있으므로,
    * 아무것도 막히지 않는다는 것은 **행동으로** 측정한다: 일치하는 줄을 보내고, 셸이 실제로

@@ -203,7 +203,7 @@ function reduce(state, signal, at = null) {
       const failed = p.isError === true
         || (typeof p.subtype === 'string' && p.subtype.startsWith('error'))
         || Boolean(p.apiErrorStatus)
-        || (p.terminalReason && p.terminalReason !== 'end_turn' && p.terminalReason !== 'stop_sequence');
+        || (p.terminalReason && p.terminalReason !== 'end_turn' && p.terminalReason !== 'stop_sequence' && p.terminalReason !== 'completed');
       /* `partial` only for a refusal that was never resolved: something was asked for and not
        * done. The full 된 것 / 안 된 것 judgement is WBS-18's. */
       s.outcome = failed ? 'failed' : (s.denials.some((d) => !d.resolved) ? 'partial' : 'complete');

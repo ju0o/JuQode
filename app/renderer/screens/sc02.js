@@ -221,7 +221,7 @@ export function renderSC02(root, api, nav, state) {
         consequence.appendChild(ambiguousCard({ ...routed.route, phrase: text }, () => startWork(text)));
         return;
       }
-      if (route === 'unrecognized') { consequence.appendChild(line(C.intent.routeUnrec)); return; }
+      if (route === 'unrecognized') { consequence.appendChild(passthroughCard(text, () => startWork(text), () => { consequence.innerHTML = ''; field.focus(); })); return; }
       await startWork(text);
     } finally { submit.disabled = false; }
   }
@@ -551,6 +551,20 @@ function ambiguousCard(routed, toWork) {
     const f = document.querySelector('[data-el="intent"]');
     if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
   }));
+  n.appendChild(acts);
+  return n;
+}
+
+/* Unrecognized phrase — offer to send it straight to Claude Code instead of silent rejection.
+ * `toWork` and `toRephrase` are caller-supplied so the card does not need to reach for the DOM. */
+function passthroughCard(phrase, toWork, toRephrase) {
+  const n = el('div', 'panel grey');
+  n.setAttribute('data-el', 'passthrough');
+  n.appendChild(el('div', 'sm t', C.intent.passthroughTitle));
+  n.appendChild(el('div', 'xs mut', C.intent.passthroughBody));
+  const acts = el('div', 'row-acts');
+  acts.appendChild(btn('btn sm', C.intent.toWork, toWork));
+  acts.appendChild(btn('btn sm ghost', C.intent.rephrase, toRephrase));
   n.appendChild(acts);
   return n;
 }

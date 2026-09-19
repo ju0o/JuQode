@@ -50,8 +50,8 @@ function allowSpec(denial, cwd) {
      * a relative `../../../etc/shadow` resolved into an unrelated tree, so the card and the
      * grant named different files. */
     const abs = path.resolve(cwd, file);
-    const rel = path.relative(cwd, abs);
-    const target = rel && !rel.startsWith('..') ? rel : `/${abs}`;
+    const rel = path.relative(cwd, abs).split(path.sep).join('/');
+    const target = rel && !rel.startsWith('..') ? rel : `/${abs.split(path.sep).join('/')}`;
     if (UNSAFE_TARGET.test(target)) return null;
     return `${tool}(${target})`;
   }

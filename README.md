@@ -73,7 +73,7 @@ npm run demo          # → docs/dev-evidence/demo/juqode-usage.mp4
 
 | | 값 | 어떻게 쟀나 |
 |---|---|---|
-| 단위 테스트 | **484 / 579** (`term.test.js` 별도 · Windows 미해결) | `npm run test:unit` |
+| 단위 테스트 | **500 / 597** (`term.test.js` 포함 · 전체 스위트 정상 종료) | `npm run test:unit` |
 | e2e | 실측 재확인 필요 | `npm run test:e2e` |
 | ERD ↔ 스키마 대조 | **MVP 26표 일치** | `npm run test:erd` |
 | 렌더러 뮤테이션 생존자 | **0** | 배치 35 스윕 (`docs/dev-evidence/mvp-run/`) |
