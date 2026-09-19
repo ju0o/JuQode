@@ -77,6 +77,8 @@ npm run demo          # → docs/dev-evidence/demo/juqode-usage.mp4
 |---|---|---|
 | 단위 테스트 | **500 / 597** (`term.test.js` 포함 · 전체 스위트 정상 종료) | `npm run test:unit` |
 | e2e | 실측 재확인 필요 | `npm run test:e2e` |
+| 실패 97개 분류 | Windows 환경 한계(문서화) 약 20 · 기존 결함(POSIX 전용 하네스 등) 약 73 · 미분류 약 4 | `docs/dev-evidence/submission-audit.md` |
+| 의존성 라이선스 스캔 | 271개 패키지 · GPL/AGPL/LGPL **0건** (MIT 200 · ISC 34 · BSD-3 9 · Apache-2.0 7 외) | `npx license-checker --summary` |
 | ERD ↔ 스키마 대조 | **MVP 26표 일치** | `npm run test:erd` |
 | 렌더러 뮤테이션 생존자 | **0** | 배치 35 스윕 (`docs/dev-evidence/mvp-run/`) |
 | 구현 코드 / 테스트 코드 | 12,749줄 / **15,321줄** | `wc -l` |
