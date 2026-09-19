@@ -2,6 +2,7 @@
   "name": "juqode",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "JuQode — AI Coding Workbench for vibe coders",
   "main": "app/main/main.js",
   "scripts": {
