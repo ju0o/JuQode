@@ -2,6 +2,8 @@
 
 > ## Developers Code. Vibe Coders Qode.
 
+**🖱 [설치 없이 클릭 체험판 열기 →](https://ju0o.github.io/JuQode/)** — 실제 화면 5장을 그대로 눌러보는 브라우저 데모. Windows·Claude Code·구독 전부 필요 없다.
+
 <!--PRODUCT-SENTENCE-->
 JuQode 는 비개발자가 소프트웨어 프로젝트를 이해하고, Claude Code 에게 변경을 요청하고,
 그 작업을 이해할 수 있는 카드로 따라가고, 안전한 기술 동작 몇 가지를 자연어로 실행하고,
