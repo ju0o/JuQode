@@ -10,6 +10,17 @@ JuQode 는 비개발자가 소프트웨어 프로젝트를 이해하고, Claude 
 
 ---
 
+## 받아서 써보기 (Windows)
+
+1. **[JuQode-0.1.0-x64.exe 내려받기](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/JuQode-0.1.0-x64.exe)** (109 MB)
+   서명이 없어 SmartScreen 경고가 뜬다 — **추가 정보 → 실행**.
+   체크섬 확인: [`JuQode-0.1.0-x64.exe.sha256`](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/JuQode-0.1.0-x64.exe.sha256)
+2. 실행 전 **Claude Code CLI**를 설치하고 로그인해 둔다.
+   JuQode 는 Claude Code 를 대신하지 않는다 — 이미 설치된 Claude Code 에 붙는 얇은 층이다.
+3. JuQode 를 열고 프로젝트 폴더를 선택한다.
+
+---
+
 ## 실사용 영상 (1분 22초)
 
 [![JuQode 실사용 — 권한이 거절된 채로 도착하고, 허용하면 같은 세션이 재개된다](docs/dev-evidence/demo/preview.gif)](https://youtu.be/0wTQGH99Hxs)
@@ -62,8 +73,8 @@ npm run demo          # → docs/dev-evidence/demo/juqode-usage.mp4
 
 | | 값 | 어떻게 쟀나 |
 |---|---|---|
-| 단위 테스트 | **597 / 597** | `npm run test:unit` (약 21초) |
-| e2e | **3종 PASS** | `npm run test:e2e` — boot · visual+behaviour · offline/shutdown |
+| 단위 테스트 | **484 / 579** (`term.test.js` 별도 · Windows 미해결) | `npm run test:unit` |
+| e2e | 실측 재확인 필요 | `npm run test:e2e` |
 | ERD ↔ 스키마 대조 | **MVP 26표 일치** | `npm run test:erd` |
 | 렌더러 뮤테이션 생존자 | **0** | 배치 35 스윕 (`docs/dev-evidence/mvp-run/`) |
 | 구현 코드 / 테스트 코드 | 12,749줄 / **15,321줄** | `wc -l` |
