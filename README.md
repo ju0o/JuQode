@@ -1,160 +1,119 @@
 # JuQode
 
-> ## Developers Code. Vibe Coders Qode.
+> **Developers code. Vibe coders Qode.**
 
-**🖱 [설치 없이 클릭 체험판 열기 →](https://ju0o.github.io/JuQode/)** — 실제 화면 5장을 그대로 눌러보는 브라우저 데모. Windows·Claude Code·구독 전부 필요 없다.
+JuQode is a desktop workspace for people who build software with Claude Code but do not want to understand every task through raw terminal output and diffs.
 
-<!--PRODUCT-SENTENCE-->
-JuQode 는 비개발자가 소프트웨어 프로젝트를 이해하고, Claude Code 에게 변경을 요청하고,
-그 작업을 이해할 수 있는 카드로 따라가고, 안전한 기술 동작 몇 가지를 자연어로 실행하고,
-실제 코드 변경을 raw diff 부터 시작하지 않고 읽을 수 있게 해 주는 데스크톱 워크벤치다.
-<!--/PRODUCT-SENTENCE-->
+It reads a project, lets you ask for changes in natural language, follows the work as cards, and explains the resulting code changes at a more understandable level.
 
----
+**[Try the browser demo →](https://ju0o.github.io/JuQode/)**  
+No installation, Claude Code account, or Windows setup is required for the clickable demo.
 
-## 받아서 써보기 (Windows)
+## What JuQode does
 
-1. **[JuQode-0.1.0-x64.exe 내려받기](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/JuQode-0.1.0-x64.exe)** (109 MB)
-   서명이 없어 SmartScreen 경고가 뜬다 — **추가 정보 → 실행**.
-   체크섬 확인: [`JuQode-0.1.0-x64.exe.sha256`](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/JuQode-0.1.0-x64.exe.sha256)
-2. 실행 전 **Claude Code CLI**를 설치하고 로그인해 둔다.
-   JuQode 는 Claude Code 를 대신하지 않는다 — 이미 설치된 Claude Code 에 붙는 얇은 층이다.
-3. JuQode 를 열고 프로젝트 폴더를 선택한다.
+### Understand the project
+JuQode inspects the selected project and surfaces evidence-backed answers about what it is, how it is structured, and where important behavior lives.
 
----
+### Ask for work naturally
+Describe the change you want instead of manually building an agent command sequence.
 
-## 실사용 영상 (1분 22초)
+### Follow work as cards
+See the current task, completed steps, blocked actions, and what happens next without reading the full agent transcript.
 
-[![JuQode 실사용 — 권한이 거절된 채로 도착하고, 허용하면 같은 세션이 재개된다](docs/dev-evidence/demo/preview.gif)](https://youtu.be/0wTQGH99Hxs)
+### Keep permission decisions with the user
+JuQode does not silently approve Claude Code permissions. A blocked permission arrives as a visible state and the user decides whether to continue.
 
-▶ **[YouTube 에서 전체 영상 보기 (1분 22초)](https://youtu.be/0wTQGH99Hxs)**
-— 위 GIF 는 그중 8초다. mp4 원본: [내려받기 (0.9 MB)](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/juqode-usage.mp4)
+### Read changes before raw diffs
+Code changes are grouped into meaningful blocks with explanation first and raw diff still available when needed.
 
-**이 영상에 연출은 없다.** `scripts/demo/record-demo.mjs` 가 e2e 테스트와 **같은 fixture** 로
-진짜 Electron 앱을 띄우고, 진짜 CDP 로 클릭하고, Xvfb 화면을 ffmpeg 으로 그대로 받아 적었다.
-영상에 나오는 카드·문구·색은 전부 제품이 그린 것이고, **화면 아래 검은 자막 띠 하나만** 녹화
-스크립트가 얹은 것이다.
+### Run bounded quick commands
+A small rule-based natural-language command layer handles supported actions using an explain → confirm flow rather than guessing unknown commands.
 
-| 구간 | 무엇을 보여주나 |
+## Download
+
+### Windows demo build
+
+**[JuQode 0.1.0 x64](https://github.com/ju0o/JuQode/releases/download/demo-v0.1/JuQode-0.1.0-x64.exe)**
+
+A SHA-256 checksum is available with the release artifact.
+
+> The demo build is unsigned, so Windows SmartScreen may display a warning.
+
+### Requirement
+
+JuQode currently acts as a layer on top of an existing **Claude Code CLI** installation. Install and sign in to Claude Code before using the desktop build.
+
+## Demo video
+
+[![JuQode demo](docs/dev-evidence/demo/preview.gif)](https://youtu.be/0wTQGH99Hxs)
+
+**[Watch the full 1m 22s demo →](https://youtu.be/0wTQGH99Hxs)**
+
+The demo shows the actual Electron UI driven by the same fixture used by the end-to-end test path.
+
+## MVP capabilities
+
+| Capability | Purpose |
 |---|---|
-| 0:07 | 프로젝트를 열면 **시키지 않아도** 먼저 읽는다 |
-| 0:15 | 여섯 답 — `확인됨` 인 답은 근거 파일을 지목한다 |
-| 0:20 | 자연어로 요청 → 보낸 말이 곧 작업의 이름 |
-| 0:28 | **권한은 거절된 채로 도착한다.** JuQode 가 대신 허용하지 않는다 (D-133) |
-| 0:33 | 허용 → **같은 세션이 그 자리에서 재개된다** |
-| 0:39 | 변경 읽기 — 없는 설명은 지어내지 않고, 요청해야 읽는다 |
-| 0:54 | Quick Command — 설명 → 확인, 두 번의 왕복. 모르는 말은 짐작하지 않는다 |
-| 1:15 | 테마 둘 |
+| **Project Interpretation** | Explain the project using evidence from real files. |
+| **Work Stream + History** | Follow past, current, and next work as cards. |
+| **Claude Code integration** | Run one supported coding-agent runtime with visible permission boundaries. |
+| **Natural-language Quick Commands** | Execute a bounded set of deterministic commands after confirmation. |
+| **Code Change Reader** | Explain meaningful changed blocks before exposing the raw diff. |
+| **Minimal Terminal** | Keep a terminal available without making it the primary interface. |
 
-직접 다시 찍으려면:
-
-```bash
-npm run demo          # → docs/dev-evidence/demo/juqode-usage.mp4
-```
-
----
-
-## MVP 여섯 가지 능력
-
-| | 능력 | 영상에서 |
-|---|---|---|
-| 1 | **Project Interpretation** — 프로젝트가 무엇인지 이해시킨다 | 여섯 답 · `확인됨` 은 근거 파일을 반드시 지목한다 |
-| 2 | **Work Stream + History** — 지난 · 지금 · 다음 작업을 카드로 따라간다 | Step 카드 · `NEXT` 칸 · 끝난 작업의 결과 카드 |
-| 3 | **Claude Code ONLY** — 코딩 에이전트는 Claude Code 하나뿐이다 | 권한 거절 카드 → `허용하고 다시 해 보기` → **같은 세션 재개** |
-| 4 | **Deterministic rule-based NL Quick Commands** — 규칙 기반 자연어 빠른 실행 | 규칙 **8개**, 항상 *설명 → 확인* 두 번의 왕복. 모르는 말은 짐작하지 않는다 |
-| 5 | **Diff Code Reader by meaningful code block** — 의미 있는 블록 단위로 읽는다 | 무엇을 · 왜 · 어떤 동작에 → 코드 → Raw Diff |
-| 6 | **Minimal Terminal Drawer** — 필요할 때만 열리는 최소 터미널 | 화면을 덮되 뒤가 보이는 서랍 |
-
-**이 제품이 하지 않기로 한 것들** — JuQode 는 사용자를 대신해 권한을 허용하지 않고,
-알아듣지 못한 말을 짐작해 실행하지 않고, 근거 없는 답에 `확인됨` 을 붙이지 않고,
-차단 목록(blocklist)을 만들지 않는다. 이 네 가지는 전부 **테스트가 강제한다.**
-
----
-
-## 지금 상태 — 잰 값만
-
-| | 값 | 어떻게 쟀나 |
-|---|---|---|
-| 단위 테스트 | **500 / 597** (`term.test.js` 포함 · 전체 스위트 정상 종료) | `npm run test:unit` |
-| e2e | boot **PASS** · offline-shutdown **PASS** · visual **FAIL**(테스트 코드 회귀 — B-DEFECT-1 픽스로 `window.__work()` null 반환) — **2 / 3 PASS** | `npm run test:e2e` |
-| 실패 97개 분류 | Windows 환경 한계(문서화) 약 20 · 기존 결함(POSIX 전용 하네스 등) 약 73 · 미분류 약 4 | `docs/dev-evidence/submission-audit.md` |
-| 의존성 라이선스 스캔 | 271개 패키지 · GPL/AGPL/LGPL **0건** (MIT 200 · ISC 34 · BSD-3 9 · Apache-2.0 7 외) | `npx license-checker --summary` |
-| ERD ↔ 스키마 대조 | **MVP 26표 일치** | `npm run test:erd` |
-| 렌더러 뮤테이션 생존자 | **0** | 배치 35 스윕 (`docs/dev-evidence/mvp-run/`) |
-| 구현 코드 / 테스트 코드 | 12,749줄 / **15,321줄** | `wc -l` |
-| WBS 39개 | 37 구현 · 2 미착수 | `docs/dev-evidence/mvp-run/WBS-LEDGER.md` |
-| 런타임 의존성 | **Electron 뿐** (`typescript` 는 선택 — 없으면 블록 분할이 S2 로 내려간다) | `package.json` |
-
-### **`MVP_CERTIFIED = NO`**
-
-넷이 전부 닫혀야 YES 다. 지금 닫힌 것은 **하나도 없다.**
-
-| | 남은 것 | 막고 있는 것 |
-|---|---|---|
-| ① | WBS-32 비개발자 도그푸드 (G-1~G-11) | **사람 3명** |
-| ② | WBS-33 패키징 · 서명 표시 확인 | Windows 호스트 |
-| ③ | `MVP_WINDOWS_CERTIFIED` — **Win10 1809+ 와 Win11 둘 다** | Windows 두 환경. 한 대로는 `STARTED` 까지다 |
-| ④ | 가독성(R) 트랙 + 재측정 | ① 이 먼저 — 우선순위를 코드 계수가 아니라 사람이 막힌 지점이 정한다 |
-
-계획 전문: **[`docs/design/WBS_REMAINING.md`](docs/design/WBS_REMAINING.md)** (56작업 · 약 72시간 · 게이트 7개)
-
----
-
-## 직접 돌려보기
+## Run from source
 
 ```bash
 git clone https://github.com/ju0o/JuQode.git
 cd JuQode
 npm ci
-npm start          # Electron 앱
-npm test           # 단위 597 + e2e 3종 (Linux 는 xvfb-run 이 필요하다)
-npm run demo       # 실사용 영상 다시 찍기 (Xvfb + ffmpeg 필요)
+npm start
 ```
 
-> **Windows 10 1809+ / Windows 11 은 대상 OS 이지만 아직 검증되지 않았다.** `npm start` 는
-> 돌 것으로 보이지만, 그렇게 적힌 곳은 `DEFERRED_VALIDATION.md` 의 13행이고 전부 미측정이다.
-> ConPTY · `PATHEXT` · 프로세스 트리 종료 · NTFS 대소문자는 **Windows 에서만 진짜다.**
+Run the test suite:
 
-> **`main` 이 곧 현재 상태다.** 구현은 `dev/mvp-autonomous-v01` 에서 자란 뒤
-> [PR #4](https://github.com/ju0o/JuQode/pull/4) 로 병합되었다. 병합은 **인수 판정이 아니다** —
-> 위의 `MVP_CERTIFIED = NO` 가 그대로 유효하다.
-
-### 저장소 지도
-
-```
-app/main/          Electron 메인 — db · claude · work · change · qc · term · interpret
-app/renderer/      화면 다섯 (SC-01 · SC-02 · SC-03 · SC-04 · TD-01) + 디자인 토큰
-docs/design/       ERD · DBML · 백엔드 A안 · 남은 작업 WBS · ScreenSpec 캔버스 생성기(25장)
-docs/dev-evidence/ 배치별 QA 보고 · 스크린샷 · 뮤테이션 스윕 · WBS 원장
-scripts/demo/      실사용 영상 녹화기
-tests/             단위 597 + e2e 3종 (visual.mjs 는 단언 618개)
+```bash
+npm test
 ```
 
----
+Re-record the demo fixture:
 
-## Product SSOT
+```bash
+npm run demo
+```
 
-> ### Product SSOT 는 `JuQode-Private/docs/current/00_MASTER_INDEX.md` 다.
->
-> 제품 정의 · 범위 · 결정 이력을 알아야 한다면 거기서 시작한다.
-> **이 저장소는 제품 정의를 들고 있지 않다.**
+## Project structure
 
-이 저장소는 그 결정들을 **테스트로** 들고 있다. 그래서 Canon 을 위반하는 변경은 기능이 아니라
-빨간 테스트로 나타난다 — `tests/qc.test.js` 의 57케이스 말뭉치, `tests/term.test.js` 의
-「프로그램 이름 목록 금지」, `tests/unit.test.js` 의 능력 격리 검사가 그 자리다.
+```text
+app/main/          Electron main process and core features
+app/renderer/      desktop UI
+docs/design/       public design and architecture material
+docs/dev-evidence/ QA evidence and screenshots
+scripts/demo/      reproducible demo recorder
+tests/             unit and end-to-end tests
+```
 
----
+## Product principles
 
-## 이전 세대에 대하여
+- Do not silently approve permissions.
+- Do not invent answers when evidence is missing.
+- Do not guess unsupported quick commands.
+- Keep raw technical detail available without making it the default interface.
+- Treat verification separately from an agent saying that work is complete.
 
-**2026-09-06 이전의 JuQode Product / Architecture / Design 문서는 현재 진실이 아니다.**
+## Status
 
-이전 세대는 **Git history 와 archive ref 로만** 보존된다.
-활성 트리에는 `docs/archive/` · `historical/` · `legacy/` · `old/` 를 두지 않는다.
+**Public preview / active development.**
 
-| archive ref | 내용 |
-|---|---|
-| `archive/pre-product-reset-2026-09-06` | 이전 세대 설계 · 아키텍처 · 실험 · 프로토타입 (133 files) |
+JuQode has a working desktop build and browser demo, but the project is still being hardened through Windows validation, real-user dogfooding, packaging, and usability testing before a stable V1 release.
 
-> **archive ref 안의 프로토타입은 폐기된 제품의 동작하는 코드다.**
-> 구현 기준선으로 쓰지 않는다. 제품을 추론하기 위해 읽지 않는다.
+## Platform
+
+Current product focus: **Windows + Claude Code**.
+
+Broader runtime and platform support should be treated as future work unless explicitly documented in a release.
+
+## License
+
+License information will be finalized before the first stable public release.
