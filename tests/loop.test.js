@@ -644,7 +644,7 @@ test('cancelling an unresolved Work with no live root remains unknown until ackn
   assert.strictEqual(repo.activeWork(db, project.id), null, 'the D-117 slot is still held');
 });
 
-test('cancelling a Task Run records a cancelled outcome and leaves its verdict unverified', async () => {
+test('cancelling a Task Run with unproven descendants stays unknown and leaves its verdict unverified', async () => {
   const { dir, db, project, store } = bench({ git: false });
   const task = repo.createTask(db, project.id, { goal: 'Cancel without inventing rollback' });
   const bin = path.join(dir, 'slow-task-claude');
