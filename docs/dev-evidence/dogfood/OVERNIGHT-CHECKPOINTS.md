@@ -37,6 +37,7 @@ Scope: JuQode only. No GitHub operations. Dios was not modified.
 |---|---|
 | `npm run test:unit` | PASS, exit 0, 657/657; TAP duration 20.91s. ERD check: 53 tables, 54 relations, 31 MVP tables. |
 | `npm run test:e2e` | PASS, exit 0. Boot smoke: 3 launches, 0 external requests; restart reconciliation: 1 Run `ended_unknown`, 0 Agent invocations after restart. Visual/behavior E2E passed without updating tracked goldens. Offline boot, reduced-motion boot, and shutdown passed; 6 processes while running, 0 after termination. |
+| `node --test --test-timeout=60000 tests/loop.test.js` | PASS after the final cancellation-test wording correction; 53/53; TAP duration 18.72s. |
 | `git diff --check` | PASS, exit 0 before the implementation checkpoint. |
 | E2E-owned process count after shutdown | 0 by the offline-shutdown harness; it observed 6 while running and 0 after graceful termination. |
 | User DB schema, read-only | `[1,2]`, highest 2; unchanged. |
