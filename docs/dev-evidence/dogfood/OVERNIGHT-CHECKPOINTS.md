@@ -55,7 +55,7 @@ These are direct negative/counterexample tests in the product suite; no generic 
 
 ## Deferred and stop boundary
 
-- **DG-08 live execution is NOT_PROVEN.** JuQode's sanitized detector reported `available:false, reason:logged-out`; account identity was not read or exposed. An authenticated Claude process is required for the real Run.
+- **DG-08 live execution is NOT_PROVEN.** JuQode's sanitized detector reported `available:false, reason:logged-out`; account identity was not read or exposed. An authenticated Claude process is required for the real Run. Founder Gate `HG-20261005-4b0a87` requests login completion only; no credentials or auth output are requested.
 - **DG-14 was not started.** Founder acceptance is not claimed. Use [FOUNDER-DOGFOOD.md](./FOUNDER-DOGFOOD.md) when ready.
 - Windows build/runtime/packaging and Mac `darwin-x64` / `darwin-arm64` remain unverified. Current measurements are Linux only.
 - Current implementation and E2E fix are locally checkpointed in commit `5521bf4` (`feat: add Project Task Run dogfood path`).
@@ -63,3 +63,53 @@ These are direct negative/counterexample tests in the product suite; no generic 
 ## Local checkpoint
 
 Implementation checkpoint: `5521bf4` (`feat: add Project Task Run dogfood path`). The ledger, Founder checklist, and pixel captures are tracked in the follow-up evidence commit.
+
+## Exact file inventory
+
+Implementation checkpoint `5521bf4`:
+
+- `README.md`
+- `app/main/db/db.js`
+- `app/main/db/repo.js`
+- `app/main/ipc.js`
+- `app/main/main.js`
+- `app/main/work/context.js`
+- `app/main/work/run-evidence.js`
+- `app/main/work/supervisor.js`
+- `app/preload/preload.js`
+- `app/renderer/copy.js`
+- `app/renderer/screens/sc01.js`
+- `app/renderer/screens/sc02.css`
+- `app/renderer/screens/sc02.js`
+- `app/renderer/screens/sc03.css`
+- `app/renderer/screens/sc03.js`
+- `docs/design/DBDIAGRAM.md`
+- `docs/design/ERD.md`
+- `docs/design/SPEC_RECONCILE.md`
+- `docs/design/WBS_IMPLEMENTATION.md`
+- `docs/design/WBS_REMAINING.md`
+- `docs/design/check-dbml.mjs`
+- `docs/design/erd.dbml`
+- `docs/dev-evidence/mvp-run/DG-04-QA.md`
+- `docs/dev-evidence/mvp-run/DG-05-QA.md`
+- `docs/dev-evidence/mvp-run/DG-06-QA.md`
+- `docs/discovery/DOGFOOD-CURRENT-STATE.md`
+- `docs/discovery/DOGFOOD-INTEGRATION-PLAN.md`
+- `docs/discovery/DOGFOOD-WBS.md`
+- `tests/context.test.js`
+- `tests/e2e/boot.test.mjs`
+- `tests/e2e/port-block.mjs`
+- `tests/e2e/visual.mjs`
+- `tests/explain.test.js`
+- `tests/loop.test.js`
+- `tests/run-evidence.test.js`
+- `tests/store.test.js`
+- `tests/task.test.js`
+- `tests/visual-ports.test.js`
+
+Evidence follow-up commit:
+
+- `docs/dev-evidence/dogfood/FOUNDER-DOGFOOD.md`
+- `docs/dev-evidence/dogfood/OVERNIGHT-CHECKPOINTS.md`
+- `docs/dev-evidence/dogfood/sc02-task-selected-880.png`
+- `docs/dev-evidence/dogfood/sc02-task-selected-light.png`
