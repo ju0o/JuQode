@@ -29,7 +29,7 @@ Scope: JuQode only. No GitHub operations. Dios was not modified.
 | DG-10 | PASS | `5521bf4` + `7963c19` | `tests/task.test.js`: `completed successfully` without Evidence cannot pass; one of three criteria left unreviewed stays UNVERIFIED; stale/foreign Evidence and failed Runs are rejected. | Criterion PASS still needs actual Run Evidence · next DG-11 |
 | DG-11 | PASS (Linux automated) | `5521bf4` + `7963c19` | `npm run test:e2e`: Project/Task/Run view, history/retry text, 880px no-overflow check, and visual pixel review. | No Founder usability acceptance · next DG-12 |
 | DG-12 | PASS (fixture) | `5521bf4` + `7963c19` | `tests/task.test.js`, `tests/loop.test.js`, E2E: same Task/new Run and Context; Run #1 deep-equals its pre-retry snapshot; duplicate retry replay returns one successor. | Real Claude retry not run · next DG-13 |
-| DG-13 | PARTIAL (fail-closed) | `7963c19` | Restart E2E: one `ended_unknown` Run, zero Agent invocations. Tests cover duplicate start, cancel racing a success signal, detached-child loss, and explicit unknown acknowledgement. | Cannot prove detached descendants stopped, so cancel is `ended_unknown`; multi-Task acknowledgement is coupled to retry · next real Claude verification, then DG-14 |
+| DG-13 | PARTIAL (fail-closed) | `7963c19`, test wording `ddb27ba` | Restart E2E: one `ended_unknown` Run, zero Agent invocations. Tests cover duplicate start, cancel racing a success signal, detached-child loss, and explicit unknown acknowledgement. | Cannot prove detached descendants stopped, so cancel is `ended_unknown`; multi-Task acknowledgement is coupled to retry · next real Claude verification, then DG-14 |
 
 ## Fresh verification
 
@@ -69,6 +69,7 @@ Visual QA found no blocking overlap, clipping, or hierarchy issue. Context detai
 
 - Base Task/Run feature: `5521bf4` (`feat: add Project Task Run dogfood path`).
 - Lifecycle/evidence hardening: `7963c19` (`fix: harden Task Run recovery and evidence`).
+- Test title correction: `ddb27ba` (`test: clarify unknown cancellation outcome`).
 - Evidence docs, updated Founder steps, migration planning note, and refreshed captures are the follow-up local checkpoint. No push is authorized or performed.
 
 ## Known limits and stop boundary
