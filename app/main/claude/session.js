@@ -22,6 +22,22 @@ const { toSignal } = require('../work/reducer');
 /** A Work that never produced a first event is not a Work — `20`: no row, no History entry. */
 const START_WINDOW_MS = 30_000;
 
+/* Windows starts Claude's npm `.cmd` shim under cmd.exe. After a restart, the wrapper may be
+ * gone while a descendant still owns the Project. This fixed, read-only PowerShell query runs
+ * through the existing process capability owner; errors are uncertainty, never proof of death.
+ */
+function windowsRunnerTreeMayBeAlive(pid, spawnSyncImpl = spawnSync) {
+  const script = `$ErrorActionPreference = 'Stop'; $root = ${Number(pid)}; try { $all = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId) } catch { [Console]::Error.WriteLine('process-query-failed'); exit 3 }; $seen = [System.Collections.Generic.HashSet[int]]::new(); [void]$seen.Add($root); do { $changed = $false; foreach ($p in $all) { if ($seen.Contains([int]$p.ParentProcessId) -and $seen.Add([int]$p.ProcessId)) { $changed = $true } } } while ($changed); if ($seen.Count -gt 1) { 'alive' } else { 'gone' }`;
+  try {
+    const result = spawnSyncImpl('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+      { encoding: 'utf8', timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 });
+    if (result.error || result.status !== 0) return true;
+    return String(result.stdout ?? '').trim() !== 'gone';
+  } catch {
+    return true;
+  }
+}
+
 function baseArgs(sessionId) {
   return ['-p', '--output-format', 'stream-json', '--verbose', '--session-id', sessionId];
 }
@@ -185,41 +201,69 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
 }
 
 /**
- * How to stop the child's whole tree on a given platform, as data so both answers are testable
- * from either OS.
+ * Which signal to send through the owned ChildProcess handle, as data for tests.
  *
- * POSIX: the child is `detached`, so it owns its process group and a negative pid reaches the
- * group without ever reaching JuQode. Windows has no process groups at all — `kill(-pid)`
- * throws there (WBS-00 spike C), and the pid we hold is the `cmd.exe` wrapper, so killing it
- * alone strands `claude.cmd` and the node process under it. `taskkill /T` is the documented
- * tree analogue. Without `/F` it only asks a window to close, which a console child ignores,
- * so on Windows the graceful tier is a courtesy and the escalation is the tier that lands.
+ * A numeric process-group signal can outlive the original root and hit a recycled group ID.
+ * Signal the ChildProcess handle we own. If its descendants survive root termination, liveness
+ * reconciliation reports `ended_unknown` and blocks another Run until explicit acknowledgment.
+ * The detached group remains useful for safe liveness observation without signaling JuQode.
  */
-function killPlan(platform, pid, force) {
-  return platform === 'win32'
-    ? { kind: 'taskkill', argv: ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])] }
-    : { kind: 'group', pid: -pid, signal: force ? 'SIGKILL' : 'SIGTERM' };
+function killPlan(_platform, _pid, force) {
+  return { kind: 'child', signal: force ? 'SIGKILL' : 'SIGTERM' };
 }
 
-/** Graceful stop of the child's tree, escalating to a forced one after `graceMs`. */
-function stop(child, { graceMs = 5000 } = {}) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const send = (force) => {
-    const plan = killPlan(process.platform, child.pid, force);
-    try {
-      if (plan.kind === 'taskkill') spawnSync('taskkill', plan.argv, { stdio: 'ignore', windowsHide: true });
-      else process.kill(plan.pid, plan.signal);
-    } catch { /* already gone */ }
+function processGroupMayBeAlive(pid, kill = process.kill) {
+  try { kill(-pid, 0); return true; }
+  catch (error) { return error?.code !== 'ESRCH'; }
+}
+
+function processTreeMayBeAlive(pid, { platform = process.platform, probe = windowsRunnerTreeMayBeAlive,
+  groupProbe = processGroupMayBeAlive } = {}) {
+  if (!Number.isInteger(pid) || pid < 1) return true;
+  if (platform === 'win32') return probe(pid);
+  return groupProbe(pid);
+}
+
+/** Stop the owned ChildProcess and escalate if its root ignores SIGTERM.
+ *
+ * A root `exit` is not proof that every descendant exited: on POSIX a descendant can call
+ * `setsid()`, and after the root exits its lineage is lost to the portable probes here. Therefore
+ * this adapter never certifies `cancelled`; it marks the attempt ended_unknown and requires an
+ * explicit user acknowledgement before another Task Run. Signal only through the owned handle,
+ * never through a numeric PID or process-group id that may have been reused.
+ */
+function stop(child, { graceMs = 5000, confirmMs = 3000,
+  onUnconfirmed = () => {}, platform = process.platform } = {}) {
+  if (!child || !Number.isInteger(child.pid) || child.pid < 1 || typeof child.kill !== 'function') return false;
+  let settled = false;
+  let hard = null;
+  const rootAlive = () => child.exitCode === null && child.signalCode === null;
+  const finishUnknown = () => {
+    if (settled) return;
+    settled = true;
+    if (hard) clearTimeout(hard);
+    if (confirm) clearTimeout(confirm);
+    onUnconfirmed();
   };
+  const send = (force) => {
+    /* Never signal after the ChildProcess reports root exit. child.kill() targets the direct
+     * child handle rather than a reusable numeric process-group ID; a surviving descendant is
+     * observed below and remains unknown/blocked instead of risking an unrelated process. */
+    if (!rootAlive()) return;
+    const plan = killPlan(platform, child.pid, force);
+    try { child.kill(plan.signal); } catch { /* already gone */ }
+  };
+  let confirm = null;
+  child.once('exit', finishUnknown);
+  if (!rootAlive()) { finishUnknown(); return true; }
   send(false);
-  const hard = setTimeout(() => {
-    /* Re-check before escalating: `07` §8.5 warns that a pid is reusable, and a forced kill of
-     * a recycled group or tree would take an unrelated process with it. */
-    if (child.exitCode !== null || child.signalCode !== null) return;
+  hard = setTimeout(() => {
+    /* Escalate only through the original ChildProcess handle while its root is still live. */
+    if (!rootAlive()) { finishUnknown(); return; }
     send(true);
+    confirm = setTimeout(finishUnknown, confirmMs);
   }, graceMs);
-  hard.unref?.();
-  child.once('exit', () => clearTimeout(hard));
+  return true;
 }
 
 /**
@@ -232,4 +276,5 @@ const grantedSignal = (denial, spec) => ({
   payload: { tool: denial?.tool ?? null, toolUseId: denial?.toolUseId ?? null, scope: spec },
 });
 
-module.exports = { run, stop, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS };
+module.exports = { run, stop, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
+  windowsRunnerTreeMayBeAlive, processTreeMayBeAlive };

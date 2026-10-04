@@ -1321,48 +1321,62 @@ test('stopping a child that has already ended signals nothing', () => {
   process.kill = (pid, sig) => { sent.push([pid, sig]); };
   try {
     /* Already exited. */
-    stop({ pid: 4242, exitCode: 0, signalCode: null, once: () => {} });
+    stop({ pid: 4242, exitCode: 0, signalCode: null, once: () => {} }, { groupProbe: () => false });
     /* Already signalled. */
-    stop({ pid: 4243, exitCode: null, signalCode: 'SIGTERM', once: () => {} });
+    stop({ pid: 4243, exitCode: null, signalCode: 'SIGTERM', once: () => {} }, { groupProbe: () => false });
     /* No child at all — a cancel pressed after the handle was dropped. */
     stop(null);
     stop(undefined);
     assert.deepStrictEqual(sent, [], `stop() signalled ${JSON.stringify(sent)} for a child that was gone`);
 
-    /* …and it DOES signal one that is still running, or the test above proves nothing. */
-    stop({ pid: 4244, exitCode: null, signalCode: null, once: () => {} });
-    assert.deepStrictEqual(sent, [[-4244, 'SIGTERM']],
-      'stop() did not signal the process group of a live child');
+    /* …and it DOES signal the owned ChildProcess while live, or the test above proves nothing. */
+    stop({ pid: 4244, exitCode: null, signalCode: null, once: () => {},
+      kill: (signal) => { sent.push([4244, signal]); } });
+    assert.deepStrictEqual(sent, [[4244, 'SIGTERM']],
+      'stop() did not signal the owned live ChildProcess handle');
   } finally { process.kill = realKill; }
 });
 
 test('the SIGKILL escalation re-checks before it fires', async () => {
-  /* FOUND BY MUTATION, and it is the SECOND guard — the one inside the grace timer. The first
-   * is checked above; this one only runs after the grace has elapsed, so a test that does not
-   * wait cannot reach it.
+    /* FOUND BY MUTATION, and it is the SECOND guard — the one inside the grace timer. The first
+     * is checked above; this one only runs after the grace has elapsed, so a test that does not
+     * wait cannot reach it.
    *
-   * `07` §8.5 again, and worse here: SIGTERM went out five seconds ago and the child has since
-   * exited. The pid is free to be reused, and SIGKILL to a recycled process GROUP takes an
-   * unrelated tree down with no warning and no recovery. */
+     * `07` §8.5 again: SIGTERM went out and the root has since exited. The pid is free to be
+     * reused, so do not send SIGKILL even if a descendant still appears in the old group. */
   const sent = [];
   const realKill = process.kill;
   process.kill = (pid, sig) => { sent.push([pid, sig]); };
   try {
     /* Alive when `stop` is called, gone by the time the grace expires — the ordinary case: the
      * child obeyed the SIGTERM. */
-    const child = { pid: 5150, exitCode: null, signalCode: null, once: () => {} };
-    stop(child, { graceMs: 20 });
-    assert.deepStrictEqual(sent, [[-5150, 'SIGTERM']]);
+    const child = { pid: 5150, exitCode: null, signalCode: null, once: () => {},
+      kill: (signal) => { sent.push([5150, signal]); } };
+    stop(child, { graceMs: 20, confirmMs: 40 });
+    assert.deepStrictEqual(sent, [[5150, 'SIGTERM']]);
     child.exitCode = 0;                       // it stopped, as asked
     await new Promise((r) => setTimeout(r, 80));
-    assert.deepStrictEqual(sent, [[-5150, 'SIGTERM']],
+    assert.deepStrictEqual(sent, [[5150, 'SIGTERM']],
       'SIGKILL was sent to a pid whose process had already exited');
 
     /* …and a child that IGNORED the SIGTERM does get killed, or the check above is vacuous. */
     sent.length = 0;
-    stop({ pid: 5151, exitCode: null, signalCode: null, once: () => {} }, { graceMs: 20 });
+    stop({ pid: 5151, exitCode: null, signalCode: null, once: () => {},
+      kill: (signal) => { sent.push([5151, signal]); } }, { graceMs: 20, confirmMs: 40 });
     await new Promise((r) => setTimeout(r, 80));
-    assert.deepStrictEqual(sent, [[-5151, 'SIGTERM'], [-5151, 'SIGKILL']],
-      'a child that ignored SIGTERM was never escalated');
+    assert.deepStrictEqual(sent, [[5151, 'SIGTERM'], [5151, 'SIGKILL']],
+      'a live root that ignored SIGTERM was never escalated');
+
+    /* A surviving descendant does not make a dead root's numeric PGID safe to signal. If it
+     * persists, cancellation remains unknown instead of risking an unrelated recycled group. */
+    sent.length = 0;
+    let unconfirmed = false;
+    const rootAlreadyExited = { pid: 5152, exitCode: 0, signalCode: null, once: () => {},
+      kill: (signal) => { sent.push([5152, signal]); } };
+    stop(rootAlreadyExited, { graceMs: 20, confirmMs: 40, pollMs: 5,
+      groupProbe: () => true, onUnconfirmed: () => { unconfirmed = true; } });
+    await new Promise((r) => setTimeout(r, 80));
+    assert.deepStrictEqual(sent, [], 'a dead root left a stale PGID signal target');
+    assert.strictEqual(unconfirmed, true, 'a surviving unknown tree was reported as stopped');
   } finally { process.kill = realKill; }
 });

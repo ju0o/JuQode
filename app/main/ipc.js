@@ -23,6 +23,7 @@ const term = require('./term/session');
 const { classify } = require('./router/intent');
 const { scan } = require('./interpret/scan');
 const { answers, statusOf } = require('./interpret/answers');
+const { unknownTaskRunWithLiveRunner, unresolvedLegacyUnknownWorks } = require('./work/runner-liveness');
 
 /**
  * @param {object} deps
@@ -56,19 +57,6 @@ function orientationOf(works) {
    * rest of the project's life, with a dozen completed Works sitting under the sentence. `18`
    * writes it in the singular because it is about the one the user just left. */
   return works[0].outcome === 'ended_unknown' ? 'unknown' : 'finished';
-}
-
-/* A restarted, unknown Run may have left its detached Claude process group alive. A retry is
- * explicit, but starting another writer in the same Project while that group may still write
- * is unsafe. This is a conservative existence probe; it never signals or kills the process. */
-function runnerMayBeAlive(work) {
-  if (!Number.isInteger(work?.runner_pid) || work.runner_pid < 1) return false;
-  const targets = process.platform === 'win32' ? [work.runner_pid] : [-work.runner_pid, work.runner_pid];
-  for (const pid of targets) {
-    try { process.kill(pid, 0); return true; }
-    catch (error) { if (error?.code === 'EPERM') return true; }
-  }
-  return false;
 }
 
 function makeHandlers(deps) {
@@ -446,7 +434,19 @@ function makeHandlers(deps) {
       const gate = needDb();
       if (gate) return gate;
       if (!db().prepare('select id from project where id = ?').get(projectId)) return { ok: false, reason: 'no-project' };
-      return { ok: true, tasks: repo.tasksForProject(db(), projectId) };
+      return { ok: true, tasks: repo.tasksForProject(db(), projectId),
+        legacyUnknownRuns: unresolvedLegacyUnknownWorks(db(), projectId) };
+    },
+
+    'juqode:legacy-unknown-ack': (_e, projectId, workId, confirmedStopped) => {
+      const gate = needDb();
+      if (gate) return gate;
+      if (confirmedStopped !== true) return { ok: false, reason: 'confirmation-required' };
+      const work = workOr(workId);
+      if (!work || work.project_id !== projectId || work.task_id != null) {
+        return { ok: false, reason: 'not-legacy-work' };
+      }
+      return repo.acknowledgeUnknownProcessStopped(db(), projectId, workId);
     },
 
     'juqode:task-create': (_e, projectId, input) => {
@@ -480,10 +480,11 @@ function makeHandlers(deps) {
       const gate = needDb();
       if (gate) return gate;
       try { return { ok: true, ...repo.reviewTaskCriterion(db(), taskId, workId, criterionId, verdict, evidenceIds) }; }
-      catch (error) { return { ok: false, reason: 'invalid-review', detail: error.message }; }
+      catch (error) { return { ok: false, reason: error.code === 'unsupported-verification' ? error.code : 'invalid-review',
+        detail: error.code === 'unsupported-verification' ? null : error.message }; }
     },
 
-    'juqode:task-retry': async (_e, taskId, priorWorkId, retryReason, idempotencyKey) => {
+    'juqode:task-retry': async (_e, taskId, priorWorkId, retryReason, idempotencyKey, confirmPriorStopped = false) => {
       const gate = needDb();
       if (gate) return gate;
       if (typeof taskId !== 'string' || typeof priorWorkId !== 'string' ||
@@ -493,6 +494,7 @@ function makeHandlers(deps) {
       if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
         return { ok: false, reason: 'bad-idempotency-key' };
       }
+      if (typeof confirmPriorStopped !== 'boolean') return { ok: false, reason: 'bad-retry-confirmation' };
       const task = repo.getTask(db(), taskId);
       if (!task) return { ok: false, reason: 'no-task' };
       const prior = repo.getWork(db(), priorWorkId);
@@ -502,15 +504,21 @@ function makeHandlers(deps) {
       const successor = repo.workForRetrySource(db(), prior.id);
       if (successor) return { ok: true, work: supervisor.snapshot(db(), successor.id), existing: true };
       if (prior.status !== 'ended') return { ok: false, reason: 'retry-run-not-ended' };
-      if (prior.outcome === 'ended_unknown' && runnerMayBeAlive(prior)) {
+      if (prior.outcome === 'ended_unknown' && !confirmPriorStopped) {
         return { ok: false, reason: 'prior-process-may-still-live' };
+      }
+      if (prior.outcome === 'ended_unknown' && confirmPriorStopped) {
+        const acknowledged = repo.acknowledgeUnknownProcessStopped(db(), task.project_id, prior.id);
+        if (!acknowledged.ok) return acknowledged;
       }
       const latest = repo.worksForTask(db(), task.id, 1)[0];
       if (!latest || latest.id !== prior.id) return { ok: false, reason: 'retry-source-not-latest' };
-      const taskRefusal = repo.taskRunRefusal(db(), task.project_id, task.id);
+      const taskRefusal = repo.taskRunRefusal(db(), task.project_id, task.id, { retryOfWorkId: prior.id });
       if (taskRefusal) return { ok: false, reason: taskRefusal };
       const duplicate = repo.workForIdempotency(db(), task.project_id, idempotencyKey);
-      if (duplicate) return { ok: true, work: supervisor.snapshot(db(), duplicate.id), existing: true };
+      if (duplicate) return duplicate.task_id === task.id
+        ? { ok: true, work: supervisor.snapshot(db(), duplicate.id), existing: true }
+        : { ok: false, reason: 'idempotency-key-conflict' };
 
       const reason = retryReason.trim();
       const result = await supervisor.start(db(),
@@ -523,6 +531,7 @@ function makeHandlers(deps) {
           retryOfWorkId: prior.id,
           retryReason: reason,
           appSessionId: deps.appSessionId?.() ?? null,
+          allowUnknownWorkId: prior.outcome === 'ended_unknown' && confirmPriorStopped ? prior.id : null,
         });
       return result.ok ? { ok: true, work: supervisor.snapshot(db(), result.workId), existing: Boolean(result.existing) } : result;
     },
@@ -533,16 +542,20 @@ function makeHandlers(deps) {
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
       if (typeof intent !== 'string' || !intent.trim()) return { ok: false, reason: 'empty-intent' };
-      if (taskId != null) {
-        const taskRefusal = repo.taskRunRefusal(db(), projectId, taskId);
-        if (taskRefusal) return { ok: false, reason: taskRefusal };
-        if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
-          return { ok: false, reason: 'bad-idempotency-key' };
-        }
+      if (taskId != null && (typeof idempotencyKey !== 'string' || !idempotencyKey.trim())) {
+        return { ok: false, reason: 'bad-idempotency-key' };
       }
       if (idempotencyKey) {
         const existing = repo.workForIdempotency(db(), projectId, idempotencyKey);
-        if (existing) return { ok: true, work: supervisor.snapshot(db(), existing.id), existing: true };
+        if (existing) return existing.task_id === (taskId ?? null)
+          ? { ok: true, work: supervisor.snapshot(db(), existing.id), existing: true }
+          : { ok: false, reason: 'idempotency-key-conflict' };
+      }
+      if (taskId != null) {
+        const uncertain = unknownTaskRunWithLiveRunner(db(), projectId);
+        if (uncertain) return { ok: false, reason: 'prior-process-may-still-live', detail: { workId: uncertain.id } };
+        const taskRefusal = repo.taskRunRefusal(db(), projectId, taskId);
+        if (taskRefusal) return { ok: false, reason: taskRefusal };
       }
 
       const r = await supervisor.start(db(), row, intent, {

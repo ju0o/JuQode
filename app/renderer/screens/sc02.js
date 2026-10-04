@@ -184,6 +184,9 @@ export function renderSC02(root, api, nav, state) {
   taskHeading.classList.add('task-heading');
   intent.appendChild(taskHeading);
   intent.appendChild(el('div', 'xs mut2 task-intro', C.gap.task.intro));
+  const legacyUnknownNotice = el('div', 'task-legacy-unknown');
+  legacyUnknownNotice.setAttribute('data-el', 'legacy-unknown');
+  intent.appendChild(legacyUnknownNotice);
   const taskRows = el('div', 'task-rows');
   taskRows.setAttribute('data-el', 'task-list');
   intent.appendChild(taskRows);
@@ -255,6 +258,31 @@ export function renderSC02(root, api, nav, state) {
 
   let taskLoadSequence = 0;
   let currentTasks = [];
+  const paintLegacyUnknown = (runs) => {
+    legacyUnknownNotice.innerHTML = '';
+    const work = runs[0];
+    if (!work) return;
+    const panel = el('div', 'panel wait');
+    panel.appendChild(el('div', 'sm t', C.gap.task.legacyUnknownTitle));
+    panel.appendChild(el('div', 'xs mut', C.gap.task.legacyUnknownBody));
+    if (runs.length > 1) panel.appendChild(el('div', 'xs mut2', C.gap.task.legacyUnknownManyRuns(runs.length)));
+    const check = el('input');
+    check.type = 'checkbox';
+    const label = el('label', 'xs mut2 task-legacy-confirm');
+    label.append(check, document.createTextNode(` ${C.gap.task.legacyUnknownCheck}`));
+    const note = el('div', 'xs mut2');
+    const acknowledge = btn('btn sm', C.gap.task.legacyUnknownResolve, async () => {
+      if (!check.checked) return;
+      acknowledge.disabled = true;
+      const result = await api.legacyUnknownAck(p.id, work.id, true);
+      if (result?.ok) await refreshTasks();
+      else { note.textContent = C.gap.task.retryFailed; acknowledge.disabled = false; }
+    });
+    acknowledge.disabled = true;
+    check.addEventListener('change', () => { acknowledge.disabled = !check.checked; });
+    panel.append(label, note, acknowledge);
+    legacyUnknownNotice.appendChild(panel);
+  };
   const paintTaskList = () => {
     taskRows.innerHTML = '';
     if (!currentTasks.length) {
@@ -321,6 +349,7 @@ export function renderSC02(root, api, nav, state) {
     if (sequence !== taskLoadSequence || state.project.id !== p.id) return;
     if (!listed?.ok) { taskRows.textContent = listed?.detail ?? C.gap.task.noTasks; return; }
     currentTasks = listed.tasks;
+    paintLegacyUnknown(listed.legacyUnknownRuns ?? []);
     if (!currentTasks.some((task) => task.id === state.selectedTaskId)) {
       state.selectedTaskId = currentTasks[0]?.id ?? null;
     }
@@ -337,7 +366,10 @@ export function renderSC02(root, api, nav, state) {
   async function send() {
     const text = field.value;
     if (!text.trim()) return;
-    const idempotencyKey = state.selectedTaskId ? window.crypto.randomUUID() : null;
+    /* The route can wait for the user. Freeze the Task at submit time so changing selection
+     * while that choice is open cannot attach this request to a different Task. */
+    const submittedTaskId = state.selectedTaskId ?? null;
+    const idempotencyKey = submittedTaskId ? window.crypto.randomUUID() : null;
     consequence.innerHTML = '';
     submit.disabled = true;
     try {
@@ -345,30 +377,32 @@ export function renderSC02(root, api, nav, state) {
       const route = routed?.route?.route ?? 'work';
 
       /* Not a failure and not red — a place, not a refusal (D-134). */
-      if (route === 'terminal') { consequence.appendChild(terminalCard(text, () => startWork(text, idempotencyKey))); return; }
+      if (route === 'terminal') { consequence.appendChild(terminalCard(text, () => startWork(text, submittedTaskId, idempotencyKey))); return; }
       if (route === 'ambiguous') {
-        consequence.appendChild(ambiguousCard({ ...routed.route, phrase: text }, () => startWork(text, idempotencyKey)));
+        consequence.appendChild(ambiguousCard({ ...routed.route, phrase: text }, () => startWork(text, submittedTaskId, idempotencyKey)));
         return;
       }
       if (route === 'unrecognized') { consequence.appendChild(line(C.intent.routeUnrec)); return; }
-      await startWork(text, idempotencyKey);
+      await startWork(text, submittedTaskId, idempotencyKey);
     } finally { submit.disabled = false; }
   }
 
-  async function startWork(text, idempotencyKey = null) {
+  async function startWork(text, taskId = null, idempotencyKey = null) {
     consequence.appendChild(line(C.intent.routeWork));
     const pend = el('div', 'sm mut');
     pend.setAttribute('data-el', 'pending');
     pend.textContent = C.pending.label;              // a place-holder card, NOT a progress bar
     consequence.appendChild(pend);
 
-    const r = await api.workStart(p.id, text, state.selectedTaskId ?? null, idempotencyKey);
+    const r = await api.workStart(p.id, text, taskId, idempotencyKey);
     pend.remove();
     if (r?.ok) { field.value = ''; return nav.toWork(r.work); }
 
     /* `15` SC-02 keeps the submitted text in the field for every one of these — it is never
      * queued and never thrown away (UF-RULE-NOQUEUE). */
-    consequence.appendChild(refusalCard(r, api, nav, state, p, { phrase: text, resubmit: () => startWork(text, idempotencyKey) }));
+    consequence.appendChild(refusalCard(r, api, nav, state, p, {
+      phrase: text, resubmit: () => startWork(text, taskId, idempotencyKey),
+    }));
   }
 
   /* ② Work Stream — D-138 §3 · §5, and `15` SC-02 ③.
@@ -430,7 +464,9 @@ function renderRunReview(task, detail, refresh, nav) {
   const latest = detail.runs[0];
   const section = el('div', 'task-run-review');
   const reviews = new Map();
-  for (const review of detail.reviews) reviews.set(review.criterion_id, review);
+  for (const review of detail.reviews) {
+    if (review.work_id === latest.work.id) reviews.set(review.criterion_id, review);
+  }
   section.appendChild(el('div', 'xs mut2', `${C.gap.task.run}: #${latest.work.attempt ?? 1} · ${latest.work.outcome ?? latest.work.status}`));
 
   const criteria = el('div', 'task-review-criteria');
@@ -438,11 +474,23 @@ function renderRunReview(task, detail, refresh, nav) {
     const row = el('div', 'task-review-criterion');
     row.appendChild(el('div', 'sm', criterion.text));
     const previous = reviews.get(criterion.id);
-    const matchingReview = previous && previous.task_spec_digest === latest.contextBundle?.bundle?.task_spec_digest;
-    if (matchingReview) row.appendChild(el('div', `xs mut2 review-${previous.verdict}`,
-      `${C.gap.task.status}: ${previous.verdict === 'pass' ? C.gap.task.pass : C.gap.task.fail}`));
+    const matchingReview = latest.taskSpecCurrent && previous &&
+      previous.task_spec_digest === latest.contextBundle?.bundle?.task_spec_digest;
+    if (matchingReview) {
+      row.appendChild(el('div', `xs mut2 review-${previous.verdict}`,
+        `${C.gap.task.status}: ${previous.verdict === 'pass' ? C.gap.task.pass : C.gap.task.fail}`));
+      const linked = el('div', 'task-review-evidence');
+      for (const id of previous.evidence_ids ?? []) {
+        const ref = el('span', 'xs mut2 mono', `Evidence ${id.slice(0, 8)}`);
+        ref.title = id;
+        linked.appendChild(ref);
+      }
+      if (linked.childNodes.length) row.appendChild(linked);
+    }
     const review = el('details', 'task-review');
     review.appendChild(el('summary', 'xs mut', C.gap.task.review));
+    const unsupportedCheck = /\b(?:lint|type[\s-]?check(?:ing)?|static analysis|static check(?:s)?)\b/i.test(criterion.text);
+    if (unsupportedCheck) review.appendChild(el('div', 'xs mut2', C.gap.task.unsupportedEvidence));
     const evidence = latest.runEvidence ?? [];
     if (!latest.taskSpecCurrent || latest.work.status !== 'ended') {
       review.appendChild(el('div', 'xs mut2', C.gap.task.noEvidence));
@@ -457,12 +505,20 @@ function renderRunReview(task, detail, refresh, nav) {
         check.addEventListener('change', () => check.checked ? chosen.add(item.id) : chosen.delete(item.id));
         const text = el('span', 'xs task-evidence-text');
         text.appendChild(el('span', '', item.kind === 'test_command' ? `${C.gap.task.testEvidence}: ${item.summary}` : C.gap.task.changedFiles));
+        const evidenceRef = el('span', 'xs mut2 mono', `Evidence ${item.id.slice(0, 8)}`);
+        evidenceRef.title = item.id;
+        text.appendChild(evidenceRef);
         if (item.kind === 'test_command') {
           const state = item.details.result_state === 'error' ? C.gap.task.evidenceError
-            : item.details.result_state === 'returned' ? C.gap.task.evidenceReturned : C.gap.task.evidenceUnknown;
+            : item.details.result_state === 'returned'
+              ? (item.details.exit_code == null ? C.gap.task.evidenceReturnedNoExit : C.gap.task.evidenceReturned)
+              : C.gap.task.evidenceUnknown;
           text.appendChild(el('span', 'mut2', state));
           if (item.details.exit_code != null) text.appendChild(el('span', 'mono mut2', `Exit code: ${item.details.exit_code}`));
           if (item.details.output_excerpt) text.appendChild(el('span', 'mut2', item.details.output_excerpt));
+          if (item.details.command_redacted || item.details.output_redacted) {
+            text.appendChild(el('span', 'mut2', C.gap.task.redactedContent));
+          }
         } else {
           const files = item.details.files ?? [];
           text.appendChild(el('span', 'mut2', files.length ? files.join(' · ') : C.gap.task.noChanges));
@@ -476,9 +532,13 @@ function renderRunReview(task, detail, refresh, nav) {
         pass.disabled = true;
         const result = await window.juqode.taskReviewCriterion(task.id, latest.work.id, criterion.id,
           'pass', [...chosen]);
-        if (result?.ok) await refresh(); else { review.appendChild(el('div', 'xs mut2', result?.detail ?? C.gap.task.noEvidence)); pass.disabled = false; }
+        if (result?.ok) await refresh(); else {
+          const message = result?.reason === 'unsupported-verification'
+            ? C.gap.task.unsupportedEvidence : result?.detail ?? C.gap.task.noEvidence;
+          review.appendChild(el('div', 'xs mut2', message)); pass.disabled = false;
+        }
       });
-      pass.disabled = latest.work.outcome !== 'complete';
+      pass.disabled = latest.work.outcome !== 'complete' || unsupportedCheck;
       const fail = btn('btn sm ghost', C.gap.task.reviewFail, async () => {
         if (!chosen.size) return;
         fail.disabled = true;
@@ -502,11 +562,19 @@ function renderRunReview(task, detail, refresh, nav) {
     reason.placeholder = C.gap.task.retryPlaceholder;
     reason.setAttribute('aria-label', C.gap.task.retryReason);
     const note = el('div', 'xs mut2');
+    const confirmUnknown = latest.work.outcome === 'ended_unknown' ? el('label', 'xs mut2') : null;
+    const confirmCheck = confirmUnknown ? el('input') : null;
+    if (confirmUnknown) {
+      confirmCheck.type = 'checkbox';
+      confirmUnknown.append(confirmCheck, document.createTextNode(` ${C.gap.task.retryUnknownConfirm}`));
+    }
     const start = btn('btn sm pri', C.gap.task.retrySubmit, async () => {
       if (!reason.value.trim()) { note.textContent = C.gap.task.retryNeedsReason; return; }
+      if (confirmCheck && !confirmCheck.checked) { note.textContent = C.gap.task.retryUnknownRequired; return; }
       start.disabled = true;
       note.textContent = '';
-      const result = await window.juqode.taskRetry(task.id, latest.work.id, reason.value.trim(), window.crypto.randomUUID());
+      const result = await window.juqode.taskRetry(task.id, latest.work.id, reason.value.trim(),
+        window.crypto.randomUUID(), Boolean(confirmCheck?.checked));
       if (result?.ok) nav.toWork(result.work);
       else {
         note.textContent = result?.reason === 'prior-process-may-still-live'
@@ -514,7 +582,9 @@ function renderRunReview(task, detail, refresh, nav) {
         start.disabled = false;
       }
     });
-    retry.append(el('label', 'xs mut2', C.gap.task.retryReason), reason, note, start);
+    retry.append(el('label', 'xs mut2', C.gap.task.retryReason), reason);
+    if (confirmUnknown) retry.appendChild(confirmUnknown);
+    retry.append(note, start);
     section.appendChild(retry);
   }
 
@@ -533,15 +603,22 @@ function renderRunReview(task, detail, refresh, nav) {
       const bundle = snap.contextBundle.bundle;
       context.appendChild(el('summary', 'xs mut', `${C.gap.task.prompt} · v${bundle.bundle_schema_version} · ${snap.contextBundle.content_digest.slice(0, 12)}`));
       context.appendChild(el('pre', 'task-prompt', bundle.prompt_snapshot ?? ''));
+      if (bundle.prompt_snapshot_redacted) context.appendChild(el('div', 'xs mut2', C.gap.task.redactedSnapshot));
       context.appendChild(el('div', 'xs mut2', C.gap.task.contextScope));
       run.appendChild(context);
     }
     const report = snap.result?.claims?.find((claim) => claim.kind === 'agent-report');
-    if (report?.data?.text) run.appendChild(factBlock(C.gap.task.result, report.data.text));
+    if (report?.data?.text) {
+      run.appendChild(factBlock(C.gap.task.result, report.data.text));
+      if (report.data.redacted) run.appendChild(el('div', 'xs mut2', C.gap.task.redactedContent));
+    }
     const changed = (snap.runEvidence ?? []).find((item) => item.kind === 'changed_files');
     if (changed) {
       const files = changed.details.files ?? [];
-      run.appendChild(factBlock(C.gap.task.changedFiles, files.length ? files.join('\n') : C.gap.task.noChanges));
+      const changedLabel = factBlock(`${C.gap.task.changedFiles} · Evidence ${changed.id.slice(0, 8)}`,
+        files.length ? files.join('\n') : C.gap.task.noChanges);
+      changedLabel.title = changed.id;
+      run.appendChild(changedLabel);
     }
     const tests = (snap.runEvidence ?? []).filter((item) => item.kind === 'test_command');
     if (tests.length) {
@@ -549,12 +626,36 @@ function renderRunReview(task, detail, refresh, nav) {
       block.appendChild(el('div', 'xs mut2', C.gap.task.testEvidence));
       for (const item of tests) {
         const state = item.details.result_state === 'error' ? C.gap.task.evidenceError
-          : item.details.result_state === 'returned' ? C.gap.task.evidenceReturned : C.gap.task.evidenceUnknown;
-        block.appendChild(el('div', 'xs', `${item.summary} · ${state}${item.details.exit_code == null ? '' : ` · Exit code ${item.details.exit_code}`}`));
+          : item.details.result_state === 'returned'
+            ? (item.details.exit_code == null ? C.gap.task.evidenceReturnedNoExit : C.gap.task.evidenceReturned)
+            : C.gap.task.evidenceUnknown;
+        const evidence = el('div', 'xs', `${item.summary} · ${state}${item.details.exit_code == null ? '' : ` · Exit code ${item.details.exit_code}`} · Evidence ${item.id.slice(0, 8)}`);
+        evidence.title = item.id;
+        block.appendChild(evidence);
+        if (item.details.command_redacted || item.details.output_redacted) {
+          block.appendChild(el('div', 'xs mut2', C.gap.task.redactedContent));
+        }
       }
       run.appendChild(block);
     }
     if (snap.work.failure_reason) run.appendChild(factBlock(C.gap.task.failure, snap.work.failure_reason));
+    if (snap.work.id !== latest.work.id || !snap.taskSpecCurrent) {
+      const savedReviews = detail.reviews.filter((review) => review.work_id === snap.work.id);
+      if (savedReviews.length) {
+        const saved = el('div', 'task-run-fact');
+        saved.appendChild(el('div', 'xs mut2', C.gap.task.savedReviews));
+        for (const review of savedReviews) {
+          const item = snap.contextBundle?.bundle?.items?.find((contextItem) =>
+            contextItem.source_ref === `task:${task.id}:acceptance:${review.criterion_id}`);
+          const text = item?.safe_content ?? `Criterion ${review.criterion_id}`;
+          const references = (review.evidence_ids ?? []).map((id) => `Evidence ${id.slice(0, 8)}`).join(' · ');
+          const line = el('div', 'xs', `${text} · ${review.verdict === 'pass' ? C.gap.task.pass : C.gap.task.fail}${references ? ` · ${references}` : ''}`);
+          line.title = (review.evidence_ids ?? []).join('\n');
+          saved.appendChild(line);
+        }
+        run.appendChild(saved);
+      }
+    }
     history.appendChild(run);
   }
   section.appendChild(history);
@@ -872,6 +973,15 @@ function recoveryPaths(labels, phrase, state, nav, project) {
 
 function refusalCard(r, api, nav, state, project, { phrase = '', resubmit = null } = {}) {
   const reason = r?.reason;
+
+  if (reason === 'task-run-retry-required') {
+    const n = el('div', 'panel grey');
+    n.setAttribute('data-el', 'task-retry-required');
+    n.appendChild(el('div', 'sm t', C.gap.task.retryRequired));
+    const retry = document.querySelector('.task-retry');
+    if (retry) { retry.open = true; retry.scrollIntoView({ block: 'nearest' }); }
+    return n;
+  }
 
   if (reason === 'active-work') {
     const n = el('div', 'panel wait');

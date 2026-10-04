@@ -24,7 +24,8 @@ const { testEvidenceFromSignals } = require('./run-evidence');
 const blocks = require('../change/blocks');
 const explain = require('../change/explain');
 const exclude = require('../evidence/exclude');
-const { buildContextBundle } = require('./context');
+const { buildContextBundle, safeSnapshot, safeStructuredSnapshot, redactionRules, redactionLocations } = require('./context');
+const { unknownTaskRunWithLiveRunner } = require('./runner-liveness');
 
 /** Live state for Works this process started. Nothing here is authoritative — the DB is. */
 const live = new Map();   // workId -> { child, state, sessionId, cwd, projectId }
@@ -72,8 +73,11 @@ function livenessOf(state, work) {
  * Everything that must be true before a Work can start, checked in Canon's order.
  * @returns {{ok:true, useGit:boolean, evidenceStore:string} | {ok:false, reason:string, detail?:any}}
  */
-async function preflight(db, project, { evidenceStore, detect = claude.detect, taskId = null }) {
-  const taskRefusal = repo.taskRunRefusal(db, project.id, taskId);
+async function preflight(db, project, { evidenceStore, detect = claude.detect, taskId = null,
+  retryOfWorkId = null, allowUnknownWorkId = null }) {
+  const uncertain = unknownTaskRunWithLiveRunner(db, project.id, allowUnknownWorkId);
+  if (uncertain) return { ok: false, reason: 'prior-process-may-still-live', detail: { workId: uncertain.id } };
+  const taskRefusal = repo.taskRunRefusal(db, project.id, taskId, { retryOfWorkId });
   if (taskRefusal) return { ok: false, reason: taskRefusal };
   const status = await detect();
   if (!status.available) return { ok: false, reason: 'claude-unavailable', detail: status };
@@ -81,7 +85,9 @@ async function preflight(db, project, { evidenceStore, detect = claude.detect, t
   const active = repo.activeWork(db, project.id);
   if (active) return { ok: false, reason: 'active-work', detail: active };
 
-  const useGit = gitEvidence.isGitRepo(project.path);
+  /* Task Run evidence stores path/hash manifests only. The legacy Work path retains its
+   * existing Git object/diff behavior. */
+  const useGit = !taskId && gitEvidence.isGitRepo(project.path);
   if (useGit) {
     const refused = gitEvidence.refusal(project.path);
     if (refused) return { ok: false, reason: 'evidence-blocked', detail: refused };
@@ -94,6 +100,9 @@ function captureBasis(project, store, phase, useGit) {
   if (useGit) return gitEvidence.capture(project.path, store, phase);
   const m = manifest.capture(project.path);
   if (m.error) throw Object.assign(new Error(m.error), { code: m.error, detail: m.detail });
+  if (Buffer.byteLength(JSON.stringify(m.files), 'utf8') > 16 * 1024 * 1024) {
+    throw Object.assign(new Error('manifest snapshot is too large to persist'), { code: 'manifest-too-large' });
+  }
   return m;
 }
 
@@ -105,6 +114,7 @@ async function start(db, project, intent, opts = {}) {
   const {
     evidenceStore, onUpdate = () => {}, bin, detect, taskId = null,
     idempotencyKey = null, attempt = 1, retryOfWorkId = null, retryReason = null, appSessionId = null,
+    allowUnknownWorkId = null,
   } = opts;
 
   if (retryOfWorkId) {
@@ -118,7 +128,9 @@ async function start(db, project, intent, opts = {}) {
 
   if (idempotencyKey) {
     const existing = repo.workForIdempotency(db, project.id, idempotencyKey);
-    if (existing) return { ok: true, workId: existing.id, existing: true, done: Promise.resolve({ ok: true, workId: existing.id }) };
+    if (existing) return existing.task_id === taskId
+      ? { ok: true, workId: existing.id, existing: true, done: Promise.resolve({ ok: true, workId: existing.id }) }
+      : { ok: false, reason: 'idempotency-key-conflict' };
   }
 
   if (starting.has(project.id)) return { ok: false, reason: 'active-work', detail: { starting: true } };
@@ -126,7 +138,7 @@ async function start(db, project, intent, opts = {}) {
   try {
     return await startGuarded(db, project, intent, {
       evidenceStore, onUpdate, bin, detect, taskId, idempotencyKey, attempt, retryOfWorkId, retryReason,
-      appSessionId,
+      appSessionId, allowUnknownWorkId,
     });
   } finally {
     starting.delete(project.id);
@@ -135,13 +147,14 @@ async function start(db, project, intent, opts = {}) {
 
 async function startGuarded(db, project, intent, {
   evidenceStore, onUpdate, bin, detect, taskId, idempotencyKey, attempt, retryOfWorkId, retryReason,
-  appSessionId,
+  appSessionId, allowUnknownWorkId,
 }) {
-  const pre = await preflight(db, project, { evidenceStore, detect, taskId });
+  const pre = await preflight(db, project, { evidenceStore, detect, taskId, retryOfWorkId, allowUnknownWorkId });
   if (!pre.ok) return pre;
 
   let context = null;
   let agentPrompt = intent;
+  const storedIntent = taskId ? safeSnapshot(intent).safe : intent;
   if (taskId) {
     const task = repo.getTask(db, taskId);
     if (!task) return { ok: false, reason: 'no-task' };
@@ -163,19 +176,22 @@ async function startGuarded(db, project, intent, {
   const pendingChild = { child: null };
   let justBegan = false;
   let workId = null;
+  let runEntry = null;
   let state = initial();
   const reserveRunBeforeSpawn = Boolean(taskId);
 
   if (reserveRunBeforeSpawn) {
-    const begun = repo.beginWork(db, project.id, intent, {
-      taskId, status: 'starting', idempotencyKey, attempt, retryOfWorkId, retryReason, appSessionId,
+    const begun = repo.beginWork(db, project.id, storedIntent, {
+      taskId, status: 'starting', idempotencyKey, attempt, retryOfWorkId,
+      retryReason: retryReason == null ? null : safeSnapshot(retryReason).safe, appSessionId,
     });
     if (!begun.ok) return begun;
     workId = begun.work.id;
     repo.saveBasis(db, workId, 'before', basis);
     repo.saveRunContextBundle(db, workId, context);
-    live.set(workId, { state, sessionId, cwd: project.path, projectId: project.id,
-      bin, child: null, store: evidenceStore, useGit: pre.useGit });
+    runEntry = { state, sessionId, cwd: project.path, projectId: project.id,
+      bin, child: null, store: evidenceStore, useGit: pre.useGit };
+    live.set(workId, runEntry);
   }
 
   const persist = (sig, raw, line) => {
@@ -189,6 +205,7 @@ async function startGuarded(db, project, intent, {
    * caller that needs the finished state (a test, a headless run) must be able to. */
   let markDone;
   const done = new Promise((res) => { markDone = res; });
+  if (runEntry) runEntry.markDone = markDone;
 
   const first = new Promise((resolve) => {
     let settled = false;
@@ -201,11 +218,14 @@ async function startGuarded(db, project, intent, {
         if (!workId) return;
         const at = now();
         repo.setRunnerIdentity(db, workId, sessionId, c.pid, at);
-        repo.setWorkState(db, workId, { status: 'running' });
-        const e = live.get(workId) ?? { state, sessionId, cwd: project.path, projectId: project.id,
+        const e = runEntry ?? live.get(workId) ?? { state, sessionId, cwd: project.path, projectId: project.id,
           bin, store: evidenceStore, useGit: pre.useGit };
+        runEntry = e;
+        e.markDone ??= markDone;
         e.child = c;
         live.set(workId, e);
+        if (!e.cancelRequested) repo.setWorkState(db, workId, { status: 'running' });
+        else stopEntryTree(db, workId, e, onUpdate);
         justBegan = true;
         settle({ ok: true, workId, done });
       },
@@ -213,7 +233,7 @@ async function startGuarded(db, project, intent, {
         if (!workId) {
           /* The session spoke, so a Work exists. The guard is re-checked here by the engine
            * itself — `beginWork` inserts, and the partial unique index is the arbiter. */
-          const begun = repo.beginWork(db, project.id, intent, { taskId });
+          const begun = repo.beginWork(db, project.id, taskId ? storedIntent : intent, { taskId });
           if (!begun.ok) {
             /* We lost the race for the slot. The process we started is ours to stop — leaving
              * it running would put two Claude Code sessions in one repository. */
@@ -226,7 +246,11 @@ async function startGuarded(db, project, intent, {
           workId = begun.work.id;
           if (context) repo.saveRunContextBundle(db, workId, context);
           repo.saveBasis(db, workId, 'before', basis);
-          live.set(workId, { state, sessionId, cwd: project.path, projectId: project.id, bin, child: pendingChild.child, store: evidenceStore, useGit: pre.useGit });
+          runEntry = live.get(workId) ?? { state, sessionId, cwd: project.path, projectId: project.id,
+            bin, child: pendingChild.child, store: evidenceStore, useGit: pre.useGit };
+          runEntry.markDone ??= markDone;
+          runEntry.child = pendingChild.child;
+          live.set(workId, runEntry);
           for (const p of pending) {
             writeSignal(db, workId, { source: 'claude', kind: p.sig.kind, payload: p.line });
             apply(db, workId, p.sig, onUpdate);
@@ -251,6 +275,25 @@ async function startGuarded(db, project, intent, {
     });
 
     runP.then((r) => {
+      if (runEntry?.cancelFinalized) {
+        settle({ ok: true, workId, done });
+        markDone({ ok: true, workId, cancelled: true });
+        return;
+      }
+      if (runEntry?.cancelTreeUnknown) {
+        settle({ ok: true, workId, done });
+        return;
+      }
+      if (runEntry?.cancelRequested && !runEntry.cancelTreeStopped) {
+        /* No owned-child stop observation has arrived yet. Keep the request visible until its
+         * timeout records ended_unknown and releases the slot behind an explicit acknowledgement. */
+        if (repo.getWork(db, workId)?.status === 'ended') {
+          repo.setWorkState(db, workId, { status: 'cancel_requested' });
+        }
+        onUpdate(snapshot(db, workId));
+        settle({ ok: true, workId, done });
+        return;
+      }
       if (!workId) {
         /* `15` SC-02 시작 실패: a card, and no row. */
         settle({ ok: false, reason: 'start-failed', detail: { code: r.code, stderr: r.stderr } });
@@ -339,9 +382,8 @@ function changes(db, workId, project, store = null) {
   return { known: true, files: manifest.diff({ files: beforeFiles }, { files: afterFiles }).map((c) => c.path) };
 }
 
-/* The manifest's file list is held in-process by the repository layer, keyed by work and phase.
- * It does NOT survive a restart — `20` has no column for it (CANON_FINDINGS CF-9) — so a
- * non-Git Work that outlives the app reports `known: false`, which is the honest answer. */
+/* Migration 14 makes manifest path/hash lists durable. The repository's in-process fallback
+ * supports older rows; if neither source has a snapshot, `known: false` remains the honest answer. */
 function manifestFiles(db, workId, phase) {
   const row = repo.basisFor(db, workId, phase);
   if (!row || row.kind !== 'hash_manifest' || !row.files) return null;
@@ -373,7 +415,29 @@ const withScope = (d, cwd) => {
  */
 function writeSignal(db, workId, { source, kind, payload }) {
   try {
-    repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), source, kind, payload, observedAt: now() });
+    const work = repo.getWork(db, workId);
+    let persistedPayload = payload;
+    if (work?.task_id) {
+      let parsed = payload;
+      let wasJson = false;
+      if (typeof payload === 'string') {
+        try { parsed = JSON.parse(payload); wasJson = true; } catch { parsed = payload; }
+      }
+      const rules = redactionRules(parsed);
+      if (rules.length) {
+        const safe = safeStructuredSnapshot(parsed);
+        const record = safe && typeof safe === 'object' && !Array.isArray(safe) ? safe : { value: safe };
+        record.juqodeRedaction = { applied: true, rules, paths: redactionLocations(parsed).map((item) => item.path) };
+        persistedPayload = JSON.stringify(record);
+      } else if (wasJson) {
+        persistedPayload = JSON.stringify(safeStructuredSnapshot(parsed));
+      } else if (typeof parsed !== 'string') {
+        persistedPayload = safeStructuredSnapshot(parsed);
+      } else {
+        persistedPayload = parsed;
+      }
+    }
+    repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), source, kind, payload: persistedPayload, observedAt: now() });
     return true;
   } catch (e) {
     try { repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), source: 'juqode', kind: KIND.RAW, payload: `signal-write-failed: ${e?.code ?? e?.message ?? 'unknown'}` }); }
@@ -420,13 +484,8 @@ function finishResult(db, workId, project, store) {
   const signals = db.prepare('select * from work_signal where work_id = ? order by seq').all(workId);
   for (const evidence of testEvidenceFromSignals(signals)) repo.saveRunEvidence(db, workId, evidence);
   const entry = entryFor(db, workId) ?? { state: initial() };
-  /* `saveResult` deletes and reinserts, so a SECOND call overwrites the first. On the cancel
-   * path there is always a second: `confirmCancel` writes the result from the live state and
-   * releases, then the child's own exit fires this again — with the entry gone, `entryFor`
-   * rebuilds a bare state and the rewrite lands 된 것 없음 · 안 된 것 없음 under a 부분 완료
-   * card, which is exactly what WBS-18's acceptance row forbids. So: an EXISTING result is
-   * never replaced by one rebuilt from the row. A Work that ended while the app was gone has
-   * no result yet, and still gets one. */
+  /* `saveResult` deletes and reinserts. An EXISTING result is never replaced by one rebuilt from
+   * the row. A Work that ended while the app was gone has no result yet, and still gets one. */
   if (entry.hydrated) {
     const written = repo.resultFor(db, workId);
     if (written) return written;
@@ -445,6 +504,16 @@ function finishResult(db, workId, project, store) {
   if (problems.length) {
     writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW, payload: JSON.stringify({ resultProblems: problems }) });
   }
+  if (work.task_id) {
+    const safeResult = safeStructuredSnapshot(result);
+    const rules = redactionRules(result);
+    const report = safeResult.claims?.find((claim) => claim.kind === 'agent-report');
+    if (rules.length && report?.data) {
+      report.data.redacted = true;
+      report.data.redactionRules = rules;
+    }
+    return repo.saveResult(db, workId, safeResult);
+  }
   return repo.saveResult(db, workId, result);
 }
 
@@ -453,6 +522,7 @@ function finishResult(db, workId, project, store) {
  * be opened later from History without the session or the live map still existing.
  */
 function saveDiffs(db, workId, project, store) {
+  if (repo.getWork(db, workId)?.task_id) return; // Task Runs persist measured names/hashes, not source patches.
   const before = repo.basisFor(db, workId, 'before');
   const after = repo.basisFor(db, workId, 'after');
   if (!before || !after || before.kind !== 'git_tree' || !store || !project?.path) return;
@@ -767,27 +837,46 @@ function cancel(db, workId, opts = {}) {
   apply(db, workId, { kind: KIND.CANCEL_REQUEST, payload: null }, onUpdate);
 
   const child = entry?.child;
-  const gone = !child || child.exitCode !== null || child.signalCode !== null;
-  if (child && !gone) {
-    session.stop(child);
-    child.once('exit', () => confirmCancel(db, workId, onUpdate));
+  if (entry) {
+    entry.cancelRequested = true;
+    if (child) stopEntryTree(db, workId, entry, onUpdate);
+    /* During spawn there is no handle yet. onChild notices cancelRequested and stops the tree
+     * as soon as the root handle exists; missing child is never treated as proof of death. */
   } else {
-    confirmCancel(db, workId, onUpdate);
+    /* Without the live ChildProcess/session observer, a missing PID only proves there is no
+     * process now. It does not prove this cancel request stopped the Run or that it made no
+     * changes before exiting. Preserve the outcome as unknown; never infer cancelled_nochange. */
+    repo.setWorkState(db, workId, { status: 'ended', outcome: 'ended_unknown' });
+    repo.setRunFailureReason(db, workId, 'cancel-requested-without-process-handle');
+    writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW,
+      payload: JSON.stringify({ cancelUnconfirmed: 'process-handle-unavailable' }) });
+    release(db, workId);
+    onUpdate(snapshot(db, workId));
   }
   return { ok: true };
 }
 
-/** The stop, observed. Only called when the process is actually gone. */
-function confirmCancel(db, workId, onUpdate) {
-  const work = repo.getWork(db, workId);
-  if (!work || work.status === 'ended') return;
-  writeSignal(db, workId, { source: 'juqode', kind: KIND.CANCEL_CONFIRMED, payload: null });
-  apply(db, workId, { kind: KIND.CANCEL_CONFIRMED, payload: null }, onUpdate);
-  const entry = live.get(workId);
-  /* A cancelled Work has a result too — `15` gives it two of the five outcome cards. */
-  finishResult(db, workId, { path: entry?.cwd }, entry?.store);
-  release(db, workId);
-  onUpdate(snapshot(db, workId));
+function stopEntryTree(db, workId, entry, onUpdate) {
+  if (!entry?.child || entry.cancelStopStarted || entry.cancelTreeUnknown) return;
+  entry.cancelStopStarted = true;
+  session.stop(entry.child, {
+    onUnconfirmed: () => {
+      entry.cancelTreeUnknown = true;
+      const work = repo.getWork(db, workId);
+      if (work?.status !== 'ended' || work.outcome !== 'ended_unknown') {
+        repo.setWorkState(db, workId, { status: 'ended', outcome: 'ended_unknown' });
+        repo.setRunFailureReason(db, workId, 'cancel-process-tree-not-confirmed-stopped');
+        writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW,
+          payload: JSON.stringify({ cancelUnconfirmed: 'process-tree-not-confirmed-stopped' }) });
+      }
+      const project = db.prepare('select path from project where id = ?').get(work.project_id);
+      captureAfter(db, workId, entry.cwd ? { path: entry.cwd } : project, entry.useGit ?? false, entry.store ?? null);
+      finishResult(db, workId, entry.cwd ? { path: entry.cwd } : project, entry.store ?? null);
+      release(db, workId);
+      onUpdate(snapshot(db, workId));
+      entry.markDone?.({ ok: false, reason: 'cancel-tree-unconfirmed', workId });
+    },
+  });
 }
 
 /**

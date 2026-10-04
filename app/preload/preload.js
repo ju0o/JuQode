@@ -49,13 +49,15 @@ contextBridge.exposeInMainWorld('juqode', {
 
   /** DG-11 — local Project child Tasks and their reviewable Run history. */
   taskList: (projectId) => ipcRenderer.invoke('juqode:task-list', projectId),
+  legacyUnknownAck: (projectId, workId, confirmedStopped) =>
+    ipcRenderer.invoke('juqode:legacy-unknown-ack', projectId, workId, confirmedStopped),
   taskCreate: (projectId, input) => ipcRenderer.invoke('juqode:task-create', projectId, input),
   taskUpdate: (taskId, patch) => ipcRenderer.invoke('juqode:task-update', taskId, patch),
   taskDetail: (taskId) => ipcRenderer.invoke('juqode:task-detail', taskId),
   taskReviewCriterion: (taskId, workId, criterionId, verdict, evidenceIds) =>
     ipcRenderer.invoke('juqode:task-review-criterion', taskId, workId, criterionId, verdict, evidenceIds),
-  taskRetry: (taskId, priorWorkId, reason, idempotencyKey) =>
-    ipcRenderer.invoke('juqode:task-retry', taskId, priorWorkId, reason, idempotencyKey),
+  taskRetry: (taskId, priorWorkId, reason, idempotencyKey, confirmPriorStopped = false) =>
+    ipcRenderer.invoke('juqode:task-retry', taskId, priorWorkId, reason, idempotencyKey, confirmPriorStopped),
 
   /* WBS-10 ~ 17 — the Work loop. Each is a named channel; none takes a channel name. */
   workStart: (projectId, intent, taskId = null, idempotencyKey = null) =>

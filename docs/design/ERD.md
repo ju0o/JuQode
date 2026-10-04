@@ -81,7 +81,7 @@
 | 2 | `change_group.source_ref` 추가 | D-114: 확인됨 주장은 근거를 지목한다 (CF-13) |
 | **3** | `quick_command_rule` 에 `qc.git.commit` · `qc.deploy` 추가 | **PM 판정 2026-09-12** — F-17 의 닫힌 6개를 8개로 (아래 §4) |
 
-> **앞으로 적용될 것 — 번호가 확정됐다 (Owner/PM 판정 2026-09-13 · `SPEC_RECONCILE.md` §2):**
+> **JuQode 앱 마이그레이션 순서 — v4~v14 는 코드에 구현됐고 사용자 DB는 다음 앱 시작 전까지 v2 에 머문다:**
 >
 > | 버전 | 내용 | 언제 |
 > |---|---|---|
@@ -95,6 +95,7 @@
 > | **11** | nullable `work.agent_code` (DG-08) | New Task Runs record `claude_code`; historical Work remains null |
 > | **12** | `work.retry_reason` + one-successor-per-Run index (DG-12) | Retry is a new Run; replaying a retry returns its existing successor |
 > | **13** | `work.app_session_id` (DG-13) | Each new Run records the JuQode launch that owned its process; old active Task Runs reconcile to unknown after restart |
+> | **14** | `evidence_basis.manifest_json` | Task Run path/size/SHA-256 snapshots survive restart without retaining source contents |
 >
 > 2026-10-04 Founder/PM ruling 에 따라 미적용 예약을 v4=Task, v5=process/link, v6=owner_id 로 조정했다. v6 는 nullable owner_id 만 더하며 현재 path unique 를 유지한다. v7 은 DG-07 ContextBundle 이다. v12 는 DG-12 retry 사유와 멱등 successor index, v13 은 DG-13 Run ↔ app-session 연결이다. 번호는 재사용하지 않는다.
 

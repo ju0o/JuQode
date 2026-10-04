@@ -27,6 +27,26 @@ const DB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-e2e-')), 'juq
  * moves all of it, including the Chromium profile, so nothing this test does touches the real
  * application data. */
 const USER_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-userdata-'));
+const INVOCATIONS = path.join(USER_DATA, 'run-invocations.log');
+const FAKE_CLAUDE = path.join(USER_DATA, process.platform === 'win32' ? 'fake-claude.cmd' : 'fake-claude');
+const FAKE_CLAUDE_JS = path.join(USER_DATA, 'fake-claude.js');
+const fakeSource = `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === '--version') { process.stdout.write('fixture-claude 1\\n'); process.exit(0); }
+if (args[0] === 'auth') { process.stdout.write('{"loggedIn":true}\\n'); process.exit(0); }
+if (args.includes('-p')) {
+  fs.appendFileSync(${JSON.stringify(INVOCATIONS)}, JSON.stringify(args) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'restart-probe' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'fixture' }) + '\\n');
+  process.exit(0);
+}
+process.exit(0);
+`;
+if (process.platform === 'win32') {
+  fs.writeFileSync(FAKE_CLAUDE_JS, fakeSource);
+  fs.writeFileSync(FAKE_CLAUDE, `@echo off\r\n"${process.execPath}" "${FAKE_CLAUDE_JS}" %*\r\n`);
+} else fs.writeFileSync(FAKE_CLAUDE, fakeSource, { mode: 0o755 });
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
@@ -37,7 +57,8 @@ const repo = require('../../app/main/db/repo.js');
  * process: startup must still mark the old Run unknown because the prior Claude stream cannot be
  * reattached, and it must not create a replacement execution. */
 const seededDb = openDb(DB);
-const seededProject = repo.openProject(seededDb, path.join(os.tmpdir(), 'juqode-restart-project'), 'Restart fixture');
+const restartProjectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-restart-project-'));
+const seededProject = repo.openProject(seededDb, restartProjectPath, 'Restart fixture');
 const oldAppSession = repo.startAppSession(seededDb, { appVersion: 'fixture', platform: process.platform });
 const restartTask = repo.createTask(seededDb, seededProject.id, {
   goal: 'Recover interrupted execution', acceptanceCriteria: ['History remains truthful'],
@@ -78,7 +99,9 @@ function boot(extraArgs = [], env = {}) {
 const ev = (events, name) => events.find((e) => e.ev === name);
 
 const runs = [];
-for (let i = 0; i < 3; i++) runs.push(await boot([], { JUQODE_EXIT_AFTER_LOAD: '1' }));
+for (let i = 0; i < 3; i++) runs.push(await boot([], {
+  JUQODE_EXIT_AFTER_LOAD: '1', JUQODE_CLAUDE_BIN: FAKE_CLAUDE,
+}));
 
 
 // Every run must have produced the same shape.
@@ -105,6 +128,10 @@ assert.strictEqual(recoveredDb.prepare('select ended_at from app_session where i
   'crash ownership must remain distinguishable from a clean app shutdown');
 const cleanSessions = recoveredDb.prepare('select count(*) n from app_session where ended_at is not null').get().n;
 recoveredDb.close();
+const restartInvocations = fs.existsSync(INVOCATIONS)
+  ? fs.readFileSync(INVOCATIONS, 'utf8').split('\n').filter(Boolean).length : 0;
+assert.strictEqual(restartInvocations, 0,
+  'app startup must reconcile the unknown Run without starting the Agent again');
 
 const t = runs.map((r) => ev(r.events, 'did-finish-load').ms).sort((a, b) => a - b);
 console.log(JSON.stringify({
@@ -112,6 +139,7 @@ console.log(JSON.stringify({
   windows: 1,
   externalRequests: 0,
   restartReconciliation: { outcome: recoveredRun.outcome, runCount: 1, endedAppSessions: cleanSessions },
+  agentInvocationsOnRestart: restartInvocations,
   shownVia: runs.map((r) => ev(r.events, 'window.shown').via),
   didFinishLoadMs: { min: t[0], median: t[1], max: t[t.length - 1] },
   note: 'Linux measurement only. The target OS is Windows 10/11 (D-125) and is NOT TESTED.',

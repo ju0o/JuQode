@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
-const { buildContextBundle } = require(path.join(R, 'app/main/work/context.js'));
+const { buildContextBundle, redactionLocations, redactionRules, safeSnapshot, safeStructuredSnapshot } = require(path.join(R, 'app/main/work/context.js'));
 const { openDb } = require(path.join(R, 'app/main/db/db.js'));
 const repo = require(path.join(R, 'app/main/db/repo.js'));
 const { tempDir } = require(path.join(__dirname, 'tmp.js'));
@@ -43,6 +43,44 @@ test('ContextBundle keeps a digest but redacts secret-like content from snapshot
   assert.ok(!json.includes('sk-123456789012345678901234'));
   assert.ok(json.includes('[redacted]'));
   assert.ok(built.bundle.exclusions.some((entry) => entry.kind === 'secret_redaction'));
+});
+
+test('secret snapshot redaction recognizes provider env keys, headers, cookies, and structured secret fields', () => {
+  const raw = [
+    'AWS_SECRET_ACCESS_KEY=synthetic-aws-value-93841',
+    'Authorization: Bearer synthetic-bearer-value-93841',
+    'Cookie: session=synthetic-cookie-value-93841',
+    'https://user:synthetic-url-password-93841@example.test/path',
+  ].join('\n');
+  const snapshot = safeSnapshot(raw);
+  assert.strictEqual(snapshot.redacted, true);
+  assert.ok(!snapshot.safe.includes('synthetic-aws-value-93841'));
+  assert.ok(!snapshot.safe.includes('synthetic-bearer-value-93841'));
+  assert.ok(!snapshot.safe.includes('synthetic-cookie-value-93841'));
+  assert.ok(!snapshot.safe.includes('synthetic-url-password-93841'));
+  const structured = safeStructuredSnapshot({
+    Authorization: 'synthetic-auth-value-93841',
+    Cookie: 'synthetic-cookie-value-93841',
+    AWS_SECRET_ACCESS_KEY: 'synthetic-aws-value-93841',
+    ordinary: 'public text',
+  });
+  assert.strictEqual(structured.Authorization, '[redacted]');
+  assert.strictEqual(structured.Cookie, '[redacted]');
+  assert.strictEqual(structured.AWS_SECRET_ACCESS_KEY, '[redacted]');
+  assert.strictEqual(structured.ordinary, 'public text');
+});
+
+test('provider tokens used as structured object keys are redacted without leaking through metadata paths', () => {
+  const tokenKey = 'ghp_syntheticFixtureTokenValue93841021';
+  const input = { [tokenKey]: 'present', ordinary: 'safe' };
+  const safe = safeStructuredSnapshot(input);
+  const safeJson = JSON.stringify(safe);
+  const locations = redactionLocations(input);
+  assert.ok(!safeJson.includes(tokenKey));
+  assert.ok(!JSON.stringify(locations).includes(tokenKey), 'redaction paths must use sanitized keys');
+  assert.ok(redactionRules(input).includes('object_key_provider_token'));
+  assert.ok(locations.some((entry) => entry.rules.includes('object_key_provider_token')));
+  assert.strictEqual(safe.ordinary, 'safe');
 });
 
 test('Run ContextBundle is durable, linked once, and immutable in SQLite', () => {

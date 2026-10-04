@@ -134,6 +134,32 @@ function readPrompt() {
 let ask = '';
 try { ask = readPrompt(); } catch { /* no stdin: not a pass */ }
 
+/* DG-11 visual fixture: one Task-linked Claude process emits a test result, reports a
+ * synthetic credential in its stream, and edits one disposable source file. This exercises the
+ * real Electron/IPC/supervisor/UI path while checking that the persisted Run shows only
+ * redacted evidence. The marker is created by visual.mjs and removed before other Work cases. */
+if (fs.existsSync(${JSON.stringify(path.join(DB_DIR, 'task-run'))})) {
+  const token = ['SYNTHETIC', 'VISUAL', 'VALUE', '93841'].join('_');
+  const attemptFile = ${JSON.stringify(path.join(DB_DIR, 'task-run-attempt'))};
+  const attempt = (fs.existsSync(attemptFile) ? Number(fs.readFileSync(attemptFile, 'utf8')) : 0) + 1;
+  fs.writeFileSync(attemptFile, String(attempt));
+  fs.writeFileSync(attempt === 1 ? 'src/task-run.js' : 'src/retry-task-run.js', 'export const dogfoodFixture = true;\\n');
+  const taskRunEvents = [
+    { type: 'system', subtype: 'init', session_id: 'task-run-session-' + attempt, cwd: process.cwd(), claude_code_version: '9.9.9' },
+    { type: 'assistant', message: { content: [
+      { type: 'tool_use', id: 'task-test-' + attempt, name: 'Bash', input: { command: 'npm run test:e2e -- --api-key=' + token } },
+    ] } },
+    { type: 'user', message: { content: [
+      { type: 'tool_result', tool_use_id: 'task-test-' + attempt, content: attempt + ' tests passed; API_KEY=' + token, is_error: false },
+    ] }, tool_use_result: { stdout: attempt + ' tests passed; API_KEY=' + token, stderr: '',
+      ...(attempt === 1 ? { exitCode: 0 } : {}) } },
+    { type: 'result', subtype: 'success', is_error: false, permission_denials: [],
+      result: 'completed successfully on attempt ' + attempt + '; client_secret=' + token },
+  ];
+  for (const event of taskRunEvents) process.stdout.write(JSON.stringify(event) + '\\n');
+  process.exit(0);
+}
+
 if (restricted && ask.includes('q=1')) {
   /* The narrative pass (WBS-04). Canon 19 C1: it may cite only files the scan actually read, so
    * the fixture cites the README — which the scan does read — and one path nobody read. The

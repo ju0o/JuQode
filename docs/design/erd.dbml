@@ -287,12 +287,13 @@ Table evidence_basis {
   ref text [not null]
   excluded text
   created_at timestamptz [not null]
+  manifest_json text
 
   indexes {
     (work_id, phase) [unique]
   }
 
-  Note: 'CHECK: phase in (「before」,「after」). ref 는 kind 에 따라 다르다 — git_tree 면 Git 트리 오브젝트 ID(내용이 곧 해시라 Git 이 무결성을 스스로 관리한다), hash_manifest 면 매니페스트 해시다. 후자는 그 보장이 없다.'
+  Note: 'CHECK: phase in (「before」,「after」). ref 는 kind 에 따라 다르다 — git_tree 면 Git 트리 오브젝트 ID(내용이 곧 해시라 Git 이 무결성을 스스로 관리한다), hash_manifest 면 매니페스트 해시다. migration 14 의 manifest_json 은 Task Run 의 경로·크기·SHA-256 만 재시작 후에도 비교하도록 저장하며 소스 본문은 담지 않는다.'
 }
 
 // ============================================================

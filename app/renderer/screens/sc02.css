@@ -122,6 +122,10 @@
 /* DG-11 · Project → Task → Run. The task list stays a compact single column; history and
    context are disclosures inside the selected Task rather than another card stack. */
 .sc02 .task-rows { display: flex; flex-direction: column; gap: 4px; }
+.sc02 .task-legacy-unknown:not(:empty) { margin-top: 8px; }
+.sc02 .task-legacy-unknown .panel { padding: 10px 12px; }
+.sc02 .task-legacy-confirm { display: flex; align-items: flex-start; gap: 7px; overflow-wrap: anywhere; }
+.sc02 .task-legacy-confirm input { flex: 0 0 auto; margin-top: 2px; }
 .sc02 .task-pick {
   display: flex; width: 100%; justify-content: flex-start; text-align: left;
   padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-inner);
@@ -147,6 +151,7 @@
 .sc02 .task-dep-line { overflow-wrap: anywhere; }
 .sc02 .task-run-review, .sc02 .task-review-criteria { display: flex; flex-direction: column; gap: 8px; }
 .sc02 .task-review-criterion { border-top: 1px solid var(--line); padding-top: 7px; display: flex; flex-direction: column; gap: 6px; }
+.sc02 .task-review-evidence { display: flex; flex-wrap: wrap; gap: 4px 9px; overflow-wrap: anywhere; }
 .sc02 .task-review { padding-left: 3px; }
 .sc02 .task-review[open] { display: flex; flex-direction: column; gap: 7px; }
 .sc02 .task-retry { border-top: 1px solid var(--line); padding-top: 7px; }

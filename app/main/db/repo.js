@@ -4,6 +4,8 @@
 const { randomUUID, createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { safeSnapshot } = require('../work/context');
+const { testCommandMatchesScope, testScopesForCriterion } = require('../work/run-evidence');
 
 const now = () => new Date().toISOString();
 
@@ -49,7 +51,7 @@ function normalizeCriteria(criteria) {
       throw new TypeError('acceptance criterion ids must be non-empty and unique');
     }
     ids.add(id);
-    return { id, text: object.text.trim() };
+    return { id, text: safeSnapshot(object.text.trim()).safe };
   });
 }
 
@@ -85,7 +87,7 @@ const taskStatus = (value) => {
   return value;
 };
 
-function taskRunRefusal(db, projectId, taskId) {
+function taskRunRefusal(db, projectId, taskId, { retryOfWorkId = null } = {}) {
   if (taskId == null) return null;
   if (typeof taskId !== 'string' || !taskId.trim()) return 'bad-task-id';
   const task = db.prepare('select project_id, status, verdict, dependencies from task where id = ?').get(taskId);
@@ -98,6 +100,13 @@ function taskRunRefusal(db, projectId, taskId) {
     if (!dependency || dependency.status !== 'complete' || dependency.verdict !== 'pass') {
       return 'task-dependencies-open';
     }
+  }
+  const latest = db.prepare(`select id, status from work where task_id = ?
+    order by started_at desc, rowid desc limit 1`).get(taskId);
+  if (latest?.status === 'ended') {
+    if (retryOfWorkId !== latest.id) return retryOfWorkId ? 'retry-source-not-latest' : 'task-run-retry-required';
+  } else if (retryOfWorkId) {
+    return 'retry-run-not-ended';
   }
   return null;
 }
@@ -113,7 +122,7 @@ function createTask(db, projectId, { goal, dependencies = [], acceptanceCriteria
     db.prepare(`insert into task
       (id, project_id, goal, dependencies, acceptance_criteria, status, verdict, created_at, updated_at)
       values (?, ?, ?, ?, ?, 'open', 'unverified', ?, ?)`)
-      .run(id, projectId, goal.trim(), JSON.stringify(deps), JSON.stringify(criteria), at, at);
+      .run(id, projectId, safeSnapshot(goal.trim()).safe, JSON.stringify(deps), JSON.stringify(criteria), at, at);
     db.exec('commit');
   } catch (e) {
     try { db.exec('rollback'); } catch { /* already rolled back */ }
@@ -143,7 +152,7 @@ function updateTask(db, id, patch) {
     const fields = [], values = [];
     if (Object.hasOwn(patch, 'goal')) {
       if (typeof patch.goal !== 'string' || !patch.goal.trim()) throw new TypeError('Task goal must not be empty');
-      fields.push('goal = ?'); values.push(patch.goal.trim());
+      fields.push('goal = ?'); values.push(safeSnapshot(patch.goal.trim()).safe);
     }
     if (Object.hasOwn(patch, 'dependencies')) {
       const deps = normalizeDependencies(db, current.project_id, id, patch.dependencies);
@@ -287,8 +296,35 @@ function reviewTaskCriterion(db, taskId, workId, criterionId, verdict, evidenceI
     throw new TypeError('Run Context does not contain this current acceptance criterion');
   }
   const evidence = runEvidenceFor(db, workId);
-  if (evidenceIds.some((id) => !evidence.some((item) => item.id === id))) {
+  const selectedEvidence = evidence.filter((item) => evidenceIds.includes(item.id));
+  if (selectedEvidence.length !== evidenceIds.length) {
     throw new TypeError('criterion review evidence must belong to the selected Run');
+  }
+  if (verdict === 'pass' && selectedEvidence.some((item) => item.kind === 'test_command' &&
+      (item.details.result_state !== 'returned' || item.details.exit_code !== 0 ||
+       !Number.isInteger(item.details.tests_passed_count) || item.details.tests_passed_count < 1))) {
+    throw new TypeError('test evidence for PASS must show a returned command with exit code 0 and at least one passing test');
+  }
+  if (verdict === 'pass' && selectedEvidence.some((item) => item.kind === 'changed_files' &&
+      item.details.known !== true)) {
+    throw new TypeError('changed-file evidence for PASS must be measured');
+  }
+  if (verdict === 'pass') {
+    const requiredScopes = testScopesForCriterion(criterion.text);
+    if (requiredScopes.includes('unsupported-check')) {
+      const error = new TypeError('This acceptance criterion requires a static-check evidence source that JuQode does not capture yet.');
+      error.code = 'unsupported-verification';
+      throw error;
+    }
+    for (const scope of requiredScopes) {
+      const scoped = evidence.filter((item) => item.kind === 'test_command' && testCommandMatchesScope(scope, item));
+      const latestTest = scoped.at(-1);
+      if (!latestTest || !evidenceIds.includes(latestTest.id) ||
+          latestTest.details.result_state !== 'returned' || latestTest.details.exit_code !== 0 ||
+          !Number.isInteger(latestTest.details.tests_passed_count) || latestTest.details.tests_passed_count < 1) {
+        throw new TypeError('this criterion requires its latest scoped test command(s) to return with exit code 0');
+      }
+    }
   }
   const at = now();
   db.exec('begin');
@@ -437,20 +473,30 @@ function beginWork(db, projectId, intent, {
   }
   if (idempotencyKey) {
     const existing = workForIdempotency(db, projectId, idempotencyKey);
-    if (existing) return { ok: true, existing: true, work: existing };
+    if (existing) return existing.task_id === taskId
+      ? { ok: true, existing: true, work: existing }
+      : { ok: false, reason: 'idempotency-key-conflict' };
   }
-  const taskRefusal = taskRunRefusal(db, projectId, taskId);
+  const persistedIdempotencyKey = taskId && idempotencyKey
+    ? `sha256:${createHash('sha256').update(idempotencyKey, 'utf8').digest('hex')}`
+    : idempotencyKey;
+  const taskRefusal = taskRunRefusal(db, projectId, taskId, { retryOfWorkId });
   if (taskRefusal) return { ok: false, reason: taskRefusal };
   const at = now();
   const id = randomUUID();
   try {
+    db.exec('begin');
     db.prepare(`insert into work
       (id, project_id, task_id, intent, status, requested_at, started_at,
        idempotency_key, attempt, retry_of_work_id, retry_reason, agent_code, app_session_id)
       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, projectId, taskId, intent, status, at, at, idempotencyKey, attempt, retryOfWorkId,
+      .run(id, projectId, taskId, intent, status, at, at, persistedIdempotencyKey, attempt, retryOfWorkId,
         retryReason, taskId ? 'claude_code' : null, appSessionId);
+    if (taskId) db.prepare("update task set status = 'in_progress', verdict = 'unverified', updated_at = ? where id = ?")
+      .run(at, taskId);
+    db.exec('commit');
   } catch (e) {
+    try { db.exec('rollback'); } catch { /* already rolled back */ }
     /* An active Work EXISTING is not evidence that it is what refused this insert — a NOT NULL
      * violation on `intent` would also land here and used to be reported as the D-117 guard.
      * The error has to name the uniqueness the guard index creates, AND the blocking row has
@@ -464,14 +510,14 @@ function beginWork(db, projectId, intent, {
     }
     throw e;                                    // a different constraint — do not dress it up
   }
-  if (taskId) db.prepare("update task set status = 'in_progress', updated_at = ? where id = ?")
-    .run(at, taskId);
   return { ok: true, work: db.prepare('select * from work where id = ?').get(id) };
 }
 
-const workForIdempotency = (db, projectId, key) => db.prepare(
-  'select * from work where project_id = ? and idempotency_key = ?'
-).get(projectId, key) ?? null;
+const workForIdempotency = (db, projectId, key) => {
+  const hashed = `sha256:${createHash('sha256').update(String(key), 'utf8').digest('hex')}`;
+  return db.prepare('select * from work where project_id = ? and idempotency_key in (?, ?) limit 1')
+    .get(projectId, key, hashed) ?? null;
+};
 
 const workForRetrySource = (db, priorWorkId) => db.prepare(
   'select * from work where retry_of_work_id = ?'
@@ -502,6 +548,28 @@ function addSignal(db, workId, { seq, source = 'claude', kind, payload, observed
 
 const signalsFor = (db, workId, limit = 500) =>
   db.prepare('select * from work_signal where work_id = ? order by seq limit ?').all(workId, limit);
+
+function hasStoppedProcessAcknowledgement(db, workId) {
+  const rows = db.prepare(`select payload from work_signal where work_id = ? and source = 'user' and kind = 'raw'`)
+    .all(workId);
+  return rows.some((row) => {
+    try {
+      const process = JSON.parse(row.payload ?? '')?.juqodeProcess;
+      return process?.stoppedConfirmedByUser === true && process?.workId === workId;
+    } catch { return false; }
+  });
+}
+
+function acknowledgeUnknownProcessStopped(db, projectId, workId) {
+  const work = db.prepare(`select id, project_id, task_id, status, outcome from work where id = ?`).get(workId);
+  if (!work || work.project_id !== projectId || work.status !== 'ended' || work.outcome !== 'ended_unknown') {
+    return { ok: false, reason: 'not-unknown-work' };
+  }
+  if (hasStoppedProcessAcknowledgement(db, workId)) return { ok: true, existing: true };
+  addSignal(db, workId, { seq: nextSeq(db, workId), source: 'user', kind: 'raw',
+    payload: { juqodeProcess: { workId, stoppedConfirmedByUser: true } } });
+  return { ok: true, existing: false };
+}
 
 /**
  * How many `tool_result` blocks one persisted signal carries.
@@ -577,26 +645,31 @@ const worksForTask = (db, taskId, limit = 50) =>
 
 /* ── WBS-08 · the basis a Work's diffs are computed against (D-121) ── */
 function saveBasis(db, workId, phase, { kind, ref, excluded, files }) {
-  db.prepare(`insert into evidence_basis (id, work_id, phase, kind, ref, excluded, created_at)
-              values (?, ?, ?, ?, ?, ?, ?)`)
+  const manifestJson = kind === 'hash_manifest' && Array.isArray(files) ? JSON.stringify(files) : null;
+  if (manifestJson && Buffer.byteLength(manifestJson, 'utf8') > 16 * 1024 * 1024) {
+    throw Object.assign(new Error('manifest snapshot is too large to persist'), { code: 'manifest-too-large' });
+  }
+  db.prepare(`insert into evidence_basis (id, work_id, phase, kind, ref, excluded, created_at, manifest_json)
+              values (?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(randomUUID(), workId, phase, kind, ref,
-         excluded && excluded.length ? JSON.stringify(excluded) : null, now());
+         excluded && excluded.length ? JSON.stringify(excluded) : null, now(), manifestJson);
   /* A git basis IS its tree object, so the ref alone is enough to compare it later. A manifest
-   * basis is only comparable against the list it was made from, and `20` has no column for
-   * that list — so it lives in the in-process map below and **does not survive a restart**.
-   * A non-Git Work that outlives the app therefore cannot report its change count. Filed as
-   * CANON_FINDINGS CF-9; the fix is a column, not more memory. */
+   * stores only paths, sizes, and hashes in migration 14's `manifest_json`; source contents are
+   * never copied here. The in-process map remains a compatibility fallback for old rows that
+   * predate the durable column. */
   if (kind === 'hash_manifest' && files) manifests.set(`${workId}:${phase}`, files);
 }
 
-/* ponytail: in-process only — see the note above. `20` needs a column (CF-9) to fix it. */
+/* Compatibility cache for old manifest bases that have no `manifest_json` snapshot. */
 const manifests = new Map();
 
 const basisFor = (db, workId, phase) => {
   const row = db.prepare('select * from evidence_basis where work_id = ? and phase = ?').get(workId, phase);
   if (!row) return null;
   const files = manifests.get(`${workId}:${phase}`);
-  return files ? { ...row, files: JSON.stringify(files) } : row;
+  if (files) return { ...row, files: JSON.stringify(files) };
+  if (typeof row.manifest_json === 'string') return { ...row, files: row.manifest_json };
+  return row;
 };
 
 /* ── WBS-27 · the diff, and the units it was split into ────────────────────────────
@@ -945,7 +1018,8 @@ module.exports = {
   saveInterpretation, currentInterpretation,
   activeWork, beginWork, getWork, worksFor, worksForTask, workForIdempotency, workForRetrySource,
   setRunnerIdentity, setRunFailureReason, setWorkState,
-  addSignal, signalsFor, countToolResults, nextSeq,
+  addSignal, signalsFor, countToolResults, nextSeq, hasStoppedProcessAcknowledgement,
+  acknowledgeUnknownProcessStopped,
   saveBasis, basisFor,
   upsertStep, stepsFor,
   saveResult, resultFor,

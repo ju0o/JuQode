@@ -147,10 +147,111 @@ test('a Task Run stores a completed test-like command separately from the Agent 
   assert.strictEqual(tests[0].details.command, 'npm run test:unit');
   assert.strictEqual(tests[0].details.result_state, 'returned');
   assert.strictEqual(tests[0].details.exit_code, null);
+  assert.strictEqual(tests[0].details.tests_passed_count, null,
+    'an arbitrary output string was treated as structured passing-test evidence');
   assert.strictEqual(tests[0].details.test_pass_claimed, false);
   assert.strictEqual(snap.result.claims.find((claim) => claim.kind === 'agent-report').data.text,
     'completed successfully');
   assert.notStrictEqual(tests[0].id, snap.result.claims.find((claim) => claim.kind === 'agent-report').sourceRef);
+});
+
+test('Task Run persistence redacts secret-like Task, prompt, stream, evidence, and report text', async () => {
+  const { dir, db, project, store } = bench({ git: false });
+  const secret = 'SYNTHETIC_SECRET_VALUE_93841';
+  const opaqueStructuredSecret = 'opaque-value-without-a-recognizable-prefix';
+  const tokenObjectKey = 'ghp_syntheticFixtureTokenValue93841021';
+  const task = repo.createTask(db, project.id, {
+    goal: `Store safely API_KEY=${secret}`,
+    acceptanceCriteria: [`The result hides password=${secret}`],
+  });
+  const events = [
+    INIT,
+    { type: 'assistant', message: { content: [
+      { type: 'tool_use', id: 'secret-test', name: 'Bash', input: { command: `npm run test:unit -- --api-key=${secret}` } },
+    ] } },
+    { type: 'user', message: { content: [
+      { type: 'tool_result', tool_use_id: 'secret-test', content: `test output api_key=${secret}`, is_error: false },
+    ] }, tool_use_result: { stdout: `test output api_key=${secret}`, stderr: '', exitCode: 0 } },
+    { ...OK, result: `completed successfully; client_secret=${secret}`,
+      metadata: { api_key: opaqueStructuredSecret, [tokenObjectKey]: 'synthetic marker' } },
+  ];
+  const bin = cli(dir, events);
+  const idempotencyKey = `API_KEY=${secret}`;
+  const run = await supervisor.start(db, project, `Run once API_KEY=${secret}`, {
+    evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey,
+  });
+  assert.strictEqual(run.ok, true);
+  await run.done;
+
+  const persisted = [
+    JSON.stringify(repo.getTask(db, task.id)),
+    JSON.stringify(repo.getWork(db, run.workId)),
+    JSON.stringify(repo.signalsFor(db, run.workId)),
+    JSON.stringify(repo.resultFor(db, run.workId)),
+    JSON.stringify(repo.runEvidenceFor(db, run.workId)),
+    JSON.stringify(repo.contextBundleFor(db, run.workId)),
+  ].join('\n');
+  assert.ok(!persisted.includes(secret), 'a synthetic secret value crossed into durable Task Run records');
+  assert.ok(!persisted.includes(opaqueStructuredSecret), 'a secret value escaped because its structured field name was not inspected');
+  assert.ok(!persisted.includes(tokenObjectKey), 'a token-shaped structured key crossed into durable signal metadata');
+  assert.match(persisted, /juqodeRedaction/, 'persisted signal omitted redaction metadata');
+  assert.ok(!repo.getWork(db, run.workId).idempotency_key.includes(secret), 'idempotency key was stored in plaintext');
+  assert.strictEqual(repo.workForIdempotency(db, project.id, idempotencyKey).id, run.workId);
+  assert.match(persisted, /\[redacted\]/, 'redaction left no visible indication in persisted snapshots');
+  assert.strictEqual(repo.getWork(db, run.workId).intent, `Run once [redacted]`);
+  const result = repo.resultFor(db, run.workId);
+  assert.strictEqual(result.summary, `completed successfully; [redacted]`);
+  assert.strictEqual(result.claims.find((claim) => claim.kind === 'agent-report').data.redacted, true);
+  assert.strictEqual(repo.contextBundleFor(db, run.workId).bundle.prompt_snapshot_redacted, true);
+});
+
+test('Task Run records changed paths without persisting source text, and manifest evidence survives restart', async () => {
+  const dir = tempDir('juqode-task-manifest-');
+  const source = path.join(dir, 'src', 'app.js');
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  fs.writeFileSync(source, 'export const value = 1;\n');
+  const database = path.join(tempDir('juqode-task-manifest-db-'), 'juqode.db');
+  const store = tempDir('juqode-task-manifest-store-');
+  let db = openDb(database);
+  const project = repo.openProject(db, dir, 'Manifest-backed Task Run');
+  const task = repo.createTask(db, project.id, { goal: 'Change a file without storing its contents' });
+  const secret = 'SYNTHETIC_SOURCE_SECRET_91827';
+  const bin = cli(dir, [INIT, OK], { edits: [{ path: source, body: `export const value = '${secret}';\n` }] });
+  const run = await supervisor.start(db, project, 'Change the measured source file', {
+    evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey: 'manifest-source-test',
+  });
+  assert.strictEqual(run.ok, true);
+  await run.done;
+  const changed = supervisor.snapshot(db, run.workId).runEvidence.find((item) => item.kind === 'changed_files');
+  assert.deepStrictEqual(changed.details.files, ['src/app.js']);
+  assert.strictEqual(db.prepare('select count(*) n from raw_diff where work_id = ?').get(run.workId).n, 0,
+    'Task Run source diff content was persisted');
+  const manifests = db.prepare('select manifest_json from evidence_basis where work_id = ?').all(run.workId);
+  assert.strictEqual(manifests.length, 2);
+  assert.ok(manifests.every((row) => typeof row.manifest_json === 'string'));
+  assert.ok(!manifests.some((row) => row.manifest_json.includes(secret)));
+  db.close();
+
+  db = openDb(database);
+  try {
+    const reopenedProject = db.prepare('select * from project where id = ?').get(project.id);
+    assert.deepStrictEqual(supervisor.changes(db, run.workId, reopenedProject, store), {
+      known: true, files: ['src/app.js'],
+    }, 'changed-file evidence became unknown after reopening the database');
+    assert.ok(!JSON.stringify(repo.contextBundleFor(db, run.workId)).includes(secret));
+    assert.ok(!JSON.stringify(repo.signalsFor(db, run.workId)).includes(secret));
+    assert.ok(!JSON.stringify(repo.resultFor(db, run.workId)).includes(secret));
+    const files = [];
+    const walk = (root) => {
+      if (!fs.existsSync(root)) return;
+      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+        const target = path.join(root, entry.name);
+        if (entry.isDirectory()) walk(target); else files.push(fs.readFileSync(target, 'utf8'));
+      }
+    };
+    walk(store);
+    assert.ok(!files.join('\n').includes(secret), 'the Task Run wrote source contents into its evidence store');
+  } finally { db.close(); }
 });
 
 test('the existing Claude Work path carries the selected Task and frozen Context into the attempt', async () => {
@@ -190,7 +291,7 @@ test('a Task Run and its Context exist before the Claude session can spawn', asy
     observedBeforeSpawn = repo.activeWork(db, project.id);
     assert.strictEqual(observedBeforeSpawn.status, 'starting');
     assert.strictEqual(observedBeforeSpawn.task_id, task.id);
-    assert.strictEqual(observedBeforeSpawn.idempotency_key, requestKey);
+    assert.match(observedBeforeSpawn.idempotency_key, /^sha256:[a-f0-9]{64}$/);
     assert.ok(repo.contextBundleFor(db, observedBeforeSpawn.id), 'ContextBundle must be frozen before spawn');
     options.onChild({ pid: process.pid, exitCode: null, signalCode: null });
     options.onSignal({ kind: KIND.FINISH, payload: {
@@ -253,6 +354,9 @@ test('failed Task Run retries as a new Claude session and never rewrites Run #1'
     context: JSON.stringify(repo.contextBundleFor(db, first.workId)),
     result: JSON.stringify(repo.resultFor(db, first.workId)),
     evidence: JSON.stringify(repo.runEvidenceFor(db, first.workId)),
+    signals: JSON.stringify(repo.signalsFor(db, first.workId)),
+    basis: JSON.stringify({ before: repo.basisFor(db, first.workId, 'before'), after: repo.basisFor(db, first.workId, 'after') }),
+    steps: JSON.stringify(repo.stepsFor(db, first.workId)),
   };
   assert.strictEqual(firstBefore.work.outcome, 'failed');
 
@@ -274,6 +378,9 @@ test('failed Task Run retries as a new Claude session and never rewrites Run #1'
     context: JSON.stringify(repo.contextBundleFor(db, first.workId)),
     result: JSON.stringify(repo.resultFor(db, first.workId)),
     evidence: JSON.stringify(repo.runEvidenceFor(db, first.workId)),
+    signals: JSON.stringify(repo.signalsFor(db, first.workId)),
+    basis: JSON.stringify({ before: repo.basisFor(db, first.workId, 'before'), after: repo.basisFor(db, first.workId, 'after') }),
+    steps: JSON.stringify(repo.stepsFor(db, first.workId)),
   };
   assert.deepStrictEqual(firstAfter, firstBefore, 'Run #2 rewrote Run #1 history');
   const secondSnap = supervisor.snapshot(db, second.workId);
@@ -514,7 +621,7 @@ test('an action that cannot be scoped narrowly gets no grant at all', async () =
 
 /* ───────────────────────── WBS-16 · cancel ───────────────────────── */
 
-test('cancelling a Work whose process is already gone closes it, and frees the slot', async () => {
+test('cancelling an unresolved Work with no live root remains unknown until acknowledged', async () => {
   const { dir, db, project, store } = bench();
   const bin = cli(dir, [INIT, DENIED, RESULT_DENIED]);
   const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
@@ -522,14 +629,17 @@ test('cancelling a Work whose process is already gone closes it, and frees the s
 
   supervisor.cancel(db, r.workId);
   const snap = supervisor.snapshot(db, r.workId);
-  /* Nothing is left to stop, so the stop IS observed. Without this the Work sat in 취소 요청됨
-   * forever and D-117's single slot stayed held until the app restarted. */
+  /* The original root has exited. That does not prove detached descendants are gone, and the
+   * incomplete Work has no observed Agent completion to preserve. */
   assert.strictEqual(snap.status, 'ended');
-  assert.strictEqual(snap.outcome, 'cancelled_nochange', 'no tool ran, so nothing was changed');
+  assert.strictEqual(snap.outcome, 'ended_unknown');
 
   const kinds = repo.signalsFor(db, r.workId).map((s) => `${s.source}/${s.kind}`);
   assert.ok(kinds.includes('user/cancel_request'), 'the record must say the PERSON asked');
-  assert.ok(kinds.includes('juqode/cancel_confirmed'), 'the observed stop is not on the record');
+  assert.ok(!kinds.includes('juqode/cancel_confirmed'), 'root exit alone cannot confirm the full process tree stopped');
+  const { unresolvedLegacyUnknownWorks } = require(path.join(R, 'app/main/work/runner-liveness.js'));
+  assert.ok(unresolvedLegacyUnknownWorks(db, project.id).some((item) => item.id === r.workId),
+    'an absent original PID bypassed the explicit unknown-process gate');
 
   assert.strictEqual(repo.activeWork(db, project.id), null, 'the D-117 slot is still held');
 });
@@ -538,7 +648,7 @@ test('cancelling a Task Run records a cancelled outcome and leaves its verdict u
   const { dir, db, project, store } = bench({ git: false });
   const task = repo.createTask(db, project.id, { goal: 'Cancel without inventing rollback' });
   const bin = path.join(dir, 'slow-task-claude');
-  fs.writeFileSync(bin, '#!/bin/sh\necho \'{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}\'\nsleep 20\n', { mode: 0o755 });
+  fs.writeFileSync(bin, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(`${JSON.stringify(INIT)}\\n`)});\nsetInterval(() => {}, 1000);\n`, { mode: 0o755 });
   const run = await supervisor.start(db, project, 'Cancel this attempt', {
     evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey: 'cancel-task-run-1',
   });
@@ -549,19 +659,51 @@ test('cancelling a Task Run records a cancelled outcome and leaves its verdict u
   const after = repo.getWork(db, run.workId);
   assert.strictEqual(after.id, before.id);
   assert.strictEqual(after.status, 'ended');
-  assert.ok(['cancelled_nochange', 'cancelled_partial'].includes(after.outcome));
+  assert.strictEqual(after.outcome, 'ended_unknown', 'an exited root cannot prove detached descendants stopped');
+  assert.strictEqual(after.failure_reason, 'cancel-process-tree-not-confirmed-stopped');
   assert.strictEqual(repo.getTask(db, task.id).verdict, 'unverified');
   assert.strictEqual(repo.activeWork(db, project.id), null);
   assert.ok(repo.resultFor(db, run.workId), 'cancelled attempt should remain inspectable');
+  assert.ok(!repo.signalsFor(db, run.workId).some((item) => item.kind === 'cancel_confirmed'));
 });
 
-test('a cancel whose stop is NOT observed leaves the Work open and says so', async () => {
+test('a success signal racing after cancel cannot turn the Run into success', async () => {
+  const { dir, db, project, store } = bench({ git: false });
+  const task = repo.createTask(db, project.id, { goal: 'Cancel wins over a later Agent success report' });
+  const bin = path.join(dir, 'late-success-claude');
+  const success = JSON.stringify({ type: 'result', subtype: 'success', is_error: false,
+    permission_denials: [], result: 'completed successfully' });
+  fs.writeFileSync(bin, `#!${process.execPath}
+process.stdout.write(${JSON.stringify(`${JSON.stringify(INIT)}\n`)});
+process.on('SIGTERM', () => {
+  process.stdout.write(${JSON.stringify(`${success}\n`)});
+  setTimeout(() => process.exit(0), 100);
+});
+setInterval(() => {}, 1000);
+`, { mode: 0o755 });
+  const run = await supervisor.start(db, project, 'Cancel before its late success signal', {
+    evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey: 'cancel-race-run',
+  });
+  assert.strictEqual(run.ok, true);
+  supervisor.cancel(db, run.workId);
+  await run.done;
+  const work = repo.getWork(db, run.workId);
+  assert.strictEqual(work.status, 'ended');
+  assert.strictEqual(work.outcome, 'ended_unknown');
+  assert.strictEqual(repo.getTask(db, task.id).verdict, 'unverified');
+  assert.ok(repo.signalsFor(db, run.workId).some((item) => item.kind === 'cancel_request'));
+  assert.ok(!repo.signalsFor(db, run.workId).some((item) => item.kind === 'cancel_confirmed'));
+  assert.ok(repo.resultFor(db, run.workId));
+});
+
+test('a stopped root remains unknown without process-tree proof', async () => {
   const { dir, db, project, store } = bench();
-  /* A CLI that keeps running: the request is sent, and nothing has been seen to stop. */
+  /* This fixture has no descendants, but the portable adapter cannot prove that fact after
+   * root exit, so it must retain the unknown outcome. */
   const bin = path.join(dir, 'slow-claude');
-  fs.writeFileSync(bin, `#!/bin/sh
-echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
-sleep 20
+  fs.writeFileSync(bin, `#!${process.execPath}
+process.stdout.write(${JSON.stringify(`${JSON.stringify(INIT)}\n`)});
+setInterval(() => {}, 1000);
 `, { mode: 0o755 });
   const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
   assert.strictEqual(r.ok, true);
@@ -569,22 +711,49 @@ sleep 20
   const child = supervisor.live.get(r.workId).child;
   supervisor.cancel(db, r.workId);
   const snap = supervisor.snapshot(db, r.workId);
-  assert.strictEqual(snap.status, 'cancel_requested',
-    'a cancel REQUEST is not a cancellation — `15` keeps them separate states');
-  assert.strictEqual(snap.outcome, null, '`07` §8.1: a cancelled child exits 0, so a stop is only what was SEEN');
-
-  /* …and the child must actually be stopped. Recording the request while the process runs on
-   * is the shape `07` §8.2's group rule exists to make impossible. */
-  await new Promise((res) => { child.once('exit', res); setTimeout(res, 8000); });
-  assert.notStrictEqual(child.exitCode === null && child.signalCode === null, true,
-    'the cancel was recorded but nothing stopped the process');
-
-  /* …and it closes once the child is actually observed to exit. */
+  assert.ok(['cancel_requested', 'ended'].includes(snap.status));
   await r.done;
-  await new Promise((res) => setTimeout(res, 250));
   const after = supervisor.snapshot(db, r.workId);
-  assert.strictEqual(after.status, 'ended', 'the observed exit did not close the cancelled Work');
-  assert.ok(after.outcome.startsWith('cancelled'), `outcome ${after.outcome}`);
+  assert.strictEqual(after.status, 'ended');
+  assert.strictEqual(after.outcome, 'ended_unknown');
+  assert.notStrictEqual(child.exitCode === null && child.signalCode === null, true, 'the root process was not stopped');
+  assert.ok(!repo.signalsFor(db, r.workId).some((item) => item.kind === 'cancel_confirmed'));
+});
+
+test('a legacy Work without a live process handle becomes unknown, never cancelled', async () => {
+  const { db, project, store } = bench();
+  const work = repo.beginWork(db, project.id, 'legacy Work recovered without a ChildProcess handle').work;
+  repo.setRunnerIdentity(db, work.id, 'old-session', process.pid, new Date().toISOString());
+  const result = supervisor.cancel(db, work.id);
+  assert.strictEqual(result.ok, true);
+  const current = repo.getWork(db, work.id);
+  assert.strictEqual(current.status, 'ended');
+  assert.strictEqual(current.outcome, 'ended_unknown');
+  assert.strictEqual(current.failure_reason, 'cancel-requested-without-process-handle');
+  assert.ok(!repo.signalsFor(db, work.id).some((item) => item.kind === 'cancel_confirmed'));
+  const { unresolvedLegacyUnknownWorks } = require(path.join(R, 'app/main/work/runner-liveness.js'));
+  assert.deepStrictEqual(unresolvedLegacyUnknownWorks(db, project.id).map((item) => item.id), [work.id]);
+  const task = repo.createTask(db, project.id, { goal: 'Do not overlap an unknown legacy process' });
+  const preflight = await supervisor.preflight(db, project, {
+    evidenceStore: store, detect: AVAILABLE, taskId: task.id,
+  });
+  assert.strictEqual(preflight.reason, 'prior-process-may-still-live');
+});
+
+test('a recovered Work with a dead recorded PID stays unknown when cancelled', () => {
+  const { db, project } = bench();
+  const work = repo.beginWork(db, project.id, 'Recovered work with no outcome observer').work;
+  repo.setRunnerIdentity(db, work.id, 'old-session', 2_000_000_000, new Date().toISOString());
+  const result = supervisor.cancel(db, work.id);
+  assert.strictEqual(result.ok, true);
+  const current = repo.getWork(db, work.id);
+  assert.strictEqual(current.status, 'ended');
+  assert.strictEqual(current.outcome, 'ended_unknown',
+    'a missing process proves only that it is gone now, not that cancellation ended it');
+  assert.strictEqual(current.failure_reason, 'cancel-requested-without-process-handle');
+  assert.ok(!repo.signalsFor(db, work.id).some((item) => item.kind === 'cancel_confirmed'));
+  assert.strictEqual(repo.activeWork(db, project.id), null);
+  db.close();
 });
 
 test('two submits cannot start two sessions in one project', async () => {
@@ -639,6 +808,7 @@ test('two Task submissions for one Project reserve only one live Run', async () 
   assert.strictEqual([a, b].find((result) => !result.ok).reason, 'active-work');
   assert.strictEqual(db.prepare('select count(*) n from work where task_id = ?').get(task.id).n, 1);
   await started[0].done;
+  assert.strictEqual(argvLog(dir).length, 1, 'the rejected duplicate still spawned a second Claude process');
 });
 
 test('a signal that cannot be written does not take the app down', async () => {
@@ -786,35 +956,102 @@ test('each Work gets its OWN session, so a retry cannot resume another one', asy
   await a.done; await b.done;
 });
 
-test('stopping a Work kills the whole process GROUP, not just the shell', async () => {
-  /* `07` §8.2 is about the group. A CLI that spawns a helper leaves that helper running if the
-   * signal goes to the shell alone — and the helper is what holds the file handles and keeps
-   * editing. Killing only the shell also makes the shell exit, so a test that watches the
-   * shell cannot tell the two apart. */
+test('stopping a Work signals its root but records unknown without full tree proof', async () => {
   const { dir, db, project, store } = bench();
   const home = `${dir}-cli`;
   fs.mkdirSync(home, { recursive: true });
-  const marker = path.join(home, 'HELPER-PID');
   const bin = path.join(home, 'grouped-claude');
   fs.writeFileSync(bin, `#!/bin/sh
-sh -c 'echo $$ > "${marker}"; sleep 20' &
 echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
-sleep 20
+exec sleep 20
 `, { mode: 0o755 });
 
   const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
   assert.strictEqual(r.ok, true);
-  await new Promise((res) => setTimeout(res, 400));
-  const helper = Number(fs.readFileSync(marker, 'utf8').trim());
-  assert.ok(helper > 0, 'the fixture did not record its helper');
+  const runChild = supervisor.live.get(r.workId).child;
+  const originalStop = session.stop;
+  session.stop = (child, options = {}) => originalStop(child,
+    { ...options, graceMs: 300, confirmMs: 1000, pollMs: 25 });
 
-  supervisor.cancel(db, r.workId);
-  await new Promise((res) => setTimeout(res, 1500));
-  let helperAlive = true;
-  try { process.kill(helper, 0); } catch { helperAlive = false; }
-  assert.strictEqual(helperAlive, false,
-    'the helper survived the cancel — the signal went to the shell, not to the process group');
-  await r.done;
+  try {
+    supervisor.cancel(db, r.workId);
+    await r.done;
+    const ended = repo.getWork(db, r.workId);
+    assert.strictEqual(ended.status, 'ended');
+    assert.strictEqual(ended.outcome, 'ended_unknown');
+    assert.ok(!repo.signalsFor(db, r.workId).some((item) => item.kind === 'cancel_confirmed'));
+  } finally {
+    session.stop = originalStop;
+    if (runChild.exitCode === null && runChild.signalCode === null) runChild.kill('SIGKILL');
+  }
+});
+
+test('cancel becomes unknown when the root exits before its surviving child process', async () => {
+  const { dir, db, project, store } = bench();
+  const task = repo.createTask(db, project.id, { goal: 'Keep cancellation truthful' });
+  const home = `${dir}-cli`;
+  fs.mkdirSync(home, { recursive: true });
+  const marker = path.join(home, 'IGNORE-TERM-PID');
+  const bin = path.join(home, 'root-exits-first');
+  const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', cwd: dir });
+  const source = `#!${process.execPath}
+const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+const helper = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: 'ignore' });
+fs.writeFileSync(${JSON.stringify(marker)}, String(helper.pid));
+process.stdout.write(${JSON.stringify(`${init}\n`)});
+process.on('SIGTERM', () => process.exit(0));
+setInterval(() => {}, 1000);
+`;
+  fs.writeFileSync(bin, source, { mode: 0o755 });
+  const originalStop = session.stop;
+  let helper = null;
+  let child = null;
+  session.stop = (child, options = {}) => originalStop(child, { ...options, graceMs: 700, confirmMs: 150, pollMs: 25 });
+  try {
+    const run = await supervisor.start(db, project, 'Cancel with a child that ignores TERM', {
+      evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey: 'root-exits-first',
+    });
+    assert.strictEqual(run.ok, true);
+    child = supervisor.live.get(run.workId).child;
+    const markerDeadline = Date.now() + 1500;
+    while (!fs.existsSync(marker) && Date.now() < markerDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    helper = Number(fs.readFileSync(marker, 'utf8'));
+    assert.ok(helper > 0);
+    /* The pid file is written just after spawn; give the helper time to install its SIGTERM
+     * ignore handler before the test sends the direct-child signal. */
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    supervisor.cancel(db, run.workId);
+    await new Promise((resolve) => child.once('exit', resolve));
+    await run.done;
+    assert.strictEqual(repo.getWork(db, run.workId).outcome, 'ended_unknown',
+      'the root wrapper exit was mistaken for process-tree exit');
+    assert.strictEqual(repo.activeWork(db, project.id), null,
+      'the ended unknown Run still holds the ordinary active-work slot');
+    let helperAlive = true;
+    try { process.kill(helper, 0); } catch { helperAlive = false; }
+    assert.strictEqual(helperAlive, true, 'the fixture child did not survive the graceful signal');
+
+    const ended = repo.getWork(db, run.workId);
+    assert.strictEqual(ended.status, 'ended');
+    assert.strictEqual(ended.outcome, 'ended_unknown');
+    assert.strictEqual(ended.failure_reason, 'cancel-process-tree-not-confirmed-stopped');
+    assert.ok(!repo.signalsFor(db, run.workId).some((item) => item.kind === 'cancel_confirmed'));
+    assert.strictEqual(repo.getTask(db, task.id).verdict, 'unverified');
+    const preflight = await supervisor.preflight(db, project, { evidenceStore: store, detect: AVAILABLE, taskId: task.id });
+    assert.strictEqual(preflight.reason, 'prior-process-may-still-live',
+      'a surviving child did not block another Task Run');
+    let stillAlive = true;
+    try { process.kill(helper, 0); } catch { stillAlive = false; }
+    assert.strictEqual(stillAlive, true, 'fixture descendant exited before the unknown state was proven');
+    try { process.kill(helper, 'SIGKILL'); } catch { /* already gone */ }
+  } finally {
+    session.stop = originalStop;
+    if (helper) { try { process.kill(helper, 'SIGKILL'); } catch { /* already gone */ } }
+    if (child?.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  }
 });
 
 test('a retry that lands in a SECOND refusal still refreshes the evidence', async () => {

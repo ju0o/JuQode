@@ -171,6 +171,10 @@ const MIGRATIONS = [
    * boundary lets restart reconciliation close stale Task Runs as unknown without re-spawning. */
   { to: 13, sql: `alter table work add column app_session_id uuid references app_session(id) on delete restrict;
   create index work_app_session on work(app_session_id, status);` },
+  /* 14 — keep non-content manifest snapshots durable. Task Runs use these hashes and paths
+   * instead of persisting source diffs, so changed-file evidence can still be rebuilt after an
+   * app restart without retaining source text. Existing Work history remains unchanged. */
+  { to: 14, sql: `alter table evidence_basis add column manifest_json text;` },
 ];
 /* A getter, not a constant: computed at module load it could never see a migration a test
  * pushes, so the whole migrate loop below was unreachable from any test. */

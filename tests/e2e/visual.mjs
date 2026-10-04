@@ -5,6 +5,7 @@
  * 21 WBS-01 QA evidence asks for per-OS screenshots.
  */
 import { spawn, execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -17,6 +18,7 @@ import { launchArgs, killTree, WIN } from './launch.mjs';
 sweepDisplays();
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const require = createRequire(import.meta.url);
 
 /* Starting the app is OS-specific (xvfb-run here, cmd.exe + electron.cmd on Windows) and so is
  * stopping it; both live in launch.mjs. `detached` is a POSIX process group — on Windows the
@@ -164,6 +166,21 @@ async function cdp(sendFn) {
     if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails));
     return r.result?.result?.value;
   };
+  const acknowledgeAllLegacyUnknowns = async () => {
+    let remaining = await evalJs(`(async () => (await window.juqode.taskList(window.__project().id)).legacyUnknownRuns.length)()`);
+    const limit = remaining;
+    for (let i = 0; remaining > 0 && i < limit; i++) {
+      await evalJs(`(() => {
+        const panel = document.querySelector('[data-el="legacy-unknown"]');
+        if (!panel) throw new Error('unresolved legacy Run is missing its confirmation panel');
+        panel.querySelector('input[type="checkbox"]').click();
+        panel.querySelector('button').click();
+      })()`);
+      await sleep(450);
+      remaining = await evalJs(`(async () => (await window.juqode.taskList(window.__project().id)).legacyUnknownRuns.length)()`);
+    }
+    return remaining;
+  };
   /* The renderer is LOADED before anything is asked of it.
    *
    * `pageTarget` waits for the debugger target, which exists as soon as the window does — the
@@ -178,7 +195,7 @@ async function cdp(sendFn) {
     return false; })()`);
   if (!loaded) throw new Error('the renderer never finished loading (window.__screen is missing after 10s)');
 
-  try { return await sendFn({ send, evalJs }); } finally { ws.close(); }
+  try { return await sendFn({ send, evalJs, acknowledgeAllLegacyUnknowns }); } finally { ws.close(); }
 }
 
 /* `detached` puts xvfb-run AND the Electron tree it starts into one process group.
@@ -238,7 +255,7 @@ const PANELS = `(() => {
     liveness: w?.liveness ?? null, input: n('input'), quiet: n('quiet'), unknown: n('unknown') });
 })()`;
 
-const results = await cdp(async ({ send, evalJs }) => {
+const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns }) => {
   step('cdp attached');
   await send('Page.enable');
   const out = {};
@@ -1611,6 +1628,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   await samplePanels('cancel-ended');
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
+  out.cancelUnknownGateAfterAck = await acknowledgeAllLegacyUnknowns();
 
   /* ── `15` SC-03 부분 완료 — 된 것과 안 된 것, 둘 다 ────────────────────────────────────
    * The most complex result state and the one WBS-18's acceptance is written about, and it had
@@ -1639,6 +1657,7 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
+  out.partialUnknownGateAfterAck = await acknowledgeAllLegacyUnknowns();
 
   /* ── `15` SC-03 실패 — the ONLY red on the screen ───────────────────────────────────────
    * `19` §C3-L: the three finish signals are read TOGETHER. This turn exits 0 with
@@ -2072,6 +2091,17 @@ const results = await cdp(async ({ send, evalJs }) => {
   await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
     .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED))}))?.click()`);
   await sleep(900);
+  /* Model a Work from before Task/process identity existed. It remains unattached and must
+   * block execution until the visible user confirmation records that the old process stopped. */
+  {
+    const { openDb } = require(path.join(ROOT, 'app/main/db/db.js'));
+    const repo = require(path.join(ROOT, 'app/main/db/repo.js'));
+    const seedDb = openDb(DB);
+    const project = seedDb.prepare('select * from project where path = ?').get(SEED);
+    const legacy = repo.beginWork(seedDb, project.id, 'Synthetic legacy unknown Work').work;
+    repo.setWorkState(seedDb, legacy.id, { status: 'ended', outcome: 'ended_unknown' });
+    seedDb.close();
+  }
   await evalJs(`document.querySelector('.task-create summary')?.click()`);
   await evalJs(`(() => {
     const fields = [...document.querySelectorAll('.task-create textarea')];
@@ -2082,6 +2112,37 @@ const results = await cdp(async ({ send, evalJs }) => {
   await sleep(700);
   out.taskScreen = await evalJs('window.__screen()');
   out.taskList = await evalJs(`(async () => JSON.stringify(await window.juqode.taskList(window.__project().id)))()`);
+  out.legacyUnknownBeforeAck = await evalJs(`(() => ({
+    text: document.querySelector('[data-el="legacy-unknown"]')?.innerText ?? null,
+    checkbox: Boolean(document.querySelector('[data-el="legacy-unknown"] input[type="checkbox"]')),
+    disabledBefore: document.querySelector('[data-el="legacy-unknown"] button')?.disabled ?? null,
+  }))()`);
+  if (!out.legacyUnknownBeforeAck.checkbox || !out.legacyUnknownBeforeAck.disabledBefore) {
+    throw new Error(`Legacy process confirmation did not require an explicit checkbox: ${JSON.stringify(out.legacyUnknownBeforeAck)}`);
+  }
+  if (JSON.parse(out.taskList).legacyUnknownRuns.length < 1) {
+    throw new Error(`The Project did not disclose its unattached unknown Work: ${out.taskList}`);
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme', 'light')`);
+  await sleep(200);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc02-legacy-unknown-confirmation.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  /* Earlier scenarios in this same disposable Project can also leave unknown legacy Works.
+   * Each remains blocked until the user-visible confirmation is performed once per Work. */
+  const remainingLegacy = await acknowledgeAllLegacyUnknowns();
+  out.legacyUnknownAfterAck = await evalJs(`(async () => {
+    const list = await window.juqode.taskList(window.__project().id);
+    return JSON.stringify({ unresolved: list.legacyUnknownRuns.length,
+      bannerVisible: Boolean(document.querySelector('[data-el="legacy-unknown"] .panel')),
+      oldWorkStillVisibleInHistory: Boolean((await window.juqode.history(window.__project().id)).works
+        .find(work => work.intent === 'Synthetic legacy unknown Work')) });
+  })()`);
+  if (JSON.parse(out.legacyUnknownAfterAck).unresolved !== 0 || JSON.parse(out.legacyUnknownAfterAck).bannerVisible ||
+      !JSON.parse(out.legacyUnknownAfterAck).oldWorkStillVisibleInHistory) {
+    throw new Error(`Legacy stop acknowledgement did not preserve the old Run and unblock Project: ${out.legacyUnknownAfterAck}`);
+  }
   out.taskSelectedText = await evalJs(`document.querySelector('[data-el="selected-task"]')?.innerText ?? null`);
   out.taskSelectedId = await evalJs(`document.querySelector('[data-el="task-list"] .task-pick.selected')?.getAttribute('data-task-id') ?? null`);
   await evalJs(`document.documentElement.setAttribute('data-theme', 'light')`);
@@ -2110,6 +2171,169 @@ const results = await cdp(async ({ send, evalJs }) => {
   {
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(OUT, 'sc02-task-selected-880.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  await send('Emulation.clearDeviceMetricsOverride');
+
+  /* DG-11/09 · one synthetic Task Run through the real app process boundary. This uses the
+   * fixture Claude CLI, not a mock renderer call; the CLI emits a test observation, a report,
+   * and a source edit containing only safe metadata. The synthetic stream value is redacted by
+   * the actual persistence boundary and should never appear in the rendered Run history. */
+  fs.writeFileSync(path.join(DB_DIR, 'task-run'), '1');
+  const taskId = JSON.parse(out.taskList).tasks[0].id;
+  await evalJs(`(() => {
+    const field = document.querySelector('[data-el="intent"]');
+    field.value = 'src/index.js 를 고쳐줘 api_key=SYNTHETIC_VISUAL_VALUE_93841';
+    document.querySelector('[data-act="submit-intent"]').click();
+  })()`);
+  await sleep(1200);
+  out.taskRunScreen = await evalJs('window.__screen()');
+  if (out.taskRunScreen !== 'SC-03') throw new Error(`Task Run did not open SC-03: ${out.taskRunScreen}`);
+  await sleep(900);
+  out.taskReturnButton = await evalJs(`(() => [...document.querySelectorAll('.topbar button')]
+    .find(b => b.textContent.includes('작업대'))?.textContent ?? null)()`);
+  await evalJs(`(() => [...document.querySelectorAll('.topbar button')]
+    .find(b => b.textContent.includes('작업대'))?.click())()`);
+  await sleep(600);
+  out.taskScreenAfterReturn = await evalJs('window.__screen()');
+  if (out.taskScreenAfterReturn !== 'SC-02') throw new Error(`Task Run did not return to SC-02: ${out.taskScreenAfterReturn}`);
+  await sleep(900);
+  /* Re-enter the Project so the renderer reads the persisted Run and Task review from the
+   * store. A direct IPC review in this fixture would prove only storage, not the Founder path. */
+  await evalJs(`[...document.querySelectorAll('.topbar button')]
+    .find(b => b.textContent.includes('다른 프로젝트'))?.click()`);
+  await sleep(700);
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
+    .find(row => row.innerText.includes(${JSON.stringify(path.basename(SEED))}))?.click()`);
+  await sleep(900);
+  await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click()`);
+  await sleep(700);
+  out.taskRunFirstDetail = await evalJs(`(async () => JSON.stringify(await window.juqode.taskDetail(${JSON.stringify(taskId)})))()`);
+  await evalJs(`document.querySelector('.task-runs > summary')?.click()`);
+  await sleep(100);
+  await evalJs(`document.querySelector('.task-run > summary')?.click()`);
+  await sleep(200);
+  await evalJs(`document.querySelector('.task-review > summary')?.click()`);
+  await sleep(100);
+  out.taskReviewDom = await evalJs(`(() => JSON.stringify({
+    screen: window.__screen(),
+    taskRows: document.querySelectorAll('[data-el="task-list"] [data-task-id]').length,
+    reviewSections: document.querySelectorAll('.task-review-criterion').length,
+    reviewDetails: document.querySelectorAll('.task-review').length,
+    evidenceChoices: document.querySelectorAll('.task-evidence-choice input').length,
+    reviewButtons: [...document.querySelectorAll('.task-review-criterion .task-review button')].map(b => b.textContent.trim()),
+    reviewText: document.querySelector('.task-run-review')?.innerText ?? null,
+  }))()`);
+  out.taskReviewAction = await evalJs(`(() => {
+    const section = document.querySelector('.task-review-criterion');
+    const choice = section?.querySelector('.task-evidence-choice input');
+    const fail = [...(section?.querySelectorAll('button') ?? [])]
+      .find(button => button.textContent.includes('조건 미충족'));
+    if (!section || !choice || !fail) return JSON.stringify({
+      section: Boolean(section), choice: Boolean(choice), fail: Boolean(fail),
+      buttonLabels: [...document.querySelectorAll('.task-review button')].map(button => button.textContent.trim()),
+    });
+    choice.click();
+    fail.click();
+    return JSON.stringify({ section: true, choice: true, fail: true });
+  })()`);
+  if (JSON.parse(out.taskReviewAction).fail !== true) {
+    throw new Error(`Visible Task review controls were incomplete: ${out.taskReviewAction}; DOM=${out.taskReviewDom}`);
+  }
+  await sleep(650);
+  out.taskAfterFirstReview = await evalJs(`(async () => JSON.stringify(await window.juqode.taskDetail(${JSON.stringify(taskId)})))()`);
+  if (JSON.parse(out.taskAfterFirstReview).task.verdict !== 'fail') {
+    throw new Error(`Visible criterion review did not record FAIL: ${out.taskReviewDom}`);
+  }
+  await evalJs(`document.querySelector('.task-retry > summary')?.click()`);
+  await sleep(100);
+  await evalJs(`(() => {
+    const field = document.querySelector('.task-retry textarea');
+    field.value = 'Retry after the first Run was reviewed as insufficient';
+    document.querySelector('.task-retry button')?.click();
+  })()`);
+  await sleep(1200);
+  out.taskRetryScreen = await evalJs('window.__screen()');
+  if (out.taskRetryScreen !== 'SC-03') throw new Error(`Task retry did not open SC-03: ${out.taskRetryScreen}`);
+  await sleep(900);
+  await evalJs(`document.documentElement.setAttribute('data-theme', 'light')`);
+  await evalJs(`document.querySelector('.run-evidence > summary')?.click()`);
+  await sleep(150);
+  out.taskRetryEvidenceText = await evalJs(`document.querySelector('.run-evidence')?.innerText ?? null`);
+  if (!out.taskRetryEvidenceText?.includes('명령 결과가 돌아왔지만 종료 코드는 관측하지 못함') ||
+      out.taskRetryEvidenceText.includes('Exit code')) {
+    throw new Error(`SC-03 did not report returned evidence without an observed exit code: ${out.taskRetryEvidenceText}`);
+  }
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc03-task-run-evidence-no-exit-light.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`(() => [...document.querySelectorAll('.topbar button')]
+    .find(b => b.textContent.includes('작업대'))?.click())()`);
+  await sleep(900);
+  await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click()`);
+  await sleep(700);
+  await evalJs(`document.querySelector('.task-runs > summary')?.click()`);
+  await sleep(100);
+  await evalJs(`document.querySelectorAll('.task-run > summary').forEach(summary => summary.click())`);
+  await sleep(200);
+  fs.rmSync(path.join(DB_DIR, 'task-run'), { force: true });
+  out.taskRunScreenAfterReturn = await evalJs('window.__screen()');
+  out.taskRunDetail = await evalJs(`(async () => JSON.stringify(await window.juqode.taskDetail(${JSON.stringify(taskId)})))()`);
+  out.taskRunHistoryText = await evalJs(`document.querySelector('.task-run-review')?.innerText ?? null`);
+  /* Changing the criterion after Run #1 was reviewed must not display that old verdict as if
+   * it reviewed the new wording. The old criterion and verdict remain attached to Run #1. */
+  out.taskCriterionEditUi = await evalJs(`(async () => {
+    const detail = await window.juqode.taskDetail(${JSON.stringify(taskId)});
+    const prior = detail.task.acceptance_criteria[0];
+    const updated = await window.juqode.taskUpdate(${JSON.stringify(taskId)}, {
+      acceptanceCriteria: [{ id: prior.id, text: 'Updated acceptance criterion after Run #1 review' }],
+    });
+    if (!updated.ok) return JSON.stringify({ updated: false, detail: updated.detail });
+    document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click();
+    await new Promise(resolve => setTimeout(resolve, 180));
+    document.querySelector('.task-runs > summary')?.click();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    document.querySelectorAll('.task-run > summary').forEach(summary => summary.click());
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const current = document.querySelector('.task-review-criterion');
+    return JSON.stringify({
+      updated: true,
+      currentText: current?.querySelector('.sm')?.textContent ?? null,
+      currentVerdict: current?.querySelector('.review-fail, .review-pass')?.textContent ?? null,
+      historyText: document.querySelector('.task-run-review')?.innerText ?? null,
+    });
+  })()`);
+  {
+    const edited = JSON.parse(out.taskCriterionEditUi);
+    if (!edited.updated || edited.currentText !== 'Updated acceptance criterion after Run #1 review' ||
+        edited.currentVerdict !== null || !edited.historyText?.includes('The Project shows the selected Task') ||
+        !edited.historyText.includes('FAIL · 조건이 충족되지 않음')) {
+      throw new Error(`Editing a criterion showed a stale verdict or lost Run #1 history: ${out.taskCriterionEditUi}`);
+    }
+    out.taskRunHistoryTextAfterCriterionEdit = edited.historyText;
+  }
+  /* Returning from SC-03 remounts SC-02 from the persisted app theme. Set it explicitly again
+   * so the file named `-light` is pixel evidence of the actual light palette, not the prior
+   * dark theme-matrix state. */
+  await evalJs(`document.documentElement.setAttribute('data-theme', 'light')`);
+  await sleep(200);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc02-task-run-history-light.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  await send('Emulation.setDeviceMetricsOverride',
+             { width: 880, height: 600, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
+  out.taskRunNarrow = await evalJs(`(() => ({
+    viewport: innerWidth,
+    overflow: document.documentElement.scrollWidth - innerWidth,
+    historyVisible: Boolean(document.querySelector('.task-runs')),
+    redactionNotice: document.querySelector('.task-run-review')?.innerText.includes('가렸어요') ?? false,
+    evidenceRefVisible: document.querySelector('.task-run-review')?.innerText.includes('Evidence') ?? false,
+  }))()`);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc02-task-run-history-880.png'), Buffer.from(shot.result.data, 'base64'));
   }
   await send('Emulation.clearDeviceMetricsOverride');
 
@@ -2210,7 +2434,7 @@ const bridge = JSON.parse(results.bridge);
 assert.strictEqual(results.ready, true, 'renderer did not initialise');
 assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.screen}`);
 assert.deepStrictEqual(bridge.keys.sort(),
-  ['boot', 'brief', 'claudeStatus', 'history', 'interpret', 'onQcUpdate', 'onTermUpdate',
+  ['boot', 'brief', 'claudeStatus', 'history', 'interpret', 'legacyUnknownAck', 'onQcUpdate', 'onTermUpdate',
    'onWorkUpdate', 'openPath', 'openProject', 'qcList', 'qcRoute', 'qcRun', 'qcRuns', 'qcStop',
    'routeIntent', 'taskCreate', 'taskDetail', 'taskList', 'taskRetry', 'taskReviewCriterion', 'taskUpdate',
    'termOpen', 'termStop', 'termWrite',
@@ -2251,6 +2475,61 @@ assert.strictEqual(results.taskScreen, 'SC-02', 'creating a Task left the Projec
   assert.strictEqual(narrow.overflow, 0, `the Task screen overflows horizontally by ${narrow.overflow}px at 880px`);
   assert.strictEqual(narrow.columns, 1, `the Task layout remains ${narrow.columns} columns at the minimum width`);
   assert.ok(narrow.selectedVisible, 'the selected Task is missing at the minimum supported width');
+}
+assert.strictEqual(results.taskRunScreen, 'SC-03', 'the Task-linked fixture Agent did not enter the Run surface');
+assert.strictEqual(results.taskRetryScreen, 'SC-03', 'the explicit retry did not create another Run surface');
+assert.strictEqual(results.taskRunScreenAfterReturn, 'SC-02', 'returning from the Run left the Project → Task surface');
+assert.strictEqual(JSON.parse(results.taskRunFirstDetail).task.verdict, 'unverified',
+  'a successful Agent report automatically passed the Task');
+assert.ok(results.taskRunHistoryText.includes('[redacted]'), 'the Task Run UI exposed synthetic secret-like stream text');
+assert.ok(results.taskRunHistoryText.includes('Evidence'), 'the Run history does not identify its evidence records');
+assert.ok(results.taskRunHistoryText.includes('src/task-run.js'), 'the observed changed-file path is missing from Run history');
+assert.ok(results.taskRunHistoryText.includes('src/retry-task-run.js'), 'Run #2 changed-file evidence is missing');
+assert.ok(results.taskRunHistoryText.includes('이전 Run에서 저장한 조건 검토'), 'Run #1 criterion review disappeared after retry');
+assert.ok(results.taskRunHistoryText.includes('FAIL · 조건이 충족되지 않음'), 'the Run #1 criterion verdict is not visible in its history');
+assert.ok(results.taskRunHistoryText.includes('명령 결과가 돌아왔지만 종료 코드는 관측하지 못함'),
+  'Run #2 hid the fact that a returned tool result had no observed exit code');
+assert.ok(!results.taskRunHistoryText.includes('SYNTHETIC_VISUAL_VALUE_93841'), 'raw synthetic stream value is visible');
+{
+  const detail = JSON.parse(results.taskRunDetail);
+  const beforeReview = JSON.parse(results.taskRunFirstDetail);
+  const afterReview = JSON.parse(results.taskAfterFirstReview);
+  const reviewText = JSON.parse(results.taskReviewDom).reviewText;
+  const selectedTaskId = JSON.parse(results.taskList).tasks[0].id;
+  assert.strictEqual(detail.ok, true, 'Task Run history could not be read through IPC');
+  assert.strictEqual(detail.runs.length, 2, 'retry did not create exactly Run #2 for the same Task');
+  const retry = detail.runs[0], first = detail.runs[1];
+  assert.strictEqual(retry.work.task_id, selectedTaskId, 'Run #2 is not attached to the selected Task');
+  assert.strictEqual(retry.work.attempt, 2);
+  assert.strictEqual(retry.work.retry_of_work_id, first.work.id);
+  assert.strictEqual(first.work.attempt, 1);
+  assert.strictEqual(first.work.outcome, 'complete', 'fixture Claude did not finish normally on Run #1');
+  assert.strictEqual(retry.work.outcome, 'complete', 'fixture Claude did not finish normally on Run #2');
+  assert.strictEqual(afterReview.task.verdict, 'fail', 'the explicit criterion review did not record FAIL');
+  assert.ok(reviewText.includes('Exit code: 0'), 'Run #1 evidence did not display its observed exit code');
+  assert.ok(!reviewText.includes('종료 코드는 관측하지 못함'),
+    'Run #1 evidence contradicted the observed exit code shown in the same review');
+  assert.strictEqual(detail.task.verdict, 'unverified', 'starting Run #2 left a stale verdict current');
+  assert.ok(first.contextBundle?.bundle?.prompt_snapshot_redacted, 'the Context sent to Run #1 was not marked redacted');
+  assert.notStrictEqual(first.contextBundle.bundle.bundle_id, retry.contextBundle.bundle.bundle_id,
+    'retry reused the previous Run ContextBundle');
+  assert.ok(first.runEvidence.some((item) => item.kind === 'changed_files' && item.details.files.includes('src/task-run.js')));
+  assert.ok(retry.runEvidence.some((item) => item.kind === 'changed_files' && item.details.files.includes('src/retry-task-run.js')));
+  assert.ok(first.runEvidence.some((item) => item.kind === 'test_command' && item.details.output_redacted));
+  assert.ok(first.result.claims.find((claim) => claim.kind === 'agent-report')?.data.redacted);
+  const original = beforeReview.runs[0];
+  assert.deepStrictEqual({ work: first.work, context: first.contextBundle, result: first.result, evidence: first.runEvidence },
+    { work: original.work, context: original.contextBundle, result: original.result, evidence: original.runEvidence },
+    'Run #1 changed while the retry was created');
+  assert.ok(detail.reviews.some((review) => review.work_id === first.work.id && review.verdict === 'fail'),
+    'Run #1 review was not retained as an append-only history record');
+}
+{
+  const narrow = results.taskRunNarrow;
+  assert.strictEqual(narrow.viewport, 880);
+  assert.strictEqual(narrow.overflow, 0, `Task Run history overflows by ${narrow.overflow}px`);
+  assert.ok(narrow.redactionNotice, 'Run redaction disclosure is missing at the narrow width');
+  assert.ok(narrow.evidenceRefVisible, 'evidence references disappear at the narrow width');
 }
 /* D-138 §5 folded Agent Presence INTO the Work Stream, so `presence` is no longer a card of its
  * own on SC-02 — the canvas, the nine modes and `presence.hint` all moved with it, and the
@@ -3549,12 +3828,14 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
   assert.strictEqual(results.unconfReds, 0,
     'an unconfirmed stop was painted as a failure — nobody has established that anything failed');
 
-  /* And once the child is actually gone: `07` §8.1 — a cancelled child can exit 0, so the
-   * outcome comes from what was OBSERVED. No tool ran, so nothing was changed. */
+  /* The root is stopped, but that does not prove all detached descendants are gone. Preserve
+   * the explicit unknown outcome and require a visible acknowledgement before another Run. */
   const ended = JSON.parse(results.cancelEnded);
   assert.strictEqual(ended.status, 'ended', `the Work never ended (${ended.status})`);
-  assert.strictEqual(ended.outcome, 'cancelled_nochange',
-    `a cancel with no tool run reported ${ended.outcome}`);
+  assert.strictEqual(ended.outcome, 'ended_unknown',
+    `a cancel without full process-tree proof reported ${ended.outcome}`);
+  assert.strictEqual(results.cancelUnknownGateAfterAck, 0,
+    'the Project remained blocked after visible legacy-unknown acknowledgement');
 }
 
 /* ── `15` SC-03 부분 완료 — WBS-18's acceptance row, rendered ──────────────────────────── */
@@ -3564,23 +3845,23 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
     `the second Work is ${denied.status}, so 그만두기 was never on screen`);
   const w = JSON.parse(results.partialWork);
   assert.strictEqual(w.status, 'ended');
-  /* A tool DID run before the refusal, so stopping there is 부분 — not 취소 · 변경 없음. */
-  assert.strictEqual(w.outcome, 'cancelled_partial',
-    `stopping after a tool had run reported ${w.outcome}`);
+  /* A tool result and an unresolved refusal were observed before the root was stopped. The Run
+   * remains unknown because process-tree ownership is unproven; those observations stay visible. */
+  assert.strictEqual(w.outcome, 'ended_unknown',
+    `stopping after observed tool work without tree proof reported ${w.outcome}`);
+  assert.ok(results.partialCard?.includes('지금은 작업 상태를 확인할 수 없어요'),
+    `the Result did not retain the unknown Run outcome: ${results.partialCard}`);
 
-  /* BOTH lists. `21` WBS-18's acceptance is exactly this, and it had no rendered evidence. */
   assert.ok(results.partialNotDone, '부분 완료 drew no 못 한 것 list');
   assert.ok(results.partialNotDone.includes('허용되지 않아서 하지 못한 것'),
     `the 못 한 것 list does not name the refusal: ${results.partialNotDone}`);
-  assert.ok(results.partialDone, '부분 완료 drew no 한 것 list — it reads as "nothing was done"');
-  /* The evidence pair could not tell here, and the list SAYS so rather than being dropped
-   * (batch 18: an absent 한 것 list reads as a claim nobody made). */
-  assert.ok(/확인 못함|README|src\//.test(results.partialDone),
-    `the 한 것 list says neither what was done nor that it is unknown: ${results.partialDone}`);
-  /* 부분 is not a failure. `16` §2.1: red is failure alone. */
+  assert.ok(results.partialCard.includes('JuQode가 지켜본 도구 실행 1'),
+    'the Result lost its independently observed tool result when the process tree became unknown');
+  assert.strictEqual(results.partialUnknownGateAfterAck, 0,
+    'the Project remained blocked after visible legacy-unknown acknowledgement');
   assert.strictEqual(results.partialReds, 0, '부분 완료 was painted as a failure');
-  assert.ok(results.partialCard.includes('취소했어요'),
-    `the result title is ${JSON.stringify(results.partialCard.split('\n')[0])}`);
+  assert.ok(!results.partialCard.includes('취소했어요'),
+    'the unknown partial Run was presented as a confirmed cancellation');
 }
 
 /* ── `15` SC-03 실패 — the only red, and it is read from the terminal reason ──────────────── */

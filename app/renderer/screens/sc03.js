@@ -390,12 +390,13 @@ function aboutCard(snap, api) {
   return card;
 }
 
-/** The lines as they arrived. Nothing is summarised here — that is the point of it. */
+/** Recorded signal detail. Task Run strings are redacted before persistence. */
 function rawOutput(snap, api) {
   const d = el('details', 'rawbox');
   d.setAttribute('data-el', 'raw');
   d.appendChild(el('summary', 'xs mut', C.work.raw));
   const box = el('pre', 'rawout');
+  if (snap.work.task_id) d.appendChild(el('div', 'xs mut2', C.gap.task.streamRedactionPolicy));
   d.appendChild(box);
   d.addEventListener('toggle', async () => {
     if (!d.open || box.textContent) return;
@@ -410,6 +411,7 @@ function contextDisclosure(record) {
   const bundle = record.bundle;
   details.appendChild(el('summary', 'xs mut', `${C.gap.task.prompt} · v${bundle.bundle_schema_version} · ${record.content_digest.slice(0, 12)}`));
   details.appendChild(el('pre', 'run-context-prompt', bundle.prompt_snapshot ?? ''));
+  if (bundle.prompt_snapshot_redacted) details.appendChild(el('div', 'xs mut2', C.gap.task.redactedSnapshot));
   details.appendChild(el('div', 'xs mut2', C.gap.task.contextScope));
   return details;
 }
@@ -427,6 +429,7 @@ function claimRow(c) {
 
   const body = el('div', 'body');
   body.appendChild(el('div', 'sm', claimText(c)));
+  if (c.data?.redacted) body.appendChild(el('div', 'xs mut2', C.gap.task.redactedContent));
   /* A 확인됨 chip is a promise, so what it rests on is named right there. */
   if (c.confidence === 'confirmed' && c.sourceRef) body.appendChild(el('div', 'xs mut2 src', c.sourceRef));
   row.appendChild(body);
@@ -471,9 +474,14 @@ function resultCard(snap, api, nav, state) {
         row.appendChild(el('div', 'xs mut2', files.length ? files.join(' · ') : C.gap.task.noChanges));
       } else {
         const state = item.details.result_state === 'error' ? C.gap.task.evidenceError
-          : item.details.result_state === 'returned' ? C.gap.task.evidenceReturned : C.gap.task.evidenceUnknown;
+          : item.details.result_state === 'returned'
+            ? (item.details.exit_code == null ? C.gap.task.evidenceReturnedNoExit : C.gap.task.evidenceReturned)
+            : C.gap.task.evidenceUnknown;
         row.appendChild(el('div', 'xs mut2', `${state}${item.details.exit_code == null ? '' : ` · Exit code ${item.details.exit_code}`}`));
         if (item.details.output_excerpt) row.appendChild(el('pre', 'run-evidence-output', item.details.output_excerpt));
+        if (item.details.command_redacted || item.details.output_redacted) {
+          row.appendChild(el('div', 'xs mut2', C.gap.task.redactedContent));
+        }
       }
       disclosure.appendChild(row);
     }

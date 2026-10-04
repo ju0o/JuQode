@@ -435,21 +435,15 @@ test('the user arguments survive the wrapper unchanged and in order', () => {
   assert.deepStrictEqual(r.argv.slice(-args.length), args);
 });
 
-test('cancel reaches the whole tree on both platforms — Windows has no process group', () => {
+test('cancel sends through the owned ChildProcess handle on each platform', () => {
   const { killPlan } = require(path.join(R, 'app/main/claude/session.js'));
 
-  /* POSIX: the negative pid is the group the detached child owns. Positive would signal
-   * JuQode's own process, which is the accident the group rule exists to prevent. */
-  assert.deepStrictEqual(killPlan('linux', 4242, false), { kind: 'group', pid: -4242, signal: 'SIGTERM' });
-  assert.deepStrictEqual(killPlan('darwin', 4242, true), { kind: 'group', pid: -4242, signal: 'SIGKILL' });
-
-  /* Windows: `kill(-pid)` throws there, and the pid we hold is the cmd.exe wrapper — without
-   * /T the real claude process and its node child would survive a cancel. */
-  const soft = killPlan('win32', 4242, false);
-  assert.strictEqual(soft.kind, 'taskkill');
-  assert.ok(soft.argv.includes('/T'), 'a Windows cancel that omits /T leaves the tree running');
-  assert.ok(!soft.argv.includes('/F'), 'the first tier must not be forced');
-  assert.deepStrictEqual(killPlan('win32', 4242, true).argv, ['/PID', '4242', '/T', '/F']);
+  /* The platform does not change the signal target: only the ChildProcess handle is signaled.
+   * Detached process groups remain for liveness checks; a surviving descendant becomes unknown. */
+  for (const platform of ['linux', 'darwin', 'win32']) {
+    assert.deepStrictEqual(killPlan(platform, 4242, false), { kind: 'child', signal: 'SIGTERM' });
+    assert.deepStrictEqual(killPlan(platform, 4242, true), { kind: 'child', signal: 'SIGKILL' });
+  }
 });
 
 test('a CLI that fails to start at all is reported as an error, with its own words', async () => {
@@ -641,13 +635,13 @@ test('Work IPC binds an optional Task only when it belongs to the selected Proje
   const second = repo.openProject(db, '/p/task-other', 'other');
   const task = repo.createTask(db, first.id, { goal: 'Owned task' });
   const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
-  assert.deepStrictEqual(await h['juqode:work-start'](null, second.id, 'x', task.id), {
+  assert.deepStrictEqual(await h['juqode:work-start'](null, second.id, 'x', task.id, 'task-owner-check'), {
     ok: false, reason: 'task-project-mismatch',
   });
-  assert.deepStrictEqual(await h['juqode:work-start'](null, first.id, 'x', 'missing-task'), {
+  assert.deepStrictEqual(await h['juqode:work-start'](null, first.id, 'x', 'missing-task', 'missing-task-check'), {
     ok: false, reason: 'no-task',
   });
-  assert.deepStrictEqual(await h['juqode:work-start'](null, first.id, 'x', 12), {
+  assert.deepStrictEqual(await h['juqode:work-start'](null, first.id, 'x', 12, 'bad-task-type-check'), {
     ok: false, reason: 'bad-task-id',
   });
   assert.deepStrictEqual(await h['juqode:work-start'](null, first.id, 'x', task.id), {

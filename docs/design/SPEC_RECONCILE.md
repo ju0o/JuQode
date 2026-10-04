@@ -104,14 +104,16 @@ been implemented or applied. The Founder/PM therefore superseded the reserved or
 | **11** | Nullable `work.agent_code` (DG-08) | New Task Runs explicitly record `claude_code`; old Work stays null |
 | **12** | `work.retry_reason` and unique retry-successor index (DG-12) | One source Run can have at most one retry successor; a replay returns that Run |
 | **13** | nullable `work.app_session_id` and lookup index (DG-13) | New Task Runs record the owning JuQode launch; old Work stays null |
+| **14** | nullable `evidence_basis.manifest_json` (DG-13 evidence durability) | Task Run path/hash manifests remain comparable after restart without persisting file contents |
 
 This does not rewrite any applied migration. If another current JuQode DB is found with version 4
 or 5 already applied, stop and preserve its numbering before adding another migration.
 Migration 6 currently adds a nullable `project.owner_id` only; it does not add login, ownership
 enforcement, or replace local path uniqueness. Migration 7 stores Run ContextBundles. The local
-development DB is still at v2; the application source currently implements v4–v13, all forward
+development DB is still at v2; the application source currently implements v4–v14, all forward
 only and exercised on disposable SQLite DBs. Migration 12 adds retry idempotency; migration 13
-connects Task Runs to app-session ownership for restart reconciliation.
+connects Task Runs to app-session ownership for restart reconciliation. Migration 14 persists
+only Task Run manifest metadata needed to reconstruct changed-file evidence after restart.
 
 ## 4. 나머지 판정 넷
 
