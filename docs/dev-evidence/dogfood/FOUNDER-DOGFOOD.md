@@ -1,23 +1,29 @@
 # Founder Dogfood — Project → Task → Run
 
-Status: ready for Founder validation after Claude Code is signed in on the target machine. Builder verification does not count as Founder acceptance.
+**상태:** Builder의 자동 검증은 Linux에서 통과했습니다. 실제 Claude Code Run과 Founder 확인은 아직 완료되지 않았습니다. Claude Code 로그인 후 일회용 프로젝트에서 진행합니다.
 
-## Run checklist
+## 실행 순서
 
-1. Launch JuQode and open or create one disposable Project.
-2. Create one Task with a concrete goal and at least one observable acceptance criterion; select it.
-3. Start the Task Run through the existing Claude Code path.
-4. Confirm the Run appears before execution finishes, then observe Claude's activity and final state.
-5. Open Run History. Inspect the exact prompt/Context snapshot and its version; note that Claude has project-folder-wide filesystem access.
-6. Inspect the Agent report, observed outcome, changed files, and test/evidence entries separately.
-7. Review each acceptance criterion against its linked Evidence. If any criterion lacks evidence, confirm the Task remains UNVERIFIED rather than PASS.
-8. Cause or choose a safe failed/insufficient attempt in the disposable Project. Record a retry reason and start another Run for the same Task.
-9. Confirm Run #1 and Run #2 have distinct IDs, prompts/Context snapshots, results, and evidence; Run #1 did not change.
-10. Restart JuQode, reopen the Project, and confirm Task and Run History persist without an automatic extra Run.
-11. Confirm cancellation is reported as cancellation without implying file rollback. Confirm an interrupted/unknown Run is never restarted automatically; retry it only after the previous process is known absent and by explicit user action.
+1. JuQode를 실행합니다.
+2. 실제 작업물을 보호할 수 있는 일회용 프로젝트 폴더를 열거나 새로 만듭니다.
+3. 프로젝트 화면에서 Task 하나를 만들고 구체적인 목표와 확인 가능한 완료 조건을 적습니다.
+4. 그 Task를 선택하고 Run을 시작합니다.
+5. 실행 중 Claude Code의 동작과 화면 상태를 확인합니다.
+6. 프로젝트 작업대로 돌아와 Task가 선택되어 있는지, 첫 Run이 기록되었는지 확인합니다.
+7. Run 기록에서 Agent에게 전달된 요청과 Context 버전을 펼쳐 확인합니다. Context에는 실제 요청 내용이 저장되며, Claude Code는 프로젝트 폴더 전체에 접근할 수 있습니다.
+8. Agent 보고, 관측된 Run 결과, 변경 파일, 테스트/Evidence를 각각 살펴봅니다.
+9. 각 완료 조건을 연결된 Evidence와 비교합니다. Evidence가 없는 조건은 PASS가 되지 않고 UNVERIFIED로 남아야 합니다.
+10. 안전한 부족 사례를 하나 정합니다. 예를 들어 조건에 필요한 테스트 Evidence가 없는 상태로 두고 조건 미충족으로 검토합니다.
+11. 보완 사유를 적고 같은 Task를 다시 실행합니다.
+12. Run #1과 Run #2가 별도 기록이고, 각각의 요청·Context·결과·Evidence가 유지되는지 확인합니다.
+13. 앱을 다시 시작해 프로젝트를 열고 Task 및 Run 기록이 남아 있는지 확인합니다. 앱 재시작이 Run을 자동으로 다시 실행해서는 안 됩니다.
+14. 실행 중 취소를 확인할 경우 파일이 되돌아가지 않는다는 안내를 확인합니다. 프로세스 트리 종료를 확인할 수 없으면 Run은 `ended_unknown`으로 남습니다. 이전 Claude 실행이 멈춘 것을 직접 확인한 뒤에만 확인란을 선택해 진행합니다.
+15. 실제 Claude Code 실행이 실패하거나 앱 연결이 끊긴 경우 성공으로 간주하지 말고, 화면에 남은 Run 상태와 근거를 기록합니다.
 
-## Acceptance report
+## 결과 보고
 
-Report the Project and Task used, both Run IDs, whether each Run completed/failed/cancelled/unknown, what Context each received, changed files, observed test evidence, the criterion-by-criterion verdict, and whether history survived restart. Do not paste credentials, `.env` values, API keys, or private project content into the report.
+사용한 프로젝트와 Task, 각 Run의 ID 및 상태, 전달된 Context, 변경 파일, 관측한 테스트/Evidence, 조건별 최종 판정, 재시작 후 기록 유지 여부를 적습니다. 로그인 정보, `.env` 값, API 키, 자격 증명, 비공개 프로젝트 내용을 보고서에 넣지 않습니다.
 
-Founder verdict: **pending**.
+**Founder 판정: 대기 중.** Builder의 테스트와 스크린샷은 Founder 확인을 대신하지 않습니다.
+
+**플랫폼 한계:** 현재 자동 측정은 Linux입니다. Windows 실행·패키징과 Mac `darwin-x64` / `darwin-arm64` 검증은 대기 중입니다.

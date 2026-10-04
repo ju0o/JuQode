@@ -10,11 +10,12 @@
 > 근거: `RESUME.md` · `WBS-LEDGER.md` · `DEFERRED_VALIDATION.md` · `ERD.md` · `DBML_REVIEW.md`
 > + 2026-09-13 실측(단위 597/597 · `check-dbml` 통과 · Supabase `list_tables`).
 
-> **2026-10-04 migration amendment:** Founder/PM inspected the live migration code and read-only
-> local DB ledger. Only versions 2 and 3 were implemented; the current DB had versions 1 and 2.
-> No v4/v5 application was found. The revised sequence is **4=DG-05 Task, 5=X-6 process
-> tracking, 6=nullable `project.owner_id` reservation, 7=Run ContextBundle**. This supersedes the old numbering below; applied history
-> is not rewritten.
+> **2026-10-05 dogfood migration update:** Before implementation, read-only inspection found the
+> local DB ledger at versions **1 and 2**; migration 4 and 5 had never been applied there. The
+> approved sequence remains **4=DG-05 Task, 5=process tracking and Task↔Work link,
+> 6=nullable `project.owner_id`, 7=Run ContextBundle**. Source now implements v4–v14. The user
+> DB remains at v2 until the next normal app launch; disposable test DBs exercise the new schema.
+> Applied migration history was not renumbered or rewritten.
 
 ---
 
@@ -113,13 +114,10 @@
 - **파일범위** `docs/design/CANON_CHANGE_REQUEST.md` (= **P0-3 과 같은 문서**)
 - **소요** 45분
 
-### X-6 · 마이그레이션 **5** — 프로세스 추적 ⚠️ **G-F 대기**
-- **세부** `app_session` 표 + `work`·`quick_command_run` 에 `runner_session_id`·`runner_pid`·`runner_started_at`. ERD 에 이미 `제안` 으로 그려져 있다. PID 재사용 방어는 `main.js` 의 기존 규칙(프로세스 시작 시각이 work 시작보다 앞설 때만 신뢰)을 그대로 쓴다.
-- **선행** X-5 · **게이트** **G-F**(MVP 전 진행 승인) · **G-C**(`schema.sql` 은 Canon 축자 사본)
-- **파일범위** `app/main/db/db.js` `MIGRATIONS` · `app/main/db/repo.js`(`processFor`·`reconcileQcRuns`) · `app/main/main.js` · `app/main/qc/run.js` · `tests/store.test.js` · `tests/qc.test.js` · `docs/design/erd.dbml`
-- **소요** 150분
-- **완료 기준** 앱을 껐다 켜도 **실제로 도는 개발 서버가 `running` 으로 남는다**(죽은 것은 여전히 `unknown`). `tests/store.test.js:35` 의 26표 단언이 27표로 바뀐다.
-- **왜 MVP 인증에 걸릴 수 있나** 이건 제품이 **사실이 아닌 것을 화면에 말하는** 결함이다 — 도그푸드에서 사용자가 부딪힐 수 있고, `13` §11 DoD 의 "이해할 수 있는가" 에 직접 닿는다. **판단은 PM 의 것이다.**
+### X-6 · 마이그레이션 **5** — 프로세스 추적 ✅ **dogfood 경로 구현됨 (2026-10-05)**
+- **세부** Migration 5 adds `app_session` and nullable `runner_*`/`work.task_id`; Migration 13 associates Task Runs with their owning app launch. Restart reconciliation closes interrupted Task Runs as `ended_unknown` and never re-executes them. Migration 14 persists path/size/hash manifests for post-restart change evidence without file contents.
+- **검증** `tests/task.test.js` restart and migration cases; fresh `npm run test:e2e` boot recovery reported one Run, `ended_unknown`, and zero Agent invocations after restart. The active user DB was read-only checked at v2; the app did not apply migrations during verification.
+- **한계** Linux only. A cancelled process whose detached descendants cannot be ruled out remains `ended_unknown` and needs explicit stopped-process acknowledgement; this is not a confirmed cancellation. Windows process-tree behavior still requires target validation.
 
 ### X-2 · `consume_work()` 재작성 사양 🛑 **V1 보류**
 - **세부** X-1 판정을 RPC 하나의 SQL 로 확정. 현재 `BACKEND_A.md` §3 의 RPC 는 **버려진다** — 멱등 키도, 장치 검증도, `plan→policy` 순서도 없다.
@@ -127,7 +125,7 @@
 - **파일범위** `docs/design/BACKEND_A.md` §3 · §4② (마이그레이션 번호 3→5 정정)
 - **완료 기준** RPC 본문이 다섯을 전부 적는다: ① `auth.uid()` 만 쓰고 클라이언트 `user_id` 를 읽지 않음 ② `audit_usage` 행을 먼저 만들고 UNIQUE 충돌이면 **올리지 않고 기존 결과를 돌려줌**(X-1c) ③ **장치 소유 검증 — 남의 계정 장치는 거부**(X-1d) ④ `plan → policy.daily_work_limit_override` 순서 ⑤ `for update` 유지. **`works` 하나만 센다**(X-1b).
 
-**X 합계: 7작업** (X-1 완료 · X-3·X-7 은 Phase A · X-6 은 G-F · X-2·X-4 는 뒤)
+**X 합계: 7작업** (X-1 완료 · X-3·X-7 은 Phase A · X-6 dogfood 경로 구현됨 · X-2·X-4 는 뒤)
 
 ---
 
