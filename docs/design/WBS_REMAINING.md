@@ -1,7 +1,7 @@
 # 남은 작업 WBS — MVP 인증 → V1
 
 > **rev 2 · 2026-09-13** — Owner/PM 판정(조건부 승인) 반영. 판정 전문은 **`SPEC_RECONCILE.md`**.
-> rev 1 대비 바뀐 것 여섯: ① X-1 여섯 건 전부 판정됨 ② 마이그레이션 4=X-6 · 5=P1-5 확정
+> rev 1 당시 반영한 것: ① X-1 여섯 건 전부 판정됨 ② 마이그레이션 4=X-6 · 5=P1-5 (2026-10-04 superseded)
 > ③ **M-3 도그푸드가 R 트랙보다 먼저** ④ Windows 인증은 **10 1809+ 와 11 둘 다**
 > ⑤ 실행이 **Phase A → MVP 인증 → V1** 로 나뉘고 **P1~P4 는 보류**
 > ⑥ **P1-2 는 낡은 3표 설계에서 시작할 수 없다**
@@ -9,6 +9,12 @@
 > 이어받은 것: `WBS_IMPLEMENTATION.md` 의 R · P0~P4 **ID 와 정의는 그대로**다.
 > 근거: `RESUME.md` · `WBS-LEDGER.md` · `DEFERRED_VALIDATION.md` · `ERD.md` · `DBML_REVIEW.md`
 > + 2026-09-13 실측(단위 597/597 · `check-dbml` 통과 · Supabase `list_tables`).
+
+> **2026-10-04 migration amendment:** Founder/PM inspected the live migration code and read-only
+> local DB ledger. Only versions 2 and 3 were implemented; the current DB had versions 1 and 2.
+> No v4/v5 application was found. The revised sequence is **4=DG-05 Task, 5=X-6 process
+> tracking, 6=nullable `project.owner_id` reservation, 7=Run ContextBundle**. This supersedes the old numbering below; applied history
+> is not rewritten.
 
 ---
 
@@ -56,7 +62,7 @@
 | **G-C** | Canon 판정 (Owner) | R-6 · P2-4 · P2-6 · X-5 · X-6 | `JuQode-Private` 의 `18`/`15`/`20` 개정. 이 저장소는 요청서만 낸다 | 닫힘 |
 | **G-D** | Supabase 승격 | P1-1 → P1 전체 | D-A7 확정됨. **V1 보류로 실행이 뒤로 밀렸다** | 결정 · 미실행 |
 | **G-E** | 결제사 선정 | `payment`·`billing_webhook` | V2. 지금 열 필요 없다 (D-A5) | 의도적 |
-| **G-F** | **X-6 을 MVP 전에?** | X-6 (마이그레이션 4) | PM 한 줄: 재조정 진실성 결함 수정이 인증에 필요한가 | **신규 · 대기** |
+| **G-F** | **X-6 을 MVP 전에?** | X-6 (마이그레이션 5) | PM 한 줄: 재조정 진실성 결함 수정이 인증에 필요한가 | **신규 · 대기** |
 | **G-G** | **판정→컬럼 해석 확인** | X-7 → P1-2 | `SPEC_RECONCILE.md` §2 의 확인 ①②③ | **신규 · 대기** |
 
 **변하지 않은 규칙:** 문구는 `copy.js` 에서 먼저 고치지 않는다. `18`/`15` 가 먼저다 (G-C).
@@ -81,7 +87,7 @@
 - **오류 시** `check-dbml.mjs` — 컬럼을 빼면 그 컬럼을 쓰던 `Ref:` 와 `Note` 가 같이 깨진다
 
 ### X-3 · `erd.dbml` ↔ `schema.sql` 자동 대조 검사기 **← Phase A**
-- **세부** 지금 `check-dbml.mjs` 는 **dbdiagram 문법**만 본다. 그림이 실제 스키마와 같은지는 아무도 재지 않는다 — `DBDIAGRAM.md` 가 "이 그림은 사본입니다" 라고 적어 둔 그대로다. MVP 26표의 **표 이름 · 컬럼 이름 · not null** 을 `schema.sql` + `db.js MIGRATIONS` 에서 뽑아 대조한다.
+- **완료** `check-dbml.mjs` 는 dbdiagram 문법과 실제 **schema.sql + MIGRATIONS** 의 표·컬럼·not null 을 대조한다. DG-05 가 migration table 도 비교 범위에 넣었다; 현재 대조는 MVP 29표다.
 - **선행** 없음 · **게이트** 없음 (V1 절반은 대조 대상 아님 → X-7 과 독립)
 - **파일범위** `docs/design/check-dbml.mjs` **확장** — 새 파일 만들지 않는다
 - **소요** 90분
@@ -107,7 +113,7 @@
 - **파일범위** `docs/design/CANON_CHANGE_REQUEST.md` (= **P0-3 과 같은 문서**)
 - **소요** 45분
 
-### X-6 · 마이그레이션 **4** — 프로세스 추적 ⚠️ **G-F 대기**
+### X-6 · 마이그레이션 **5** — 프로세스 추적 ⚠️ **G-F 대기**
 - **세부** `app_session` 표 + `work`·`quick_command_run` 에 `runner_session_id`·`runner_pid`·`runner_started_at`. ERD 에 이미 `제안` 으로 그려져 있다. PID 재사용 방어는 `main.js` 의 기존 규칙(프로세스 시작 시각이 work 시작보다 앞설 때만 신뢰)을 그대로 쓴다.
 - **선행** X-5 · **게이트** **G-F**(MVP 전 진행 승인) · **G-C**(`schema.sql` 은 Canon 축자 사본)
 - **파일범위** `app/main/db/db.js` `MIGRATIONS` · `app/main/db/repo.js`(`processFor`·`reconcileQcRuns`) · `app/main/main.js` · `app/main/qc/run.js` · `tests/store.test.js` · `tests/qc.test.js` · `docs/design/erd.dbml`
@@ -243,7 +249,7 @@
   - 상한 3 → `true,true,true,false,false` · 병렬 20 → 정확히 상한에서 멈춤 (기존)
   - 같은 `(device_id, kind, client_ref)` 2회 → `usage_day.works` 가 **1만** 오른다 (X-1c)
   - 남의 계정 `device_id` → **거부** (X-1d)
-- **P1-5 정정** 마이그레이션 **5** (4 는 X-6)
+- **P1-5 정정** 마이그레이션 **6** (4 는 DG-05 Task · 5 는 X-6)
 - **P1-6** 가장 위험한 항목 — 빠뜨리면 계정 전환 시 남의 프로젝트가 보인다. `grep -n "from project" app/main/` 전수
 - **P1-7 정정** 등급 판정에서 **서술 관련 칸은 읽지 않는다** (X-1f)
 
@@ -284,7 +290,7 @@ PHASE C — MVP 교정 · 인증   ▼
        ├─▶ R-7           ├──▶ R-10 ─▶ R-11 ──┐
        ├─▶ R-8 ◀── R-2    │                   │
        └─▶ R-9 ───────────┘                   │
-  X-5 ──[G-C]──▶ X-6* (마이그레이션 4) ─[G-F]─┤
+  X-5 ──[G-C]──▶ X-6* (마이그레이션 5) ─[G-F]─┤
   M-1 ─▶ M-2 (Win10) ─┬─▶ M-2a (실패 시)      │
        └─▶ M-6 (Win11)┴─▶ M-4 = WBS-33 ───────┤
   P3-4 · P3-5 (전체 스위트 · 변이) ────────────┤
@@ -294,7 +300,7 @@ PHASE C — MVP 교정 · 인증   ▼
 PHASE D — V1 (보류 해제)                       ▼
   X-2 ─▶ P1-1[G-D] ─▶ P1-2[G-G] ─┬─▶ P1-3 ─┬─▶ P1-4 ─▶ P4-3
                                   │         └─▶ P1-7 ─▶ P1-8
-                                  ├─▶ P1-5(마 5) ─▶ P1-6 ─▶ P3-1
+                                  ├─▶ P1-5(마 6) ─▶ P1-6 ─▶ P3-1
                                   └─▶ P2-1 ─▶ P2-2 ─▶ P2-3 ─┬─▶ P2-4* ─▶ P3-3
                                                              └─▶ P2-5 ─┬─▶ P2-6*
                                                                        ├─▶ P2-7

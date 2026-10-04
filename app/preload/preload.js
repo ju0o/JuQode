@@ -44,14 +44,22 @@ contextBridge.exposeInMainWorld('juqode', {
   /** WBS-09 — is Claude Code usable right now, and if not, why. Never carries credentials. */
   claudeStatus: () => ipcRenderer.invoke('juqode:claude-detect'),
 
-  /** Open a URL in the system browser. Main validates that it is HTTPS before forwarding. */
-  openExternal: (url) => ipcRenderer.invoke('juqode:open-external', url),
-
   /** WBS-06 — which of the four routes this request reads as. Classifies; runs nothing. */
   routeIntent: (text) => ipcRenderer.invoke('juqode:route-intent', text),
 
+  /** DG-11 — local Project child Tasks and their reviewable Run history. */
+  taskList: (projectId) => ipcRenderer.invoke('juqode:task-list', projectId),
+  taskCreate: (projectId, input) => ipcRenderer.invoke('juqode:task-create', projectId, input),
+  taskUpdate: (taskId, patch) => ipcRenderer.invoke('juqode:task-update', taskId, patch),
+  taskDetail: (taskId) => ipcRenderer.invoke('juqode:task-detail', taskId),
+  taskReviewCriterion: (taskId, workId, criterionId, verdict, evidenceIds) =>
+    ipcRenderer.invoke('juqode:task-review-criterion', taskId, workId, criterionId, verdict, evidenceIds),
+  taskRetry: (taskId, priorWorkId, reason, idempotencyKey) =>
+    ipcRenderer.invoke('juqode:task-retry', taskId, priorWorkId, reason, idempotencyKey),
+
   /* WBS-10 ~ 17 — the Work loop. Each is a named channel; none takes a channel name. */
-  workStart: (projectId, intent) => ipcRenderer.invoke('juqode:work-start', projectId, intent),
+  workStart: (projectId, intent, taskId = null, idempotencyKey = null) =>
+    ipcRenderer.invoke('juqode:work-start', projectId, intent, taskId, idempotencyKey),
   workGet: (workId) => ipcRenderer.invoke('juqode:work-get', workId),
   workAllow: (workId, toolUseId) => ipcRenderer.invoke('juqode:work-allow', workId, toolUseId),
   workAnswer: (workId, text) => ipcRenderer.invoke('juqode:work-answer', workId, text),

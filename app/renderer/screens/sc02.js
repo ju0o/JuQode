@@ -30,6 +30,10 @@ import { stateChip } from './sc03.js';
 export function renderSC02(root, api, nav, state) {
   root.innerHTML = '';
   const p = state.project;
+  if (state.taskProjectId !== p.id) {
+    state.taskProjectId = p.id;
+    state.selectedTaskId = null;
+  }
 
   const shell = el('div', 'shell');
 
@@ -175,8 +179,56 @@ export function renderSC02(root, api, nav, state) {
    * Claude Code Work. A technical execution request is NOT run; the field says where that
    * lives. Nothing is routed as the user types — the route is disclosed after submit only
    * (D-106), because a live guess is a guess. */
-  const intent = card('wide', 'intent');
-  intent.appendChild(head(C.intent.label));
+  const intent = card('wide2', 'intent');
+  const taskHeading = head(C.gap.task.title);
+  taskHeading.classList.add('task-heading');
+  intent.appendChild(taskHeading);
+  intent.appendChild(el('div', 'xs mut2 task-intro', C.gap.task.intro));
+  const taskRows = el('div', 'task-rows');
+  taskRows.setAttribute('data-el', 'task-list');
+  intent.appendChild(taskRows);
+
+  const createTask = el('details', 'task-create');
+  const createSummary = el('summary', 'sm', C.gap.task.create);
+  createTask.appendChild(createSummary);
+  const taskGoal = el('textarea', 'intentfield task-input');
+  taskGoal.rows = 2;
+  taskGoal.placeholder = C.gap.task.goalPlaceholder;
+  taskGoal.setAttribute('aria-label', C.gap.task.goal);
+  const taskAcceptance = el('textarea', 'intentfield task-input');
+  taskAcceptance.rows = 3;
+  taskAcceptance.placeholder = C.gap.task.acceptancePlaceholder;
+  taskAcceptance.setAttribute('aria-label', C.gap.task.acceptance);
+  const dependencies = el('div', 'task-dependencies');
+  const createNote = el('div', 'xs mut2 task-create-note');
+  const createButton = btn('btn sm', C.gap.task.createSubmit, async () => {
+    const criteria = taskAcceptance.value.split('\n').map((text) => text.trim()).filter(Boolean);
+    if (!criteria.length) { createNote.textContent = C.gap.task.createNeedsCriterion; return; }
+    createButton.disabled = true;
+    const selectedDependencies = [...dependencies.querySelectorAll('input:checked')].map((input) => input.value);
+    const created = await api.taskCreate(p.id, {
+      goal: taskGoal.value,
+      dependencies: selectedDependencies,
+      acceptanceCriteria: criteria,
+    });
+    createButton.disabled = false;
+    if (!created?.ok) { createNote.textContent = created?.detail ?? C.gap.task.createNeedsCriterion; return; }
+    state.selectedTaskId = created.task.id;
+    taskGoal.value = '';
+    taskAcceptance.value = '';
+    createTask.open = false;
+    await refreshTasks();
+  });
+  createTask.append(el('label', 'xs mut2', C.gap.task.goal), taskGoal,
+    el('label', 'xs mut2', C.gap.task.acceptance), taskAcceptance,
+    dependencies, createNote, createButton);
+  intent.appendChild(createTask);
+
+  const selectedTask = el('section', 'task-selected');
+  selectedTask.setAttribute('data-el', 'selected-task');
+  intent.appendChild(selectedTask);
+  const requestLabel = el('div', 'sm task-request-label', C.intent.label);
+  intent.appendChild(requestLabel);
   const field = el('textarea', 'intentfield');
   field.setAttribute('data-el', 'intent');
   field.placeholder = C.intent.ph;
@@ -197,9 +249,85 @@ export function renderSC02(root, api, nav, state) {
   row.appendChild(submit);
   row.appendChild(el('span', 'xs mut', C.intent.helper));
   intent.appendChild(row);
-  intent.appendChild(el('div', 'xs mut2', C.intent.examples));
-  intent.appendChild(el('div', 'xs mut2', C.intent.approvalNote));
+  intent.appendChild(el('div', 'xs mut2 task-request-note', C.intent.examples));
+  intent.appendChild(el('div', 'xs mut2 task-request-note', C.intent.approvalNote));
   colMain.appendChild(intent);
+
+  let taskLoadSequence = 0;
+  let currentTasks = [];
+  const paintTaskList = () => {
+    taskRows.innerHTML = '';
+    if (!currentTasks.length) {
+      taskRows.appendChild(el('div', 'sm mut', C.gap.task.noTasks));
+      dependencies.innerHTML = '';
+      return;
+    }
+    for (const task of currentTasks) {
+      const row = btn(`task-pick${task.id === state.selectedTaskId ? ' selected' : ''}`,
+        `${task.goal} · ${taskVerdictLabel(task.verdict)}`, () => {
+          state.selectedTaskId = task.id;
+          paintTaskList();
+          paintSelectedTask();
+        });
+      row.setAttribute('data-task-id', task.id);
+      row.setAttribute('aria-pressed', String(task.id === state.selectedTaskId));
+      taskRows.appendChild(row);
+    }
+    dependencies.innerHTML = '';
+    if (currentTasks.length) {
+      dependencies.appendChild(el('div', 'xs mut2', C.gap.task.dependencies));
+      for (const task of currentTasks) {
+        const label = el('label', 'task-dependency');
+        const check = el('input');
+        check.type = 'checkbox'; check.value = task.id;
+        label.append(check, el('span', 'xs', task.goal));
+        dependencies.appendChild(label);
+      }
+    }
+  };
+
+  const paintSelectedTask = async () => {
+    const sequence = ++taskLoadSequence;
+    const taskId = state.selectedTaskId;
+    selectedTask.innerHTML = '';
+    if (!taskId) { requestLabel.textContent = C.intent.label; return; }
+    const result = await api.taskDetail(taskId);
+    if (sequence !== taskLoadSequence || state.selectedTaskId !== taskId) return;
+    if (!result?.ok) { selectedTask.appendChild(el('div', 'xs mut2', result?.detail ?? C.gap.task.noTasks)); return; }
+    const task = result.task;
+    requestLabel.textContent = C.gap.task.runRequest;
+    const goal = el('div', 'task-goal');
+    goal.append(el('div', 'xs mut2', C.gap.task.selected), el('div', 'sm', task.goal));
+    const lifecycleLabel = task.status === 'complete' ? C.gap.task.completeState
+      : task.status === 'blocked' ? C.gap.task.blocked
+        : task.status === 'in_progress' ? C.gap.task.inProgress : C.gap.task.open;
+    const lifecycle = el('div', 'xs mut2', `${C.gap.task.stateLabel}: ${lifecycleLabel}`);
+    const statusLabel = task.verdict === 'pass' ? C.gap.task.pass : task.verdict === 'fail' ? C.gap.task.fail : C.gap.task.unverified;
+    const verdict = el('div', `task-verdict ${task.verdict}`, `${C.gap.task.status}: ${statusLabel}`);
+    const acceptance = el('ul', 'task-criteria');
+    for (const criterion of task.acceptance_criteria) acceptance.appendChild(el('li', 'sm', criterion.text));
+    const deps = el('div', 'xs mut2 task-dep-line', task.dependencies.length
+      ? `${C.gap.task.dependencies}: ${task.dependencies.map((id) => currentTasks.find((item) => item.id === id)?.goal ?? id).join(' · ')}`
+      : `${C.gap.task.dependencies}: —`);
+    selectedTask.append(goal, lifecycle, verdict, deps, el('div', 'xs mut2', C.gap.task.acceptance), acceptance);
+    if (result.runs.length) selectedTask.appendChild(renderRunReview(task, result, refreshTasks, nav));
+    else selectedTask.appendChild(el('div', 'xs mut2', C.gap.task.noRuns));
+    submit.disabled = task.verdict === 'pass';
+  };
+
+  async function refreshTasks() {
+    const sequence = ++taskLoadSequence;
+    const listed = await api.taskList(p.id);
+    if (sequence !== taskLoadSequence || state.project.id !== p.id) return;
+    if (!listed?.ok) { taskRows.textContent = listed?.detail ?? C.gap.task.noTasks; return; }
+    currentTasks = listed.tasks;
+    if (!currentTasks.some((task) => task.id === state.selectedTaskId)) {
+      state.selectedTaskId = currentTasks[0]?.id ?? null;
+    }
+    paintTaskList();
+    await paintSelectedTask();
+  }
+  refreshTasks();
 
   /* Enter submits, Shift+Enter is a newline (`15` SC-02 Inputs). */
   field.addEventListener('keydown', (e) => {
@@ -209,6 +337,7 @@ export function renderSC02(root, api, nav, state) {
   async function send() {
     const text = field.value;
     if (!text.trim()) return;
+    const idempotencyKey = state.selectedTaskId ? window.crypto.randomUUID() : null;
     consequence.innerHTML = '';
     submit.disabled = true;
     try {
@@ -216,30 +345,30 @@ export function renderSC02(root, api, nav, state) {
       const route = routed?.route?.route ?? 'work';
 
       /* Not a failure and not red — a place, not a refusal (D-134). */
-      if (route === 'terminal') { consequence.appendChild(terminalCard(text, () => startWork(text))); return; }
+      if (route === 'terminal') { consequence.appendChild(terminalCard(text, () => startWork(text, idempotencyKey))); return; }
       if (route === 'ambiguous') {
-        consequence.appendChild(ambiguousCard({ ...routed.route, phrase: text }, () => startWork(text)));
+        consequence.appendChild(ambiguousCard({ ...routed.route, phrase: text }, () => startWork(text, idempotencyKey)));
         return;
       }
-      if (route === 'unrecognized') { consequence.appendChild(passthroughCard(text, () => startWork(text), () => { consequence.innerHTML = ''; field.focus(); })); return; }
-      await startWork(text);
+      if (route === 'unrecognized') { consequence.appendChild(line(C.intent.routeUnrec)); return; }
+      await startWork(text, idempotencyKey);
     } finally { submit.disabled = false; }
   }
 
-  async function startWork(text) {
+  async function startWork(text, idempotencyKey = null) {
     consequence.appendChild(line(C.intent.routeWork));
     const pend = el('div', 'sm mut');
     pend.setAttribute('data-el', 'pending');
     pend.textContent = C.pending.label;              // a place-holder card, NOT a progress bar
     consequence.appendChild(pend);
 
-    const r = await api.workStart(p.id, text);
+    const r = await api.workStart(p.id, text, state.selectedTaskId ?? null, idempotencyKey);
     pend.remove();
     if (r?.ok) { field.value = ''; return nav.toWork(r.work); }
 
     /* `15` SC-02 keeps the submitted text in the field for every one of these — it is never
      * queued and never thrown away (UF-RULE-NOQUEUE). */
-    consequence.appendChild(refusalCard(r, api, nav, state, p, { phrase: text, resubmit: () => startWork(text) }));
+    consequence.appendChild(refusalCard(r, api, nav, state, p, { phrase: text, resubmit: () => startWork(text, idempotencyKey) }));
   }
 
   /* ② Work Stream — D-138 §3 · §5, and `15` SC-02 ③.
@@ -285,6 +414,158 @@ export function renderSC02(root, api, nav, state) {
   root.appendChild(shell);
 
   return { shell, board, field };
+}
+
+function taskVerdictLabel(verdict) {
+  return verdict === 'pass' ? C.gap.task.pass : verdict === 'fail' ? C.gap.task.fail : C.gap.task.unverified;
+}
+
+function runTime(value) {
+  if (!value) return '—';
+  const time = new Date(value);
+  return Number.isFinite(time.getTime()) ? time.toLocaleString() : String(value);
+}
+
+function renderRunReview(task, detail, refresh, nav) {
+  const latest = detail.runs[0];
+  const section = el('div', 'task-run-review');
+  const reviews = new Map();
+  for (const review of detail.reviews) reviews.set(review.criterion_id, review);
+  section.appendChild(el('div', 'xs mut2', `${C.gap.task.run}: #${latest.work.attempt ?? 1} · ${latest.work.outcome ?? latest.work.status}`));
+
+  const criteria = el('div', 'task-review-criteria');
+  for (const criterion of task.acceptance_criteria) {
+    const row = el('div', 'task-review-criterion');
+    row.appendChild(el('div', 'sm', criterion.text));
+    const previous = reviews.get(criterion.id);
+    const matchingReview = previous && previous.task_spec_digest === latest.contextBundle?.bundle?.task_spec_digest;
+    if (matchingReview) row.appendChild(el('div', `xs mut2 review-${previous.verdict}`,
+      `${C.gap.task.status}: ${previous.verdict === 'pass' ? C.gap.task.pass : C.gap.task.fail}`));
+    const review = el('details', 'task-review');
+    review.appendChild(el('summary', 'xs mut', C.gap.task.review));
+    const evidence = latest.runEvidence ?? [];
+    if (!latest.taskSpecCurrent || latest.work.status !== 'ended') {
+      review.appendChild(el('div', 'xs mut2', C.gap.task.noEvidence));
+    } else if (!evidence.length) {
+      review.appendChild(el('div', 'xs mut2', C.gap.task.noEvidence));
+    } else {
+      const chosen = new Set();
+      for (const item of evidence) {
+        const label = el('label', 'task-evidence-choice');
+        const check = el('input', 'task-evidence-check');
+        check.type = 'checkbox'; check.value = item.id;
+        check.addEventListener('change', () => check.checked ? chosen.add(item.id) : chosen.delete(item.id));
+        const text = el('span', 'xs task-evidence-text');
+        text.appendChild(el('span', '', item.kind === 'test_command' ? `${C.gap.task.testEvidence}: ${item.summary}` : C.gap.task.changedFiles));
+        if (item.kind === 'test_command') {
+          const state = item.details.result_state === 'error' ? C.gap.task.evidenceError
+            : item.details.result_state === 'returned' ? C.gap.task.evidenceReturned : C.gap.task.evidenceUnknown;
+          text.appendChild(el('span', 'mut2', state));
+          if (item.details.exit_code != null) text.appendChild(el('span', 'mono mut2', `Exit code: ${item.details.exit_code}`));
+          if (item.details.output_excerpt) text.appendChild(el('span', 'mut2', item.details.output_excerpt));
+        } else {
+          const files = item.details.files ?? [];
+          text.appendChild(el('span', 'mut2', files.length ? files.join(' · ') : C.gap.task.noChanges));
+        }
+        label.append(check, text);
+        review.appendChild(label);
+      }
+      const acts = el('div', 'row-acts task-review-acts');
+      const pass = btn('btn sm pri', C.gap.task.reviewPass, async () => {
+        if (!chosen.size) return;
+        pass.disabled = true;
+        const result = await window.juqode.taskReviewCriterion(task.id, latest.work.id, criterion.id,
+          'pass', [...chosen]);
+        if (result?.ok) await refresh(); else { review.appendChild(el('div', 'xs mut2', result?.detail ?? C.gap.task.noEvidence)); pass.disabled = false; }
+      });
+      pass.disabled = latest.work.outcome !== 'complete';
+      const fail = btn('btn sm ghost', C.gap.task.reviewFail, async () => {
+        if (!chosen.size) return;
+        fail.disabled = true;
+        const result = await window.juqode.taskReviewCriterion(task.id, latest.work.id, criterion.id,
+          'fail', [...chosen]);
+        if (result?.ok) await refresh(); else { review.appendChild(el('div', 'xs mut2', result?.detail ?? C.gap.task.noEvidence)); fail.disabled = false; }
+      });
+      acts.append(pass, fail);
+      review.appendChild(acts);
+    }
+    row.appendChild(review);
+    criteria.appendChild(row);
+  }
+  section.appendChild(criteria);
+
+  if (latest.work.status === 'ended' && task.verdict !== 'pass') {
+    const retry = el('details', 'task-retry');
+    retry.appendChild(el('summary', 'xs mut', C.gap.task.retryRun));
+    const reason = el('textarea', 'intentfield task-input');
+    reason.rows = 2;
+    reason.placeholder = C.gap.task.retryPlaceholder;
+    reason.setAttribute('aria-label', C.gap.task.retryReason);
+    const note = el('div', 'xs mut2');
+    const start = btn('btn sm pri', C.gap.task.retrySubmit, async () => {
+      if (!reason.value.trim()) { note.textContent = C.gap.task.retryNeedsReason; return; }
+      start.disabled = true;
+      note.textContent = '';
+      const result = await window.juqode.taskRetry(task.id, latest.work.id, reason.value.trim(), window.crypto.randomUUID());
+      if (result?.ok) nav.toWork(result.work);
+      else {
+        note.textContent = result?.reason === 'prior-process-may-still-live'
+          ? C.gap.task.retryProcessStillLive : result?.detail ?? C.gap.task.retryFailed;
+        start.disabled = false;
+      }
+    });
+    retry.append(el('label', 'xs mut2', C.gap.task.retryReason), reason, note, start);
+    section.appendChild(retry);
+  }
+
+  const history = el('details', 'task-runs');
+  history.appendChild(el('summary', 'sm', `${C.gap.task.runHistory} · ${detail.runs.length}`));
+  for (const snap of detail.runs) {
+    const run = el('details', 'task-run');
+    const attempt = snap.work.attempt ?? 1;
+    const agent = snap.work.agent_code === 'claude_code' ? C.actor.claude : '—';
+    run.appendChild(el('summary', 'xs task-run-summary', `#${attempt} · ${C.gap.task.agent} ${agent} · ${snap.work.outcome ?? snap.work.status}`));
+    const times = el('div', 'xs mut2 task-run-times', `${C.work.started}: ${runTime(snap.work.started_at)}${snap.work.ended_at ? ` · ${C.gap.task.ended}: ${runTime(snap.work.ended_at)}` : ''}`);
+    run.appendChild(times);
+    if (snap.work.retry_reason) run.appendChild(factBlock(C.gap.task.retryReason, snap.work.retry_reason));
+    if (snap.contextBundle?.bundle) {
+      const context = el('details', 'task-context');
+      const bundle = snap.contextBundle.bundle;
+      context.appendChild(el('summary', 'xs mut', `${C.gap.task.prompt} · v${bundle.bundle_schema_version} · ${snap.contextBundle.content_digest.slice(0, 12)}`));
+      context.appendChild(el('pre', 'task-prompt', bundle.prompt_snapshot ?? ''));
+      context.appendChild(el('div', 'xs mut2', C.gap.task.contextScope));
+      run.appendChild(context);
+    }
+    const report = snap.result?.claims?.find((claim) => claim.kind === 'agent-report');
+    if (report?.data?.text) run.appendChild(factBlock(C.gap.task.result, report.data.text));
+    const changed = (snap.runEvidence ?? []).find((item) => item.kind === 'changed_files');
+    if (changed) {
+      const files = changed.details.files ?? [];
+      run.appendChild(factBlock(C.gap.task.changedFiles, files.length ? files.join('\n') : C.gap.task.noChanges));
+    }
+    const tests = (snap.runEvidence ?? []).filter((item) => item.kind === 'test_command');
+    if (tests.length) {
+      const block = el('div', 'task-run-fact');
+      block.appendChild(el('div', 'xs mut2', C.gap.task.testEvidence));
+      for (const item of tests) {
+        const state = item.details.result_state === 'error' ? C.gap.task.evidenceError
+          : item.details.result_state === 'returned' ? C.gap.task.evidenceReturned : C.gap.task.evidenceUnknown;
+        block.appendChild(el('div', 'xs', `${item.summary} · ${state}${item.details.exit_code == null ? '' : ` · Exit code ${item.details.exit_code}`}`));
+      }
+      run.appendChild(block);
+    }
+    if (snap.work.failure_reason) run.appendChild(factBlock(C.gap.task.failure, snap.work.failure_reason));
+    history.appendChild(run);
+  }
+  section.appendChild(history);
+  return section;
+}
+
+function factBlock(label, value) {
+  const block = el('div', 'task-run-fact');
+  block.appendChild(el('div', 'xs mut2', label));
+  block.appendChild(el('pre', 'task-run-value', value));
+  return block;
 }
 
 /**
@@ -555,20 +836,6 @@ function ambiguousCard(routed, toWork) {
   return n;
 }
 
-/* Unrecognized phrase — offer to send it straight to Claude Code instead of silent rejection.
- * `toWork` and `toRephrase` are caller-supplied so the card does not need to reach for the DOM. */
-function passthroughCard(phrase, toWork, toRephrase) {
-  const n = el('div', 'panel grey');
-  n.setAttribute('data-el', 'passthrough');
-  n.appendChild(el('div', 'sm t', C.intent.passthroughTitle));
-  n.appendChild(el('div', 'xs mut', C.intent.passthroughBody));
-  const acts = el('div', 'row-acts');
-  acts.appendChild(btn('btn sm', C.intent.toWork, toWork));
-  acts.appendChild(btn('btn sm ghost', C.intent.rephrase, toRephrase));
-  n.appendChild(acts);
-  return n;
-}
-
 /**
  * Every way a Work can fail to start, each with the reason and the way out `15` names.
  * The submitted text stays in the field throughout — it is never queued (UF-RULE-NOQUEUE).
@@ -744,4 +1011,3 @@ function head(title, right) {
   if (right) h.appendChild(right);
   return h;
 }
-

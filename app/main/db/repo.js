@@ -7,6 +7,307 @@ const path = require('node:path');
 
 const now = () => new Date().toISOString();
 
+function startAppSession(db, { appVersion, platform }) {
+  if (typeof appVersion !== 'string' || !appVersion || typeof platform !== 'string' || !platform) {
+    throw new TypeError('App session requires an app version and platform');
+  }
+  const id = randomUUID(), startedAt = now();
+  db.prepare('insert into app_session (id, started_at, app_version, platform) values (?, ?, ?, ?)')
+    .run(id, startedAt, appVersion, platform);
+  return { id, startedAt, appVersion, platform };
+}
+
+function endAppSession(db, id) {
+  if (!id) return false;
+  return db.prepare('update app_session set ended_at = coalesce(ended_at, ?) where id = ?')
+    .run(now(), id).changes === 1;
+}
+
+/* ── DG-05 · Task persistence ──────────────────────────────────────────────────── */
+const TASK_STATUSES = new Set(['open', 'in_progress', 'blocked', 'complete']);
+
+function taskFromRow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    dependencies: JSON.parse(row.dependencies),
+    acceptance_criteria: JSON.parse(row.acceptance_criteria),
+  };
+}
+
+function normalizeCriteria(criteria) {
+  if (!Array.isArray(criteria)) throw new TypeError('acceptanceCriteria must be an array');
+  const ids = new Set();
+  return criteria.map((item) => {
+    const object = typeof item === 'string' ? { text: item } : item;
+    if (!object || typeof object !== 'object' || Array.isArray(object) ||
+        typeof object.text !== 'string' || !object.text.trim()) {
+      throw new TypeError('each acceptance criterion must have non-empty text');
+    }
+    const id = typeof object.id === 'string' ? object.id.trim() : object.id ?? randomUUID();
+    if (typeof id !== 'string' || !id.trim() || ids.has(id)) {
+      throw new TypeError('acceptance criterion ids must be non-empty and unique');
+    }
+    ids.add(id);
+    return { id, text: object.text.trim() };
+  });
+}
+
+function normalizeDependencies(db, projectId, taskId, dependencies) {
+  if (!Array.isArray(dependencies) || dependencies.some((id) => typeof id !== 'string' || !id.trim())) {
+    throw new TypeError('dependencies must be an array of Task ids');
+  }
+  const ids = dependencies.map((id) => id.trim());
+  if (new Set(ids).size !== ids.length) throw new TypeError('dependencies must not contain duplicates');
+  if (ids.includes(taskId)) throw new TypeError('a Task cannot depend on itself');
+  if (ids.length) {
+    const rows = db.prepare(`select id, dependencies from task where project_id = ?`).all(projectId);
+    const byId = new Map(rows.map((row) => [row.id, JSON.parse(row.dependencies)]));
+    const found = ids.filter((id) => byId.has(id));
+    if (found.length !== ids.length) {
+      throw new TypeError('every dependency must be an existing Task in the same Project');
+    }
+    const reachesTask = (from, seen = new Set()) => {
+      if (from === taskId) return true;
+      if (seen.has(from)) return false;
+      seen.add(from);
+      return (byId.get(from) ?? []).some((next) => reachesTask(next, seen));
+    };
+    if (ids.some((id) => reachesTask(id))) throw new TypeError('Task dependencies must not create a cycle');
+  }
+  return ids;
+}
+
+const taskStatus = (value) => {
+  /* `complete` is persisted for the future evaluator but is not writable through this API.
+   * DG-10 will expose completion only alongside criterion-level evidence. */
+  if (!TASK_STATUSES.has(value) || value === 'complete') throw new TypeError('invalid Task status');
+  return value;
+};
+
+function taskRunRefusal(db, projectId, taskId) {
+  if (taskId == null) return null;
+  if (typeof taskId !== 'string' || !taskId.trim()) return 'bad-task-id';
+  const task = db.prepare('select project_id, status, verdict, dependencies from task where id = ?').get(taskId);
+  if (!task) return 'no-task';
+  if (task.project_id !== projectId) return 'task-project-mismatch';
+  if (task.status === 'complete' || task.verdict === 'pass') return 'task-complete';
+  for (const dependencyId of JSON.parse(task.dependencies)) {
+    const dependency = db.prepare('select status, verdict from task where id = ? and project_id = ?')
+      .get(dependencyId, projectId);
+    if (!dependency || dependency.status !== 'complete' || dependency.verdict !== 'pass') {
+      return 'task-dependencies-open';
+    }
+  }
+  return null;
+}
+
+function createTask(db, projectId, { goal, dependencies = [], acceptanceCriteria = [] }) {
+  if (typeof goal !== 'string' || !goal.trim()) throw new TypeError('Task goal must not be empty');
+  if (!db.prepare('select id from project where id = ?').get(projectId)) throw new TypeError('Project not found');
+  const id = randomUUID(), at = now();
+  db.exec('begin');
+  try {
+    const deps = normalizeDependencies(db, projectId, id, dependencies);
+    const criteria = normalizeCriteria(acceptanceCriteria);
+    db.prepare(`insert into task
+      (id, project_id, goal, dependencies, acceptance_criteria, status, verdict, created_at, updated_at)
+      values (?, ?, ?, ?, ?, 'open', 'unverified', ?, ?)`)
+      .run(id, projectId, goal.trim(), JSON.stringify(deps), JSON.stringify(criteria), at, at);
+    db.exec('commit');
+  } catch (e) {
+    try { db.exec('rollback'); } catch { /* already rolled back */ }
+    throw e;
+  }
+  return getTask(db, id);
+}
+
+const getTask = (db, id) => taskFromRow(db.prepare('select * from task where id = ?').get(id));
+
+const tasksForProject = (db, projectId) => db.prepare(
+  'select * from task where project_id = ? order by created_at, rowid'
+).all(projectId).map(taskFromRow);
+
+function updateTask(db, id, patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new TypeError('Task patch must be an object');
+  const allowed = new Set(['goal', 'dependencies', 'acceptanceCriteria', 'status']);
+  for (const key of Object.keys(patch)) if (!allowed.has(key)) throw new TypeError(`unsupported Task field: ${key}`);
+  db.exec('begin');
+  try {
+    const current = db.prepare('select * from task where id = ?').get(id);
+    if (!current) throw new TypeError('Task not found');
+    if (!Object.keys(patch).length) {
+      db.exec('commit');
+      return taskFromRow(current);
+    }
+    const fields = [], values = [];
+    if (Object.hasOwn(patch, 'goal')) {
+      if (typeof patch.goal !== 'string' || !patch.goal.trim()) throw new TypeError('Task goal must not be empty');
+      fields.push('goal = ?'); values.push(patch.goal.trim());
+    }
+    if (Object.hasOwn(patch, 'dependencies')) {
+      const deps = normalizeDependencies(db, current.project_id, id, patch.dependencies);
+      fields.push('dependencies = ?'); values.push(JSON.stringify(deps));
+    }
+    if (Object.hasOwn(patch, 'acceptanceCriteria')) {
+      fields.push('acceptance_criteria = ?'); values.push(JSON.stringify(normalizeCriteria(patch.acceptanceCriteria)));
+    }
+    if (['goal', 'dependencies', 'acceptanceCriteria'].some((key) => Object.hasOwn(patch, key))) {
+      fields.push("verdict = 'unverified'");
+      if (!Object.hasOwn(patch, 'status') && current.status === 'complete') fields.push("status = 'open'");
+    }
+    if (Object.hasOwn(patch, 'status')) {
+      fields.push('status = ?'); values.push(taskStatus(patch.status));
+    }
+    fields.push('updated_at = ?'); values.push(now(), id);
+    db.prepare(`update task set ${fields.join(', ')} where id = ?`).run(...values);
+    db.exec('commit');
+  } catch (e) {
+    try { db.exec('rollback'); } catch { /* already rolled back */ }
+    throw e;
+  }
+  return getTask(db, id);
+}
+
+function saveRunContextBundle(db, workId, built) {
+  if (!built?.bundle?.bundle_id || !Number.isInteger(built.bundle.bundle_schema_version) ||
+      typeof built.contentDigest !== 'string' || typeof built.agentPrompt !== 'string') {
+    throw new TypeError('invalid Run ContextBundle');
+  }
+  if (!db.prepare('select id from work where id = ?').get(workId)) throw new TypeError('Work not found');
+  const prior = db.prepare('select * from run_context_bundle where work_id = ?').get(workId);
+  if (prior) {
+    if (prior.id === built.bundle.bundle_id && prior.content_digest === built.contentDigest) return contextBundleFor(db, workId);
+    throw new TypeError('Run ContextBundle is already frozen');
+  }
+  db.prepare(`insert into run_context_bundle
+    (id, work_id, bundle_schema_version, created_at, builder_version, content_digest, bundle_json)
+    values (?, ?, ?, ?, ?, ?, ?)`)
+    .run(built.bundle.bundle_id, workId, built.bundle.bundle_schema_version, built.bundle.created_at,
+      built.bundle.builder_version, built.contentDigest, JSON.stringify(built.bundle));
+  return contextBundleFor(db, workId);
+}
+
+function contextBundleFor(db, workId) {
+  const row = db.prepare('select * from run_context_bundle where work_id = ?').get(workId);
+  if (!row) return null;
+  return { ...row, bundle: JSON.parse(row.bundle_json) };
+}
+
+function saveRunEvidence(db, workId, evidence) {
+  if (!evidence || !['changed_files', 'test_command'].includes(evidence.kind) ||
+      typeof evidence.source_ref !== 'string' || !evidence.source_ref ||
+      typeof evidence.content_digest !== 'string' || typeof evidence.summary !== 'string' ||
+      !evidence.observed_at || !evidence.details || typeof evidence.details !== 'object') {
+    throw new TypeError('invalid Run evidence');
+  }
+  const prior = db.prepare('select * from run_evidence where work_id = ? and kind = ? and source_ref = ?')
+    .get(workId, evidence.kind, evidence.source_ref);
+  if (prior) {
+    if (prior.content_digest === evidence.content_digest) return runEvidenceFor(db, workId);
+    throw new TypeError('Run evidence is immutable');
+  }
+  db.prepare(`insert into run_evidence
+    (id, work_id, kind, source_ref, observed_at, summary, content_digest, details_json)
+    values (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(randomUUID(), workId, evidence.kind, evidence.source_ref, evidence.observed_at,
+      evidence.summary, evidence.content_digest, JSON.stringify(evidence.details));
+  return runEvidenceFor(db, workId);
+}
+
+const runEvidenceFor = (db, workId) => db.prepare(
+  'select * from run_evidence where work_id = ? order by observed_at, rowid'
+).all(workId).map((row) => ({ ...row, details: JSON.parse(row.details_json) }));
+
+function taskCriterionReviewsFor(db, taskId) {
+  return db.prepare('select * from task_criterion_review where task_id = ? order by reviewed_at, rowid')
+    .all(taskId).map((row) => ({ ...row, evidence_ids: JSON.parse(row.evidence_ids) }));
+}
+
+const taskSpecDigest = (task) => createHash('sha256').update(JSON.stringify({
+  goal: task.goal,
+  dependencies: task.dependencies ?? [],
+  acceptanceCriteria: task.acceptance_criteria,
+}), 'utf8').digest('hex');
+
+function runMatchesTaskSpec(db, task, workId) {
+  const bundle = contextBundleFor(db, workId)?.bundle;
+  return Boolean(bundle && bundle.task_spec_digest === taskSpecDigest(task));
+}
+
+function currentTaskVerdict(db, task, workId, criterionId, criterionDigest, specDigest, nextVerdict) {
+  const criteria = task.acceptance_criteria;
+  const rows = taskCriterionReviewsFor(db, task.id);
+  const latest = new Map();
+  for (const row of rows) latest.set(row.criterion_id, row);
+  latest.set(criterionId, { task_id: task.id, work_id: workId, criterion_id: criterionId,
+    criterion_digest: criterionDigest, task_spec_digest: specDigest, verdict: nextVerdict });
+  const relevant = criteria.map((criterion) => {
+    const review = latest.get(criterion.id);
+    return review && review.task_spec_digest === specDigest &&
+      review.criterion_digest === createHash('sha256').update(criterion.text, 'utf8').digest('hex')
+      ? review : null;
+  });
+  if (relevant.some((review) => review?.verdict === 'fail')) return { verdict: 'fail', status: 'in_progress' };
+  if (criteria.length && relevant.every((review) => review?.verdict === 'pass')) {
+    const runs = new Set(relevant.map((review) => review.work_id));
+    if (runs.size === 1) {
+      const run = db.prepare('select outcome from work where id = ? and task_id = ?').get([...runs][0], task.id);
+      if (run?.outcome === 'complete') return { verdict: 'pass', status: 'complete' };
+    }
+  }
+  const hasReview = relevant.some(Boolean);
+  return { verdict: 'unverified', status: hasReview ? 'in_progress' : 'open' };
+}
+
+function reviewTaskCriterion(db, taskId, workId, criterionId, verdict, evidenceIds) {
+  if (!['pass', 'fail'].includes(verdict)) throw new TypeError('criterion verdict must be pass or fail');
+  if (!Array.isArray(evidenceIds) || !evidenceIds.length || evidenceIds.some((id) => typeof id !== 'string' || !id.trim()) ||
+      new Set(evidenceIds).size !== evidenceIds.length) {
+    throw new TypeError('criterion review requires distinct Run evidence ids');
+  }
+  const task = getTask(db, taskId);
+  if (!task) throw new TypeError('Task not found');
+  const criterion = task.acceptance_criteria.find((item) => item.id === criterionId);
+  if (!criterion) throw new TypeError('acceptance criterion not found');
+  const work = getWork(db, workId);
+  if (!work || work.task_id !== taskId || work.project_id !== task.project_id || work.status !== 'ended') {
+    throw new TypeError('review Run must be an ended Run of this Task');
+  }
+  if (verdict === 'pass' && work.outcome !== 'complete') {
+    throw new TypeError('a PASS review requires a successful Run outcome');
+  }
+  const bundle = contextBundleFor(db, workId)?.bundle;
+  const contextCriterion = bundle?.items?.find((item) =>
+    item.source_ref === `task:${taskId}:acceptance:${criterionId}`);
+  const criterionDigest = createHash('sha256').update(criterion.text, 'utf8').digest('hex');
+  const specDigest = taskSpecDigest(task);
+  if (!bundle || bundle.task_spec_digest !== specDigest || !contextCriterion ||
+      contextCriterion.content_digest !== criterionDigest) {
+    throw new TypeError('Run Context does not contain this current acceptance criterion');
+  }
+  const evidence = runEvidenceFor(db, workId);
+  if (evidenceIds.some((id) => !evidence.some((item) => item.id === id))) {
+    throw new TypeError('criterion review evidence must belong to the selected Run');
+  }
+  const at = now();
+  db.exec('begin');
+  try {
+    db.prepare(`insert into task_criterion_review
+      (id, task_id, work_id, criterion_id, criterion_digest, task_spec_digest, verdict, evidence_ids, reviewed_at)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(randomUUID(), taskId, workId, criterionId, criterionDigest, specDigest, verdict, JSON.stringify(evidenceIds), at);
+    const next = currentTaskVerdict(db, task, workId, criterionId, criterionDigest, specDigest, verdict);
+    db.prepare('update task set verdict = ?, status = ?, updated_at = ? where id = ?')
+      .run(next.verdict, next.status, at, taskId);
+    db.exec('commit');
+  } catch (e) {
+    try { db.exec('rollback'); } catch { /* already rolled back */ }
+    throw e;
+  }
+  return { task: getTask(db, taskId), reviews: taskCriterionReviewsFor(db, taskId) };
+}
+
 /** Make this folder the project context. Idempotent: the same path is one row forever. */
 function openProject(db, absPath, name) {
   const at = now();
@@ -112,12 +413,43 @@ const ACTIVE = "status <> 'ended'";
 const activeWork = (db, projectId) =>
   db.prepare(`select * from work where project_id = ? and ${ACTIVE}`).get(projectId) ?? null;
 
-function beginWork(db, projectId, intent) {
+function beginWork(db, projectId, intent, {
+  taskId = null, status = 'running', idempotencyKey = null, attempt = 1, retryOfWorkId = null,
+  retryReason = null, appSessionId = null,
+} = {}) {
+  if (!['running', 'starting'].includes(status)) return { ok: false, reason: 'bad-run-state' };
+  if (idempotencyKey != null && (typeof idempotencyKey !== 'string' || !idempotencyKey.trim())) {
+    return { ok: false, reason: 'bad-idempotency-key' };
+  }
+  if (!Number.isInteger(attempt) || attempt < 1) return { ok: false, reason: 'bad-attempt' };
+  if (retryOfWorkId != null) {
+    const prior = db.prepare('select task_id, project_id, status, attempt from work where id = ?').get(retryOfWorkId);
+    if (!prior || prior.project_id !== projectId || prior.task_id !== taskId || prior.status !== 'ended') {
+      return { ok: false, reason: 'bad-retry-source' };
+    }
+    const successor = workForRetrySource(db, retryOfWorkId);
+    if (successor) return { ok: true, existing: true, work: successor, retryReplay: true };
+    if (attempt !== (prior.attempt ?? 1) + 1) return { ok: false, reason: 'bad-attempt-sequence' };
+    if (typeof retryReason !== 'string' || !retryReason.trim()) return { ok: false, reason: 'retry-reason-required' };
+    retryReason = retryReason.trim();
+  } else if (retryReason != null) {
+    return { ok: false, reason: 'retry-source-required' };
+  }
+  if (idempotencyKey) {
+    const existing = workForIdempotency(db, projectId, idempotencyKey);
+    if (existing) return { ok: true, existing: true, work: existing };
+  }
+  const taskRefusal = taskRunRefusal(db, projectId, taskId);
+  if (taskRefusal) return { ok: false, reason: taskRefusal };
   const at = now();
   const id = randomUUID();
   try {
-    db.prepare(`insert into work (id, project_id, intent, status, requested_at, started_at)
-                values (?, ?, ?, 'running', ?, ?)`).run(id, projectId, intent, at, at);
+    db.prepare(`insert into work
+      (id, project_id, task_id, intent, status, requested_at, started_at,
+       idempotency_key, attempt, retry_of_work_id, retry_reason, agent_code, app_session_id)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, projectId, taskId, intent, status, at, at, idempotencyKey, attempt, retryOfWorkId,
+        retryReason, taskId ? 'claude_code' : null, appSessionId);
   } catch (e) {
     /* An active Work EXISTING is not evidence that it is what refused this insert — a NOT NULL
      * violation on `intent` would also land here and used to be reported as the D-117 guard.
@@ -126,9 +458,34 @@ function beginWork(db, projectId, intent) {
     const wasGuard = /UNIQUE constraint failed: work\.project_id/.test(String(e?.message ?? ''));
     const active = wasGuard ? activeWork(db, projectId) : null;
     if (active) return { ok: false, reason: 'active-work', active };
+    if (/UNIQUE constraint failed: work\.retry_of_work_id/.test(String(e?.message ?? '')) && retryOfWorkId) {
+      const successor = workForRetrySource(db, retryOfWorkId);
+      if (successor) return { ok: true, existing: true, work: successor, retryReplay: true };
+    }
     throw e;                                    // a different constraint — do not dress it up
   }
+  if (taskId) db.prepare("update task set status = 'in_progress', updated_at = ? where id = ?")
+    .run(at, taskId);
   return { ok: true, work: db.prepare('select * from work where id = ?').get(id) };
+}
+
+const workForIdempotency = (db, projectId, key) => db.prepare(
+  'select * from work where project_id = ? and idempotency_key = ?'
+).get(projectId, key) ?? null;
+
+const workForRetrySource = (db, priorWorkId) => db.prepare(
+  'select * from work where retry_of_work_id = ?'
+).get(priorWorkId) ?? null;
+
+function setRunnerIdentity(db, workId, sessionId, pid, startedAt = now()) {
+  db.prepare(`update work set runner_session_id = ?, runner_pid = ?, runner_started_at = ? where id = ?`)
+    .run(sessionId, Number.isInteger(pid) ? pid : null, startedAt, workId);
+  return getWork(db, workId);
+}
+
+function setRunFailureReason(db, workId, reason) {
+  db.prepare('update work set failure_reason = ? where id = ?').run(reason, workId);
+  return getWork(db, workId);
 }
 
 /* ── WBS-10 · the observed stream, persisted before anything interprets it ──────────
@@ -213,6 +570,10 @@ const getWork = (db, id) => db.prepare('select * from work where id = ?').get(id
 const worksFor = (db, projectId, limit = 20) =>
   db.prepare('select * from work where project_id = ? order by started_at desc, rowid desc limit ?')
     .all(projectId, limit);
+
+const worksForTask = (db, taskId, limit = 50) =>
+  db.prepare('select * from work where task_id = ? order by started_at desc, rowid desc limit ?')
+    .all(taskId, limit);
 
 /* ── WBS-08 · the basis a Work's diffs are computed against (D-121) ── */
 function saveBasis(db, workId, phase, { kind, ref, excluded, files }) {
@@ -524,20 +885,27 @@ const stepsFor = (db, workId) =>
  * `07` §8.5: a pid is reusable, so identity is `{pid, startedAt}` and both are compared.
  */
 function processFor(db, workId) {
+  const row = db.prepare('select runner_pid, runner_started_at, runner_session_id from work where id = ?').get(workId);
   for (const s of db.prepare("select payload from work_signal where work_id = ? and source = 'juqode' order by seq").all(workId)) {
     try {
       const p = JSON.parse(s.payload ?? '')?.juqodeProcess;
-      if (p?.pid) return p;
+      if (p?.pid) return { pid: p.pid, startedAt: p.startedAt ?? row?.runner_started_at ?? null,
+        sessionId: row?.runner_session_id ?? null };
     } catch { /* not the process marker */ }
   }
-  return null;
+  return row?.runner_pid ? { pid: row.runner_pid, startedAt: row.runner_started_at ?? null,
+    sessionId: row.runner_session_id ?? null } : null;
 }
 
 function reconcileLostWorks(db, isAlive = () => false) {
   const stranded = db.prepare("select * from work where status <> 'ended'").all()
-    .filter((w) => !isAlive(w, processFor(db, w.id)));
+    /* A Task Run belongs to the app process that opened its Claude stream. That stream cannot
+     * be reattached after a restart, even if the PID still answers; an uncertain old process is
+     * therefore ended_unknown. Legacy Work retains the pre-existing process-liveness behavior. */
+    .filter((w) => w.task_id != null || !isAlive(w, processFor(db, w.id)));
   for (const w of stranded) {
     setWorkState(db, w.id, { status: 'ended', outcome: 'ended_unknown' });
+    if (w.task_id) setRunFailureReason(db, w.id, 'app-restarted-before-run-completion');
     addSignal(db, w.id, { seq: nextSeq(db, w.id), source: 'juqode', kind: 'reconciled', payload: 'ended_unknown' });
     db.prepare("update step set state = 'not_executed', updated_at = ? where work_id = ? and state in ('running','declared_next')")
       .run(now(), w.id);
@@ -569,9 +937,14 @@ function reconcileInterpretations(db) {
 }
 
 module.exports = {
+  startAppSession, endAppSession,
   openProject, recentProjects,
+  createTask, getTask, tasksForProject, updateTask, taskRunRefusal,
+  saveRunContextBundle, contextBundleFor, saveRunEvidence, runEvidenceFor,
+  taskCriterionReviewsFor, reviewTaskCriterion, runMatchesTaskSpec,
   saveInterpretation, currentInterpretation,
-  activeWork, beginWork, getWork, worksFor, setWorkState,
+  activeWork, beginWork, getWork, worksFor, worksForTask, workForIdempotency, workForRetrySource,
+  setRunnerIdentity, setRunFailureReason, setWorkState,
   addSignal, signalsFor, countToolResults, nextSeq,
   saveBasis, basisFor,
   upsertStep, stepsFor,

@@ -8,6 +8,9 @@
  * `(work_id, seq) [unique]` 를 가진 work_signal.work_id 는 `>` 를 써도 통과한다.
  */
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 
 const src = readFileSync(new URL('./erd.dbml', import.meta.url), 'utf8');
 /* 컬럼 한 줄. dbdiagram 은 예약어를 컬럼 이름으로 쓸 때 "text" 처럼 따옴표를 친다 —
@@ -81,7 +84,7 @@ if (ungrouped.length) bad.push(`TableGroup 에 없는 표: ${ungrouped.join(', '
  * ------------------------------------------------------------------------ */
 const DB_DIR = new URL('../../app/main/db/', import.meta.url);
 const sqlSrc = readFileSync(new URL('schema.sql', DB_DIR), 'utf8');
-const dbSrc = readFileSync(new URL('db.js', DB_DIR), 'utf8');
+const migrations = require('../../app/main/db/db.js').MIGRATIONS;
 
 /* `create table x ( … );` 의 본문. 본문 안에 check(...) 가 들어 있어 정규식 하나로는 끝을 못
  * 찾는다 — 괄호 깊이를 세고, 따옴표 안의 괄호는 세지 않는다. */
@@ -128,11 +131,18 @@ function columnsOf(body) {
 }
 
 const real = new Map([...tableBodies(sqlSrc)].map(([n, b]) => [n, columnsOf(b)]));
-/* 마이그레이션을 그 위에 얹는다. 그림은 마이그레이션 뒤의 표를 그린다. */
-for (const m of dbSrc.matchAll(/alter table (\w+) add column (\w+)([^;']*)/gi)) {
-  const t = real.get(m[1].toLowerCase());
-  if (!t) { bad.push(`X-3 마이그레이션이 없는 표를 고친다: ${m[1]}`); continue; }
-  t.set(m[2].toLowerCase(), /\bnot null\b/i.test(m[3]));
+/* MIGRATIONS 는 유일한 변경 경로다. ALTER 와 CREATE TABLE 을 실제 실행 코드에서 읽어
+ * 마이그레이션 후 스키마와 다이어그램을 비교한다. */
+for (const migration of migrations) {
+  for (const [name, body] of tableBodies(migration.sql)) {
+    if (real.has(name)) { bad.push(`X-3 마이그레이션이 기존 표를 다시 정의한다: ${name}`); continue; }
+    real.set(name, columnsOf(body));
+  }
+  for (const m of migration.sql.matchAll(/alter table (\w+) add column (\w+)([^;]*)/gi)) {
+    const t = real.get(m[1].toLowerCase());
+    if (!t) { bad.push(`X-3 마이그레이션이 없는 표를 고친다: ${m[1]}`); continue; }
+    t.set(m[2].toLowerCase(), /\bnot null\b/i.test(m[3]));
+  }
 }
 
 const mvp = new Set();

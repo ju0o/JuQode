@@ -8,11 +8,12 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
+const { DatabaseSync } = require('node:sqlite');
 const os = require('node:os');
 const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
-const { openDb } = require(path.join(R, 'app/main/db/db.js'));
+const { openDb, SCHEMA_FILE } = require(path.join(R, 'app/main/db/db.js'));
 const repo = require(path.join(R, 'app/main/db/repo.js'));
 const E = require(path.join(R, 'app/main/change/explain.js'));
 const { KIND } = require(path.join(R, 'app/main/work/reducer.js'));
@@ -601,19 +602,18 @@ test('an existing store gains the source_ref column rather than being rebuilt', 
   /* Forward-only migrations, and this is the first one. A store written before this batch must
    * keep its History — `20`'s promise is that History never disappears. */
   const file = path.join(tempDir('juqode-mig-'), 'old.db');
-  const old = openDb(file);
+  /* Start from the actual version-1 Canon schema. Rewinding a latest-version store by deleting
+   * schema_version rows leaves later migrations' tables/columns behind and is not a valid old DB. */
+  const old = new DatabaseSync(file);
+  old.exec('pragma foreign_keys = on');
+  old.exec(fs.readFileSync(SCHEMA_FILE, 'utf8'));
   const project = repo.openProject(old, tempDir('juqode-p-'), 'p');
-  const workId = repo.beginWork(old, project.id, 'x').work.id;
+  const workId = 'legacy-work';
+  old.prepare(`insert into work (id, project_id, intent, status, requested_at, started_at)
+    values (?, ?, ?, 'running', ?, ?)`).run(workId, project.id, 'x', 't1', 't2');
   repo.saveDiff(old, workId, { file: 'a.ts', patch: '+1\n' });
-  old.exec('drop table change_group');
-  old.exec(`create table change_group (
-    id uuid primary key, work_id uuid not null references work(id) on delete cascade,
-    ord smallint not null, title text not null, what text, why text, affects text,
-    confidence text references confidence(code),
-    explainable boolean not null default true, unique (work_id, ord))`);
-  /* Put the store back at version 1, the shape it had before this migration existed. Each
-   * applied version is its own row, so the later ones are removed rather than renumbered. */
-  old.exec('delete from schema_version where version > 1');
+  const before = old.prepare('select name from pragma_table_info(?)').all('change_group').map((c) => c.name);
+  assert.ok(!before.includes('source_ref'));
   old.close();
 
   const reopened = openDb(file);

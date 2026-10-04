@@ -36,6 +36,8 @@ process.on('exit', () => {
 const { openDb } = require(path.join(R, 'app/main/db/db.js'));
 const repo = require(path.join(R, 'app/main/db/repo.js'));
 const supervisor = require(path.join(R, 'app/main/work/supervisor.js'));
+const session = require(path.join(R, 'app/main/claude/session.js'));
+const { KIND } = require(path.join(R, 'app/main/work/reducer.js'));
 
 const AVAILABLE = async () => ({ available: true, version: '9.9.9-fixture' });
 
@@ -65,7 +67,7 @@ function cliHome(dir) {
   return home;
 }
 
-function cli(dir, events, { edits = [], exit = 0, silent = false, name = 'fake-claude' } = {}) {
+function cli(dir, events, { edits = [], exit = 0, silent = false, capturePrompt = false, name = 'fake-claude' } = {}) {
   const home = cliHome(dir);
   const bin = path.join(home, name);
   const script = path.join(home, `${name}.js`);
@@ -75,6 +77,7 @@ function cli(dir, events, { edits = [], exit = 0, silent = false, name = 'fake-c
   fs.writeFileSync(script, `
 const fs = require('fs');
 fs.appendFileSync(${JSON.stringify(path.join(cliHome(dir), 'ARGV.log'))}, process.argv.slice(2).join(' ') + '\\n');
+${capturePrompt ? `fs.writeFileSync(${JSON.stringify(path.join(home, 'PROMPT.log'))}, fs.readFileSync(0, 'utf8'));` : ''}
 ${edits.map((e) => `fs.writeFileSync(${JSON.stringify(e.path)}, ${JSON.stringify(e.body)});`).join('\n')}
 ${silent ? '' : `for (const e of ${JSON.stringify(events)}) process.stdout.write(JSON.stringify(e) + '\\n');`}
 process.exit(${exit});
@@ -119,6 +122,174 @@ test('a Work runs, ends, and its changes are a measured number', async () => {
   assert.ok(signals.length >= 2, `only ${signals.length} signals persisted`);
   assert.ok(signals.every((s) => s.payload !== null || s.kind === 'reconciled'),
     '기술 출력 보기 would have nothing to show for some signal');
+  const changedEvidence = supervisor.snapshot(db, r.workId).runEvidence.find((item) => item.kind === 'changed_files');
+  assert.deepStrictEqual(changedEvidence.details.files, ['a.txt']);
+});
+
+test('a Task Run stores a completed test-like command separately from the Agent report', async () => {
+  const { dir, db, project, store } = bench();
+  const task = repo.createTask(db, project.id, { goal: 'Observe a test command', acceptanceCriteria: ['The command result is inspectable'] });
+  const toolUse = { type: 'assistant', message: { content: [
+    { type: 'tool_use', id: 'test-tool-1', name: 'Bash', input: { command: 'npm run test:unit' } },
+  ] } };
+  const toolResult = { type: 'user', message: { content: [
+    { type: 'tool_result', tool_use_id: 'test-tool-1', content: '599 tests passed', is_error: false },
+  ] }, tool_use_result: { stdout: '599 tests passed', stderr: '' } };
+  const bin = cli(dir, [INIT, toolUse, toolResult, { ...OK, result: 'completed successfully' }]);
+  const run = await supervisor.start(db, project, 'Run a test', {
+    evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey: 'evidence-run-1',
+  });
+  assert.strictEqual(run.ok, true);
+  await run.done;
+  const snap = supervisor.snapshot(db, run.workId);
+  const tests = snap.runEvidence.filter((item) => item.kind === 'test_command');
+  assert.strictEqual(tests.length, 1);
+  assert.strictEqual(tests[0].details.command, 'npm run test:unit');
+  assert.strictEqual(tests[0].details.result_state, 'returned');
+  assert.strictEqual(tests[0].details.exit_code, null);
+  assert.strictEqual(tests[0].details.test_pass_claimed, false);
+  assert.strictEqual(snap.result.claims.find((claim) => claim.kind === 'agent-report').data.text,
+    'completed successfully');
+  assert.notStrictEqual(tests[0].id, snap.result.claims.find((claim) => claim.kind === 'agent-report').sourceRef);
+});
+
+test('the existing Claude Work path carries the selected Task and frozen Context into the attempt', async () => {
+  const { dir, db, project, store } = bench();
+  const task = repo.createTask(db, project.id, {
+    goal: 'Change a.txt safely', acceptanceCriteria: ['The Work remains linked to this Task'],
+  });
+  const bin = cli(dir, [INIT, OK], {
+    edits: [{ path: path.join(dir, 'a.txt'), body: 'two\n' }], capturePrompt: true,
+  });
+  const run = await supervisor.start(db, project, 'Change a.txt safely', {
+    evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id,
+  });
+  assert.strictEqual(run.ok, true, `Task-linked Work refused: ${run.reason}`);
+  await run.done;
+  const work = repo.getWork(db, run.workId);
+  assert.strictEqual(work.task_id, task.id);
+  assert.deepStrictEqual(repo.worksForTask(db, task.id).map((item) => item.id), [run.workId]);
+  assert.strictEqual(work.intent, 'Change a.txt safely');
+  const context = repo.contextBundleFor(db, run.workId);
+  assert.ok(context, 'the started Task Run has no ContextBundle');
+  assert.strictEqual(context.bundle.task_ref, task.id);
+  assert.strictEqual(context.bundle.project_ref, project.id);
+  assert.strictEqual(context.bundle.workspace_capability.selected_file_isolation, false);
+  assert.deepStrictEqual(context.bundle.selected_resources, []);
+  assert.strictEqual(fs.readFileSync(path.join(`${dir}-cli`, 'PROMPT.log'), 'utf8'),
+    context.bundle.prompt_snapshot, 'the stored safe snapshot is exactly what the CLI received');
+});
+
+test('a Task Run and its Context exist before the Claude session can spawn', async () => {
+  const { dir, db, project, store } = bench();
+  const task = repo.createTask(db, project.id, { goal: 'Run before spawn', acceptanceCriteria: ['Stored first'] });
+  const requestKey = 'submit-once-001';
+  const actualRun = session.run;
+  let observedBeforeSpawn = null;
+  session.run = (options) => {
+    observedBeforeSpawn = repo.activeWork(db, project.id);
+    assert.strictEqual(observedBeforeSpawn.status, 'starting');
+    assert.strictEqual(observedBeforeSpawn.task_id, task.id);
+    assert.strictEqual(observedBeforeSpawn.idempotency_key, requestKey);
+    assert.ok(repo.contextBundleFor(db, observedBeforeSpawn.id), 'ContextBundle must be frozen before spawn');
+    options.onChild({ pid: process.pid, exitCode: null, signalCode: null });
+    options.onSignal({ kind: KIND.FINISH, payload: {
+      subtype: 'success', terminalReason: 'end_turn', isError: false, denials: [],
+    } }, { type: 'result' }, JSON.stringify({ type: 'result', subtype: 'success' }));
+    return Promise.resolve({ code: 0, signal: null, sawEvent: true, stderr: '', startFailed: false, unparsed: 0 });
+  };
+  try {
+    const r = await supervisor.start(db, project, 'Do it', {
+      evidenceStore: store, bin: 'not-spawned', detect: AVAILABLE, taskId: task.id,
+      idempotencyKey: requestKey,
+    });
+    assert.strictEqual(r.ok, true);
+    await r.done;
+    assert.ok(observedBeforeSpawn, 'the session started without a reserved Run');
+    const work = repo.getWork(db, r.workId);
+    assert.strictEqual(work.status, 'ended');
+    assert.strictEqual(work.outcome, 'complete');
+    assert.strictEqual(work.runner_session_id != null, true);
+    assert.strictEqual(work.runner_pid, process.pid);
+  } finally { session.run = actualRun; }
+});
+
+test('a Task process that emits no event remains a failed Run with a durable reason', async () => {
+  const { dir, db, project, store } = bench();
+  const task = repo.createTask(db, project.id, { goal: 'Record an Agent start failure', acceptanceCriteria: ['The attempt remains inspectable'] });
+  const bin = cli(dir, [], { silent: true, exit: 1 });
+  const r = await supervisor.start(db, project, 'Try the task', {
+    evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey: 'start-failure-1',
+  });
+  assert.strictEqual(r.ok, true, 'the accepted Run should be returned even if the child emits no event');
+  await r.done;
+  const work = repo.getWork(db, r.workId);
+  assert.strictEqual(work.task_id, task.id);
+  assert.strictEqual(work.status, 'ended');
+  assert.strictEqual(work.outcome, 'failed');
+  assert.strictEqual(work.failure_reason, 'agent-start-failed-before-first-event');
+  assert.ok(work.runner_session_id && work.runner_pid && work.runner_started_at);
+  assert.ok(repo.contextBundleFor(db, work.id));
+  assert.ok(repo.resultFor(db, work.id));
+});
+
+test('failed Task Run retries as a new Claude session and never rewrites Run #1', async () => {
+  const { dir, db, project, store } = bench();
+  const task = repo.createTask(db, project.id, {
+    goal: 'Retry without losing history', acceptanceCriteria: ['The retry is independently inspectable'],
+  });
+  const firstBin = cli(dir, [INIT, {
+    type: 'result', subtype: 'error_max_turns', terminal_reason: 'error_max_turns',
+    is_error: false, permission_denials: [], result: 'I could not finish within the turn limit',
+  }]);
+  const first = await supervisor.start(db, project, 'Make the requested change', {
+    evidenceStore: store, bin: firstBin, detect: AVAILABLE, taskId: task.id,
+    idempotencyKey: 'task-loop-attempt-1',
+  });
+  assert.strictEqual(first.ok, true);
+  await first.done;
+  const firstBefore = {
+    work: { ...repo.getWork(db, first.workId) },
+    context: JSON.stringify(repo.contextBundleFor(db, first.workId)),
+    result: JSON.stringify(repo.resultFor(db, first.workId)),
+    evidence: JSON.stringify(repo.runEvidenceFor(db, first.workId)),
+  };
+  assert.strictEqual(firstBefore.work.outcome, 'failed');
+
+  const retryReason = 'Continue the change and run the focused test';
+  const secondBin = cli(dir, [INIT, OK], {
+    edits: [{ path: path.join(dir, 'a.txt'), body: 'retry result with evidence\n' }], capturePrompt: true,
+  });
+  const second = await supervisor.start(db, project, retryReason, {
+    evidenceStore: store, bin: secondBin, detect: AVAILABLE, taskId: task.id,
+    idempotencyKey: 'task-loop-attempt-2', attempt: 2,
+    retryOfWorkId: first.workId, retryReason,
+  });
+  assert.strictEqual(second.ok, true);
+  assert.notStrictEqual(second.workId, first.workId);
+  await second.done;
+
+  const firstAfter = {
+    work: { ...repo.getWork(db, first.workId) },
+    context: JSON.stringify(repo.contextBundleFor(db, first.workId)),
+    result: JSON.stringify(repo.resultFor(db, first.workId)),
+    evidence: JSON.stringify(repo.runEvidenceFor(db, first.workId)),
+  };
+  assert.deepStrictEqual(firstAfter, firstBefore, 'Run #2 rewrote Run #1 history');
+  const secondSnap = supervisor.snapshot(db, second.workId);
+  assert.strictEqual(secondSnap.work.task_id, task.id);
+  assert.strictEqual(secondSnap.work.attempt, 2);
+  assert.strictEqual(secondSnap.work.retry_of_work_id, first.workId);
+  assert.strictEqual(secondSnap.work.retry_reason, retryReason);
+  assert.strictEqual(secondSnap.work.outcome, 'complete');
+  assert.notStrictEqual(secondSnap.work.runner_session_id, firstBefore.work.runner_session_id);
+  assert.notStrictEqual(secondSnap.contextBundle.bundle.bundle_id,
+    JSON.parse(firstBefore.context).bundle.bundle_id);
+  assert.strictEqual(fs.readFileSync(path.join(`${dir}-cli`, 'PROMPT.log'), 'utf8'),
+    secondSnap.contextBundle.bundle.prompt_snapshot, 'retry Context does not match the actual prompt');
+  assert.deepStrictEqual(repo.worksForTask(db, task.id).map((run) => run.id), [second.workId, first.workId]);
+  assert.strictEqual(repo.getTask(db, task.id).verdict, 'unverified',
+    'a successful agent run without criterion reviews must not mark the Task PASS');
 });
 
 test('a finished Work has a result, and every 확인됨 claim names its evidence', async () => {
@@ -363,6 +534,27 @@ test('cancelling a Work whose process is already gone closes it, and frees the s
   assert.strictEqual(repo.activeWork(db, project.id), null, 'the D-117 slot is still held');
 });
 
+test('cancelling a Task Run records a cancelled outcome and leaves its verdict unverified', async () => {
+  const { dir, db, project, store } = bench({ git: false });
+  const task = repo.createTask(db, project.id, { goal: 'Cancel without inventing rollback' });
+  const bin = path.join(dir, 'slow-task-claude');
+  fs.writeFileSync(bin, '#!/bin/sh\necho \'{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}\'\nsleep 20\n', { mode: 0o755 });
+  const run = await supervisor.start(db, project, 'Cancel this attempt', {
+    evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey: 'cancel-task-run-1',
+  });
+  assert.strictEqual(run.ok, true);
+  const before = repo.getWork(db, run.workId);
+  supervisor.cancel(db, run.workId);
+  await run.done;
+  const after = repo.getWork(db, run.workId);
+  assert.strictEqual(after.id, before.id);
+  assert.strictEqual(after.status, 'ended');
+  assert.ok(['cancelled_nochange', 'cancelled_partial'].includes(after.outcome));
+  assert.strictEqual(repo.getTask(db, task.id).verdict, 'unverified');
+  assert.strictEqual(repo.activeWork(db, project.id), null);
+  assert.ok(repo.resultFor(db, run.workId), 'cancelled attempt should remain inspectable');
+});
+
 test('a cancel whose stop is NOT observed leaves the Work open and says so', async () => {
   const { dir, db, project, store } = bench();
   /* A CLI that keeps running: the request is sent, and nothing has been seen to stop. */
@@ -428,6 +620,27 @@ echo '{"type":"result","subtype":"success","is_error":false,"permission_denials"
   await started[0].done;
 });
 
+test('two Task submissions for one Project reserve only one live Run', async () => {
+  const { dir, db, project, store } = bench();
+  const task = repo.createTask(db, project.id, { goal: 'Do not duplicate a live Task Run' });
+  const bin = cli(dir, [INIT, OK]);
+  const slowDetect = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    return AVAILABLE();
+  };
+  const [a, b] = await Promise.all([
+    supervisor.start(db, project, 'first request', { evidenceStore: store, bin, detect: slowDetect,
+      taskId: task.id, idempotencyKey: 'task-duplicate-a' }),
+    supervisor.start(db, project, 'duplicate request', { evidenceStore: store, bin, detect: slowDetect,
+      taskId: task.id, idempotencyKey: 'task-duplicate-b' }),
+  ]);
+  const started = [a, b].filter((result) => result.ok);
+  assert.strictEqual(started.length, 1);
+  assert.strictEqual([a, b].find((result) => !result.ok).reason, 'active-work');
+  assert.strictEqual(db.prepare('select count(*) n from work where task_id = ?').get(task.id).n, 1);
+  await started[0].done;
+});
+
 test('a signal that cannot be written does not take the app down', async () => {
   /* The session's own per-run counter collided with `unique (work_id, seq)` as soon as a retry
    * advanced the sequence, and it threw inside a stdout handler — in the main process that is
@@ -460,7 +673,9 @@ test('reconciliation ASKS whether the process is alive before closing a Work', (
   repo.addSignal(db, w.id, { seq: 0, source: 'juqode', kind: 'raw',
     payload: JSON.stringify({ juqodeProcess: { pid: 4242, startedAt: new Date().toISOString() } }) });
 
-  assert.deepStrictEqual(repo.processFor(db, w.id), { pid: 4242, startedAt: repo.processFor(db, w.id).startedAt });
+  assert.deepStrictEqual(repo.processFor(db, w.id), {
+    pid: 4242, startedAt: repo.processFor(db, w.id).startedAt, sessionId: null,
+  });
 
   /* alive → left alone */
   assert.deepStrictEqual(repo.reconcileLostWorks(db, () => true), []);

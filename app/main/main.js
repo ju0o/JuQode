@@ -52,6 +52,7 @@ if (!app.requestSingleInstanceLock()) {
    * losing the store is not a reason to show the user nothing. */
   let db = null;
   let dbFault = null;
+  let appSessionId = null;
   function openStore() {
     const file = process.env.JUQODE_DB || path.join(app.getPath('userData'), 'juqode.db');
     try {
@@ -104,6 +105,7 @@ if (!app.requestSingleInstanceLock()) {
   const handlers = makeHandlers({
     db: () => db,
     dbFault: () => dbFault,
+    appSessionId: () => appSessionId,
     evidenceStore: (projectId) => path.join(evidenceRoot(), projectId),
     push: pushUpdate,
     pushQc,
@@ -139,14 +141,20 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     readExternalAttempts = enforceLocalOnly(session.defaultSession);
     openStore();
+    if (db) {
+      const appSession = repo.startAppSession(db, { appVersion: app.getVersion(), platform: process.platform });
+      appSessionId = appSession.id;
+      trace('app-session.started', { platform: appSession.platform });
+    }
     /* D-124 · `20`: a Work whose process is gone cannot be judged, and a Work left `running`
-     * pins D-117's single slot forever.
+     * pins D-117's single slot forever. Each app launch has a durable app_session row; a Task
+     * Run cannot reattach its old stream after launch changes, so reconciliation records it as
+     * ended_unknown without starting another child. Legacy unlinked Work retains its old probe.
      *
      * A JuQode child is spawned detached and CAN outlive its parent, so this ASKS rather than
-     * assuming. `07` §8.5: a pid is reusable, so a pid that answers is only believed when the
-     * process also started before the Work's own start time was recorded. A Work we cannot
-     * decide about is left alone — closing a live session would let a second one start in the
-     * same repository, which is the thing D-117 exists to prevent. */
+     * assuming. Legacy rows have only the historical pid probe; a positively live process is
+     * left alone to preserve the active-project guard. Task Runs have explicit app-session
+     * ownership and are reconciled as unknown by the repository. */
     if (db) {
       const lost = repo.reconcileLostWorks(db, (_work, proc) => {
         if (!proc?.pid) return false;                     // no marker: we cannot ask, so it is gone
@@ -190,6 +198,7 @@ if (!app.requestSingleInstanceLock()) {
       /* WBS-25 · and the shell. It is detached, it holds the user's environment, and after a
        * quit nothing on screen could ever stop it again. */
       try { handlers.__stopAllTerm?.(); } catch { /* no session */ }
+      try { repo.endAppSession(db, appSessionId); } catch { /* store may already be closed/refused */ }
     });
 
     /* The quiet states are defined by the absence of a signal, so only a clock can deliver
@@ -234,6 +243,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('quit', (_e, exitCode) => {
     trace('quit', { exitCode });
+    try { repo.endAppSession(db, appSessionId); } catch { /* best effort before close */ }
     try { db?.close(); } catch { /* closing a store we are about to lose anyway */ }
   });
 }

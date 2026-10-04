@@ -10,14 +10,14 @@
 4. 이름을 `JuQode ERD` 로 저장
 5. 우상단 **Share** → 링크 복사 → 제출
 
-전체 49표 · 관계 49개 · 그룹 11개입니다.
+전체 53표 · 관계 54개 · 그룹 10개입니다.
 
 ## 그림에서 무엇을 보게 되는가
 
 | 그룹 | 뜻 |
 |---|---|
 | **읽는 법** | 표기 규칙 범례. 데이터가 아니라 안내다 — 각 줄의 말풍선에 뜻이 있다 |
-| **MVP ·** 5개 그룹 | **지금 실제로 도는 것.** 로컬 SQLite 26표 |
+| **MVP ·** 5개 그룹 | **지금 실제로 도는 것.** 로컬 SQLite 31표 |
 | **V1 ·** 4개 그룹 | **배포부터 생기는 것.** 서버 Postgres 21표 |
 | **제안 ·** | **아직 없는 것.** 마이그레이션이 필요하다 |
 
@@ -40,6 +40,7 @@
 |---|---|
 | `project.owner_id → profile.id` | **데이터베이스가 달라** 외래키로 강제되지 않는다. 선을 그으면 강제된다고 읽힌다 |
 | `work.outcome → work_outcome.code` | 컬럼이 nullable(`status='ended'` 일 때만 채워진다). dbdiagram 의 다대일은 자식이 NOT NULL 이어야 한다 |
+| `work.retry_of_work_id → work.id` | 첫 Run 은 null 이다. 같은 이유 |
 | `change_group.confidence → confidence.code` | 같은 이유 (설명 전에는 null) |
 
 셋 다 `_READ_ME` 와 해당 표의 `Note` 가 적고 있습니다. NOT NULL 로 적으면 **거짓이 되므로**

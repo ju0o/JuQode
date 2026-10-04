@@ -16,7 +16,7 @@
 // database_type 은 'PostgreSQL' 이지만 **MVP 절반은 로컬 SQLite 다**(D-129). DBML 은
 // 프로젝트당 엔진을 하나만 갖고, DDL 은 양쪽에서 도는 방언으로 쓰여 있다.
 //
-// 원본: app/main/db/schema.sql (26개 표) + app/main/db/db.js MIGRATIONS
+// 원본: app/main/db/schema.sql (26개 표) + app/main/db/db.js MIGRATIONS (현재 MVP 31개 표)
 // 설명: docs/design/ERD.md · 리뷰 대응: docs/design/DBML_REVIEW.md
 
 Project JuQode {
@@ -35,10 +35,10 @@ Table _READ_ME {
   c_note_v1 text [note: 'note V1 = 배포(V1)부터 생긴다. 지금 MVP 스키마에는 없다.']
   d_note_unused text [note: 'note MVP/미사용 = 컬럼은 있으나 지금 아무도 값을 넣지 않는다.']
   e_table_note text [note: '표 아래 Note = DBML 문법으로 표현할 수 없는 것만. CHECK 제약, 부분 UNIQUE 인덱스, 필요한 시드, 신뢰 경계, 알려진 구멍.']
-  f_group_mvp text [note: 'MVP 그룹 = 지금 도는 로컬 SQLite 26개 표. 로그인도 구독도 서버도 없다. 이 단계에서 확인하는 것은 하나다 — Claude Code 가 이 도구와 실제로 연동되는가.']
+  f_group_mvp text [note: 'MVP 그룹 = 지금 도는 로컬 SQLite 31개 표. 로그인도 구독도 서버도 없다. 이 단계에서 확인하는 것은 하나다 — Claude Code 가 이 도구와 실제로 연동되는가.']
   g_group_v1 text [note: 'V1 그룹 = 배포부터 생기는 서버 Postgres. 아직 하나도 만들지 않았다.']
   h_two_databases text [note: '데이터베이스가 둘이다. database_type 이 PostgreSQL 인 것은 dbdiagram 이 엔진을 하나만 받기 때문이고, MVP 절반은 로컬 임베디드 SQLite 다 (D-129).']
-  i_undrawn_refs text [note: '그리지 않은 연결 셋. project.owner_id -> profile.id 는 데이터베이스가 달라 외래키가 아니다. work.outcome -> work_outcome.code 와 change_group.confidence -> confidence.code 는 nullable 이라 dbdiagram 의 다대일 연산자가 거부한다.']
+  i_undrawn_refs text [note: '그리지 않은 연결 넷. project.owner_id -> profile.id 는 데이터베이스가 달라 로컬 외래키가 아니다. work.outcome, work.retry_of_work_id, change_group.confidence 는 nullable 이라 dbdiagram 의 다대일 연산자가 거부한다.']
   j_source text [note: '원본은 app/main/db/schema.sql 과 app/main/db/db.js 다. 이 그림은 사본이고, 값이 다르면 원본이 맞다.']
 }
 
@@ -80,18 +80,18 @@ Table schema_version {
 }
 
 // ============================================================
-// 제안 · 앱 실행 세션  —  아직 없다
-// 재시작 뒤에 "이전 실행이 남긴 것" 과 "지금 실행이 만든 것" 을 가르기 위한 것.
+// MVP · 앱 실행 세션
+// 프로세스 추적의 소유 범위를 식별한다. Work/QC runner_* 는 DG-13 에서 사용한다.
 // ============================================================
 
 Table app_session {
-  id uuid [pk, note: '제안']
-  started_at timestamptz [not null, note: '제안']
-  app_version text [not null, note: '제안']
-  platform text [not null, note: '제안']
-  ended_at timestamptz [note: '제안']
+  id uuid [pk]
+  started_at timestamptz [not null]
+  app_version text [not null]
+  platform text [not null]
+  ended_at timestamptz
 
-  Note: '제안 · 이 표는 schema.sql 에 없다. 마이그레이션이 필요하고 아직 쓰지 않았다. 지금은 프로세스 표식이 work_signal 의 payload JSON 안에 {juqodeProcess:{pid,startedAt}} 로 들어가고, repo.js processFor() 가 그 작업의 모든 신호를 훑어 꺼낸다.'
+  Note: 'Migration 5. 현재 앱 세션과 이후 runner_* process identity 를 구분한다. 실행기 동작과 재시작 대조는 DG-13 에서 연결한다.'
 }
 
 // ============================================================
@@ -104,13 +104,75 @@ Table project {
   name text [not null]
   first_opened_at timestamptz [not null]
   last_opened_at timestamptz [not null]
-  owner_id uuid [note: 'V1']
+  owner_id uuid
 
   indexes {
     path [unique]
   }
 
-  Note: 'V1 에서 path 단독 unique 가 (owner_id, path) 로 **교체된다** — 둘이 동시에 존재하지 않으므로 지금 있는 것만 그린다. SQLite 는 unique 제약을 떼려면 표를 다시 써야 한다. owner_id 는 서버 profile.id 를 가리키는 논리적 참조이고 외래키가 아니다 — 서버는 클라이언트가 보낸 이 값을 읽지 않는다.'
+  Note: 'Migration 6 의 owner_id 는 nullable 예약 필드다. 현재 login/ownership 동작은 없고 path 단독 unique 가 그대로 유지된다. 실제 owner FK 는 별도 서버 DB의 profile.id 이므로 로컬 FK 는 아니다.'
+}
+
+Table task {
+  id uuid [pk]
+  project_id uuid [not null]
+  goal text [not null]
+  dependencies text [not null, default: '[]']
+  acceptance_criteria text [not null, default: '[]']
+  status text [not null, default: 'open']
+  verdict text [not null, default: 'unverified']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+
+  Note: 'dependencies 와 acceptance_criteria 는 JSON text 다. 기존 Work 는 재구성 가능한 Task 가 없으면 연결하지 않는다. verdict 는 초기 unverified 이고 DG-10 증거 평가 전에는 PASS 를 쓰지 않는다.'
+}
+
+Table run_context_bundle {
+  id uuid [pk]
+  work_id uuid [not null, unique]
+  bundle_schema_version integer [not null]
+  created_at timestamptz [not null]
+  builder_version text [not null]
+  content_digest text [not null]
+  bundle_json text [not null]
+
+  Note: 'Migration 7. Run 당 한 개의 불변 ContextBundle 이다. JSON 은 전달 항목, digest, safe snapshot, exclusions 와 workspace capability 를 담는다. secret 내용은 redacted snapshot 만 보존한다.'
+}
+
+Table run_evidence {
+  id uuid [pk]
+  work_id uuid [not null]
+  kind text [not null]
+  source_ref text [not null]
+  observed_at timestamptz [not null]
+  summary text [not null]
+  content_digest text [not null]
+  details_json text [not null]
+
+  indexes {
+    (work_id, kind, source_ref) [unique]
+    (work_id, observed_at)
+  }
+
+  Note: 'Migration 9. 불변 관측 사실이다. test_command 는 Agent 가 실행한 test-like Bash 호출과 연결 결과를 보존하되, is_error=false 만으로 테스트 PASS 라고 주장하지 않는다. 출력은 알려진 secret 패턴을 redaction 한 제한된 excerpt 와 digest 만 남긴다.'
+}
+
+Table task_criterion_review {
+  id uuid [pk]
+  task_id uuid [not null]
+  work_id uuid [not null]
+  criterion_id text [not null]
+  criterion_digest text [not null]
+  task_spec_digest text [not null]
+  verdict text [not null]
+  evidence_ids text [not null]
+  reviewed_at timestamptz [not null]
+
+  indexes {
+    (task_id, criterion_id, reviewed_at)
+  }
+
+  Note: 'Migration 10. Append-only human criterion review. Evidence IDs must belong to the reviewed Run; PASS needs a successful Run, current Task/criterion snapshot, and every criterion PASS against the same Run. No Agent report path writes reviews.'
 }
 
 Table interpretation {
@@ -158,23 +220,32 @@ Table interpretation_read_file {
 Table work {
   id uuid [pk]
   project_id uuid [not null]
+  task_id uuid
   intent text [not null]
   status text [not null]
   outcome text
   requested_at timestamptz [not null]
   started_at timestamptz [not null]
   ended_at timestamptz
-  runner_session_id uuid [note: '제안']
-  runner_pid integer [note: '제안']
-  runner_started_at timestamptz [note: '제안']
+  runner_session_id uuid
+  runner_pid integer
+  runner_started_at timestamptz
+  idempotency_key text
+  attempt integer [not null, default: 1]
+  retry_of_work_id uuid
+  retry_reason text
+  failure_reason text
+  agent_code text
+  app_session_id uuid
   stream_ref text [note: 'MVP/미사용']
   signals_truncated boolean [not null, default: false]
 
   indexes {
     (project_id, ended_at) [name: 'work_project_recent']
+    (retry_of_work_id) [unique, name: 'work_one_retry_successor']
   }
 
-  Note: 'CHECK: (status = 「ended」) = (outcome is not null) · (status = 「ended」) = (ended_at is not null) — D-124 · V2 M-14. 부분 UNIQUE: (project_id) WHERE status <> 「ended」 — 프로젝트당 진행 중 작업 한 건 (D-117), 인덱스 이름 work_one_active_per_project. runner_* 는 제안이다: 지금 PID 는 work_signal 의 payload JSON 안에 있다. PID 는 재사용되므로 단독으로 믿지 않는다 — 프로세스 시작 시각이 work.started_at 보다 앞설 때만 살아 있는 것으로 본다.'
+  Note: 'task_id 는 nullable 이라 과거 Work 는 연결되지 않은 채 남는다. 한 Task 에 여러 Work/Run 을 둘 수 있다. Task Run 은 migration 8 의 starting 상태와 durable idempotency key 로 spawn 전에 저장된다. started_at 은 Run 시도 시작이고 runner_started_at 은 실제 child 시작이다. retry_of_work_id 는 nullable self-FK 이므로 선은 그리지 않았다. migration 12 의 retry_reason 은 사람이 준 보완 사유이며 work_one_retry_successor 부분 UNIQUE 가 원본 Run 당 후속 Run 하나만 허용해 재전송을 멱등 처리한다. agent_code 는 migration 11 부터 새 Task Run 의 claude_code adapter 값을 기록하며 과거 Work 는 null 로 둔다. app_session_id 는 migration 13 부터 Run 을 JuQode 실행 세션에 연결하며 과거 Work 는 null 이다. CHECK: (status = 「ended」) = (outcome is not null) · (status = 「ended」) = (ended_at is not null) — D-124 · V2 M-14. 부분 UNIQUE: (project_id) WHERE status <> 「ended」 — 프로젝트당 진행 중 작업 한 건 (D-117), 인덱스 이름 work_one_active_per_project. runner_* 는 migration 5 에 생겼고 DG-13 이 durable recovery 에서 사용한다.'
 }
 
 Table step {
@@ -343,9 +414,9 @@ Table quick_command_run {
   output_head text
   output_ref text [note: 'MVP/미사용']
   exit_code integer
-  runner_session_id uuid [note: '제안']
-  runner_pid integer [note: '제안']
-  runner_started_at timestamptz [note: '제안']
+  runner_session_id uuid
+  runner_pid integer
+  runner_started_at timestamptz
   started_at timestamptz
   ended_at timestamptz
   stopped_at timestamptz
@@ -355,7 +426,7 @@ Table quick_command_run {
     (project_id, created_at) [name: 'qc_project_recent']
   }
 
-  Note: '알려진 구멍: 프로세스 표식이 **하나도 없다.** 그래서 재시작 뒤 이전 실행의 run 을 물어볼 수조차 없고, 실제로 돌고 있는 개발 서버도 확인 불가로 닫힌다. runner_* 세 컬럼이 그 해법이고, 아직 제안이다.'
+  Note: 'runner_* 는 migration 5 에 생겼다. DG-13 에서 재시작 뒤에도 실제 실행과 QC 기록을 연결하고 ended_unknown 을 판정한다.'
 }
 
 // ============================================================
@@ -606,6 +677,11 @@ Table audit_usage {
 // ============================================================
 
 Ref: interpretation.project_id > project.id [delete: restrict]
+Ref: task.project_id > project.id [delete: restrict]
+Ref: run_context_bundle.work_id - work.id [delete: restrict]
+Ref: run_evidence.work_id > work.id [delete: restrict]
+Ref: task_criterion_review.task_id > task.id [delete: restrict]
+Ref: task_criterion_review.work_id > work.id [delete: restrict]
 Ref: work.project_id > project.id [delete: restrict]
 Ref: quick_command_run.project_id > project.id [delete: restrict]
 
@@ -696,13 +772,18 @@ TableGroup "MVP · 룩업" {
 
 TableGroup "MVP · 프로젝트와 해석" {
   project
+  task
   interpretation
   interpretation_answer
   interpretation_read_file
 }
 
 TableGroup "MVP · Work 와 증거" {
+  app_session
   work
+  run_context_bundle
+  run_evidence
+  task_criterion_review
   step
   work_signal
   evidence_basis
@@ -720,10 +801,6 @@ TableGroup "MVP · 변경" {
 
 TableGroup "MVP · Quick Command" {
   quick_command_run
-}
-
-TableGroup "제안 · 아직 없음" {
-  app_session
 }
 
 TableGroup "V1 · 룩업" {

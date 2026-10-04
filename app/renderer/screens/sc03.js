@@ -383,6 +383,8 @@ function aboutCard(snap, api) {
   card.appendChild(head(C.gap.workAbout));
   card.appendChild(field(C.gap.workActor, C.actor.claude));
   card.appendChild(field(C.gap.workBasis, snap.evidence?.before ? C.gap.workBasisOk : C.brief.chips.no));
+  if (snap.work.task_id) card.appendChild(field(C.gap.task.selected, snap.work.task_id));
+  if (snap.contextBundle?.bundle) card.appendChild(contextDisclosure(snap.contextBundle));
   card.appendChild(el('div', 'xs mut2', C.gap.workStepsNote));
   card.appendChild(rawOutput(snap, api));
   return card;
@@ -401,6 +403,15 @@ function rawOutput(snap, api) {
     if (r?.ok) box.textContent = r.signals.map((s) => `${s.seq} ${s.source}/${s.kind} ${s.payload ?? ''}`).join('\n');
   });
   return d;
+}
+
+function contextDisclosure(record) {
+  const details = el('details', 'run-context');
+  const bundle = record.bundle;
+  details.appendChild(el('summary', 'xs mut', `${C.gap.task.prompt} · v${bundle.bundle_schema_version} · ${record.content_digest.slice(0, 12)}`));
+  details.appendChild(el('pre', 'run-context-prompt', bundle.prompt_snapshot ?? ''));
+  details.appendChild(el('div', 'xs mut2', C.gap.task.contextScope));
+  return details;
 }
 
 /**
@@ -448,6 +459,26 @@ function resultCard(snap, api, nav, state) {
    * on (D-114, `18` §0.9). The chip is per CLAIM, never per card — a single chip over a mixed
    * list would be asserting one confidence for several different things. */
   for (const c of snap.result?.claims ?? []) card.appendChild(claimRow(c));
+  const evidence = snap.runEvidence ?? [];
+  if (evidence.length) {
+    const disclosure = el('details', 'run-evidence');
+    disclosure.appendChild(el('summary', 'xs mut', `${C.gap.task.testEvidence} · ${evidence.length}`));
+    for (const item of evidence) {
+      const row = el('div', 'run-evidence-row');
+      row.appendChild(el('div', 'xs', item.kind === 'test_command' ? item.summary : C.gap.task.changedFiles));
+      if (item.kind === 'changed_files') {
+        const files = item.details.files ?? [];
+        row.appendChild(el('div', 'xs mut2', files.length ? files.join(' · ') : C.gap.task.noChanges));
+      } else {
+        const state = item.details.result_state === 'error' ? C.gap.task.evidenceError
+          : item.details.result_state === 'returned' ? C.gap.task.evidenceReturned : C.gap.task.evidenceUnknown;
+        row.appendChild(el('div', 'xs mut2', `${state}${item.details.exit_code == null ? '' : ` · Exit code ${item.details.exit_code}`}`));
+        if (item.details.output_excerpt) row.appendChild(el('pre', 'run-evidence-output', item.details.output_excerpt));
+      }
+      disclosure.appendChild(row);
+    }
+    card.appendChild(disclosure);
+  }
 
   /* 부분 완료 needs both lists (`15`): what was done, and what was not. */
   const done = (snap.result?.items ?? []).filter((i) => i.kind === 'done');

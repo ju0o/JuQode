@@ -29,10 +29,10 @@ const asRoot = process.getuid && process.getuid() === 0;
 
 /* ─────────────────────────── WBS-21 · store ─────────────────────────── */
 
-test('fresh store: the Canon schema is applied whole', () => {
+test('fresh store: the Canon schema and additive migrations are applied whole', () => {
   const db = openDb(':memory:');
   const tables = db.prepare("select count(*) n from sqlite_master where type='table'").get().n;
-  assert.strictEqual(tables, 26, '20 / schema.sql declares 26 tables');
+  assert.strictEqual(tables, 31, '26 Canon tables plus five additive Task/Run tables');
   assert.strictEqual(db.prepare('select max(version) v from schema_version').get().v, LATEST);
   db.close();
 });
@@ -631,6 +631,30 @@ test('a Work is not started for an unknown project, or for an empty request', as
     assert.strictEqual((await h['juqode:work-start'](null, p.id, bad)).reason, 'empty-intent',
       `an empty request started a Work: ${JSON.stringify(bad)}`);
   }
+  db.close();
+});
+
+test('Work IPC binds an optional Task only when it belongs to the selected Project', async () => {
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const db = openDb(':memory:');
+  const first = repo.openProject(db, '/p/task-owner', 'owner');
+  const second = repo.openProject(db, '/p/task-other', 'other');
+  const task = repo.createTask(db, first.id, { goal: 'Owned task' });
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x', push: () => {} });
+  assert.deepStrictEqual(await h['juqode:work-start'](null, second.id, 'x', task.id), {
+    ok: false, reason: 'task-project-mismatch',
+  });
+  assert.deepStrictEqual(await h['juqode:work-start'](null, first.id, 'x', 'missing-task'), {
+    ok: false, reason: 'no-task',
+  });
+  assert.deepStrictEqual(await h['juqode:work-start'](null, first.id, 'x', 12), {
+    ok: false, reason: 'bad-task-id',
+  });
+  assert.deepStrictEqual(await h['juqode:work-start'](null, first.id, 'x', task.id), {
+    ok: false, reason: 'bad-idempotency-key',
+  });
+  assert.strictEqual(db.prepare('select count(*) n from work').get().n, 0,
+    'a rejected cross-Project or malformed Task reference starts no Work');
   db.close();
 });
 

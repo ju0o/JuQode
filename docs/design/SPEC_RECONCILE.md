@@ -86,6 +86,33 @@
 
 ---
 
+### 3.1 2026-10-04 PM amendment — Dogfood sequence
+
+Read-only inspection of the current implementation and local development DB found only migrations
+2 and 3 in source, while the DB ledger contained versions 1 and 2. Versions 4 and 5 had never
+been implemented or applied. The Founder/PM therefore superseded the reserved ordering above:
+
+| Version | Current assignment | Timing |
+|---|---|---|
+| **4** | JuQode Task persistence (DG-05) | Dogfood critical path · applied by migration code, not private Canon edits |
+| **5** | Work-to-Task link (`work.task_id`) plus process-tracking schema (`app_session` + `runner_*`, DG-06/X-6) | After Task persistence; runtime recovery in DG-13 |
+| **6** | nullable `project.owner_id` reservation (P1-5) | Future auth readiness; no login or enforcement |
+| **7** | Immutable `run_context_bundle` linked to one Work/Run (DG-07) | Dogfood critical path; safe snapshots/digests only |
+| **8** | Task Run pre-spawn state, durable idempotency, attempt/retry/failure fields (DG-08/12) | Dogfood critical path |
+| **9** | Immutable `run_evidence` for measured changes and test-like command results (DG-09) | Dogfood critical path; redacted excerpts/digests |
+| **10** | Append-only `task_criterion_review` (DG-10) | PASS requires every current criterion and evidence from one successful Run |
+| **11** | Nullable `work.agent_code` (DG-08) | New Task Runs explicitly record `claude_code`; old Work stays null |
+| **12** | `work.retry_reason` and unique retry-successor index (DG-12) | One source Run can have at most one retry successor; a replay returns that Run |
+| **13** | nullable `work.app_session_id` and lookup index (DG-13) | New Task Runs record the owning JuQode launch; old Work stays null |
+
+This does not rewrite any applied migration. If another current JuQode DB is found with version 4
+or 5 already applied, stop and preserve its numbering before adding another migration.
+Migration 6 currently adds a nullable `project.owner_id` only; it does not add login, ownership
+enforcement, or replace local path uniqueness. Migration 7 stores Run ContextBundles. The local
+development DB is still at v2; the application source currently implements v4–v13, all forward
+only and exercised on disposable SQLite DBs. Migration 12 adds retry idempotency; migration 13
+connects Task Runs to app-session ownership for restart reconciliation.
+
 ## 4. 나머지 판정 넷
 
 | | 판정 | 반영 |

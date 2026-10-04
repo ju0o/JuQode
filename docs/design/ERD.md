@@ -1,4 +1,4 @@
-# ERD — JuQode 데이터 모델 (2026-09-12 기준)
+# ERD — JuQode 데이터 모델 (2026-10-05 기준)
 
 > 상태: **현행 반영 (AS-IS + 확정 변경)**. `app/main/db/schema.sql` 은 Canon `docs/data/schema.sql` 의
 > **축자 복사본**이며 이 저장소에서 편집하지 않는다. 스키마 변경은 전부 `app/main/db/db.js` 의
@@ -12,7 +12,7 @@
 |---|---|---|
 | 위치 | `userData/juqode.db` | Supabase 프로젝트 |
 | 엔진 | `node:sqlite` (Electron 44 내장) | Postgres 17 |
-| 담는 것 | 프로젝트 · 해석 · Work · 증거 · 변경 · Quick Command | 계정 · 정책 · 사용량 |
+| 담는 것 | 프로젝트 · Task · 해석 · Work · 증거 · 변경 · Quick Command | 계정 · 정책 · 사용량 |
 | 나가는 것 | **아무것도 나가지 않는다** | 로그인 · 정책 읽기 · 작업 카운트 +1 |
 
 **코드 · diff · 파일 경로 · 프롬프트 · 에이전트 출력은 서버로 가지 않는다.** (A안 §2)
@@ -60,6 +60,9 @@
 앵커: schema_version (version, applied_at)
 ```
 
+`project → task` 는 장기 목표와 acceptance/verdict 를 보유한다. 기존 `work` 는 실행 이력으로
+남아 있고, DG-06 에서만 재구성 가능한 새 실행분에 `task_id` 를 연결한다.
+
 ### 읽는 법
 - `restrict` = **프로젝트는 지워지지 않는다** (F-18 · D-129). History 가 사라지지 않는다는 약속이 FK 로 적혀 있다.
 - `cascade` = Work 가 지워지면 그 아래는 전부 따라간다.
@@ -74,7 +77,7 @@
 
 | 버전 | 내용 | 이유 |
 |---|---|---|
-| 1 | `schema.sql` 26개 테이블 seed | Canon `20` |
+| 1 | `schema.sql` 26개 base 테이블 seed | Canon `20` |
 | 2 | `change_group.source_ref` 추가 | D-114: 확인됨 주장은 근거를 지목한다 (CF-13) |
 | **3** | `quick_command_rule` 에 `qc.git.commit` · `qc.deploy` 추가 | **PM 판정 2026-09-12** — F-17 의 닫힌 6개를 8개로 (아래 §4) |
 
@@ -82,11 +85,18 @@
 >
 > | 버전 | 내용 | 언제 |
 > |---|---|---|
-> | **4** | 프로세스 추적 — `app_session` + `work`·`quick_command_run` 의 `runner_session_id`·`runner_pid`·`runner_started_at` (X-6) | **MVP 인증 전** (기존 재조정 진실성 결함 수정) |
-> | **5** | `project.owner_id` + `unique(owner_id, path)` (P1-5) | V1 · **MVP 인증 후** |
+> | **4** | `task` — Project goal/dependencies/acceptance/status/verdict (DG-05) | JuQode migration code · temp DB verified; userData DB remains v2 |
+> | **5** | `work.task_id` + process schema — `app_session`, Work/QC `runner_*` (DG-06/X-6) | JuQode migration code · runtime recovery is DG-13 |
+> | **6** | nullable `project.owner_id` (future auth reservation) | JuQode migration code · no login or ownership behavior |
+> | **7** | immutable per-Run `run_context_bundle` (DG-07) | JuQode migration code · safe snapshots/digests only |
+> | **8** | Task Run starting state, idempotency, attempt/retry link, failure reason (DG-08/12) | JuQode migration code · legacy Work remains compatible |
+> | **9** | immutable `run_evidence` rows for measured changes and test-like command results (DG-09) | JuQode migration code · redacted output excerpts/digests |
+> | **10** | append-only `task_criterion_review` records (DG-10) | PASS requires every current criterion, evidence from one successful Run, and explicit review |
+> | **11** | nullable `work.agent_code` (DG-08) | New Task Runs record `claude_code`; historical Work remains null |
+> | **12** | `work.retry_reason` + one-successor-per-Run index (DG-12) | Retry is a new Run; replaying a retry returns its existing successor |
+> | **13** | `work.app_session_id` (DG-13) | Each new Run records the JuQode launch that owned its process; old active Task Runs reconcile to unknown after restart |
 >
-> 번호는 재사용하지 않는다. 마이그레이션 5 는 SQLite 가 유니크 제약 해제에 테이블 재작성을
-> 요구하므로 `project_new` → 복사 → `rename` 형태가 된다.
+> 2026-10-04 Founder/PM ruling 에 따라 미적용 예약을 v4=Task, v5=process/link, v6=owner_id 로 조정했다. v6 는 nullable owner_id 만 더하며 현재 path unique 를 유지한다. v7 은 DG-07 ContextBundle 이다. v12 는 DG-12 retry 사유와 멱등 successor index, v13 은 DG-13 Run ↔ app-session 연결이다. 번호는 재사용하지 않는다.
 
 ---
 
@@ -149,7 +159,7 @@ auth.users (Supabase 관리)
 
 > users / teams / billing / cost usage / **undo-rollback state** / intent queue / terminal sessions / full project source
 
-- **users/teams** — A안이 서버로 옮긴다. 로컬 스키마에는 `project.owner_id` 만 들어온다 (마이그레이션 4).
+- **users/teams** — A안이 서버로 옮긴다. 로컬 스키마에는 `project.owner_id` 만 들어온다 (마이그레이션 6).
 - **undo-rollback state** — 여전히 없고, **있을 필요가 없다.** 2026-09-12 에 들어온 되돌리기(WBS-19b)는 새 상태를 만들지 않는다: `evidence_basis.ref` 가 가리키는 before 트리에서 파일을 다시 써 낼 뿐이다. 되돌리기는 **저장된 상태가 아니라 이미 있는 증거의 사용**이다.
 - **terminal sessions** — 셸 세션은 프로세스의 것이고 저장소의 것이 아니다. 앱이 죽으면 세션도 죽는다.
 

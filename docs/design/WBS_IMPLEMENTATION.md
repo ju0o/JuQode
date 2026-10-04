@@ -4,7 +4,7 @@
 > R · P0~P4 의 **ID 와 정의는 그대로 살아 있고** 거기서 이어진다. 바뀐 것:
 > ① **실행 단계가 Phase A → MVP 인증 → V1 로 나뉘었다** — P1~P4 는 MVP 인증 전까지 **보류**
 > ② **P1-2 의 「서버 테이블 3개」는 낡았다** (X-1a: ERD 21표 모델). 이 텍스트에서 시작하지 않는다
-> ③ P1-5 의 마이그레이션 번호가 **4 → 5** (4 는 X-6 프로세스 추적)
+> ③ 당시 P1-5 의 마이그레이션 번호가 **4 → 5** 였으나, 2026-10-04 Dogfood ruling 으로 현재는 **6**이다 (4=Task · 5=X-6)
 > ④ **M-3 도그푸드가 R 트랙보다 먼저**다
 > ⑤ P4-1·P4-2 의 Windows 검증은 **Windows 10 1809+ 와 11 둘 다**여야 인증이다
 >
@@ -213,7 +213,7 @@
 - **완료 기준** 상한을 5→1 로 내린 직후 호출이 `allowed=false` 로 바뀐다. `suspended` 계정은 상한과 무관하게 `false`.
 - **오류 시** `consume_work()` 본문 (`security definer` · `search_path` 누락이 흔하다)
 
-### P1-5 · 로컬 마이그레이션 4 — `project.owner_id`
+### P1-5 · 로컬 마이그레이션 6 — `project.owner_id`
 - **세부** `project` 테이블 재작성(`project_new` → 복사 → rename), `unique(owner_id, path)`. 기존 행의 `owner_id` 는 최초 로그인 계정으로 채운다.
 - **우선순위** 필수 · **선행** P1-2
 - **도구** Claude Code · `node --test tests/store.test.js`

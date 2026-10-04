@@ -10,7 +10,6 @@
  * directory, a way to push updates, and the dialog's owning window.
  */
 const path = require('node:path');
-const { shell } = require('electron');
 const repo = require('./db/repo');
 const project = require('./project');
 const claude = require('./claude-detect');
@@ -57,6 +56,19 @@ function orientationOf(works) {
    * rest of the project's life, with a dozen completed Works sitting under the sentence. `18`
    * writes it in the singular because it is about the one the user just left. */
   return works[0].outcome === 'ended_unknown' ? 'unknown' : 'finished';
+}
+
+/* A restarted, unknown Run may have left its detached Claude process group alive. A retry is
+ * explicit, but starting another writer in the same Project while that group may still write
+ * is unsafe. This is a conservative existence probe; it never signals or kills the process. */
+function runnerMayBeAlive(work) {
+  if (!Number.isInteger(work?.runner_pid) || work.runner_pid < 1) return false;
+  const targets = process.platform === 'win32' ? [work.runner_pid] : [-work.runner_pid, work.runner_pid];
+  for (const pid of targets) {
+    try { process.kill(pid, 0); return true; }
+    catch (error) { if (error?.code === 'EPERM') return true; }
+  }
+  return false;
 }
 
 function makeHandlers(deps) {
@@ -428,23 +440,117 @@ function makeHandlers(deps) {
       return detecting;
     },
 
-    /* HTTPS only — the renderer cannot reach arbitrary protocols. */
-    'juqode:open-external': (_e, url) => {
-      if (typeof url === 'string' && url.startsWith('https://')) shell.openExternal(url);
-    },
-
     'juqode:route-intent': (_e, text) => ({ ok: true, route: classify(String(text ?? '')) }),
 
-    'juqode:work-start': async (_e, projectId, intent) => {
+    'juqode:task-list': (_e, projectId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      if (!db().prepare('select id from project where id = ?').get(projectId)) return { ok: false, reason: 'no-project' };
+      return { ok: true, tasks: repo.tasksForProject(db(), projectId) };
+    },
+
+    'juqode:task-create': (_e, projectId, input) => {
+      const gate = needDb();
+      if (gate) return gate;
+      if (!db().prepare('select id from project where id = ?').get(projectId)) return { ok: false, reason: 'no-project' };
+      try { return { ok: true, task: repo.createTask(db(), projectId, input ?? {}) }; }
+      catch (error) { return { ok: false, reason: 'invalid-task', detail: error.message }; }
+    },
+
+    'juqode:task-update': (_e, taskId, patch) => {
+      const gate = needDb();
+      if (gate) return gate;
+      try { return { ok: true, task: repo.updateTask(db(), taskId, patch) }; }
+      catch (error) { return { ok: false, reason: 'invalid-task', detail: error.message }; }
+    },
+
+    'juqode:task-detail': (_e, taskId) => {
+      const gate = needDb();
+      if (gate) return gate;
+      const task = repo.getTask(db(), taskId);
+      if (!task) return { ok: false, reason: 'no-task' };
+      return { ok: true, task, reviews: repo.taskCriterionReviewsFor(db(), task.id),
+        runs: repo.worksForTask(db(), task.id, 100).map((run) => ({
+          ...supervisor.snapshot(db(), run.id),
+          taskSpecCurrent: repo.runMatchesTaskSpec(db(), task, run.id),
+        })) };
+    },
+
+    'juqode:task-review-criterion': (_e, taskId, workId, criterionId, verdict, evidenceIds) => {
+      const gate = needDb();
+      if (gate) return gate;
+      try { return { ok: true, ...repo.reviewTaskCriterion(db(), taskId, workId, criterionId, verdict, evidenceIds) }; }
+      catch (error) { return { ok: false, reason: 'invalid-review', detail: error.message }; }
+    },
+
+    'juqode:task-retry': async (_e, taskId, priorWorkId, retryReason, idempotencyKey) => {
+      const gate = needDb();
+      if (gate) return gate;
+      if (typeof taskId !== 'string' || typeof priorWorkId !== 'string' ||
+          typeof retryReason !== 'string' || !retryReason.trim()) {
+        return { ok: false, reason: 'bad-retry-request' };
+      }
+      if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
+        return { ok: false, reason: 'bad-idempotency-key' };
+      }
+      const task = repo.getTask(db(), taskId);
+      if (!task) return { ok: false, reason: 'no-task' };
+      const prior = repo.getWork(db(), priorWorkId);
+      if (!prior || prior.task_id !== task.id || prior.project_id !== task.project_id) {
+        return { ok: false, reason: 'bad-retry-source' };
+      }
+      const successor = repo.workForRetrySource(db(), prior.id);
+      if (successor) return { ok: true, work: supervisor.snapshot(db(), successor.id), existing: true };
+      if (prior.status !== 'ended') return { ok: false, reason: 'retry-run-not-ended' };
+      if (prior.outcome === 'ended_unknown' && runnerMayBeAlive(prior)) {
+        return { ok: false, reason: 'prior-process-may-still-live' };
+      }
+      const latest = repo.worksForTask(db(), task.id, 1)[0];
+      if (!latest || latest.id !== prior.id) return { ok: false, reason: 'retry-source-not-latest' };
+      const taskRefusal = repo.taskRunRefusal(db(), task.project_id, task.id);
+      if (taskRefusal) return { ok: false, reason: taskRefusal };
+      const duplicate = repo.workForIdempotency(db(), task.project_id, idempotencyKey);
+      if (duplicate) return { ok: true, work: supervisor.snapshot(db(), duplicate.id), existing: true };
+
+      const reason = retryReason.trim();
+      const result = await supervisor.start(db(),
+        db().prepare('select * from project where id = ?').get(task.project_id), reason, {
+          evidenceStore: deps.evidenceStore(task.project_id),
+          onUpdate: deps.push,
+          taskId: task.id,
+          idempotencyKey,
+          attempt: (prior.attempt ?? 1) + 1,
+          retryOfWorkId: prior.id,
+          retryReason: reason,
+          appSessionId: deps.appSessionId?.() ?? null,
+        });
+      return result.ok ? { ok: true, work: supervisor.snapshot(db(), result.workId), existing: Boolean(result.existing) } : result;
+    },
+
+    'juqode:work-start': async (_e, projectId, intent, taskId = null, idempotencyKey = null) => {
       const gate = needDb();
       if (gate) return gate;
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
       if (typeof intent !== 'string' || !intent.trim()) return { ok: false, reason: 'empty-intent' };
+      if (taskId != null) {
+        const taskRefusal = repo.taskRunRefusal(db(), projectId, taskId);
+        if (taskRefusal) return { ok: false, reason: taskRefusal };
+        if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
+          return { ok: false, reason: 'bad-idempotency-key' };
+        }
+      }
+      if (idempotencyKey) {
+        const existing = repo.workForIdempotency(db(), projectId, idempotencyKey);
+        if (existing) return { ok: true, work: supervisor.snapshot(db(), existing.id), existing: true };
+      }
 
       const r = await supervisor.start(db(), row, intent, {
         evidenceStore: deps.evidenceStore(projectId),
         onUpdate: deps.push,
+        taskId,
+        idempotencyKey,
+        appSessionId: deps.appSessionId?.() ?? null,
       });
       return r.ok ? { ok: true, work: supervisor.snapshot(db(), r.workId) } : r;
     },

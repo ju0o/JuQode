@@ -1,0 +1,502 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
+
+const R = path.resolve(__dirname, '..');
+const { MIGRATIONS, SCHEMA_FILE, openDb } = require(path.join(R, 'app/main/db/db.js'));
+const repo = require(path.join(R, 'app/main/db/repo.js'));
+const { buildContextBundle } = require(path.join(R, 'app/main/work/context.js'));
+const { tempDir } = require(path.join(__dirname, 'tmp.js'));
+
+function setup() {
+  const db = openDb(':memory:');
+  const project = repo.openProject(db, tempDir('juqode-task-'), 'Task test');
+  return { db, project };
+}
+
+function reviewRun(db, project, task, { outcome = 'complete', evidence = true } = {}) {
+  const work = repo.beginWork(db, project.id, 'Run for evidence review', { taskId: task.id }).work;
+  const built = buildContextBundle({ project, task, userPrompt: 'Implement and verify' });
+  repo.saveRunContextBundle(db, work.id, built);
+  repo.setWorkState(db, work.id, { status: 'ended', outcome });
+  const refs = [];
+  if (evidence) {
+    for (const [kind, sourceRef, summary, details] of [
+      ['changed_files', 'evidence:before→after', '1 changed file measured', { known: true, files: ['src/app.js'] }],
+      ['test_command', 'test-call-1', 'npm test', { result_state: 'returned', test_pass_claimed: false }],
+    ]) {
+      const rows = repo.saveRunEvidence(db, work.id, {
+        kind, source_ref: sourceRef, observed_at: 't1', summary,
+        content_digest: `digest:${sourceRef}`, details,
+      });
+      refs.push(rows.find((row) => row.source_ref === sourceRef).id);
+    }
+  }
+  return { work: repo.getWork(db, work.id), refs };
+}
+
+test('Task persistence creates durable, separate Project children with truthful initial verdict', () => {
+  const { db, project } = setup();
+  try {
+    const task = repo.createTask(db, project.id, {
+      goal: '  Add a focused persistence check  ',
+      acceptanceCriteria: ['The Task is stored', { id: 'criterion-2', text: 'A result is inspectable' }],
+    });
+    assert.strictEqual(task.project_id, project.id);
+    assert.strictEqual(task.goal, 'Add a focused persistence check');
+    assert.deepStrictEqual(task.dependencies, []);
+    assert.deepStrictEqual(task.acceptance_criteria, [
+      { id: task.acceptance_criteria[0].id, text: 'The Task is stored' },
+      { id: 'criterion-2', text: 'A result is inspectable' },
+    ]);
+    assert.strictEqual(task.status, 'open');
+    assert.strictEqual(task.verdict, 'unverified');
+    assert.strictEqual(task.created_at, task.updated_at);
+    assert.deepStrictEqual(repo.tasksForProject(db, project.id).map((row) => row.id), [task.id]);
+    assert.strictEqual(db.prepare('select count(*) n from work').get().n, 0,
+      'creating a Task does not create or masquerade as a Work/Run');
+  } finally { db.close(); }
+});
+
+test('Task dependencies must reference distinct Tasks in the same Project', () => {
+  const { db, project } = setup();
+  try {
+    const prerequisite = repo.createTask(db, project.id, { goal: 'Prerequisite' });
+    const dependent = repo.createTask(db, project.id, {
+      goal: 'Dependent', dependencies: [prerequisite.id],
+    });
+    assert.deepStrictEqual(dependent.dependencies, [prerequisite.id]);
+    assert.throws(() => repo.createTask(db, project.id, {
+      goal: 'Unknown dependency', dependencies: ['not-a-task'],
+    }), /same Project/);
+    assert.throws(() => repo.createTask(db, project.id, {
+      goal: 'Duplicate dependency', dependencies: [prerequisite.id, prerequisite.id],
+    }), /duplicates/);
+    const otherProject = repo.openProject(db, '/tmp/task-other-project', 'Other');
+    const foreignTask = repo.createTask(db, otherProject.id, { goal: 'Foreign' });
+    assert.throws(() => repo.createTask(db, project.id, {
+      goal: 'Cross-project dependency', dependencies: [foreignTask.id],
+    }), /same Project/);
+    assert.throws(() => repo.updateTask(db, prerequisite.id, { dependencies: [prerequisite.id] }), /itself/);
+    assert.throws(() => repo.updateTask(db, prerequisite.id, { dependencies: [dependent.id] }), /cycle/);
+  } finally { db.close(); }
+});
+
+test('Task records survive closing and reopening the local database', () => {
+  const file = path.join(tempDir('juqode-task-reopen-'), 'tasks.db');
+  let db = openDb(file);
+  const project = repo.openProject(db, '/tmp/durable-task-project', 'Durable');
+  const task = repo.createTask(db, project.id, {
+    goal: 'Survive application restart', acceptanceCriteria: ['History remains readable'],
+  });
+  db.close();
+
+  db = openDb(file);
+  try {
+    const restored = repo.getTask(db, task.id);
+    assert.strictEqual(restored.project_id, project.id);
+    assert.strictEqual(restored.goal, task.goal);
+    assert.deepStrictEqual(restored.acceptance_criteria, task.acceptance_criteria);
+    assert.strictEqual(restored.verdict, 'unverified');
+  } finally { db.close(); }
+});
+
+test('Task updates preserve criterion identity and cannot bypass the evidence verdict gate', () => {
+  const { db, project } = setup();
+  try {
+    const task = repo.createTask(db, project.id, { goal: 'Initial goal', acceptanceCriteria: ['Criterion'] });
+    const criterionId = task.acceptance_criteria[0].id;
+    const updated = repo.updateTask(db, task.id, {
+      goal: 'Revised goal',
+      acceptanceCriteria: [{ id: criterionId, text: 'Revised criterion' }],
+      status: 'in_progress',
+    });
+    assert.strictEqual(updated.goal, 'Revised goal');
+    assert.strictEqual(updated.acceptance_criteria[0].id, criterionId);
+    assert.strictEqual(updated.status, 'in_progress');
+    assert.strictEqual(updated.verdict, 'unverified');
+    assert.throws(() => repo.updateTask(db, task.id, { status: 'complete' }), /invalid Task status/);
+    assert.throws(() => repo.updateTask(db, task.id, { verdict: 'pass' }), /unsupported Task field/);
+    assert.throws(() => repo.createTask(db, project.id, { goal: '   ' }), /goal/);
+    assert.throws(() => repo.createTask(db, project.id, { goal: 'Missing criteria array', acceptanceCriteria: 'not-an-array' }), /array/);
+  } finally { db.close(); }
+});
+
+test('Task PASS requires every criterion to be reviewed against evidence from one successful Run', () => {
+  const { db, project } = setup();
+  try {
+    const task = repo.createTask(db, project.id, {
+      goal: 'Ship the requested behavior', acceptanceCriteria: ['The UI renders it', 'A test covers it', 'The result is inspectable'],
+    });
+    const { work, refs } = reviewRun(db, project, task);
+    const first = repo.reviewTaskCriterion(db, task.id, work.id, task.acceptance_criteria[0].id, 'pass', [refs[0]]);
+    assert.strictEqual(first.task.verdict, 'unverified');
+    assert.strictEqual(first.task.status, 'in_progress');
+    const second = repo.reviewTaskCriterion(db, task.id, work.id, task.acceptance_criteria[1].id, 'pass', [refs[1]]);
+    assert.strictEqual(second.task.verdict, 'unverified', 'one of three acceptance criteria is still unreviewed');
+    assert.strictEqual(second.task.status, 'in_progress');
+    const third = repo.reviewTaskCriterion(db, task.id, work.id, task.acceptance_criteria[2].id, 'pass', [refs[1]]);
+    assert.strictEqual(third.task.verdict, 'pass');
+    assert.strictEqual(third.task.status, 'complete');
+    assert.strictEqual(third.reviews.length, 3);
+    assert.throws(() => db.prepare('update task_criterion_review set verdict = ? where task_id = ?').run('fail', task.id), /immutable/);
+    assert.throws(() => db.prepare('delete from task_criterion_review where task_id = ?').run(task.id), /immutable/);
+  } finally { db.close(); }
+});
+
+test('"completed successfully" without evidence cannot pass a Task', () => {
+  const { db, project } = setup();
+  try {
+    const task = repo.createTask(db, project.id, { goal: 'Verify a behavior', acceptanceCriteria: ['Behavior is correct'] });
+    const { work } = reviewRun(db, project, task, { evidence: false });
+    repo.saveResult(db, work.id, {
+      outcome: 'complete', summary: 'completed successfully', whatFailed: null,
+      claims: [{ kind: 'agent-report', data: { text: 'completed successfully' }, confidence: 'expected', sourceRef: 'claude:result' }],
+      items: [],
+    });
+    assert.throws(() => repo.reviewTaskCriterion(db, task.id, work.id, task.acceptance_criteria[0].id, 'pass', []), /requires distinct Run evidence/);
+    assert.strictEqual(repo.getTask(db, task.id).verdict, 'unverified');
+    assert.strictEqual(repo.getTask(db, task.id).status, 'in_progress');
+    assert.throws(() => repo.updateTask(db, task.id, { verdict: 'pass' }), /unsupported Task field/);
+  } finally { db.close(); }
+});
+
+test('criterion review rejects foreign evidence, stale Task context, and PASS from a failed Run', () => {
+  const { db, project } = setup();
+  try {
+    const task = repo.createTask(db, project.id, { goal: 'Keep criterion current', acceptanceCriteria: ['The old behavior is gone'] });
+    const old = reviewRun(db, project, task);
+    const otherTask = repo.createTask(db, project.id, { goal: 'Other goal', acceptanceCriteria: ['Other criterion'] });
+    const other = reviewRun(db, project, otherTask);
+    assert.throws(() => repo.reviewTaskCriterion(db, task.id, old.work.id,
+      task.acceptance_criteria[0].id, 'pass', other.refs), /belong to the selected Run/);
+    repo.updateTask(db, task.id, { acceptanceCriteria: ['A changed criterion'] });
+    assert.throws(() => repo.reviewTaskCriterion(db, task.id, old.work.id,
+      repo.getTask(db, task.id).acceptance_criteria[0].id, 'pass', old.refs), /current acceptance criterion/);
+
+    const failureTask = repo.createTask(db, project.id, { goal: 'A failed attempt', acceptanceCriteria: ['The attempt passes'] });
+    const failed = reviewRun(db, project, failureTask, { outcome: 'failed' });
+    assert.throws(() => repo.reviewTaskCriterion(db, failureTask.id, failed.work.id,
+      failureTask.acceptance_criteria[0].id, 'pass', failed.refs), /successful Run outcome/);
+    const markedFail = repo.reviewTaskCriterion(db, failureTask.id, failed.work.id,
+      failureTask.acceptance_criteria[0].id, 'fail', failed.refs);
+    assert.strictEqual(markedFail.task.verdict, 'fail');
+    assert.strictEqual(markedFail.task.status, 'in_progress');
+  } finally { db.close(); }
+});
+
+test('Task IPC exposes Project-scoped creation, selection, and a truthful unverified detail', async () => {
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const { db, project } = setup();
+  try {
+    const handlers = makeHandlers({ db: () => db, dbFault: () => null,
+      evidenceStore: () => tempDir('juqode-task-ipc-evidence-'), push: () => {} });
+    assert.deepStrictEqual(await handlers['juqode:task-list'](null, 'missing-project'),
+      { ok: false, reason: 'no-project' });
+    const created = await handlers['juqode:task-create'](null, project.id, {
+      goal: 'Create one selectable Task', acceptanceCriteria: ['The Task remains unverified before evidence'],
+    });
+    assert.strictEqual(created.ok, true);
+    assert.strictEqual(created.task.verdict, 'unverified');
+    assert.deepStrictEqual((await handlers['juqode:task-list'](null, project.id)).tasks.map((task) => task.id), [created.task.id]);
+    const detail = await handlers['juqode:task-detail'](null, created.task.id);
+    assert.strictEqual(detail.task.id, created.task.id);
+    assert.deepStrictEqual(detail.runs, []);
+    assert.deepStrictEqual(detail.reviews, []);
+    const invalid = await handlers['juqode:task-review-criterion'](null, created.task.id, 'missing-work',
+      created.task.acceptance_criteria[0].id, 'pass', ['no-evidence']);
+    assert.strictEqual(invalid.ok, false);
+    assert.strictEqual((await handlers['juqode:task-detail'](null, created.task.id)).task.verdict, 'unverified');
+  } finally { db.close(); }
+});
+
+test('Task retry IPC deduplicates a replay by source Run before invoking the Agent adapter', async () => {
+  const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+  const supervisor = require(path.join(R, 'app/main/work/supervisor.js'));
+  const { db, project } = setup();
+  const actualStart = supervisor.start;
+  try {
+    const task = repo.createTask(db, project.id, { goal: 'Retry through the Product boundary' });
+    const prior = repo.beginWork(db, project.id, 'Run #1', { taskId: task.id }).work;
+    repo.setWorkState(db, prior.id, { status: 'ended', outcome: 'failed' });
+    const handlers = makeHandlers({ db: () => db, dbFault: () => null,
+      evidenceStore: () => tempDir('juqode-task-retry-ipc-'), push: () => {} });
+    const calls = [];
+    supervisor.start = async (store, projectRow, intent, options) => {
+      calls.push({ projectId: projectRow.id, intent, options });
+      const begun = repo.beginWork(store, projectRow.id, intent, options);
+      return begun.ok ? { ok: true, workId: begun.work.id } : begun;
+    };
+    const reason = 'Add the missing verification evidence';
+    const first = await handlers['juqode:task-retry'](null, task.id, prior.id, reason, 'retry-ipc-1');
+    assert.strictEqual(first.ok, true);
+    assert.strictEqual(first.work.work.task_id, task.id);
+    assert.strictEqual(first.work.work.attempt, 2);
+    assert.strictEqual(first.work.work.retry_reason, reason);
+    assert.strictEqual(first.work.work.retry_of_work_id, prior.id);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].options.taskId, task.id);
+    assert.strictEqual(calls[0].options.retryOfWorkId, prior.id);
+    assert.strictEqual(calls[0].options.attempt, 2);
+
+    const replay = await handlers['juqode:task-retry'](null, task.id, prior.id,
+      'a different body after a lost reply', 'retry-ipc-2');
+    assert.strictEqual(replay.ok, true);
+    assert.strictEqual(replay.existing, true);
+    assert.strictEqual(replay.work.work.id, first.work.work.id);
+    assert.strictEqual(calls.length, 1, 'a replay spawned or reserved another retry');
+    assert.strictEqual(db.prepare('select count(*) n from work where task_id = ?').get(task.id).n, 2);
+    repo.setWorkState(db, first.work.work.id, { status: 'ended', outcome: 'failed' });
+
+    const unknownTask = repo.createTask(db, project.id, { goal: 'Do not overlap an unknown process' });
+    const unknown = repo.beginWork(db, project.id, 'Unknown after restart', { taskId: unknownTask.id }).work;
+    repo.setRunnerIdentity(db, unknown.id, 'unknown-session-id', process.pid);
+    repo.setWorkState(db, unknown.id, { status: 'ended', outcome: 'ended_unknown' });
+    const unsafeRetry = await handlers['juqode:task-retry'](null, unknownTask.id, unknown.id,
+      'Retry while its process may still exist', 'retry-unknown-live');
+    assert.strictEqual(unsafeRetry.reason, 'prior-process-may-still-live');
+    assert.strictEqual(calls.length, 1, 'an unknown Run with a live pid was retried into the same project');
+  } finally {
+    supervisor.start = actualStart;
+    db.close();
+  }
+});
+
+test('migration 4 preserves pre-existing Works and does not invent Tasks', () => {
+  const file = path.join(tempDir('juqode-task-migration-'), 'legacy.db');
+  const legacy = new DatabaseSync(file);
+  legacy.exec('pragma foreign_keys = on');
+  legacy.exec(fs.readFileSync(SCHEMA_FILE, 'utf8'));
+  for (const migration of MIGRATIONS.filter((m) => m.to <= 3)) {
+    legacy.exec(migration.sql);
+    legacy.prepare('insert into schema_version values (?, ?)').run(migration.to, '2026-01-01T00:00:00Z');
+  }
+  const projectId = 'legacy-project';
+  const workId = 'legacy-work';
+  legacy.prepare(`insert into project (id, path, name, first_opened_at, last_opened_at)
+    values (?, ?, ?, ?, ?)`).run(projectId, '/tmp/legacy-project', 'legacy', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+  legacy.prepare(`insert into work (id, project_id, intent, status, requested_at, started_at)
+    values (?, ?, ?, 'running', ?, ?)`).run(workId, projectId, 'legacy intent', '2026-01-02T00:00:00Z', '2026-01-02T00:00:01Z');
+  legacy.close();
+
+  const upgraded = openDb(file);
+  try {
+    assert.strictEqual(upgraded.prepare('select max(version) v from schema_version').get().v, 13);
+    assert.deepStrictEqual({ ...upgraded.prepare('select id, project_id, intent, status, requested_at, started_at from work').get() }, {
+      id: workId,
+      project_id: projectId,
+      intent: 'legacy intent',
+      status: 'running',
+      requested_at: '2026-01-02T00:00:00Z',
+      started_at: '2026-01-02T00:00:01Z',
+    });
+    assert.strictEqual(upgraded.prepare('select count(*) n from task').get().n, 0,
+      'historical Work rows stay taskless when no Task can be reconstructed');
+    assert.strictEqual(upgraded.prepare('select task_id from work where id = ?').get(workId).task_id, null,
+      'DG-06 adds the link without fabricating a historical Task');
+    assert.strictEqual(upgraded.prepare("select count(*) n from sqlite_master where type='table' and name='app_session'").get().n, 1);
+  } finally { upgraded.close(); }
+});
+
+test('migration 5 adds Task linkage and process fields without changing existing Work or QC rows', () => {
+  const file = path.join(tempDir('juqode-task-work-migration-'), 'v4.db');
+  const v4 = new DatabaseSync(file);
+  v4.exec('pragma foreign_keys = on');
+  v4.exec(fs.readFileSync(SCHEMA_FILE, 'utf8'));
+  for (const migration of MIGRATIONS.filter((m) => m.to <= 4)) {
+    v4.exec(migration.sql);
+    v4.prepare('insert into schema_version values (?, ?)').run(migration.to, '2026-01-01T00:00:00Z');
+  }
+  v4.prepare(`insert into project (id, path, name, first_opened_at, last_opened_at)
+    values (?, ?, ?, ?, ?)`).run('project-v4', '/tmp/v4', 'v4', 't0', 't0');
+  v4.prepare(`insert into work (id, project_id, intent, status, requested_at, started_at)
+    values (?, ?, ?, 'running', ?, ?)`).run('work-v4', 'project-v4', 'old Work', 't1', 't2');
+  v4.prepare(`insert into quick_command_run
+    (id, project_id, phrase, rule_id, command, status, started_at, created_at)
+    values (?, ?, ?, ?, ?, 'running', ?, ?)`).run('qc-v4', 'project-v4', 'start', 'qc.dev.start', 'npm run dev', 't3', 't3');
+  v4.close();
+
+  const db = openDb(file);
+  try {
+    assert.strictEqual(db.prepare('select max(version) v from schema_version').get().v, 13);
+    assert.strictEqual(db.prepare('select task_id from work where id = ?').get('work-v4').task_id, null);
+    assert.strictEqual(db.prepare('select intent from work where id = ?').get('work-v4').intent, 'old Work');
+    assert.strictEqual(db.prepare('select phrase from quick_command_run where id = ?').get('qc-v4').phrase, 'start');
+    for (const [table, columns] of [['work', ['task_id', 'runner_session_id', 'runner_pid', 'runner_started_at', 'app_session_id']],
+                                    ['quick_command_run', ['runner_session_id', 'runner_pid', 'runner_started_at']]]) {
+      const names = new Set(db.prepare(`select name from pragma_table_info('${table}')`).all().map((r) => r.name));
+      for (const column of columns) assert.ok(names.has(column), `${table}.${column} missing after v5`);
+    }
+  } finally { db.close(); }
+});
+
+test('Task Run idempotency returns one durable Work and the active-Project guard remains authoritative', () => {
+  const { db, project } = setup();
+  try {
+    const first = repo.createTask(db, project.id, { goal: 'First Task' });
+    const second = repo.createTask(db, project.id, { goal: 'Second Task' });
+    const begun = repo.beginWork(db, project.id, 'attempt one', {
+      taskId: first.id, status: 'starting', idempotencyKey: 'one-request-one-run',
+    });
+    assert.strictEqual(begun.ok, true);
+    assert.strictEqual(begun.work.task_id, first.id);
+    assert.strictEqual(begun.work.status, 'starting');
+    assert.strictEqual(begun.work.agent_code, 'claude_code');
+    assert.strictEqual(repo.getTask(db, first.id).status, 'in_progress');
+    const duplicate = repo.beginWork(db, project.id, 'attempt one', {
+      taskId: first.id, status: 'starting', idempotencyKey: 'one-request-one-run',
+    });
+    assert.strictEqual(duplicate.existing, true);
+    assert.strictEqual(duplicate.work.id, begun.work.id);
+    assert.strictEqual(db.prepare('select count(*) n from work').get().n, 1);
+    assert.deepStrictEqual(repo.worksForTask(db, first.id).map((work) => work.id), [begun.work.id]);
+    assert.deepStrictEqual(repo.beginWork(db, project.id, 'attempt two', { taskId: second.id }), {
+      ok: false, reason: 'active-work', active: repo.getWork(db, begun.work.id),
+    });
+    assert.deepStrictEqual(repo.beginWork(db, tempDir('other-project-'), 'wrong project', { taskId: first.id }), {
+      ok: false, reason: 'task-project-mismatch',
+    });
+  } finally { db.close(); }
+});
+
+test('a retry is a new immutable Run under the same Task, and replay returns its one successor', () => {
+  const { db, project } = setup();
+  try {
+    const task = repo.createTask(db, project.id, {
+      goal: 'Keep separate attempts', acceptanceCriteria: ['Each attempt remains reviewable'],
+    });
+    const first = reviewRun(db, project, task, { outcome: 'failed' });
+    repo.saveResult(db, first.work.id, {
+      outcome: 'failed', summary: 'The first attempt failed', whatFailed: 'A required test was missing',
+      claims: [{ kind: 'agent-report', data: { text: 'done' }, confidence: 'expected', sourceRef: 'claude:first' }],
+      items: [],
+    });
+    const original = {
+      work: { ...repo.getWork(db, first.work.id) },
+      context: JSON.stringify(repo.contextBundleFor(db, first.work.id)),
+      result: JSON.stringify(repo.resultFor(db, first.work.id)),
+      evidence: JSON.stringify(repo.runEvidenceFor(db, first.work.id)),
+    };
+    const reason = 'Add the missing test and capture its result';
+    const second = repo.beginWork(db, project.id, reason, {
+      taskId: task.id, status: 'starting', idempotencyKey: 'task-retry-2',
+      attempt: 2, retryOfWorkId: first.work.id, retryReason: reason,
+    });
+    assert.strictEqual(second.ok, true);
+    assert.notStrictEqual(second.work.id, first.work.id);
+    assert.strictEqual(second.work.task_id, task.id);
+    assert.strictEqual(second.work.attempt, 2);
+    assert.strictEqual(second.work.retry_of_work_id, first.work.id);
+    assert.strictEqual(second.work.retry_reason, reason);
+
+    const replay = repo.beginWork(db, project.id, 'different replay body', {
+      taskId: task.id, status: 'starting', idempotencyKey: 'task-retry-replayed',
+      attempt: 2, retryOfWorkId: first.work.id, retryReason: 'different replay reason',
+    });
+    assert.strictEqual(replay.existing, true);
+    assert.strictEqual(replay.retryReplay, true);
+    assert.strictEqual(replay.work.id, second.work.id);
+    assert.strictEqual(db.prepare('select count(*) n from work where task_id = ?').get(task.id).n, 2);
+
+    const refreshedTask = repo.getTask(db, task.id);
+    const secondContext = buildContextBundle({ project, task: refreshedTask, userPrompt: reason });
+    repo.saveRunContextBundle(db, second.work.id, secondContext);
+    const priorAfter = {
+      work: { ...repo.getWork(db, first.work.id) },
+      context: JSON.stringify(repo.contextBundleFor(db, first.work.id)),
+      result: JSON.stringify(repo.resultFor(db, first.work.id)),
+      evidence: JSON.stringify(repo.runEvidenceFor(db, first.work.id)),
+    };
+    assert.deepStrictEqual(priorAfter, original, 'retry changed the historical first Run');
+    assert.notStrictEqual(repo.contextBundleFor(db, second.work.id).bundle.bundle_id,
+      repo.contextBundleFor(db, first.work.id).bundle.bundle_id);
+    assert.throws(() => db.prepare('update run_context_bundle set bundle_json = ? where work_id = ?')
+      .run('{}', first.work.id), /immutable/);
+
+    repo.setWorkState(db, second.work.id, { status: 'ended', outcome: 'ended_unknown' });
+    assert.throws(() => db.prepare(`insert into work
+      (id, project_id, task_id, intent, status, requested_at, started_at, idempotency_key,
+       attempt, retry_of_work_id, retry_reason, agent_code, app_session_id)
+      select 'duplicate-successor', project_id, task_id, 'duplicate', 'starting', requested_at,
+        started_at, 'duplicate-successor-key', 2, retry_of_work_id, 'duplicate', agent_code, app_session_id
+      from work where id = ?`).run(second.work.id), /UNIQUE constraint failed: work\.retry_of_work_id/,
+    'the durable unique index must reject a duplicate retry even if repository checks are bypassed');
+    const third = repo.beginWork(db, project.id, 'Resolve unknown attempt explicitly', {
+      taskId: task.id, status: 'starting', idempotencyKey: 'task-retry-3',
+      attempt: 3, retryOfWorkId: second.work.id, retryReason: 'Resolve unknown attempt explicitly',
+    });
+    assert.strictEqual(third.ok, true);
+    assert.strictEqual(third.work.retry_of_work_id, second.work.id);
+    assert.strictEqual(repo.getTask(db, task.id).verdict, 'unverified');
+  } finally { db.close(); }
+});
+
+test('retry rejects an active source, wrong attempt number, missing reason, and cross-Task source', () => {
+  const { db, project } = setup();
+  try {
+    const task = repo.createTask(db, project.id, { goal: 'First Task' });
+    const other = repo.createTask(db, project.id, { goal: 'Second Task' });
+    const active = repo.beginWork(db, project.id, 'Run #1', { taskId: task.id, status: 'starting' }).work;
+    assert.deepStrictEqual(repo.beginWork(db, project.id, 'bad retry', {
+      taskId: task.id, attempt: 2, retryOfWorkId: active.id, retryReason: 'retry',
+    }), { ok: false, reason: 'bad-retry-source' });
+    repo.setWorkState(db, active.id, { status: 'ended', outcome: 'failed' });
+    assert.deepStrictEqual(repo.beginWork(db, project.id, 'wrong attempt', {
+      taskId: task.id, attempt: 4, retryOfWorkId: active.id, retryReason: 'retry',
+    }), { ok: false, reason: 'bad-attempt-sequence' });
+    assert.deepStrictEqual(repo.beginWork(db, project.id, 'no reason', {
+      taskId: task.id, attempt: 2, retryOfWorkId: active.id,
+    }), { ok: false, reason: 'retry-reason-required' });
+    assert.deepStrictEqual(repo.beginWork(db, project.id, 'cross Task', {
+      taskId: other.id, attempt: 2, retryOfWorkId: active.id, retryReason: 'retry',
+    }), { ok: false, reason: 'bad-retry-source' });
+  } finally { db.close(); }
+});
+
+test('app session ownership survives restart and interrupted Task Runs reconcile to unknown without replay', () => {
+  const file = path.join(tempDir('juqode-run-restart-'), 'restart.db');
+  let db = openDb(file);
+  const project = repo.openProject(db, '/tmp/restart-task-project', 'Restart');
+  const oldSession = repo.startAppSession(db, { appVersion: '0.1-test', platform: 'linux' });
+  const task = repo.createTask(db, project.id, { goal: 'Survive interruption' });
+  const run = repo.beginWork(db, project.id, 'Run interrupted by app close', {
+    taskId: task.id, status: 'starting', appSessionId: oldSession.id,
+  }).work;
+  repo.setRunnerIdentity(db, run.id, 'claude-session-for-run-1', 2147483000, '2026-10-05T00:00:00.000Z');
+  assert.strictEqual(repo.processFor(db, run.id).pid, 2147483000,
+    'process identity must be queryable from durable columns even without a signal marker');
+  db.close(); // simulate a crash: no endAppSession and no child result
+
+  db = openDb(file);
+  try {
+    const currentSession = repo.startAppSession(db, { appVersion: '0.1-test', platform: 'linux' });
+    assert.notStrictEqual(currentSession.id, oldSession.id);
+    assert.strictEqual(db.prepare('select ended_at from app_session where id = ?').get(oldSession.id).ended_at, null,
+      'crash simulation should leave the prior launch open');
+    assert.deepStrictEqual(repo.reconcileLostWorks(db, () => true), [run.id],
+      'a Task Run from a prior launch must not stay falsely live or be reattached');
+    const recovered = repo.getWork(db, run.id);
+    assert.strictEqual(recovered.status, 'ended');
+    assert.strictEqual(recovered.outcome, 'ended_unknown');
+    assert.strictEqual(recovered.failure_reason, 'app-restarted-before-run-completion');
+    assert.strictEqual(recovered.app_session_id, oldSession.id);
+    assert.strictEqual(repo.workForRetrySource(db, run.id), null);
+    assert.strictEqual(db.prepare('select count(*) n from work where task_id = ?').get(task.id).n, 1,
+      'restart reconciliation must not create a replacement Run');
+    assert.strictEqual(repo.endAppSession(db, currentSession.id), true);
+    assert.ok(db.prepare('select ended_at from app_session where id = ?').get(currentSession.id).ended_at);
+  } finally { db.close(); }
+});
+
+test('a database claiming current version while missing the migrated Task table is refused', () => {
+  const file = path.join(tempDir('juqode-task-integrity-'), 'damaged.db');
+  let db = openDb(file);
+  db.close();
+  db = new DatabaseSync(file);
+  db.exec('drop table task');
+  db.close();
+  assert.throws(() => openDb(file), (e) => e.code === 'db-corrupt' && /after migrations/.test(e.message));
+});

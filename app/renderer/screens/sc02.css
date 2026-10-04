@@ -119,6 +119,61 @@
 .sc02 .consequence { display: flex; flex-direction: column; gap: 8px; }
 .sc02 .routeline { color: var(--ink2); }
 
+/* DG-11 · Project → Task → Run. The task list stays a compact single column; history and
+   context are disclosures inside the selected Task rather than another card stack. */
+.sc02 .task-rows { display: flex; flex-direction: column; gap: 4px; }
+.sc02 .task-pick {
+  display: flex; width: 100%; justify-content: flex-start; text-align: left;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-inner);
+  color: var(--ink2); background: transparent; font: inherit; font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.sc02 .task-pick.selected { border-color: var(--line3); color: var(--ink); background: var(--card2); }
+.sc02 .task-create { border-top: 1px solid var(--line); padding-top: 8px; }
+.sc02 .task-create summary, .sc02 .task-review summary, .sc02 .task-runs > summary,
+.sc02 .task-run > summary, .sc02 .task-context summary { cursor: pointer; }
+.sc02 .task-create[open] { display: flex; flex-direction: column; gap: 8px; }
+.sc02 .task-input { min-height: 42px; }
+.sc02 .task-dependencies { display: flex; flex-direction: column; gap: 5px; }
+.sc02 .task-dependency { display: flex; align-items: flex-start; gap: 7px; overflow-wrap: anywhere; }
+.sc02 .task-dependency input, .sc02 .task-evidence-choice input { flex: 0 0 auto; margin-top: 2px; }
+.sc02 .task-selected { display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--line); padding-top: 9px; }
+.sc02 .task-goal { display: flex; flex-direction: column; gap: 3px; }
+.sc02 .task-verdict { font-size: 11px; font-weight: 600; }
+.sc02 .task-verdict.pass { color: var(--ok); }
+.sc02 .task-verdict.fail { color: var(--fail); }
+.sc02 .task-criteria { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.sc02 .task-criteria li { overflow-wrap: anywhere; }
+.sc02 .task-dep-line { overflow-wrap: anywhere; }
+.sc02 .task-run-review, .sc02 .task-review-criteria { display: flex; flex-direction: column; gap: 8px; }
+.sc02 .task-review-criterion { border-top: 1px solid var(--line); padding-top: 7px; display: flex; flex-direction: column; gap: 6px; }
+.sc02 .task-review { padding-left: 3px; }
+.sc02 .task-review[open] { display: flex; flex-direction: column; gap: 7px; }
+.sc02 .task-retry { border-top: 1px solid var(--line); padding-top: 7px; }
+.sc02 .task-retry > summary { cursor: pointer; }
+.sc02 .task-retry[open] { display: flex; flex-direction: column; gap: 7px; }
+.sc02 .task-evidence-choice { display: flex; gap: 7px; align-items: flex-start; overflow-wrap: anywhere; }
+.sc02 .task-evidence-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sc02 .task-review-acts { justify-content: flex-start; }
+.sc02 .task-runs { border-top: 1px solid var(--line); padding-top: 7px; }
+.sc02 .task-runs[open], .sc02 .task-run[open], .sc02 .task-context[open] { display: flex; flex-direction: column; gap: 7px; }
+.sc02 .task-run { border-top: 1px solid var(--line); padding-top: 7px; min-width: 0; }
+.sc02 .task-run-summary { overflow-wrap: anywhere; }
+.sc02 .task-run-times { overflow-wrap: anywhere; }
+.sc02 .task-prompt, .sc02 .task-run-value { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 var(--font-mono); color: var(--ink2); }
+.sc02 .task-run-fact { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sc02 .task-request-label { padding-top: 4px; }
+
+/* While a Run is live, keep the current Task identity beside the request controls and defer
+   planning/history detail. This lets D-138's running Work remain the largest, first subject. */
+.sc02:has([data-card="stream"][data-live="work"]) .task-intro,
+.sc02:has([data-card="stream"][data-live="work"]) .task-rows,
+.sc02:has([data-card="stream"][data-live="work"]) .task-create,
+.sc02:has([data-card="stream"][data-live="work"]) .task-dep-line,
+.sc02:has([data-card="stream"][data-live="work"]) .task-criteria,
+.sc02:has([data-card="stream"][data-live="work"]) .task-run-review,
+.sc02:has([data-card="stream"][data-live="work"]) .task-request-note { display: none; }
+
 .sc02 .panel {
   padding: 10px 12px; border-radius: var(--r-inner);
   display: flex; flex-direction: column; gap: 6px;

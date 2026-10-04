@@ -33,6 +33,11 @@
 }
 .sc03 .wname { overflow-wrap: anywhere; }
 .sc03 .routeline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sc03 .run-context, .sc03 .run-evidence { border-top: 1px solid var(--line); padding-top: 7px; }
+.sc03 .run-context summary, .sc03 .run-evidence summary { cursor: pointer; }
+.sc03 .run-context[open], .sc03 .run-evidence[open] { display: flex; flex-direction: column; gap: 7px; }
+.sc03 .run-context-prompt, .sc03 .run-evidence-output { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 var(--font-mono); color: var(--ink2); }
+.sc03 .run-evidence-row { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
 
 /* the liveness line — a fact and a time, and nothing that moves on its own */
 .sc03 .liveness { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }

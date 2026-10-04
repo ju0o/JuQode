@@ -5,8 +5,9 @@
  *   1. Claude Code available?      → 사용 불가 card (WBS-09)   — reason, and remaining paths
  *   2. no other Work running?      → guard card (WBS-07)       — text kept, never queued
  *   3. can a before-basis be built? → 확립 불가 card (WBS-08)  — the Work does not start
- *   4. session starts and emits?   → 시작 실패 card (WBS-10)   — NO `work` row is written
- * Only after all four does a row exist, because `20` says History is Works that started.
+ *   4. session starts and emits?   → legacy Work stays transient; Task Run is durable before spawn
+ * Existing unlinked Work keeps the old Canon behavior. A Task Run is a first-class attempt and
+ * is durably reserved before spawn so even a failed start has an honest Run ID and outcome.
  *
  * Nothing here decides a state on a timer or on an exit code. Every transition comes from a
  * signal, and every signal is persisted before it is interpreted.
@@ -19,9 +20,11 @@ const gitEvidence = require('../evidence/git');
 const manifest = require('../evidence/manifest');
 const { toSignal, reduce, initial, openPermission, openPermissions, KIND } = require('./reducer');
 const resultBuilder = require('./result');
+const { testEvidenceFromSignals } = require('./run-evidence');
 const blocks = require('../change/blocks');
 const explain = require('../change/explain');
 const exclude = require('../evidence/exclude');
+const { buildContextBundle } = require('./context');
 
 /** Live state for Works this process started. Nothing here is authoritative — the DB is. */
 const live = new Map();   // workId -> { child, state, sessionId, cwd, projectId }
@@ -69,7 +72,9 @@ function livenessOf(state, work) {
  * Everything that must be true before a Work can start, checked in Canon's order.
  * @returns {{ok:true, useGit:boolean, evidenceStore:string} | {ok:false, reason:string, detail?:any}}
  */
-async function preflight(db, project, { evidenceStore, detect = claude.detect }) {
+async function preflight(db, project, { evidenceStore, detect = claude.detect, taskId = null }) {
+  const taskRefusal = repo.taskRunRefusal(db, project.id, taskId);
+  if (taskRefusal) return { ok: false, reason: taskRefusal };
   const status = await detect();
   if (!status.available) return { ok: false, reason: 'claude-unavailable', detail: status };
 
@@ -97,20 +102,52 @@ function captureBasis(project, store, phase, useGit) {
  * because that is the moment `15` navigates to SC-03. The session keeps running after.
  */
 async function start(db, project, intent, opts = {}) {
-  const { evidenceStore, onUpdate = () => {}, bin, detect } = opts;
+  const {
+    evidenceStore, onUpdate = () => {}, bin, detect, taskId = null,
+    idempotencyKey = null, attempt = 1, retryOfWorkId = null, retryReason = null, appSessionId = null,
+  } = opts;
+
+  if (retryOfWorkId) {
+    const prior = repo.getWork(db, retryOfWorkId);
+    if (prior?.project_id === project.id && prior.task_id === taskId && prior.status === 'ended') {
+      const successor = repo.workForRetrySource(db, retryOfWorkId);
+      if (successor) return { ok: true, workId: successor.id, existing: true,
+        done: Promise.resolve({ ok: true, workId: successor.id }) };
+    }
+  }
+
+  if (idempotencyKey) {
+    const existing = repo.workForIdempotency(db, project.id, idempotencyKey);
+    if (existing) return { ok: true, workId: existing.id, existing: true, done: Promise.resolve({ ok: true, workId: existing.id }) };
+  }
 
   if (starting.has(project.id)) return { ok: false, reason: 'active-work', detail: { starting: true } };
   starting.add(project.id);
   try {
-    return await startGuarded(db, project, intent, { evidenceStore, onUpdate, bin, detect });
+    return await startGuarded(db, project, intent, {
+      evidenceStore, onUpdate, bin, detect, taskId, idempotencyKey, attempt, retryOfWorkId, retryReason,
+      appSessionId,
+    });
   } finally {
     starting.delete(project.id);
   }
 }
 
-async function startGuarded(db, project, intent, { evidenceStore, onUpdate, bin, detect }) {
-  const pre = await preflight(db, project, { evidenceStore, detect });
+async function startGuarded(db, project, intent, {
+  evidenceStore, onUpdate, bin, detect, taskId, idempotencyKey, attempt, retryOfWorkId, retryReason,
+  appSessionId,
+}) {
+  const pre = await preflight(db, project, { evidenceStore, detect, taskId });
   if (!pre.ok) return pre;
+
+  let context = null;
+  let agentPrompt = intent;
+  if (taskId) {
+    const task = repo.getTask(db, taskId);
+    if (!task) return { ok: false, reason: 'no-task' };
+    context = buildContextBundle({ project, task, userPrompt: intent });
+    agentPrompt = context.agentPrompt;
+  }
 
   const sessionId = crypto.randomUUID();
   let basis;
@@ -127,6 +164,19 @@ async function startGuarded(db, project, intent, { evidenceStore, onUpdate, bin,
   let justBegan = false;
   let workId = null;
   let state = initial();
+  const reserveRunBeforeSpawn = Boolean(taskId);
+
+  if (reserveRunBeforeSpawn) {
+    const begun = repo.beginWork(db, project.id, intent, {
+      taskId, status: 'starting', idempotencyKey, attempt, retryOfWorkId, retryReason, appSessionId,
+    });
+    if (!begun.ok) return begun;
+    workId = begun.work.id;
+    repo.saveBasis(db, workId, 'before', basis);
+    repo.saveRunContextBundle(db, workId, context);
+    live.set(workId, { state, sessionId, cwd: project.path, projectId: project.id,
+      bin, child: null, store: evidenceStore, useGit: pre.useGit });
+  }
 
   const persist = (sig, raw, line) => {
     if (!workId) { pending.push({ sig, line }); return; }
@@ -145,22 +195,36 @@ async function startGuarded(db, project, intent, { evidenceStore, onUpdate, bin,
     const settle = (v) => { if (!settled) { settled = true; resolve(v); } };
 
     const runP = session.run({
-      cwd: project.path, sessionId, prompt: intent, bin,
-      onChild: (c) => { const e = live.get(workId) ?? {}; e.child = c; if (workId) live.set(workId, e); else pendingChild.child = c; },
+      cwd: project.path, sessionId, prompt: agentPrompt, bin,
+      onChild: (c) => {
+        pendingChild.child = c;
+        if (!workId) return;
+        const at = now();
+        repo.setRunnerIdentity(db, workId, sessionId, c.pid, at);
+        repo.setWorkState(db, workId, { status: 'running' });
+        const e = live.get(workId) ?? { state, sessionId, cwd: project.path, projectId: project.id,
+          bin, store: evidenceStore, useGit: pre.useGit };
+        e.child = c;
+        live.set(workId, e);
+        justBegan = true;
+        settle({ ok: true, workId, done });
+      },
       onSignal: (sig, raw, line) => {
         if (!workId) {
           /* The session spoke, so a Work exists. The guard is re-checked here by the engine
            * itself — `beginWork` inserts, and the partial unique index is the arbiter. */
-          const begun = repo.beginWork(db, project.id, intent);
+          const begun = repo.beginWork(db, project.id, intent, { taskId });
           if (!begun.ok) {
             /* We lost the race for the slot. The process we started is ours to stop — leaving
              * it running would put two Claude Code sessions in one repository. */
             if (pendingChild.child) session.stop(pendingChild.child);
-            settle({ ok: false, reason: 'active-work', detail: begun.active });
-            markDone({ ok: false, reason: 'active-work' });
+            const reason = begun.reason ?? 'active-work';
+            settle({ ok: false, reason, detail: begun.active });
+            markDone({ ok: false, reason });
             return;
           }
           workId = begun.work.id;
+          if (context) repo.saveRunContextBundle(db, workId, context);
           repo.saveBasis(db, workId, 'before', basis);
           live.set(workId, { state, sessionId, cwd: project.path, projectId: project.id, bin, child: pendingChild.child, store: evidenceStore, useGit: pre.useGit });
           for (const p of pending) {
@@ -190,6 +254,20 @@ async function startGuarded(db, project, intent, { evidenceStore, onUpdate, bin,
       if (!workId) {
         /* `15` SC-02 시작 실패: a card, and no row. */
         settle({ ok: false, reason: 'start-failed', detail: { code: r.code, stderr: r.stderr } });
+        markDone({ ok: false, reason: 'start-failed' });
+      } else if (reserveRunBeforeSpawn && !r.sawEvent) {
+        /* A Task Run row already exists, so a process that produced no event is a durable failed
+         * attempt. Keep stderr out of the database; the stable reason is enough to distinguish
+         * this from an Agent-reported failure without persisting arbitrary CLI output. */
+        repo.setWorkState(db, workId, { status: 'ended', outcome: 'failed' });
+        repo.setRunFailureReason(db, workId, 'agent-start-failed-before-first-event');
+        writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW,
+          payload: JSON.stringify({ runFailure: 'agent-start-failed-before-first-event' }) });
+        captureAfter(db, workId, project, pre.useGit, evidenceStore);
+        finishResult(db, workId, project, evidenceStore);
+        release(db, workId);
+        onUpdate(snapshot(db, workId));
+        settle({ ok: true, workId, done });
         markDone({ ok: false, reason: 'start-failed' });
       } else {
         /* WBS-17 · the after-basis, taken when the session's turn ends. It is what makes
@@ -328,6 +406,19 @@ function finishResult(db, workId, project, store) {
   const work = repo.getWork(db, workId);
   if (!work || work.status !== 'ended') return null;
   saveDiffs(db, workId, project, store);
+  const measuredChanges = changes(db, workId, project, store);
+  if (measuredChanges.known) {
+    const files = [...measuredChanges.files];
+    const digest = crypto.createHash('sha256').update(JSON.stringify(files), 'utf8').digest('hex');
+    repo.saveRunEvidence(db, workId, {
+      kind: 'changed_files', source_ref: `evidence:before→after:${digest.slice(0, 16)}`, observed_at: now(),
+      summary: `${files.length} changed file${files.length === 1 ? '' : 's'} measured`,
+      content_digest: digest,
+      details: { known: true, files },
+    });
+  }
+  const signals = db.prepare('select * from work_signal where work_id = ? order by seq').all(workId);
+  for (const evidence of testEvidenceFromSignals(signals)) repo.saveRunEvidence(db, workId, evidence);
   const entry = entryFor(db, workId) ?? { state: initial() };
   /* `saveResult` deletes and reinserts, so a SECOND call overwrites the first. On the cancel
    * path there is always a second: `confirmCancel` writes the result from the live state and
@@ -342,7 +433,7 @@ function finishResult(db, workId, project, store) {
   }
   const { result, problems } = resultBuilder.buildChecked({
     state: { ...entry.state, outcome: work.outcome },
-    changes: changes(db, workId, project, store),
+    changes: measuredChanges,
     /* Counted over the WHOLE history and over every block in it — see `countToolResults`. The
      * capped `signalsFor` read was producing a 확인됨 number that undercounted. */
     toolResults: repo.countToolResults(db, workId),
@@ -536,6 +627,8 @@ function snapshot(db, workId) {
   const s = entry.state;
   return {
     work,
+    contextBundle: repo.contextBundleFor(db, workId),
+    runEvidence: repo.runEvidenceFor(db, workId),
     steps: repo.stepsFor(db, workId),
     status: work.status,
     outcome: work.outcome,

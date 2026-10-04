@@ -10,6 +10,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import assert from 'node:assert';
 import os from 'node:os';
+import { findFreePortBlock } from './port-block.mjs';
 /* Stale Xvfb locks accumulate and eventually starve `xvfb-run -a` — see xvfb.mjs. */
 import { sweepDisplays } from './xvfb.mjs';
 import { launchArgs, killTree, WIN } from './launch.mjs';
@@ -38,10 +39,9 @@ const GOLDEN = path.join(ROOT, 'docs', 'dev-evidence', 'screens');
 const UPDATE = process.argv.includes('--update-golden') || process.env.JUQODE_UPDATE_GOLDEN === '1';
 const OUT = UPDATE ? GOLDEN : path.join(ROOT, 'tmp-visual');
 fs.mkdirSync(OUT, { recursive: true });
-/* One CDP port pair per run. `JUQODE_E2E_PORT` lets several copies of this file run at once —
- * a mutation sweep does exactly that, and two runs sharing 9223 fail each other rather than
- * failing on the mutation, which silently turns a survivor into a "kill". */
-const PORT = Number(process.env.JUQODE_E2E_PORT || 9223);
+/* Reserve the CDP ports this run will use. JUQODE_E2E_PORT sets the preferred start port;
+ * when that block is occupied the harness selects the next free block. */
+const PORT = await findFreePortBlock(Number(process.env.JUQODE_E2E_PORT || 9223), 3);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -66,6 +66,8 @@ const step = (m) => process.stderr.write(`  · ${m}\n`);
 /* Attaching is a race against the app's own start-up, and how long that takes varies with the
  * machine. Retrying is not papering over a failure — a refused connection at t=4s and one at
  * t=20s are different facts, and only the second one means the app did not come up. */
+step('CDP ports ' + PORT + '-' + (PORT + 2));
+
 async function pageTarget(port, { tries = 20, everyMs = 750 } = {}) {
   let last = null;
   for (let i = 0; i < tries; i++) {
@@ -185,7 +187,7 @@ async function cdp(sendFn) {
  * its work and then never exit — measured, and the reason for the group kill. */
 /* A leftover Electron on this port would be driven INSTEAD of the app under test, and the
  * run would report on code that is not in the working tree. */
-for (const port of [PORT, PORT + 1]) {
+for (const port of [PORT, PORT + 1, PORT + 2]) {
   try {
     await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(700) });
     throw new Error(`something is already listening on ${port} — kill the stale Electron before running this`);
@@ -541,6 +543,22 @@ const results = await cdp(async ({ send, evalJs }) => {
     await sleep(250);
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(OUT, `sc02-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+
+  /* Canon routeUnrec: an unsupported phrase stays in the field and starts no Work. */
+  step('unrecognized request stays unsent');
+  const historyBeforeUnrecognized = await evalJs('document.querySelectorAll("[data-el=history-row]").length');
+  await evalJs('(() => { const f = document.querySelector("[data-el=intent]"); f.value = "npm install"; })()');
+  await evalJs('document.querySelector("[data-act=submit-intent]").click()');
+  await sleep(250);
+  out.unrecognizedRoute = await evalJs('JSON.stringify({text: document.querySelector("[data-el=consequence]")?.innerText ?? null, value: document.querySelector("[data-el=intent]")?.value ?? null, history: document.querySelectorAll("[data-el=history-row]").length, work: window.__work()?.id ?? null, buttons: document.querySelectorAll("[data-el=consequence] button").length})');
+  {
+    const route = JSON.parse(out.unrecognizedRoute);
+    assert.strictEqual(route.text, '프로젝트를 바꾸는 요청으로 읽히지 않아요.');
+    assert.strictEqual(route.value, 'npm install');
+    assert.strictEqual(route.history, historyBeforeUnrecognized);
+    assert.strictEqual(route.work, null);
+    assert.strictEqual(route.buttons, 0);
   }
 
   /* ── the Work loop, end to end through the real app ──────────────────────────────
@@ -2049,6 +2067,52 @@ const results = await cdp(async ({ send, evalJs }) => {
     fs.writeFileSync(path.join(OUT, `sc01-fail-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
 
+  /* DG-11 · exercise Project → Task through visible controls and capture the selected Task.
+   * The fixture DB is disposable; this never replaces tracked golden evidence. */
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
+    .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED))}))?.click()`);
+  await sleep(900);
+  await evalJs(`document.querySelector('.task-create summary')?.click()`);
+  await evalJs(`(() => {
+    const fields = [...document.querySelectorAll('.task-create textarea')];
+    fields[0].value = 'Visual E2E Task selection';
+    fields[1].value = 'The Project shows the selected Task';
+  })()`);
+  await evalJs(`document.querySelector('.task-create button')?.click()`);
+  await sleep(700);
+  out.taskScreen = await evalJs('window.__screen()');
+  out.taskList = await evalJs(`(async () => JSON.stringify(await window.juqode.taskList(window.__project().id)))()`);
+  out.taskSelectedText = await evalJs(`document.querySelector('[data-el="selected-task"]')?.innerText ?? null`);
+  out.taskSelectedId = await evalJs(`document.querySelector('[data-el="task-list"] .task-pick.selected')?.getAttribute('data-task-id') ?? null`);
+  await evalJs(`document.documentElement.setAttribute('data-theme', 'light')`);
+  await sleep(200);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc02-task-selected-light.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  /* The Task hierarchy must remain readable at the smallest supported window too. This is
+   * separate from the Work-board width matrix below: it measures the actual Task selection,
+   * not just the shared grid shell. */
+  await send('Emulation.setDeviceMetricsOverride',
+             { width: 880, height: 600, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
+  out.taskNarrow = await evalJs(`(() => {
+    const board = document.querySelector('.sc02');
+    const selected = document.querySelector('[data-el="selected-task"]');
+    return JSON.stringify({
+      viewport: innerWidth,
+      overflow: document.documentElement.scrollWidth - innerWidth,
+      columns: getComputedStyle(board).gridTemplateColumns.split(' ').length,
+      selectedVisible: Boolean(selected?.innerText.includes('Visual E2E Task selection')),
+      text: selected?.innerText ?? null,
+    });
+  })()`);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc02-task-selected-880.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  await send('Emulation.clearDeviceMetricsOverride');
+
   return out;
 });
 
@@ -2148,7 +2212,8 @@ assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.scree
 assert.deepStrictEqual(bridge.keys.sort(),
   ['boot', 'brief', 'claudeStatus', 'history', 'interpret', 'onQcUpdate', 'onTermUpdate',
    'onWorkUpdate', 'openPath', 'openProject', 'qcList', 'qcRoute', 'qcRun', 'qcRuns', 'qcStop',
-   'routeIntent', 'termOpen', 'termStop', 'termWrite',
+   'routeIntent', 'taskCreate', 'taskDetail', 'taskList', 'taskRetry', 'taskReviewCriterion', 'taskUpdate',
+   'termOpen', 'termStop', 'termWrite',
    'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges', 'workExplain', 'workGet',
    /* WBS-19b (PM 판정 2026-09-12): the one method on this surface that WRITES to the user's
     * worktree. It is listed here for the same reason as every other — the surface is exactly
@@ -2173,6 +2238,20 @@ assert.ok(Math.abs(results.centreOffset) <= 40,
 assert.strictEqual(results.recentRows, 3, 'the seeded projects did not reach SC-01 from the store');
 assert.strictEqual(results.screenAfterOpen, 'SC-02', `opening a project did not reach SC-02 (got ${results.screenAfterOpen})`);
 assert.strictEqual(JSON.parse(results.openedProject).path, SEED, 'SC-02 is showing a different project than the one opened');
+assert.strictEqual(results.taskScreen, 'SC-02', 'creating a Task left the Project workbench');
+{
+  const taskList = JSON.parse(results.taskList);
+  assert.strictEqual(taskList.ok, true, 'Task list could not be read through the preload/IPC path');
+  assert.strictEqual(taskList.tasks.length, 1, 'the visible form did not create exactly one Task');
+  assert.strictEqual(results.taskSelectedId, taskList.tasks[0].id, 'the created Task was not selected');
+  assert.ok(results.taskSelectedText.includes('Visual E2E Task selection'), 'the selected Task goal is not visible');
+  assert.ok(results.taskSelectedText.includes('The Project shows the selected Task'), 'the selected Task acceptance is not visible');
+  const narrow = JSON.parse(results.taskNarrow);
+  assert.strictEqual(narrow.viewport, 880, 'Task responsive capture did not use the minimum supported width');
+  assert.strictEqual(narrow.overflow, 0, `the Task screen overflows horizontally by ${narrow.overflow}px at 880px`);
+  assert.strictEqual(narrow.columns, 1, `the Task layout remains ${narrow.columns} columns at the minimum width`);
+  assert.ok(narrow.selectedVisible, 'the selected Task is missing at the minimum supported width');
+}
 /* D-138 §5 folded Agent Presence INTO the Work Stream, so `presence` is no longer a card of its
  * own on SC-02 — the canvas, the nine modes and `presence.hint` all moved with it, and the
  * separate probes above still find them. The rule this assertion carries is unchanged: the
