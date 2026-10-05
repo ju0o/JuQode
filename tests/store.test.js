@@ -323,6 +323,26 @@ function fakeClaude(dir, { version = '2.1.266 (Claude Code)', auth = '{"loggedIn
   return f;
 }
 
+/** Fake auth is available only when detection receives an explicitly selected profile. */
+function profileAwareFakeClaude(dir) {
+  const f = path.join(dir, 'claude-profile-fixture');
+  const lines = [
+    '#!/bin/sh',
+    'if [ "$1" = "--version" ]; then echo "2.1.999 (fixture)"; exit 0; fi',
+    'if [ "$1" = "auth" ]; then',
+    '  if [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ -f "$CLAUDE_CONFIG_DIR/.juqode-fixture-authenticated" ]; then',
+    '    echo \'{"loggedIn":true}\'',
+    '    exit 0',
+    '  fi',
+    '  echo \'{"loggedIn":false}\'',
+    '  exit 1',
+    'fi',
+    'exit 1',
+  ];
+  fs.writeFileSync(f, lines.join('\n') + '\n', { mode: 0o755 });
+  return f;
+}
+
 function withBin(bin, fn) {
   const prev = process.env.JUQODE_CLAUDE_BIN;
   process.env.JUQODE_CLAUDE_BIN = bin;
@@ -346,6 +366,37 @@ test('installed but logged out is 로그인 필요 — never treated as a failur
   const r = await withBin(fakeClaude(tmp(), { auth: '{"loggedIn":false}' }), () => claude.detect());
   assert.strictEqual(r.available, false);
   assert.strictEqual(r.reason, 'logged-out');
+});
+
+test('the selected Claude config profile reaches detection instead of silently falling back', async () => {
+  const dir = fs.realpathSync(tmp());
+  const defaultProfile = path.join(dir, 'default-profile');
+  const alternateProfile = path.join(dir, 'alternate-profile');
+  fs.mkdirSync(defaultProfile);
+  fs.mkdirSync(alternateProfile);
+  fs.writeFileSync(path.join(alternateProfile, '.juqode-fixture-authenticated'), 'fixture only');
+  const bin = profileAwareFakeClaude(dir);
+  const previousProfile = process.env.CLAUDE_CONFIG_DIR;
+
+  try {
+    delete process.env.CLAUDE_CONFIG_DIR;
+    const fallback = await withBin(bin, () => claude.detect());
+    assert.strictEqual(fallback.available, false, 'the unauthenticated default profile must stay unavailable');
+    assert.strictEqual(fallback.reason, 'logged-out');
+
+    process.env.CLAUDE_CONFIG_DIR = defaultProfile;
+    const defaultSelected = await withBin(bin, () => claude.detect());
+    assert.strictEqual(defaultSelected.available, false, 'an explicit unauthenticated profile must stay unavailable');
+    assert.strictEqual(defaultSelected.reason, 'logged-out');
+
+    process.env.CLAUDE_CONFIG_DIR = alternateProfile;
+    const selected = await withBin(bin, () => claude.detect());
+    assert.strictEqual(selected.available, true, 'detector must pass the explicitly selected config directory');
+    assert.strictEqual(selected.version, '2.1.999');
+  } finally {
+    if (previousProfile === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousProfile;
+  }
 });
 
 test('auth output we cannot parse is reported as such, not guessed as logged in', async () => {

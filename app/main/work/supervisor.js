@@ -762,12 +762,13 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
   writeSignal(db, workId, { source: 'juqode', kind: KIND.PERMISSION_GRANTED, payload: granted.payload });
   apply(db, workId, granted, opts.onUpdate ?? (() => {}));
 
-  /* Same Work, same session. `--resume` needs the request restated on CLI 2.1.266, and the
-   * grant is what bounds the retry — measured in docs/dev-evidence/mvp-run/BATCH-03.md. */
-  const work = repo.getWork(db, workId);
+  /* Same Work, same session. Restating the whole request made Claude repeat completed writes
+   * after each one-action grant; the existing conversation already contains the original task
+   * and denied tool call. This fixed continuation keeps that context without replaying the task. */
   await session.run({
     cwd: entry.cwd, sessionId: entry.sessionId, resume: true, allowedTools: [spec],
-    prompt: work.intent, bin: entry.bin,
+    prompt: 'Continue the original request from this session. Retry the one action that was just allowed, then finish without repeating completed work.',
+    bin: entry.bin,
     onChild: (c) => { entry.child = c; },
     onSignal: (sig, raw, line) => {
       writeSignal(db, workId, { source: 'claude', kind: sig.kind, payload: line });

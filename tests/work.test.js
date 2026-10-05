@@ -893,8 +893,11 @@ test('parallel tool calls in one message are all counted', () => {
 
 test('allowing narrows to one tool and one target, never to the tool as a whole', () => {
   assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: '/p/note.txt' } }, '/p'), 'Edit(note.txt)');
+  assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: '/p/note.txt' } }, '/p'), 'Edit(note.txt)',
+    'Claude Code Write requests must use its file-edit permission rule');
   /* `Edit(/abs)` with ONE leading slash is read as a cwd-relative glob and silently denies. */
   assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: '/elsewhere/x' } }, '/p'), 'Edit(//elsewhere/x)');
+  assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: '/elsewhere/x' } }, '/p'), 'Edit(//elsewhere/x)');
   assert.strictEqual(allowSpec({ tool: 'Bash', input: { command: 'npm test' } }, '/p'), 'Bash(npm test:*)');
   assert.strictEqual(allowSpec({ tool: 'Bash', input: {} }, '/p'), null,
     'with nothing to scope to, the answer is no grant — never a grant of the whole tool');

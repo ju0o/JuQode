@@ -84,3 +84,30 @@ Visual QA found no blocking overlap, clipping, or hierarchy issue. Context detai
 - **TEST_INFRA:** This overnight E2E ran on Linux only. No Windows or Mac test runner was available; neither `darwin-x64` nor `darwin-arm64` was tested.
 - A separate system Chrome tree (12 `chrome` processes) is present under `gnome-shell`; it is not an E2E-owned child by observed parent metadata. It was not touched. The offline-shutdown harness's own process count remained 0 after termination.
 - **DG-14 real Founder dogfood was not started.** Founder acceptance remains pending. Use [FOUNDER-DOGFOOD.md](./FOUNDER-DOGFOOD.md) after Claude sign-in and target-machine readiness.
+
+
+## Pre-Founder closure continuation — 2026-10-05 (ASUS `ju0o`)
+
+- Auth root cause is `SHELL_ALIAS_OR_FUNCTION`: interactive `claude` function exports the existing `CLAUDE_CONFIG_DIR`; both shell modes resolve the same `/home/skkse12/.local/bin/claude`. Noninteractive default config is logged out, explicit existing selector is logged in. Product detector/session preserve the inherited selector; no product absolute profile path or credential copy was added.
+- Fixture regression `node --test --test-name-pattern='selected Claude config profile' tests/store.test.js`: 1 matching test passed; it distinguishes fixture-authenticated alternate profile from unauthenticated default without credentials.
+- Real Product Run PASS: Project `e34fbb11-c775-4c1f-b8ad-e35d4fb4f112`, Task `13e07762-85d8-47e8-a0a8-44b238fc550c`, Run `9004d147-edd0-484e-8c13-a6c8b1c7f702`; Claude Code 2.1.289, session `1670efd7-c731-4745-bc45-83a206aa2e32`, PID 2427902; 40 stream events (37 Claude). It wrote only `dogfood-proof.txt`; exact-content test returned exit 0 / 1 pass / 0 fail.
+- Task criterion review: empty evidence was rejected and kept the Task unverified; after exact output verification the Product accepted measured changed-file evidence `32d70700-f7e2-429b-913d-f7bfc0de6526`; Task verdict PASS. Claude-stream test row retained `exit_code=null` and was not selected as exit-code proof.
+- Restart PASS through Product IPC: same Project, Task, Run, ContextBundle, Result, three Evidence rows, and PASS verdict returned; clean shutdown observed before and after. Context ID `0bf660c0-e308-4ae6-96a8-a55093ae042c` unchanged.
+- Pending: real cancellation, retry/duplicate proof, and fresh final full regression. Current safe profile launch script is `~/Desktop/JuQode_10.05/RUN_JUQODE.sh`; no manual GUI preview was opened.
+
+## Pre-Founder closure completed — 2026-10-05 (ASUS `ju0o`)
+
+- Auth diagnosis confirmed `SHELL_ALIAS_OR_FUNCTION`: the interactive shell function selects the existing `CLAUDE_CONFIG_DIR`; interactive and noninteractive forms resolve the same Claude binary. The configured profile is logged in. Product detector returned `available=true`, version `2.1.289`; no product-wide absolute profile path or credential copy was introduced.
+- Real Run A PASS: Task `13e07762-85d8-47e8-a0a8-44b238fc550c`, Run `9004d147-edd0-484e-8c13-a6c8b1c7f702`; exact file content and independent test evidence supported criterion PASS. Agent report alone was insufficient.
+- Real cancel Task `49302ea9-7c78-41f0-a30d-58a59afa578b`, Run #3 `ec32dbc4-e83f-4b6b-b29f-67d8065b79d0`: Product recorded `cancel_requested`; actual Claude was alive before request; final outcome remained `ended_unknown`, Task stayed unverified, no rollback was claimed, recorded process group was empty after cancellation.
+- Explicit retry created new Run #4 `e8c80ad3-17fc-4f43-8621-1caa3fa24fda`; it satisfied Acceptance with observed file Evidence. Duplicate same-key submission returned the existing Run; a distinct key was rejected while active. Earlier Run IDs, contexts, results, and evidence remained in history.
+- Product restart reads preserved both Tasks, all five Runs, ContextBundles, Results, Evidence, and verdicts; no automatic duplicate Agent execution. Owned app process count after clean shutdown: 0.
+- Fresh `npm run test:unit`: 658/658, exit 0, 31.104 s. Fresh `npm run test:e2e`: boot, visual/behavior, offline/reduced-motion/shutdown PASS, exit 0; shutdown count 6 → 0. Windows/macOS and DG-14 remain untested.
+- Handoff files are in `~/Desktop/JuQode_10.05`. DG-14 is ready for Founder and was not performed by the Builder.
+
+## Final closure refresh — 2026-10-05 (ASUS `ju0o`)
+
+- Restart check was freshly repeated through the Product renderer: Task A PASS/1 Run; Task B PASS/4 Runs; Project, Task list, Context, Results, Evidence, and verdicts were stable. Cancelled Run #3 remained `ended_unknown`; no automatic Run was created. Both app closes were clean; owned process count after close was 0.
+- Fresh `npm run test:unit`: 658/658, exit 0, 20.928 s. Fresh `npm run test:e2e`: boot, visual/behavior, offline/reduced-motion/shutdown PASS, exit 0; shutdown observed 6 → 0.
+- Existing actual cancellation proof remains Run #3 → explicit retry Run #4. Separate later cancellation rehearsals ended normally without Cancel and are excluded; they stayed unverified.
+- DG-14 was not performed. Result handoff: `~/Desktop/JuQode_10.05`.

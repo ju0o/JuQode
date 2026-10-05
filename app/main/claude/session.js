@@ -56,7 +56,9 @@ function baseArgs(sessionId) {
 const UNSAFE_TARGET = /[(),*?[\]{}!\n\r\0]|^\s*$/;
 
 function allowSpec(denial, cwd) {
-  const tool = denial?.tool;
+  /* Claude Code's file permission rule is `Edit`, including calls emitted by its `Write` tool.
+   * Use that rule name while keeping the grant scoped to the denied file. */
+  const tool = denial?.tool === 'Write' ? 'Edit' : denial?.tool;
   if (!tool || !/^[A-Za-z][A-Za-z0-9_]*$/.test(tool)) return null;
   const input = denial.input ?? {};
   const file = input.file_path ?? input.path ?? input.notebook_path ?? null;

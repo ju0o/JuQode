@@ -555,7 +555,7 @@ test('allowing retries that ONE action, and records that a person allowed it', a
   await r.done;
 
   /* the retry turn succeeds and edits the file */
-  const retryBin = cli(dir, [INIT, OK], { edits: [{ path: path.join(dir, 'a.txt'), body: 'allowed\n' }] });
+  const retryBin = cli(dir, [INIT, OK], { edits: [{ path: path.join(dir, 'a.txt'), body: 'allowed\n' }], capturePrompt: true });
   supervisor.live.get(r.workId).bin = retryBin;
 
   const allowed = await supervisor.allow(db, r.workId, 'tu_1');
@@ -581,6 +581,9 @@ test('allowing retries that ONE action, and records that a person allowed it', a
   assert.strictEqual(grants.length, 1);
   assert.strictEqual(grants[0].source, 'juqode');
   assert.match(grants[0].payload, /Edit\(a\.txt\)/, 'the record does not say what was allowed');
+  assert.strictEqual(fs.readFileSync(path.join(`${dir}-cli`, 'PROMPT.log'), 'utf8'),
+    'Continue the original request from this session. Retry the one action that was just allowed, then finish without repeating completed work.',
+    'permission continuation must not replay the full original request');
 });
 
 test('two concurrent allows do not start two sessions on one session id', async () => {
