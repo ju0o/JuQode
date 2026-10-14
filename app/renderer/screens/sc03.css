@@ -1,36 +1,41 @@
-/* SC-03 · Work.
- * Composition per 17: the Work card is L (2×2) and dominates; the board is quieter than
- * SC-02's because one thing is happening and the screen should say which. */
+/* SC-03 · the same board: a light canvas, one reading card, a quiet side. */
 
 .sc03 {
   flex: 1 1 auto;
   overflow: hidden;
   padding: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
   height: 100%;
   max-width: none; width: 100%; margin: 0;
   gap: 0;
   align-content: stretch;
+  background: var(--board);
 }
-.sc03-stage { min-width: 0; overflow: auto; padding: 28px 32px 40px; background: var(--board); }
+.sc03-stage { min-width: 0; overflow: auto; padding: 16px 20px 28px; background: var(--board); }
 .sc03-side {
-  min-width: 0; overflow: auto; padding: 18px 16px 32px;
-  border-left: 1px solid var(--line); background: var(--card);
-  display: flex; flex-direction: column; gap: 14px;
+  min-width: 0; overflow: auto; padding: 12px 14px 24px;
+  border-left: 1px solid var(--line); background: var(--board);
+  display: flex; flex-direction: column; gap: 8px;
 }
 .sc03 .c-s, .sc03 .c-m, .sc03 .c-l, .sc03 .c-wide { grid-column: auto; grid-row: auto; }
 .sc03 .card {
-  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
   min-width: 0; align-self: start;
   border-radius: var(--r-card);
+  box-shadow: none;
 }
-.sc03-stage > .card { min-height: calc(100% - 4px); padding: 28px 32px; }
+.sc03-stage > .card {
+  min-height: 0;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
 .sc03-stage [data-card="result"] .chead .ct {
   font-size: 18px; line-height: 26px; font-weight: 650;
   letter-spacing: -.02em; color: var(--ink);
 }
-.sc03-side .wname, .sc03 .wname { font-size: 16px; line-height: 24px; font-weight: 650; letter-spacing: 0; }
+.sc03-side .wname, .sc03 .wname { font-size: 18px; line-height: 26px; font-weight: 650; letter-spacing: -.02em; }
 .sc03 .result-human, .sc03 .context-human { display: flex; flex-direction: column; gap: 8px; }
 .sc03 .result-count { font-weight: 650; }
 .sc03 .result-voice, .sc03 .context-line { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -46,10 +51,13 @@
 .sc03 .foot { margin-top: auto; padding-top: 8px; }
 
 .sc03 .actor {
-  font-size: 10px; letter-spacing: .06em; font-weight: 600;
-  color: var(--claude); border: 1px solid var(--claude);
-  border-radius: var(--r-badge); padding: 2px 6px; text-transform: uppercase;
+  font-size: 12px; letter-spacing: 0; font-weight: 600;
+  color: var(--mut); border: none;
+  border-radius: 0; padding: 0; text-transform: none;
 }
+.sc03 .perm-action { font-size: 15px; line-height: 22px; font-weight: 650; color: var(--ink); }
+.sc03 [data-card="permission"],
+.sc03 [data-el="permission"] .row-acts .btn { min-height: 36px; }
 .sc03 .wname { overflow-wrap: anywhere; }
 .sc03 .routeline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .sc03 .run-context, .sc03 .run-evidence { border-top: 1px solid var(--line); padding-top: 7px; }
@@ -59,7 +67,11 @@
 .sc03 .run-evidence-row { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
 
 /* the liveness line — a fact and a time, and nothing that moves on its own */
-.sc03 .liveness { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.sc03 .liveness {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
 
 /* cancel is ink-outlined everywhere it appears: never recovery-green, never red (15 §0) */
 .sc03 .cancelrow { display: flex; flex-direction: column; gap: 4px; margin-top: auto; }
@@ -93,10 +105,11 @@
 .sc03 .nextslot {
   border-top: 1px solid var(--line);
   border-left: 3px solid var(--claude);
-  padding: 8px 0 0 10px;
+  padding: 6px 0 0 8px;
+  margin-top: 4px;
   display: flex; flex-direction: column; gap: 2px;
 }
-.sc03 .nextslot .nlabel { color: var(--claude); font-weight: 600; letter-spacing: .03em; }
+.sc03 .nextslot .nlabel { color: var(--claude); font-weight: 600; letter-spacing: 0; font-size: 11px; }
 .sc03 .unknownline { border-left: 1px dashed var(--unk); padding-left: 8px; }
 
 .sc03 .rawout {
@@ -110,8 +123,30 @@
    있었다 — 950 px 창에서 칼럼 하나가 145 px 다. sc02 와 같은 경계로 맞춘다. 1024 는 e2e 가
    같은 서열을 요구하며 재는 폭이므로 건드리지 않는다. */
 @media (max-width: 1023px) {
-  .sc03 { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 20px; }
-  .sc03 .c-l, .sc03 .c-wide, .sc03 .c-m { grid-column: span 2; grid-row: span 1; }
+  .sc03 { grid-template-columns: minmax(0, 1fr); height: auto; overflow: auto; }
+  .sc03 .c-l, .sc03 .c-wide, .sc03 .c-m { grid-column: auto; grid-row: auto; }
+  .sc03-side { border-left: none; border-top: 1px solid var(--line); }
+}
+
+/* The presence stays, as a status mark. It does not get a panel of its own. */
+.sc03 [data-card="presence"] {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+.sc03 [data-card="presence"] .pbody {
+  width: 22px; height: 22px; min-width: 0; min-height: 0;
+  flex: 0 0 22px; overflow: hidden;
+}
+.sc03 [data-card="presence"] .pbody canvas {
+  width: 22px; height: 22px; max-width: 22px; max-height: 22px;
+}
+.sc03 [data-card="presence"] .foot {
+  flex: 1 1 140px;
+  margin: 0; padding: 0;
+  font-size: 11px; line-height: 15px;
 }
 
 /* label · value rows: the label must not run into the value it introduces */

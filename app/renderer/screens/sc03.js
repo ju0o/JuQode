@@ -194,6 +194,16 @@ function liveness(snap) {
  * there is nothing else to parse. A spec that does not have that shape is not shown at all —
  * the caller falls back to the raw input rather than displaying something half-read.
  */
+function permissionAction(d) {
+  const target = specTarget(d.spec)
+    ?? d.input?.file_path ?? d.input?.path ?? d.input?.notebook_path
+    ?? null;
+  if (!target || typeof target !== 'string') return null;
+  const name = target.split(/[\\/]/).filter(Boolean).pop() || target;
+  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(d.tool ?? '')) return C.gap.board.fileEdit(name);
+  return name;
+}
+
 function specTarget(spec) {
   if (typeof spec !== 'string') return null;
   const open = spec.indexOf('(');
@@ -207,6 +217,8 @@ function permissionPanel(snap, api, state) {
   const panel = el('div', 'panel wait');
   panel.setAttribute('data-el', 'permission');
   panel.appendChild(el('div', 'sm t', C.gap.stage.permit));
+  const action = permissionAction(d);
+  if (action) panel.appendChild(el('div', 'perm-action', action));
   panel.appendChild(el('div', 'sm', C.work.permTitleB));
 
   /* Verbatim: which tool, and on WHAT — and specifically the string the GRANT is built from.
@@ -220,15 +232,11 @@ function permissionPanel(snap, api, state) {
   const target = specTarget(d.spec)
     ?? d.input?.file_path ?? d.input?.path ?? d.input?.notebook_path
     ?? d.input?.command ?? d.input?.url ?? null;
-  const what = el('div', 'xs mono mut');
-  what.textContent = `${C.gap.workDenialTool}: ${d.tool ?? '—'}${target ? ` · ${target}` : ''}`;
-  panel.appendChild(what);
-  if (d.message) {
-    const raw = el('details');
-    raw.appendChild(el('summary', 'xs mut', C.work.rawQ));
-    raw.appendChild(el('div', 'xs mono mut', d.message));
-    panel.appendChild(raw);
-  }
+  const raw = el('details');
+  raw.appendChild(el('summary', 'xs mut', C.work.rawQ));
+  raw.appendChild(el('div', 'xs mono mut', `${C.gap.workDenialTool}: ${d.tool ?? '—'}${target ? ` · ${target}` : ''}`));
+  if (d.message) raw.appendChild(el('div', 'xs mono mut', d.message));
+  panel.appendChild(raw);
 
   panel.appendChild(el('div', 'sm', C.work.permGlossB));
 
@@ -465,14 +473,13 @@ function labeled(label, text) {
   return row;
 }
 
-/* The result's first reading: what Claude said, and what JuQode actually recorded.
+/* The result's first reading: what JuQode recorded, then what Claude said.
  * Claim chips stay below this. They are the precise record, not the headline. */
 function humanResult(snap) {
   const block = el('div', 'result-human');
   block.setAttribute('data-el', 'result-human');
   const report = (snap.result?.claims ?? []).find((claim) => claim.kind === 'agent-report');
   const said = typeof report?.data?.text === 'string' ? report.data.text.trim() : '';
-  block.appendChild(labeled(C.gap.task.humanAgent, said || C.gap.task.humanAgentNone));
   /* A Task Run's truth is run_evidence. A Work that is not a Task Run has no such rows;
      its changed-file claim is a different record, and "0개" would deny that claim. */
   if (snap.work?.task_id) {
@@ -498,6 +505,7 @@ function humanResult(snap) {
       block.appendChild(labeled(C.gap.task.humanObserved, files.length ? files.join('\n') : C.work.noChanges));
     }
   }
+  block.appendChild(labeled(C.gap.task.humanAgent, said || C.gap.task.humanAgentNone));
   return block;
 }
 

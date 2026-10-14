@@ -528,7 +528,9 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await sleep(300);
   out.briefFoldedAfter = await evalJs('JSON.stringify(window.__brief())');
   out.briefAnswersFolded = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
-  out.briefHeadFolded = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.innerText ?? null`);
+  /* The folded Brief lives under 프로젝트 정보. A closed disclosure is not rendered, so
+   * innerText is empty while the controls are still in the document and still clickable. */
+  out.briefHeadFolded = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.textContent ?? null`);
   out.briefHeadTitle = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.getAttribute('title') ?? ''`);
   await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '펼치기')?.click()`);
   await sleep(300);

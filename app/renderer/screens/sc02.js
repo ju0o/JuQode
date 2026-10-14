@@ -37,6 +37,7 @@ export function renderSC02(root, api, nav, state) {
     state.taskProjectId = p.id;
     state.selectedTaskId = null;
   }
+  state.unlinkedLive = null;
 
   const shell = el('div', 'shell');
 
@@ -47,6 +48,19 @@ export function renderSC02(root, api, nav, state) {
   id.appendChild(el('span', 'xs mut path', p.path));   /* truncation is CSS, so the title stays whole */
   id.title = p.path;
   bar.appendChild(id);
+  /* Board / List is the one real view control. Search and display stay off until they filter
+   * something the product actually stores. */
+  const viewBoard = btn('btn sm', C.gap.board.viewBoard, () => {
+    state.boardView = 'board';
+    paintTaskList();
+  });
+  const viewList = btn('btn sm', C.gap.board.viewList, () => {
+    state.boardView = 'list';
+    paintTaskList();
+  });
+  const views = el('div', 'board-views');
+  views.append(viewBoard, viewList);
+  bar.appendChild(views);
   bar.appendChild(el('span', 'grow'));
   bar.appendChild(btn('btn sm ghost nodrag', C.nav.otherProject, () => nav.toPicker()));
   /* `15` §0 · TD-01: the terminal toggle is on every screen's top bar. The drawer itself lives
@@ -184,6 +198,7 @@ export function renderSC02(root, api, nav, state) {
       });
     },
   });
+    foldProjectInfo(brief, state);
   };
   /* Every redraw re-places the card, so the interpretation ARRIVING is also when the Brief
    * stops being the subject — the move and the content change land in the same frame instead
@@ -387,23 +402,11 @@ export function renderSC02(root, api, nav, state) {
   };
   const paintTaskList = () => {
     taskRows.innerHTML = '';
-    const tools = el('div', 'boardbar');
-    tools.appendChild(el('span', 'board-title', C.gap.task.title));
-    const viewBoard = btn('btn sm', C.gap.board.viewBoard, () => {
-      state.boardView = 'board';
-      paintTaskList();
-    });
-    const viewList = btn('btn sm', C.gap.board.viewList, () => {
-      state.boardView = 'list';
-      paintTaskList();
-    });
-    if (state.boardView === 'list') viewList.classList.add('is-current');
-    else viewBoard.classList.add('is-current');
-    const views = el('div', 'board-views');
-    views.append(viewBoard, viewList);
-    tools.appendChild(views);
-    taskRows.appendChild(tools);
-    if (!currentTasks.length) taskRows.appendChild(el('div', 'sm mut board-empty', C.gap.task.noTasks));
+    viewBoard.classList.toggle('is-current', state.boardView !== 'list');
+    viewList.classList.toggle('is-current', state.boardView === 'list');
+    if (!currentTasks.length && !state.unlinkedLive) {
+      taskRows.appendChild(el('div', 'sm mut board-empty', C.gap.task.noTasks));
+    }
 
     const columns = [
       ['queued', C.gap.board.queued],
@@ -415,18 +418,21 @@ export function renderSC02(root, api, nav, state) {
     const cols = el('div', `board-cols${state.boardView === 'list' ? ' is-list' : ''}`);
     let liveMarked = false;
     const filter = state.boardFilter || 'all';
+    const loose = state.unlinkedLive;
+    const looseColumn = loose ? columnFor(null, { status: loose.status, outcome: loose.outcome }) : null;
     for (const [key, label] of columns) {
       if (filter === 'needs' && key !== 'needs') continue;
       if (filter === 'done' && key !== 'done') continue;
       const items = currentTasks.filter((task) => columnFor(task, task._run) === key);
+      const extra = looseColumn === key ? 1 : 0;
       const column = el('section', 'board-col');
       column.setAttribute('data-column', key);
       const headRow = el('div', 'col-head');
       headRow.appendChild(el('span', 'col-title', label));
-      headRow.appendChild(el('span', 'col-count', String(items.length)));
+      headRow.appendChild(el('span', 'col-count', String(items.length + extra)));
       column.appendChild(headRow);
-      if (key === 'doing' && items.length) column.appendChild(el('div', 'xs mut2 col-note', C.gap.board.oneRun));
-      if (!items.length && !currentTasks.length && key === 'queued') {
+      if (key === 'doing' && (items.length || extra)) column.appendChild(el('div', 'xs mut2 col-note', C.gap.board.oneRun));
+      if (!items.length && !extra && !currentTasks.length && !loose && key === 'queued') {
         column.appendChild(el('div', 'xs mut2 col-empty', C.gap.board.empty));
       }
       for (const task of items) {
@@ -434,6 +440,7 @@ export function renderSC02(root, api, nav, state) {
         if (executing) liveMarked = true;
         column.appendChild(taskTile(task, executing));
       }
+      if (extra) column.appendChild(unlinkedTile(loose));
       cols.appendChild(column);
     }
     taskRows.appendChild(cols);
@@ -463,13 +470,20 @@ export function renderSC02(root, api, nav, state) {
     row.setAttribute('data-task-id', task.id);
     row.setAttribute('data-tone', tone);
     row.setAttribute('aria-pressed', String(selected));
-    row.appendChild(el('span', 'tile-title', task.goal));
-    row.appendChild(el('span', `tile-status tone-${tone}`, tileStatus(task, task._run, executing)));
-    const meta = el('span', 'tile-meta');
-    if (task._run?.attempt) meta.appendChild(el('span', '', `${C.gap.task.run} ${task._run.attempt}`));
-    if (task._run?.at) meta.appendChild(el('span', '', shortWhen(task._run.at)));
-    if (task._run?.evidence > 0) meta.appendChild(el('span', '', C.gap.board.seen(task._run.evidence)));
-    if (meta.childNodes.length) row.appendChild(meta);
+    fillTile(row, task.goal, tileBits(task, task._run, executing), tone, task._run);
+    return row;
+  };
+
+  /* A live attempt that was never saved as a Task. It occupies the column its status
+   * actually maps to, and it does not pretend to be a Task. */
+  const unlinkedTile = (live) => {
+    const run = { status: live.status, outcome: live.outcome, at: live.at };
+    const tone = tileTone(null, run);
+    const row = btn(`tile tone-${tone} is-live`, '', () => nav.toWork(live.snap));
+    row.type = 'button';
+    row.setAttribute('data-el', 'unlinked-run');
+    row.setAttribute('data-tone', tone);
+    fillTile(row, live.intent, tileBits(null, run, true), tone, run, true);
     return row;
   };
 
@@ -631,7 +645,17 @@ export function renderSC02(root, api, nav, state) {
   stream.appendChild(presenceBody('idle'));
   stream.appendChild(el('div', 'xs mut2 foot', C.presence.hint));
   colMain.appendChild(stream);
-  fillStream(streamBody, stream, api, nav, state);
+  fillStream(streamBody, stream, api, nav, state, (snap) => {
+    const linked = Boolean(snap?.work?.task_id);
+    state.unlinkedLive = !snap || linked ? null : {
+      intent: snap.work.intent,
+      status: snap.status,
+      outcome: snap.outcome ?? snap.work.outcome ?? null,
+      at: snap.work.started_at || null,
+      snap,
+    };
+    paintTaskList();
+  });
 
   /* History — the rail. WBS-20: every Work this project started, newest first. `12`
    * F-C2-04 — it never disappears, and a failed or cancelled Work stays in it.
@@ -660,20 +684,81 @@ function shortWhen(iso) {
   return time.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-function tileStatus(task, run, executing) {
-  if (run?.status === 'permission_waiting') return C.gap.presenceLabel.permission;
-  if (run?.status === 'input_waiting') return C.gap.presenceLabel.input;
-  if (run?.status === 'cancel_requested') return C.work.cancelReq;
-  if (run?.outcome === 'ended_unknown') return C.gap.task.unknownOutcome;
-  if (task?.status === 'blocked') return C.gap.task.blocked;
-  if (run?.status && run.status !== 'ended') return executing ? C.gap.board.live : C.gap.board.notEnded;
-  if (task?.verdict === 'pass' || task?.status === 'complete') return C.gap.task.pass;
-  if (task?.verdict === 'fail' || run?.outcome === 'failed') return C.gap.task.fail;
-  if (run?.outcome === 'partial' || run?.outcome === 'cancelled_partial') return C.work.resultTitle.partial;
-  if (run?.outcome === 'cancelled_nochange') return C.work.resultTitle.cancelled_none;
-  if (run?.outcome === 'complete') return C.gap.board.look;
-  if (run) return C.gap.board.look;
-  return C.gap.board.notStarted;
+/* Painted once from the timestamp. Nothing here schedules a refresh. */
+function ago(iso) {
+  const time = new Date(iso);
+  if (!Number.isFinite(time.getTime())) return '';
+  const delta = Date.now() - time.getTime();
+  if (delta < 0) return shortWhen(iso);
+  const min = Math.floor(delta / 60000);
+  if (min < 1) return C.gap.board.agoJust;
+  if (min < 60) return C.gap.board.agoMin(min);
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return C.gap.board.agoHour(hour);
+  return shortWhen(iso);
+}
+
+/* Title, one short state, and a reason only when the status itself names something to notice. */
+function tileBits(task, run, executing) {
+  if (run?.status === 'permission_waiting') {
+    return { mark: '●', status: C.gap.board.needs, reason: C.gap.presenceLabel.permission };
+  }
+  if (run?.status === 'input_waiting') {
+    return { mark: '●', status: C.gap.board.needs, reason: C.gap.presenceLabel.input };
+  }
+  if (run?.status === 'cancel_requested') {
+    return { mark: '●', status: C.gap.board.needs, reason: C.work.cancelReq };
+  }
+  if (run?.outcome === 'ended_unknown') {
+    return { mark: '●', status: C.gap.board.needs, reason: C.gap.task.legacyUnknownTitle };
+  }
+  if (task?.status === 'blocked') {
+    return { mark: '●', status: C.gap.board.needs, reason: C.gap.task.blocked };
+  }
+  if (run?.status && run.status !== 'ended') {
+    return { mark: '●', status: executing ? C.gap.board.working : C.gap.board.notEnded, reason: '' };
+  }
+  if (task?.verdict === 'pass' || task?.status === 'complete') {
+    return { mark: '✓', status: C.gap.task.completeState, reason: '' };
+  }
+  if (task?.verdict === 'fail' || run?.outcome === 'failed') {
+    return { mark: '', status: C.gap.board.review, reason: C.gap.task.fail };
+  }
+  if (run?.outcome === 'partial' || run?.outcome === 'cancelled_partial') {
+    return { mark: '', status: C.gap.board.review, reason: C.work.resultTitle.partial };
+  }
+  if (run?.outcome === 'cancelled_nochange') {
+    return { mark: '', status: C.gap.board.review, reason: C.work.resultTitle.cancelled_none };
+  }
+  if (run) return { mark: '', status: C.gap.board.review, reason: C.gap.board.look };
+  return { mark: '', status: C.gap.board.queued, reason: '' };
+}
+
+function fillTile(row, title, bits, tone, run, unlinked = false) {
+  row.appendChild(el('span', 'tile-title', title));
+  const status = el('span', `tile-status tone-${tone}`);
+  if (bits.mark) status.appendChild(el('span', 'tile-mark', bits.mark));
+  status.appendChild(el('span', 'tile-state', bits.status));
+  row.appendChild(status);
+  if (bits.reason) row.appendChild(el('span', 'tile-reason', bits.reason));
+  const meta = el('span', 'tile-meta');
+  if (unlinked) meta.appendChild(el('span', '', C.gap.board.unlinked));
+  if (run?.at) meta.appendChild(el('span', '', ago(run.at)));
+  if (run?.evidence > 0) meta.appendChild(el('span', '', C.gap.board.seen(run.evidence)));
+  if (meta.childNodes.length) row.appendChild(meta);
+}
+
+/* The interpretation stays in the rail, closed, until someone asks or it has news. */
+function foldProjectInfo(card, state) {
+  const details = el('details', 'project-info');
+  details.open = Boolean(state.projectEmpty)
+    || !state.interpretation
+    || state.briefFolded === false
+    || Boolean(state.stale?.changed)
+    || Boolean(state.rereading);
+  details.appendChild(el('summary', 'project-info-sum', C.gap.board.projectInfo));
+  while (card.firstChild) details.appendChild(card.firstChild);
+  card.appendChild(details);
 }
 
 function runTime(value) {
@@ -1083,7 +1168,7 @@ export function presenceIsStill(state, project) {
  * whether a Work is running is not known synchronously — and an idle screen therefore never
  * moves at all.
  */
-async function fillStream(body, stream, api, nav, state) {
+async function fillStream(body, stream, api, nav, state, onLive) {
   const project = state.project;
   const r = await api.history(project.id);
   /* The answer describes the project this started for. If the user has moved on, it is about
@@ -1092,13 +1177,14 @@ async function fillStream(body, stream, api, nav, state) {
 
   /* A read that FAILED says nothing about whether there is a Work. `idle` is `대기 중` — a
    * claim that nothing is happening — and the store refusing to answer is not evidence for it. */
-  if (!r?.ok) { setPresenceMode('unknown'); return; }
+  if (!r?.ok) { setPresenceMode('unknown'); onLive?.(null); return; }
 
   const live = r.works.find((w) => w.status !== 'ended');
   if (!live) {
     /* TRUE, and now only said when it is: this project has no Work that has not ended. */
     body.appendChild(el('div', 'sm mut', C.work.empty));
     setPresenceMode('idle');
+    onLive?.(null);
     return;
   }
 
@@ -1113,9 +1199,11 @@ async function fillStream(body, stream, api, nav, state) {
      * happening, and something is — we just cannot see what. */
     body.appendChild(el('div', 'sm mut', C.orient.unknown));
     setPresenceMode('unknown');
+    onLive?.(null);
     return;
   }
   setPresenceMode(modeFor(snap));
+  onLive?.(snap);
 
   /* D-138 §3: with a Work running, this is what the first scan must land on. */
   stream.parentNode?.insertBefore(stream, stream.parentNode.firstChild);
@@ -1232,7 +1320,10 @@ async function fillHistory(rows, api, nav, state) {
       const got = await api.workGet(w.id);
       if (got?.ok) nav.toReader(got.work);
     }));
-    row.appendChild(acts);
+    const more = el('details', 'hist-more');
+    more.appendChild(el('summary', 'xs mut', C.gap.board.rowMore));
+    more.appendChild(acts);
+    row.appendChild(more);
 
     rows.appendChild(row);
   }

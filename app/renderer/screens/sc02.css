@@ -416,6 +416,28 @@
 }
 .sc02 .nav-item:hover { background: var(--card2); }
 .sc02 .nav-item.is-current { background: var(--card2); font-weight: 650; }
+.sc02 .project-info { margin: 6px 0 2px; }
+.sc02 .project-info-sum {
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ink2);
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.sc02 .project-info-sum::-webkit-details-marker { display: none; }
+.sc02 .project-info-sum:hover { background: var(--card2); }
+.sc02 .project-info[open] > .project-info-sum { color: var(--ink); font-weight: 650; }
+.sc02 .project-info > .chead { margin-top: 4px; }
+.sc02 .hist-more { margin-top: 2px; }
+.sc02 .hist-more > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  color: var(--mut2);
+}
+.sc02 .hist-more > summary::-webkit-details-marker { display: none; }
 .sc02 .nav-projects .nav-item.is-current::before,
 .sc02 .nav-filters .nav-item.is-current::before {
   content: "";
@@ -437,17 +459,17 @@
 }
 .sc02 .boardbar { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 0 auto; }
 .sc02 .board-title { display: none; }
-.sc02 .board-views { display: flex; gap: 0; padding: 2px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
-.sc02 .board-views .btn {
+.topbar .board-views { display: flex; gap: 0; padding: 2px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.topbar .board-views .btn {
   min-height: 28px; padding: 2px 10px; font-size: 13px; font-weight: 500;
   background: transparent; border-color: transparent; box-shadow: none;
 }
-.sc02 .board-views .btn.is-current { background: var(--card2); border-color: transparent; font-weight: 650; color: var(--ink); }
+.topbar .board-views .btn.is-current { background: var(--card2); border-color: transparent; font-weight: 650; color: var(--ink); }
 .sc02 .board-empty { margin: 0; }
 .sc02 .board-cols {
   flex: 1 1 auto;
   display: flex;
-  gap: 8px;
+  gap: 12px;
   align-items: stretch;
   min-width: 0;
   min-height: 0;
@@ -455,23 +477,29 @@
   overflow-x: auto;
 }
 .sc02 .board-cols.is-list { flex-direction: column; overflow-x: visible; }
+/* The column is a place on the canvas. The header is the anchor. Cards float;
+   an empty column is not a box. */
 .sc02 .board-col {
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: 8px;
   flex: 1 1 0;
   min-width: 108px;
   max-width: none;
-  min-height: 160px;
-  padding: 8px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  min-height: 0;
+  padding: 0 2px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 .sc02 .board-cols.is-list .board-col { flex-basis: auto; max-width: none; width: 100%; }
-.sc02 .col-head { display: flex; align-items: baseline; gap: 6px; }
+.sc02 .col-head {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 0 2px 6px;
+  border-bottom: 1px solid var(--line);
+}
 .sc02 .col-title { font-size: 12px; font-weight: 650; color: var(--ink2); white-space: nowrap; }
 .sc02 .col-count { font-size: 12px; color: var(--mut2); }
 .sc02 .col-note, .sc02 .col-empty { overflow-wrap: break-word; word-break: keep-all; }
-.sc02 .task-pick.tile {
+.sc02 .tile {
   appearance: none; -webkit-appearance: none;
   display: flex; flex-direction: column; align-items: stretch; gap: 3px;
   width: 100%; text-align: left;
@@ -483,11 +511,14 @@
   color: var(--ink);
   font: inherit;
   cursor: pointer;
+  box-shadow: var(--sh-rest);
 }
-.sc02 .task-pick.tile:hover { border-color: var(--line3); }
+.sc02 .tile:hover { border-color: var(--line3); }
 .sc02 .task-pick.tile.selected { border-color: var(--ink); }
 .sc02 .tile-title { font-size: 13px; font-weight: 650; line-height: 18px; overflow-wrap: break-word; word-break: keep-all; }
-.sc02 .tile-status { font-size: 12px; line-height: 16px; color: var(--mut); overflow-wrap: break-word; word-break: keep-all; }
+.sc02 .tile-status { display: flex; align-items: center; gap: 5px; font-size: 12px; line-height: 16px; color: var(--mut); overflow-wrap: break-word; word-break: keep-all; }
+.sc02 .tile-mark { flex: 0 0 auto; font-size: 11px; }
+.sc02 .tile-reason { font-size: 12px; line-height: 16px; color: var(--ink2); overflow-wrap: break-word; word-break: keep-all; }
 .sc02 .tile-status.tone-fail { color: var(--fail); }
 .sc02 .tile-status.tone-needs, .sc02 .tile-status.tone-partial { color: var(--wait); }
 .sc02 .tile-status.tone-done { color: var(--rec); }
