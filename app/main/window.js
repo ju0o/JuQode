@@ -31,6 +31,10 @@ function createWindow({ onShown } = {}) {
    * and a single slash, and any space in the install path stays unescaped. The comparison
    * could then never match, so the allowlist silently degraded to deny-all. */
   lockNavigation(win.webContents, pathToFileURL(RENDERER).href);
+  /* E2E under Xvfb can mark the renderer occluded. Animation frames then stop, and the
+     visual harness waits on requestAnimationFrame until the CDP call times out. Production
+     starts do not set JUQODE_TRACE, so this stays off for a normal window. */
+  if (process.env.JUQODE_TRACE === '1') win.webContents.setBackgroundThrottling(false);
 
   let shown = false;
   const show = (via) => {

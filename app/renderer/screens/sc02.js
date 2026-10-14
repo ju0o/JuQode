@@ -22,6 +22,9 @@
  */
 import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
+import { proposeDraft, compareRuns } from '../draft.mjs';
+import { columnFor, tileTone } from '../board-column.mjs';
+import { contextFacts } from '../human-read.mjs';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
@@ -48,7 +51,7 @@ export function renderSC02(root, api, nav, state) {
   bar.appendChild(btn('btn sm ghost nodrag', C.nav.otherProject, () => nav.toPicker()));
   /* `15` §0 · TD-01: the terminal toggle is on every screen's top bar. The drawer itself lives
    * outside `#root`, so this only flips a flag the router owns. */
-  bar.appendChild(btn('btn sm ghost nodrag', C.term.title, () => window.__toggleDrawer?.()));
+  bar.appendChild(btn('btn sm ghost nodrag term-toggle', C.term.title, () => window.__toggleDrawer?.()));
   mountThemeToggle(bar, C.theme);
   shell.appendChild(bar);
 
@@ -63,10 +66,49 @@ export function renderSC02(root, api, nav, state) {
    *
    * A stack still cannot overlap, which is why this is two flex columns and not a row grid —
    * see the measured failure recorded below. */
-  const colMain = el('div', 'sc02-col sc02-main');
   const colRail = el('div', 'sc02-col sc02-rail');
-  board.appendChild(colMain);
-  board.appendChild(colRail);
+  const colMain = el('div', 'sc02-col sc02-main');
+  const colInspect = el('div', 'sc02-col sc02-inspect');
+  colRail.setAttribute('data-region', 'rail');
+  colMain.setAttribute('data-region', 'stage');
+  colInspect.setAttribute('data-region', 'inspector');
+  const navHead = el('div', 'nav-head');
+  navHead.appendChild(el('div', 'nav-brand', C.app.name));
+  navHead.appendChild(btn('nav-new', C.gap.board.newWork, () => {
+    state.composerOpen = true;
+    syncShell();
+    document.querySelector('[data-el="intent"]')?.focus();
+  }));
+  navHead.appendChild(el('div', 'nav-label', C.gap.board.projects));
+  const projList = el('div', 'nav-projects');
+  for (const item of (state.recent ?? []).slice(0, 6)) {
+    const current = item.path === p.path;
+    const itemBtn = btn(`nav-item${current ? ' is-current' : ''}`, item.name, async () => {
+      if (current) return;
+      const res = await api.openPath(item.path);
+      if (res?.ok) nav.toWorkbench(res.project, res.interpretation ?? null, { empty: res.empty === true });
+    });
+    itemBtn.type = 'button';
+    projList.appendChild(itemBtn);
+  }
+  if (!projList.childNodes.length) projList.appendChild(el('div', 'nav-item is-current', p.name));
+  navHead.appendChild(projList);
+  navHead.appendChild(el('div', 'nav-label', C.gap.board.filterWork));
+  const filters = el('div', 'nav-filters');
+  for (const [key, label] of [['all', C.gap.board.filterAll], ['needs', C.gap.board.needs], ['done', C.gap.task.completeState]]) {
+    const filterBtn = btn(`nav-item${(state.boardFilter || 'all') === key ? ' is-current' : ''}`, label, () => {
+      state.boardFilter = key;
+      for (const node of filters.children) node.classList.toggle('is-current', node.textContent === label);
+      paintTaskList();
+    });
+    filterBtn.type = 'button';
+    filters.appendChild(filterBtn);
+  }
+  navHead.appendChild(filters);
+  colRail.appendChild(navHead);
+  /* Stage is first in the DOM so the subject is the first card. Visual columns put the
+   * rail on the left; see sc02.css `order`. */
+  board.append(colMain, colRail, colInspect);
   board.setAttribute('data-screen', 'SC-02');
 
   /* ① Brief — D-138 §4: supporting project context, NOT the user's permanent primary task.
@@ -79,9 +121,17 @@ export function renderSC02(root, api, nav, state) {
   const brief = card('wide2', 'brief');
   const placeBrief = () => {
     const wanted = state.interpretation ? colRail : colMain;
-    /* Only ever a MOVE, and only when the column is actually wrong — re-appending a node that
-     * is already in place would restart the card's fade for no reason. */
-    if (brief.parentNode !== wanted) wanted.insertBefore(brief, wanted.firstChild);
+    /* The rail keeps its identity above the Brief. The stage keeps the request first.
+     * Re-inserting a node before itself throws, so the early return compares the neighbour
+     * that should stay put, not the Brief. */
+    if (wanted === colRail) {
+      if (brief.parentNode === colRail && brief.previousSibling === navHead) return;
+      colRail.insertBefore(brief, navHead.nextSibling);
+      return;
+    }
+    const intentCard = colMain.querySelector(':scope > [data-card="intent"]');
+    if (brief.parentNode === colMain && brief.nextSibling === intentCard) return;
+    colMain.insertBefore(brief, intentCard);
   };
   placeBrief();
 
@@ -97,6 +147,8 @@ export function renderSC02(root, api, nav, state) {
       /* The sentence goes into the field and is NOT sent. `12` treats 보내기 as consent to
        * change files, so the person presses it — with their own words in place of the stub. */
       if (!field) return;
+      state.composerOpen = true;
+      syncShell();
       field.value = C.gap.briefEmptyIntent;
       field.focus();
       field.setSelectionRange(field.value.length, field.value.length);
@@ -180,16 +232,11 @@ export function renderSC02(root, api, nav, state) {
    * lives. Nothing is routed as the user types — the route is disclosed after submit only
    * (D-106), because a live guess is a guess. */
   const intent = card('wide2', 'intent');
-  const taskHeading = head(C.gap.task.title);
-  taskHeading.classList.add('task-heading');
-  intent.appendChild(taskHeading);
-  intent.appendChild(el('div', 'xs mut2 task-intro', C.gap.task.intro));
   const legacyUnknownNotice = el('div', 'task-legacy-unknown');
   legacyUnknownNotice.setAttribute('data-el', 'legacy-unknown');
-  intent.appendChild(legacyUnknownNotice);
-  const taskRows = el('div', 'task-rows');
+  colInspect.appendChild(legacyUnknownNotice);
+  const taskRows = el('div', 'kanban');
   taskRows.setAttribute('data-el', 'task-list');
-  intent.appendChild(taskRows);
 
   const createTask = el('details', 'task-create');
   const createSummary = el('summary', 'sm', C.gap.task.create);
@@ -215,7 +262,10 @@ export function renderSC02(root, api, nav, state) {
       acceptanceCriteria: criteria,
     });
     createButton.disabled = false;
-    if (!created?.ok) { createNote.textContent = created?.detail ?? C.gap.task.createNeedsCriterion; return; }
+    if (!created?.ok) {
+      createNote.textContent = created?.reason === 'invalid-task' ? C.gap.task.draftFailed : (created?.detail ?? C.gap.task.createNeedsCriterion);
+      return;
+    }
     state.selectedTaskId = created.task.id;
     taskGoal.value = '';
     taskAcceptance.value = '';
@@ -225,16 +275,26 @@ export function renderSC02(root, api, nav, state) {
   createTask.append(el('label', 'xs mut2', C.gap.task.goal), taskGoal,
     el('label', 'xs mut2', C.gap.task.acceptance), taskAcceptance,
     dependencies, createNote, createButton);
-  intent.appendChild(createTask);
+  colInspect.appendChild(createTask);
 
   const selectedTask = el('section', 'task-selected');
   selectedTask.setAttribute('data-el', 'selected-task');
-  intent.appendChild(selectedTask);
-  const requestLabel = el('div', 'sm task-request-label', C.intent.label);
+  const detailHead = el('div', 'detail-kicker');
+  detailHead.appendChild(el('span', '', C.gap.board.detail));
+  detailHead.appendChild(btn('btn sm ghost', C.term.close, () => {
+    state.selectedTaskId = null;
+    syncShell();
+    paintTaskList();
+    paintSelectedTask();
+  }));
+  colInspect.appendChild(detailHead);
+  colInspect.appendChild(selectedTask);
+  const requestLabel = el('div', 'sm task-request-label', C.gap.stage.ask);
   intent.appendChild(requestLabel);
+  intent.appendChild(el('div', 'xs mut2 task-intro', C.gap.task.intro));
   const field = el('textarea', 'intentfield');
   field.setAttribute('data-el', 'intent');
-  field.placeholder = C.intent.ph;
+  field.placeholder = C.gap.stage.askPlaceholder;
   field.rows = 2;
   /* WBS-19 · a correction arrives with the request already written. It is NOT sent — `12` treats
    * 보내기 as consent to change files, so the sentence sits here for the user to send, edit, or
@@ -242,9 +302,50 @@ export function renderSC02(root, api, nav, state) {
   if (state.prefill) { field.value = state.prefill; state.prefill = null; }
   intent.appendChild(field);
 
+  const draft = el('div', 'composer-draft');
+  draft.setAttribute('data-el', 'composer-draft');
+  draft.hidden = true;
+  const criteriaBox = el('textarea', 'intentfield task-input');
+  criteriaBox.rows = 2;
+  criteriaBox.setAttribute('aria-label', C.gap.task.draftCriterion);
+  const draftNote = el('div', 'xs mut2');
+  let criteriaDirty = false;
+  criteriaBox.addEventListener('input', () => { criteriaDirty = true; });
+  const commit = btn('btn pri', C.gap.task.commitNew, () => commitNewTask());
+  commit.setAttribute('data-act', 'commit-task');
+  draft.title = `${C.gap.task.draftHandoff}\n${C.gap.task.contextScope}`;
+  draft.append(
+    el('div', 'sm', C.gap.task.draftLead),
+    el('label', 'xs mut2', C.gap.task.draftCriterion),
+    criteriaBox,
+    draftNote,
+    commit,
+  );
+  intent.appendChild(draft);
+  const paintDraft = () => {
+    const proposal = proposeDraft(field.value);
+    if (!proposal) {
+      draft.hidden = true;
+      criteriaDirty = false;
+      criteriaBox.value = '';
+      draftNote.textContent = '';
+      return;
+    }
+    draft.hidden = false;
+    if (!criteriaDirty) criteriaBox.value = proposal.criteria.join('\n');
+  };
+  paintDraft();
+
   const consequence = el('div', 'consequence');
   consequence.setAttribute('data-el', 'consequence');
   intent.appendChild(consequence);
+  const syncShell = () => {
+    board.classList.toggle('is-inspect', Boolean(state.selectedTaskId));
+    board.classList.toggle('composer-open', Boolean(state.composerOpen) || consequence.childNodes.length > 0 || draft.hidden === false);
+  };
+  new MutationObserver(syncShell).observe(consequence, { childList: true });
+  field.addEventListener('input', () => { paintDraft(); syncShell(); });
+  syncShell();
 
   const submit = btn('btn pri', C.intent.submit, () => send());
   submit.setAttribute('data-act', 'submit-intent');
@@ -255,6 +356,7 @@ export function renderSC02(root, api, nav, state) {
   intent.appendChild(el('div', 'xs mut2 task-request-note', C.intent.examples));
   intent.appendChild(el('div', 'xs mut2 task-request-note', C.intent.approvalNote));
   colMain.appendChild(intent);
+  colMain.appendChild(taskRows);
 
   let taskLoadSequence = 0;
   let currentTasks = [];
@@ -285,22 +387,57 @@ export function renderSC02(root, api, nav, state) {
   };
   const paintTaskList = () => {
     taskRows.innerHTML = '';
-    if (!currentTasks.length) {
-      taskRows.appendChild(el('div', 'sm mut', C.gap.task.noTasks));
-      dependencies.innerHTML = '';
-      return;
+    const tools = el('div', 'boardbar');
+    tools.appendChild(el('span', 'board-title', C.gap.task.title));
+    const viewBoard = btn('btn sm', C.gap.board.viewBoard, () => {
+      state.boardView = 'board';
+      paintTaskList();
+    });
+    const viewList = btn('btn sm', C.gap.board.viewList, () => {
+      state.boardView = 'list';
+      paintTaskList();
+    });
+    if (state.boardView === 'list') viewList.classList.add('is-current');
+    else viewBoard.classList.add('is-current');
+    const views = el('div', 'board-views');
+    views.append(viewBoard, viewList);
+    tools.appendChild(views);
+    taskRows.appendChild(tools);
+    if (!currentTasks.length) taskRows.appendChild(el('div', 'sm mut board-empty', C.gap.task.noTasks));
+
+    const columns = [
+      ['queued', C.gap.board.queued],
+      ['doing', C.gap.historyRunning],
+      ['needs', C.gap.board.needs],
+      ['review', C.gap.board.review],
+      ['done', C.gap.task.completeState],
+    ];
+    const cols = el('div', `board-cols${state.boardView === 'list' ? ' is-list' : ''}`);
+    let liveMarked = false;
+    const filter = state.boardFilter || 'all';
+    for (const [key, label] of columns) {
+      if (filter === 'needs' && key !== 'needs') continue;
+      if (filter === 'done' && key !== 'done') continue;
+      const items = currentTasks.filter((task) => columnFor(task, task._run) === key);
+      const column = el('section', 'board-col');
+      column.setAttribute('data-column', key);
+      const headRow = el('div', 'col-head');
+      headRow.appendChild(el('span', 'col-title', label));
+      headRow.appendChild(el('span', 'col-count', String(items.length)));
+      column.appendChild(headRow);
+      if (key === 'doing' && items.length) column.appendChild(el('div', 'xs mut2 col-note', C.gap.board.oneRun));
+      if (!items.length && !currentTasks.length && key === 'queued') {
+        column.appendChild(el('div', 'xs mut2 col-empty', C.gap.board.empty));
+      }
+      for (const task of items) {
+        const executing = key === 'doing' && !liveMarked;
+        if (executing) liveMarked = true;
+        column.appendChild(taskTile(task, executing));
+      }
+      cols.appendChild(column);
     }
-    for (const task of currentTasks) {
-      const row = btn(`task-pick${task.id === state.selectedTaskId ? ' selected' : ''}`,
-        `${task.goal} · ${taskVerdictLabel(task.verdict)}`, () => {
-          state.selectedTaskId = task.id;
-          paintTaskList();
-          paintSelectedTask();
-        });
-      row.setAttribute('data-task-id', task.id);
-      row.setAttribute('aria-pressed', String(task.id === state.selectedTaskId));
-      taskRows.appendChild(row);
-    }
+    taskRows.appendChild(cols);
+
     dependencies.innerHTML = '';
     if (currentTasks.length) {
       dependencies.appendChild(el('div', 'xs mut2', C.gap.task.dependencies));
@@ -314,11 +451,37 @@ export function renderSC02(root, api, nav, state) {
     }
   };
 
+  const taskTile = (task, executing) => {
+    const tone = tileTone(task, task._run);
+    const selected = task.id === state.selectedTaskId;
+    const row = btn(`task-pick tile tone-${tone}${selected ? ' selected' : ''}${executing ? ' is-live' : ''}`, '', () => {
+      state.selectedTaskId = task.id;
+      syncShell();
+      paintTaskList();
+      paintSelectedTask();
+    });
+    row.setAttribute('data-task-id', task.id);
+    row.setAttribute('data-tone', tone);
+    row.setAttribute('aria-pressed', String(selected));
+    row.appendChild(el('span', 'tile-title', task.goal));
+    row.appendChild(el('span', `tile-status tone-${tone}`, tileStatus(task, task._run, executing)));
+    const meta = el('span', 'tile-meta');
+    if (task._run?.attempt) meta.appendChild(el('span', '', `${C.gap.task.run} ${task._run.attempt}`));
+    if (task._run?.at) meta.appendChild(el('span', '', shortWhen(task._run.at)));
+    if (task._run?.evidence > 0) meta.appendChild(el('span', '', C.gap.board.seen(task._run.evidence)));
+    if (meta.childNodes.length) row.appendChild(meta);
+    return row;
+  };
+
   const paintSelectedTask = async () => {
     const sequence = ++taskLoadSequence;
     const taskId = state.selectedTaskId;
     selectedTask.innerHTML = '';
-    if (!taskId) { requestLabel.textContent = C.intent.label; return; }
+    if (!taskId) {
+      requestLabel.textContent = C.gap.stage.ask;
+      selectedTask.appendChild(el('p', 'sm mut', C.gap.stage.noTask));
+      return;
+    }
     const result = await api.taskDetail(taskId);
     if (sequence !== taskLoadSequence || state.selectedTaskId !== taskId) return;
     if (!result?.ok) { selectedTask.appendChild(el('div', 'xs mut2', result?.detail ?? C.gap.task.noTasks)); return; }
@@ -348,11 +511,27 @@ export function renderSC02(root, api, nav, state) {
     const listed = await api.taskList(p.id);
     if (sequence !== taskLoadSequence || state.project.id !== p.id) return;
     if (!listed?.ok) { taskRows.textContent = listed?.detail ?? C.gap.task.noTasks; return; }
-    currentTasks = listed.tasks;
+    const details = await Promise.all((listed.tasks ?? []).map((task) => api.taskDetail(task.id)));
+    if (sequence !== taskLoadSequence || state.project.id !== p.id) return;
+    currentTasks = (listed.tasks ?? []).map((task, index) => {
+      const detail = details[index]?.ok ? details[index] : null;
+      const snap = detail?.runs?.[0] ?? null;
+      return {
+        ...task,
+        _run: snap ? {
+          status: snap.work?.status ?? null,
+          outcome: snap.work?.outcome ?? null,
+          attempt: snap.work?.attempt ?? null,
+          at: snap.work?.ended_at || snap.work?.started_at || null,
+          evidence: (snap.runEvidence ?? []).length,
+        } : null,
+      };
+    });
     paintLegacyUnknown(listed.legacyUnknownRuns ?? []);
-    if (!currentTasks.some((task) => task.id === state.selectedTaskId)) {
-      state.selectedTaskId = currentTasks[0]?.id ?? null;
+    if (state.selectedTaskId && !currentTasks.some((task) => task.id === state.selectedTaskId)) {
+      state.selectedTaskId = null;
     }
+    syncShell();
     paintTaskList();
     await paintSelectedTask();
   }
@@ -362,6 +541,30 @@ export function renderSC02(root, api, nav, state) {
   field.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
+
+  async function commitNewTask() {
+    const text = field.value;
+    const criteria = criteriaBox.value.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (!text.trim()) { draftNote.textContent = C.gap.task.draftNeed; return; }
+    if (!criteria.length) { draftNote.textContent = C.gap.task.draftNeedCriterion; return; }
+    commit.disabled = true;
+    commit.textContent = C.gap.task.commitWorking;
+    draftNote.textContent = '';
+    try {
+      const routed = await api.routeIntent(text);
+      const route = routed?.route?.route ?? 'work';
+      if (route !== 'work') { await send(); return; }
+      const created = await api.taskCreate(p.id, { goal: text.trim(), acceptanceCriteria: criteria });
+      if (!created?.ok) { draftNote.textContent = C.gap.task.draftFailed; return; }
+      state.selectedTaskId = created.task.id;
+      criteriaDirty = false;
+      await refreshTasks();
+      await startWork(text, created.task.id, window.crypto.randomUUID());
+    } finally {
+      commit.disabled = false;
+      commit.textContent = C.gap.task.commitNew;
+    }
+  }
 
   async function send() {
     const text = field.value;
@@ -420,6 +623,7 @@ export function renderSC02(root, api, nav, state) {
    * `18` `work.now` names the region; Human Gate ② (2026-09-11) settled that the label is this
    * key's copy and not `15`'s table shorthand `지금`. */
   const stream = card('wide2', 'stream');
+  stream.title = C.presence.hint;
   stream.appendChild(head(C.work.now));
   const streamBody = el('div', 'streambody');
   streamBody.setAttribute('data-el', 'stream-body');
@@ -450,48 +654,209 @@ export function renderSC02(root, api, nav, state) {
   return { shell, board, field };
 }
 
-function taskVerdictLabel(verdict) {
-  return verdict === 'pass' ? C.gap.task.pass : verdict === 'fail' ? C.gap.task.fail : C.gap.task.unverified;
+function shortWhen(iso) {
+  const time = new Date(iso);
+  if (!Number.isFinite(time.getTime())) return '';
+  return time.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function tileStatus(task, run, executing) {
+  if (run?.status === 'permission_waiting') return C.gap.presenceLabel.permission;
+  if (run?.status === 'input_waiting') return C.gap.presenceLabel.input;
+  if (run?.status === 'cancel_requested') return C.work.cancelReq;
+  if (run?.outcome === 'ended_unknown') return C.gap.task.unknownOutcome;
+  if (task?.status === 'blocked') return C.gap.task.blocked;
+  if (run?.status && run.status !== 'ended') return executing ? C.gap.board.live : C.gap.board.notEnded;
+  if (task?.verdict === 'pass' || task?.status === 'complete') return C.gap.task.pass;
+  if (task?.verdict === 'fail' || run?.outcome === 'failed') return C.gap.task.fail;
+  if (run?.outcome === 'partial' || run?.outcome === 'cancelled_partial') return C.work.resultTitle.partial;
+  if (run?.outcome === 'cancelled_nochange') return C.work.resultTitle.cancelled_none;
+  if (run?.outcome === 'complete') return C.gap.board.look;
+  if (run) return C.gap.board.look;
+  return C.gap.board.notStarted;
 }
 
 function runTime(value) {
   if (!value) return '—';
   const time = new Date(value);
-  return Number.isFinite(time.getTime()) ? time.toLocaleString() : String(value);
+  if (!Number.isFinite(time.getTime())) return String(value);
+  return time.toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function outcomeKorean(outcome) {
+  if (!outcome) return null;
+  if (outcome === 'cancelled_nochange') return C.work.resultTitle.cancelled_none;
+  if (outcome === 'ended_unknown') return C.gap.task.unknownOutcome;
+  return C.work.resultTitle[outcome] ?? null;
+}
+
+function runFacts(snap) {
+  const changed = (snap.runEvidence ?? []).find((item) => item.kind === 'changed_files');
+  return {
+    contextDigest: snap.contextBundle?.content_digest ?? null,
+    filesObserved: Boolean(changed),
+    changedFiles: changed?.details?.files ?? [],
+    outcome: snap.work?.outcome ?? null,
+  };
+}
+
+function voice(label, text) {
+  const block = el('div', 'task-voice');
+  block.append(el('div', 'xs mut2', label), el('div', 'sm', text));
+  return block;
+}
+
+function renderHumanRead(task, latest) {
+  const block = el('div', 'task-human');
+  block.setAttribute('data-el', 'human-read');
+  block.appendChild(el('div', 'sm', C.gap.task.humanTitle));
+  block.appendChild(voice(C.gap.task.humanAsked, task.goal));
+  const ended = latest.work.status === 'ended';
+  const known = outcomeKorean(latest.work.outcome);
+  if (known) block.appendChild(voice(C.gap.task.humanOutcome, known));
+  else if (latest.work.outcome) {
+    const raw = el('details');
+    raw.appendChild(el('summary', 'xs mut', C.gap.task.outcomeRaw));
+    raw.appendChild(el('div', 'xs mono mut', latest.work.outcome));
+    block.appendChild(raw);
+  }
+  const report = latest.result?.claims?.find((claim) => claim.kind === 'agent-report');
+  if (report?.data?.text) block.appendChild(voice(C.gap.task.humanAgent, report.data.text));
+  else block.appendChild(voice(C.gap.task.humanAgent, ended ? C.gap.task.humanAgentNone : C.gap.task.humanAgentPending));
+  const changed = (latest.runEvidence ?? []).find((item) => item.kind === 'changed_files');
+  if (changed) {
+    const files = changed.details.files ?? [];
+    block.appendChild(voice(C.gap.task.humanObserved, files.length ? files.join('\n') : C.gap.task.noChanges));
+  } else {
+    block.appendChild(voice(C.gap.task.humanObserved, ended ? C.gap.task.humanObservedMissing : C.gap.task.humanObservedPending));
+  }
+  const tests = (latest.runEvidence ?? []).filter((item) => item.kind === 'test_command');
+  if (tests.length) {
+    const lines = tests.map((item) => `${item.summary} · ${testStateLabel(item)}`);
+    block.appendChild(voice(C.gap.task.humanTest, lines.join('\n')));
+  } else {
+    block.appendChild(voice(C.gap.task.humanTest, ended ? C.gap.task.humanTestNone : C.gap.task.humanTestPending));
+  }
+  if (ended) block.appendChild(el('div', 'sm', C.gap.task.observedCount((latest.runEvidence ?? []).length)));
+  if (latest.contextBundle?.bundle) block.appendChild(contextBlock(latest.contextBundle.bundle));
+  block.appendChild(voice(C.gap.task.humanConfirm, C.gap.task.humanConfirmHint));
+  return block;
+}
+
+function testStateLabel(item) {
+  if (item.details?.result_state === 'error') return C.gap.task.evidenceError;
+  if (item.details?.result_state === 'returned') {
+    return item.details.exit_code == null ? C.gap.task.evidenceReturnedNoExit : C.gap.task.evidenceReturned;
+  }
+  return C.gap.task.evidenceUnknown;
+}
+
+/* The frozen facts of one attempt. Ids and digests stay behind 자세히 보기. */
+function contextBlock(bundle) {
+  const block = el('div', 'context-human');
+  block.setAttribute('data-el', 'context-human');
+  block.appendChild(el('div', 'sm', C.gap.task.contextShown));
+  const label = {
+    goal: C.gap.task.goal,
+    criterion: C.gap.task.draftCriterion,
+    request: C.gap.task.humanAsked,
+  };
+  for (const fact of contextFacts(bundle)) {
+    const row = el('div', 'context-line');
+    if (label[fact.key]) row.appendChild(el('div', 'xs mut2', label[fact.key]));
+    row.appendChild(el('div', 'sm', fact.text));
+    block.appendChild(row);
+  }
+  block.appendChild(el('div', 'xs mut2', C.gap.task.contextScope));
+  return block;
+}
+
+function attemptLine(work) {
+  const spoken = outcomeKorean(work.outcome);
+  const line = el('div', 'task-attempt');
+  line.appendChild(el('div', 'sm', spoken
+    ? `${C.gap.task.run} ${work.attempt ?? 1} · ${spoken}`
+    : `${C.gap.task.run} ${work.attempt ?? 1}`));
+  if (!spoken && (work.outcome || work.status)) {
+    const raw = el('details');
+    raw.appendChild(el('summary', 'xs mut', C.gap.task.outcomeRaw));
+    raw.appendChild(el('div', 'xs mono mut', work.outcome ?? work.status));
+    line.appendChild(raw);
+  }
+  return line;
+}
+
+function renderRunCompare(newer, older) {
+  const compared = compareRuns(runFacts(newer), runFacts(older));
+  if (!compared) return el('div');
+  const block = el('div', 'task-compare');
+  block.setAttribute('data-el', 'run-compare');
+  block.appendChild(el('div', 'xs mut2', C.gap.task.compareTitle));
+  const context = compared.context === 'same' ? C.gap.task.compareContextSame
+    : compared.context === 'different' ? C.gap.task.compareContextDiff
+      : C.gap.task.compareContextUnknown;
+  const files = compared.files === 'same' ? C.gap.task.compareFilesSame
+    : compared.files === 'different' ? C.gap.task.compareFilesDiff
+      : C.gap.task.compareFilesUnknown;
+  block.append(el('div', 'sm', context), el('div', 'sm', files));
+  if (compared.addedFiles.length) block.appendChild(voice(C.gap.task.compareAdded, compared.addedFiles.join('\n')));
+  if (compared.removedFiles.length) block.appendChild(voice(C.gap.task.compareRemoved, compared.removedFiles.join('\n')));
+  return block;
 }
 
 function renderRunReview(task, detail, refresh, nav) {
   const latest = detail.runs[0];
   const section = el('div', 'task-run-review');
+  section.appendChild(renderHumanRead(task, latest));
+  if (detail.runs.length > 1) section.appendChild(renderRunCompare(detail.runs[0], detail.runs[1]));
   const reviews = new Map();
   for (const review of detail.reviews) {
     if (review.work_id === latest.work.id) reviews.set(review.criterion_id, review);
   }
-  section.appendChild(el('div', 'xs mut2', `${C.gap.task.run}: #${latest.work.attempt ?? 1} · ${latest.work.outcome ?? latest.work.status}`));
+  section.appendChild(attemptLine(latest.work));
 
   const criteria = el('div', 'task-review-criteria');
   for (const criterion of task.acceptance_criteria) {
     const row = el('div', 'task-review-criterion');
-    row.appendChild(el('div', 'sm', criterion.text));
     const previous = reviews.get(criterion.id);
     const matchingReview = latest.taskSpecCurrent && previous &&
       previous.task_spec_digest === latest.contextBundle?.bundle?.task_spec_digest;
+    const line = el('div', 'task-criterion-line');
+    line.appendChild(el('span', `task-mark${matchingReview?.verdict === 'pass' ? ' pass' : ''}`,
+      matchingReview?.verdict === 'pass' ? '✓' : '·'));
+    line.appendChild(el('div', 'sm', criterion.text));
+    row.appendChild(line);
     if (matchingReview) {
       row.appendChild(el('div', `xs mut2 review-${previous.verdict}`,
         `${C.gap.task.status}: ${previous.verdict === 'pass' ? C.gap.task.pass : C.gap.task.fail}`));
-      const linked = el('div', 'task-review-evidence');
-      for (const id of previous.evidence_ids ?? []) {
-        const ref = el('span', 'xs mut2 mono', `Evidence ${id.slice(0, 8)}`);
-        ref.title = id;
-        linked.appendChild(ref);
+    }
+    const unsupportedCheck = /\b(?:lint|type[\s-]?check(?:ing)?|static analysis|static check(?:s)?)\b/i.test(criterion.text);
+    const evidence = latest.runEvidence ?? [];
+    if (!matchingReview && latest.taskSpecCurrent && latest.work.status === 'ended' && !unsupportedCheck) {
+      if (evidence.length === 1) {
+        const shortcut = el('div', 'row-acts task-review-acts');
+        const record = async (verdict, button) => {
+          button.disabled = true;
+          const result = await window.juqode.taskReviewCriterion(task.id, latest.work.id, criterion.id,
+            verdict, [evidence[0].id]);
+          if (result?.ok) await refresh();
+          else {
+            row.appendChild(el('div', 'xs mut2', result?.detail ?? C.gap.task.noEvidence));
+            button.disabled = false;
+          }
+        };
+        const pass = btn('btn sm pri', C.gap.task.reviewThisPass, () => record('pass', pass));
+        const fail = btn('btn sm ghost', C.gap.task.reviewThisFail, () => record('fail', fail));
+        pass.disabled = latest.work.outcome !== 'complete';
+        shortcut.append(pass, fail);
+        row.appendChild(shortcut);
+      } else if (evidence.length > 1) {
+        row.appendChild(el('div', 'xs mut2', C.gap.task.reviewPick));
       }
-      if (linked.childNodes.length) row.appendChild(linked);
     }
     const review = el('details', 'task-review');
     review.appendChild(el('summary', 'xs mut', C.gap.task.review));
-    const unsupportedCheck = /\b(?:lint|type[\s-]?check(?:ing)?|static analysis|static check(?:s)?)\b/i.test(criterion.text);
     if (unsupportedCheck) review.appendChild(el('div', 'xs mut2', C.gap.task.unsupportedEvidence));
-    const evidence = latest.runEvidence ?? [];
     if (!latest.taskSpecCurrent || latest.work.status !== 'ended') {
       review.appendChild(el('div', 'xs mut2', C.gap.task.noEvidence));
     } else if (!evidence.length) {
@@ -594,17 +959,27 @@ function renderRunReview(task, detail, refresh, nav) {
     const run = el('details', 'task-run');
     const attempt = snap.work.attempt ?? 1;
     const agent = snap.work.agent_code === 'claude_code' ? C.actor.claude : '—';
-    run.appendChild(el('summary', 'xs task-run-summary', `#${attempt} · ${C.gap.task.agent} ${agent} · ${snap.work.outcome ?? snap.work.status}`));
+    const spoken = outcomeKorean(snap.work.outcome);
+    run.appendChild(el('summary', 'xs task-run-summary', spoken
+      ? `#${attempt} · ${C.gap.task.agent} ${agent} · ${spoken}`
+      : `#${attempt} · ${C.gap.task.agent} ${agent}`));
+    if (!spoken && (snap.work.outcome || snap.work.status)) {
+      const raw = el('details');
+      raw.appendChild(el('summary', 'xs mut', C.gap.task.outcomeRaw));
+      raw.appendChild(el('div', 'xs mono mut', snap.work.outcome ?? snap.work.status));
+      run.appendChild(raw);
+    }
     const times = el('div', 'xs mut2 task-run-times', `${C.work.started}: ${runTime(snap.work.started_at)}${snap.work.ended_at ? ` · ${C.gap.task.ended}: ${runTime(snap.work.ended_at)}` : ''}`);
     run.appendChild(times);
     if (snap.work.retry_reason) run.appendChild(factBlock(C.gap.task.retryReason, snap.work.retry_reason));
     if (snap.contextBundle?.bundle) {
+      run.appendChild(contextBlock(snap.contextBundle.bundle));
       const context = el('details', 'task-context');
       const bundle = snap.contextBundle.bundle;
-      context.appendChild(el('summary', 'xs mut', `${C.gap.task.prompt} · v${bundle.bundle_schema_version} · ${snap.contextBundle.content_digest.slice(0, 12)}`));
+      context.appendChild(el('summary', 'xs mut', C.gap.task.contextDetail));
+      context.appendChild(el('div', 'xs mono mut', `${C.gap.task.prompt} · v${bundle.bundle_schema_version} · ${snap.contextBundle.content_digest.slice(0, 12)}`));
       context.appendChild(el('pre', 'task-prompt', bundle.prompt_snapshot ?? ''));
       if (bundle.prompt_snapshot_redacted) context.appendChild(el('div', 'xs mut2', C.gap.task.redactedSnapshot));
-      context.appendChild(el('div', 'xs mut2', C.gap.task.contextScope));
       run.appendChild(context);
     }
     const report = snap.result?.claims?.find((claim) => claim.kind === 'agent-report');
@@ -783,10 +1158,16 @@ async function fillStream(body, stream, api, nav, state) {
   }
 
   /* `18` `work.open` · `15` SC-02 ③ — the way into the Work. Human Gate ② (2026-09-11): this
-   * key was never a duplicate of `guard.open`, it was a button no screen had built. */
+   * key was never a duplicate of `guard.open`, it was a button no screen had built.
+   * Permission is the decision, so that sentence sits with the button rather than only as a
+   * presence caption. The label stays `work.open` — the test and the canon key are that word. */
+  if (snap.status === 'permission_waiting') {
+    body.appendChild(el('div', 'sm', C.gap.stage.permit));
+  }
   const acts = el('div', 'row-acts');
-  acts.appendChild(btn('btn sm', C.work.open, () => nav.toWork(snap)));
+  acts.appendChild(btn('btn sm pri', C.work.open, () => nav.toWork(snap)));
   body.appendChild(acts);
+  body.appendChild(el('div', 'xs mut2', C.gap.board.oneRun));
 }
 
 /**
@@ -803,7 +1184,9 @@ async function fillHistory(rows, api, nav, state) {
 
   /* `18` orient.* — where the user is, in one sentence. `확인 불가` is reserved for a Work whose
    * process could not be found; it is never a stand-in for "we have not looked". */
-  rows.appendChild(el('p', 'sm mut hist-orient', C.orient[r.orientation] ?? C.orient.idle));
+  const orient = el('p', 'sm mut hist-orient', C.orient[r.orientation] ?? C.orient.idle);
+  if ((r.orientation ?? 'idle') === 'idle') orient.classList.add('is-idle');
+  rows.appendChild(orient);
   rows.previousSibling?.setAttribute?.('data-orient', r.orientation);
 
   if (!r.works.length) {

@@ -14,6 +14,7 @@ import { el, btn } from '../dom.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceCard, modeFor } from '../presence.js';
 import { nextActions } from '../nextaction.js';
+import { contextFacts } from '../human-read.mjs';
 
 /* The schema's outcome codes → the class that paints them and `18`'s own title key.
  * `cancelled_nochange` is a NEUTRAL chip (`15`): the 사용 불가 grey means "지금 안 됨 · 실패
@@ -45,7 +46,7 @@ export function renderSC03(root, api, nav, state) {
   bar.appendChild(btn('btn sm ghost nodrag', C.work.toBench, () => nav.toWorkbench(p, state.interpretation)));
   /* `15` §0 · TD-01: the terminal toggle is on every screen's top bar. The drawer itself lives
    * outside `#root`, so this only flips a flag the router owns. */
-  bar.appendChild(btn('btn sm ghost nodrag', C.term.title, () => window.__toggleDrawer?.()));
+  bar.appendChild(btn('btn sm ghost nodrag term-toggle', C.term.title, () => window.__toggleDrawer?.()));
   mountThemeToggle(bar, C.theme);
   shell.appendChild(bar);
 
@@ -59,14 +60,23 @@ export function renderSC03(root, api, nav, state) {
     return { shell, board };
   }
 
-  board.appendChild(workCard(snap, api, nav, state));
-  /* WBS-35 · `15` SC-03 board: Presence is S and sits beside the Work card. Its mode is a
-   * pure function of the snapshot the screen is already drawing, so it can never disagree
-   * with the chip and the panels above it. */
-  board.appendChild(presenceCard(modeFor(snap)));
-  board.appendChild(stepsCard(snap));
-  board.appendChild(aboutCard(snap, api));
-  if (snap.status === 'ended') board.appendChild(resultCard(snap, api, nav, state));
+  const stage = el('div', 'sc03-stage');
+  const side = el('aside', 'sc03-side');
+  stage.setAttribute('data-region', 'stage');
+  side.setAttribute('data-region', 'inspector');
+  /* While Claude is working, the attempt is the stage. Once it has ended, the result is
+     what the reader has to judge, and the original request moves to the side. */
+  const ended = snap.status === 'ended';
+  if (ended) {
+    stage.appendChild(resultCard(snap, api, nav, state));
+    side.appendChild(workCard(snap, api, nav, state));
+  } else {
+    stage.appendChild(workCard(snap, api, nav, state));
+  }
+  side.appendChild(presenceCard(modeFor(snap)));
+  side.appendChild(stepsCard(snap));
+  side.appendChild(aboutCard(snap, api));
+  board.append(stage, side);
 
   shell.appendChild(board);
   root.appendChild(shell);
@@ -196,7 +206,8 @@ function permissionPanel(snap, api, state) {
   const d = snap.permission;
   const panel = el('div', 'panel wait');
   panel.setAttribute('data-el', 'permission');
-  panel.appendChild(el('div', 'sm t', C.work.permTitleB));
+  panel.appendChild(el('div', 'sm t', C.gap.stage.permit));
+  panel.appendChild(el('div', 'sm', C.work.permTitleB));
 
   /* Verbatim: which tool, and on WHAT — and specifically the string the GRANT is built from.
    *
@@ -383,8 +394,10 @@ function aboutCard(snap, api) {
   card.appendChild(head(C.gap.workAbout));
   card.appendChild(field(C.gap.workActor, C.actor.claude));
   card.appendChild(field(C.gap.workBasis, snap.evidence?.before ? C.gap.workBasisOk : C.brief.chips.no));
-  if (snap.work.task_id) card.appendChild(field(C.gap.task.selected, snap.work.task_id));
-  if (snap.contextBundle?.bundle) card.appendChild(contextDisclosure(snap.contextBundle));
+  if (snap.contextBundle?.bundle) {
+    card.appendChild(contextBlock(snap.contextBundle.bundle));
+    card.appendChild(contextDisclosure(snap.contextBundle));
+  }
   card.appendChild(el('div', 'xs mut2', C.gap.workStepsNote));
   card.appendChild(rawOutput(snap, api));
   return card;
@@ -396,7 +409,10 @@ function rawOutput(snap, api) {
   d.setAttribute('data-el', 'raw');
   d.appendChild(el('summary', 'xs mut', C.work.raw));
   const box = el('pre', 'rawout');
-  if (snap.work.task_id) d.appendChild(el('div', 'xs mut2', C.gap.task.streamRedactionPolicy));
+  if (snap.work.task_id) {
+    d.appendChild(el('div', 'xs mut2', C.gap.task.streamRedactionPolicy));
+    d.appendChild(el('div', 'xs mono mut', `${C.gap.task.rawId} ${snap.work.task_id}`));
+  }
   d.appendChild(box);
   d.addEventListener('toggle', async () => {
     if (!d.open || box.textContent) return;
@@ -406,14 +422,83 @@ function rawOutput(snap, api) {
   return d;
 }
 
+function contextBlock(bundle) {
+  const block = el('div', 'context-human');
+  block.setAttribute('data-el', 'context-human');
+  block.appendChild(el('div', 'sm', C.gap.task.contextShown));
+  const label = {
+    goal: C.gap.task.goal,
+    criterion: C.gap.task.draftCriterion,
+    request: C.gap.task.humanAsked,
+  };
+  for (const fact of contextFacts(bundle)) {
+    const row = el('div', 'context-line');
+    if (label[fact.key]) row.appendChild(el('div', 'xs mut2', label[fact.key]));
+    row.appendChild(el('div', 'sm', fact.text));
+    block.appendChild(row);
+  }
+  block.appendChild(el('div', 'xs mut2', C.gap.task.contextScope));
+  return block;
+}
+
 function contextDisclosure(record) {
   const details = el('details', 'run-context');
   const bundle = record.bundle;
-  details.appendChild(el('summary', 'xs mut', `${C.gap.task.prompt} · v${bundle.bundle_schema_version} · ${record.content_digest.slice(0, 12)}`));
+  details.appendChild(el('summary', 'xs mut', C.gap.task.contextDetail));
+  details.appendChild(el('div', 'xs mono mut', `${C.gap.task.prompt} · v${bundle.bundle_schema_version} · ${record.content_digest.slice(0, 12)}`));
   details.appendChild(el('pre', 'run-context-prompt', bundle.prompt_snapshot ?? ''));
   if (bundle.prompt_snapshot_redacted) details.appendChild(el('div', 'xs mut2', C.gap.task.redactedSnapshot));
-  details.appendChild(el('div', 'xs mut2', C.gap.task.contextScope));
   return details;
+}
+
+function testStateLabel(item) {
+  if (item.details?.result_state === 'error') return C.gap.task.evidenceError;
+  if (item.details?.result_state === 'returned') {
+    return item.details.exit_code == null ? C.gap.task.evidenceReturnedNoExit : C.gap.task.evidenceReturned;
+  }
+  return C.gap.task.evidenceUnknown;
+}
+
+function labeled(label, text) {
+  const row = el('div', 'result-voice');
+  row.append(el('div', 'xs mut2', label), el('div', 'sm', text));
+  return row;
+}
+
+/* The result's first reading: what Claude said, and what JuQode actually recorded.
+ * Claim chips stay below this. They are the precise record, not the headline. */
+function humanResult(snap) {
+  const block = el('div', 'result-human');
+  block.setAttribute('data-el', 'result-human');
+  const report = (snap.result?.claims ?? []).find((claim) => claim.kind === 'agent-report');
+  const said = typeof report?.data?.text === 'string' ? report.data.text.trim() : '';
+  block.appendChild(labeled(C.gap.task.humanAgent, said || C.gap.task.humanAgentNone));
+  /* A Task Run's truth is run_evidence. A Work that is not a Task Run has no such rows;
+     its changed-file claim is a different record, and "0개" would deny that claim. */
+  if (snap.work?.task_id) {
+    const evidence = snap.runEvidence ?? [];
+    block.appendChild(el('div', 'sm result-count', C.gap.task.observedCount(evidence.length)));
+    const changed = evidence.find((item) => item.kind === 'changed_files');
+    if (changed) {
+      const files = changed.details?.files ?? [];
+      block.appendChild(labeled(C.gap.task.humanObserved, files.length ? files.join('\n') : C.gap.task.noChanges));
+    } else {
+      block.appendChild(labeled(C.gap.task.humanObserved, C.gap.task.humanObservedMissing));
+    }
+    const tests = evidence.filter((item) => item.kind === 'test_command');
+    if (tests.length) {
+      block.appendChild(labeled(C.gap.task.humanTest, tests.map((item) => `${item.summary} · ${testStateLabel(item)}`).join('\n')));
+    } else {
+      block.appendChild(labeled(C.gap.task.humanTest, C.gap.task.humanTestNone));
+    }
+  } else {
+    const changed = (snap.result?.claims ?? []).find((claim) => claim.kind === 'changed-files');
+    if (changed) {
+      const files = changed.data?.files ?? [];
+      block.appendChild(labeled(C.gap.task.humanObserved, files.length ? files.join('\n') : C.work.noChanges));
+    }
+  }
+  return block;
 }
 
 /**
@@ -457,6 +542,7 @@ function resultCard(snap, api, nav, state) {
    * decoupling of chip and meaning that D-114's vocabulary exists to prevent. */
   card.appendChild(head(outcomeTitle(snap.outcome),
     el('span', `chip ${OUTCOME[snap.outcome]?.cls ?? 'unk'}`, outcomeTitle(snap.outcome))));
+  card.appendChild(humanResult(snap));
 
   /* WBS-18 · every claim carries its own chip, and a 확인됨 one names the evidence it rests
    * on (D-114, `18` §0.9). The chip is per CLAIM, never per card — a single chip over a mixed
@@ -473,10 +559,7 @@ function resultCard(snap, api, nav, state) {
         const files = item.details.files ?? [];
         row.appendChild(el('div', 'xs mut2', files.length ? files.join(' · ') : C.gap.task.noChanges));
       } else {
-        const state = item.details.result_state === 'error' ? C.gap.task.evidenceError
-          : item.details.result_state === 'returned'
-            ? (item.details.exit_code == null ? C.gap.task.evidenceReturnedNoExit : C.gap.task.evidenceReturned)
-            : C.gap.task.evidenceUnknown;
+        const state = testStateLabel(item);
         row.appendChild(el('div', 'xs mut2', `${state}${item.details.exit_code == null ? '' : ` · Exit code ${item.details.exit_code}`}`));
         if (item.details.output_excerpt) row.appendChild(el('pre', 'run-evidence-output', item.details.output_excerpt));
         if (item.details.command_redacted || item.details.output_redacted) {

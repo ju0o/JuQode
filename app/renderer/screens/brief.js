@@ -50,7 +50,10 @@ export function renderBrief(card, interp, opts = {}) {
   /* `15` SC-02 ① requires the 해석 시점 timestamp. It is what tells a cached Brief from a
    * fresh one; the stale JUDGEMENT is WBS-05, the timestamp is not. */
   if (interp?.created_at) {
-    head.appendChild(el('span', 'xs mut2', `${C.brief.at} ${when(interp.created_at)}`));
+    const stamp = `${C.brief.at} ${when(interp.created_at)}`;
+    head.appendChild(el('span', 'xs mut2', stamp));
+    /* The rail does not print the time. Hovering the header still says when this reading was cached. */
+    head.title = stamp;
   }
   /* WBS-05 · 다시 읽기 and 접기/펼치기. Both are USER actions — `19` §C1 ⑤ and D-132 forbid an
    * automatic re-read, so this button is the only thing that starts one. */

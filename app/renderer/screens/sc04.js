@@ -61,7 +61,7 @@ export function renderSC04(root, api, nav, state) {
    * 카드 아래 행동 줄, so it moved into the 다음 행동 block at the foot of the board (WBS-38). */
   /* `15` §0 · TD-01: the terminal toggle is on every screen's top bar. The drawer itself lives
    * outside `#root`, so this only flips a flag the router owns. */
-  bar.appendChild(btn('btn sm ghost nodrag', C.term.title, () => window.__toggleDrawer?.()));
+  bar.appendChild(btn('btn sm ghost nodrag term-toggle', C.term.title, () => window.__toggleDrawer?.()));
   mountThemeToggle(bar, C.theme);
   shell.appendChild(bar);
 
@@ -114,6 +114,7 @@ export function renderSC04(root, api, nav, state) {
   const selected = Math.min(state.readerGroup ?? 0, reader.groups.length - 1);
   const group = reader.groups[selected];
 
+  board.appendChild(el('p', 'sm mut sc04-orient', C.gap.readerOrient));
   const cols = el('div', 'sc04-cols');
   cols.appendChild(groupColumn(reader, selected, api, nav, state));
   cols.appendChild(blockColumn(group, state, nav));

@@ -54,7 +54,7 @@
   --juq:    #0f5f6b;   --juqbg:    #e6f3f5; --juqline:  #8ec4cc;
 
   /* shape */
-  --r-card: 12px; --r-inner: 8px; --r-chip: 999px; --r-badge: 4px;
+  --r-card: 10px; --r-inner: 8px; --r-chip: 999px; --r-badge: 4px;
 
   /* grid — 16 §4 */
   --u: 216px; --row: 148px; --gap: 16px;

@@ -26,62 +26,62 @@ export function renderSC01(root, api, nav, state) {
 
   const main = el('main', 'sc01 fade-in');
   main.setAttribute('data-screen', 'SC-01');
+  main.title = C.gap.stage.rail;
+  const stage = el('div', 'arrival-stage');
+  stage.setAttribute('data-region', 'stage');
 
-  const hero = el('div', 'card hero');   /* 16 §1: everything is a card */
-  hero.appendChild(el('h1', 'h1', C.sc01.title));
-  hero.appendChild(el('p', 'lead', C.sc01.lead));
+  const hero = el('div', 'card hero');   /* measured as the one entry surface, not a dashboard tile */
+  const title = el('h1', 'h1', C.gap.stage.where);
+  title.title = C.gap.stage.whereLead;
+  hero.appendChild(title);
 
   const actions = el('div', 'actions');
   const openBtn = btn('btn pri', C.sc01.open, () => run(() => api.openProject(), false));
   openBtn.setAttribute('data-act', 'open-project');
+  openBtn.title = C.sc01.openHint;
   actions.appendChild(openBtn);
-  actions.appendChild(el('span', 'xs mut', C.sc01.openHint));
   hero.appendChild(actions);
-  main.appendChild(hero);
+  stage.appendChild(hero);
 
   /* The store is what remembers projects. If it was refused we say so instead of
    * offering a button whose result cannot be kept. 21 WBS-21: refuse, never replace. */
   if (!state.store?.ok) {
     openBtn.disabled = true;
-    main.appendChild(storeCard(state.store?.reason));
+    stage.appendChild(storeCard(state.store?.reason));
   }
 
   /* WBS-33 · 원칙 2 — the build says whether it is signed, on the first screen after install.
    * CF-21: no screen spec hosts this; SC-01 is chosen because it is the only screen with no
    * project context and the moment a SmartScreen warning is still fresh. */
   const sig = buildNotice(state.signature);
-  if (sig) main.appendChild(sig);
+  if (sig) stage.appendChild(sig);
 
   /* Recent list — A-8 (Founder-pending, removable). SC-01 is complete without it. */
   const recent = el('section', 'recent');
   recent.setAttribute('data-el', 'recent');
+  recent.title = C.sc01.recentNote;
   recent.appendChild(el('h2', null, C.sc01.recent));
   if (state.recent.length === 0) {
     recent.appendChild(el('div', 'empty', C.sc01.noHistory));
-    /* WBS-02c · 처음 쓰는 사람.
-     *
-     * `15` SC-01 rules out creation, templates, clone, remote, workspaces, login and settings —
-     * and this is none of them. It is three sentences saying what the next three minutes look
-     * like, shown ONLY when the store has no project at all, and gone for good after the first
-     * one. There is no dismiss control because there is nothing to dismiss twice.
-     *
-     * It is here rather than in the hero on purpose: the hero holds the one primary action, and
-     * `15` SC-01 is explicit that there is exactly one. CANON_FINDINGS CF-23. */
-    const first = el('div', 'firstrun');
-    first.setAttribute('data-el', 'firstrun');
-    first.appendChild(el('div', 't', C.gap.firstRunTitle));
-    const ol = el('ol', 'sm');
-    for (const line of C.gap.firstRunSteps) ol.appendChild(el('li', '', line));
-    first.appendChild(ol);
-    first.appendChild(el('p', 'xs mut', C.gap.firstRunNote));
-    recent.appendChild(first);
   } else {
     const list = el('div', 'rows');
     for (const p of state.recent) list.appendChild(recentRow(p, () => run(() => api.openPath(p.path))));
     recent.appendChild(list);
   }
-  recent.appendChild(el('span', 'footnote', C.sc01.recentNote));
-  main.appendChild(recent);
+  /* The three-step start stays available, closed. The primary screen is the question and the list. */
+  const help = el('details', 'help');
+  help.appendChild(el('summary', 'sm', C.gap.stage.help));
+  const first = el('div', 'firstrun');
+  first.setAttribute('data-el', 'firstrun');
+  first.appendChild(el('div', 't', C.gap.firstRunTitle));
+  const ol = el('ol', 'sm');
+  for (const line of C.gap.firstRunSteps) ol.appendChild(el('li', '', line));
+  first.appendChild(ol);
+  first.appendChild(el('p', 'xs mut', C.gap.firstRunNote));
+  help.appendChild(first);
+  recent.appendChild(help);
+  stage.appendChild(recent);
+  main.appendChild(stage);
 
   shell.appendChild(main);
   root.appendChild(shell);
@@ -104,7 +104,7 @@ export function renderSC01(root, api, nav, state) {
     main.querySelector('[data-el="fail"]')?.remove();
     if (res?.ok) return nav.toWorkbench(res.project, res.interpretation ?? null, { empty: res.empty === true });
     if (res?.reason === 'cancelled') return;            // 15: cancelling shows nothing
-    main.appendChild(failCard(res, () => run(() => api.openPath(res.path)), () => run(() => api.openProject(), false)));
+    stage.appendChild(failCard(res, () => run(() => api.openPath(res.path)), () => run(() => api.openProject(), false)));
   }
 
   return { shell, main, openBtn };

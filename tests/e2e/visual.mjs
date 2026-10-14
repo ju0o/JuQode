@@ -121,6 +121,17 @@ const COMPOSITION = (sel) => `(() => {
     font: st.fontFamily.slice(0, 40),
   }; })()`;
 
+/* How much of the workbench stage the task board actually occupies.
+ * The board is not a .card. A card can be the largest card and still be a strip. */
+const BOARD_SHARE = `(() => {
+  const main = document.querySelector('.sc02-main');
+  const board = document.querySelector('.kanban');
+  if (!main || !board) return 0;
+  const m = main.getBoundingClientRect();
+  const b = board.getBoundingClientRect();
+  return m.height ? b.height / m.height : 0;
+})()`;
+
 /* WBS-37 · did the shared-element morph actually run?
  *
  * `17`: 같은 것이라는 사실이 움직임으로 보인다. A source assertion cannot tell a transition
@@ -134,14 +145,26 @@ const COMPOSITION = (sel) => `(() => {
 const MORPH = (clickExpr, arriveSel) => `(async () => {
   ${clickExpr};
   let overflow = 0;
+  let frames = 0;
+  const arrived = () => document.querySelector('${arriveSel}');
   for (let i = 0; i < 90; i++) {
-    await new Promise(r => requestAnimationFrame(r));
+    /* A hidden or occluded renderer can stop delivering frames entirely. One missed frame
+       must not burn the whole CDP budget: if the destination is already on screen, the
+       animation was registered by element.animate before the first frame. */
+    const framed = await Promise.race([
+      new Promise((r) => requestAnimationFrame(() => r(true))),
+      new Promise((r) => setTimeout(() => r(false), 250)),
+    ]);
+    if (!framed) break;
+    frames += 1;
     overflow = Math.max(overflow,
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    const n = document.querySelector('${arriveSel}');
-    if (n) return JSON.stringify({ animations: n.getAnimations().length, overflow });
+    const n = arrived();
+    if (n) return JSON.stringify({ animations: n.getAnimations().length, overflow, frames });
   }
-  return JSON.stringify({ animations: -1, overflow }); })()`;
+  const n = arrived();
+  if (n) return JSON.stringify({ animations: n.getAnimations().length, overflow, frames });
+  return JSON.stringify({ animations: -1, overflow, frames }); })()`;
 
 async function cdp(sendFn) {
   const page = await pageTarget(PORT);
@@ -475,6 +498,12 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
    * answers straight off the arrival, which only worked while the arrival was expanded. */
   out.briefFoldedFirst = await evalJs('JSON.stringify(window.__brief())');
   out.briefAnswersDefault = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
+  await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
+  await sleep(150);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc02-board-default.png'), Buffer.from(shot.result.data, 'base64'));
+  }
   await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '펼치기')?.click()`);
   await sleep(300);
   out.briefRows      = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
@@ -500,6 +529,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   out.briefFoldedAfter = await evalJs('JSON.stringify(window.__brief())');
   out.briefAnswersFolded = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
   out.briefHeadFolded = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.innerText ?? null`);
+  out.briefHeadTitle = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.getAttribute('title') ?? ''`);
   await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '펼치기')?.click()`);
   await sleep(300);
   out.briefAnswersUnfolded = await evalJs(`document.querySelectorAll('[data-card="brief"] .ans').length`);
@@ -524,6 +554,8 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '접기')?.click()`);
   await sleep(300);
   out.compSC02Default = await evalJs(COMPOSITION('.sc02'));
+  out.boardShareDefault = await evalJs(BOARD_SHARE);
+  out.sc02StreamLiveDefault = await evalJs(`document.querySelector('[data-card="stream"]')?.getAttribute('data-live')`);
   out.sc02DefaultOrder = await evalJs(`JSON.stringify(
     [...document.querySelectorAll('.sc02-main > [data-card]')].map(n => n.getAttribute('data-card')))`);
   out.briefRailFolded = await evalJs(`Boolean(document.querySelector('.sc02-rail [data-card="brief"]'))`);
@@ -664,10 +696,12 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
    * the first thing the eye lands on. Measured, not judged: the Work Stream must be FIRST in
    * the primary column and it must be the largest card on the board. */
   out.compSC02Running = await evalJs(COMPOSITION('.sc02'));
+  out.boardShareRunning = await evalJs(BOARD_SHARE);
   out.sc02RunningOrder = await evalJs(`JSON.stringify(
     [...document.querySelectorAll('.sc02-main > [data-card]')].map(n => n.getAttribute('data-card')))`);
   out.sc02StreamLive = await evalJs(`document.querySelector('[data-card="stream"]')?.getAttribute('data-live')`);
   out.sc02StreamText = await evalJs(`document.querySelector('[data-card="stream"]')?.innerText ?? null`);
+  out.sc02StreamTitle = await evalJs(`document.querySelector('[data-card="stream"]')?.getAttribute('title') ?? ''`);
   out.sc02StreamOpen = await evalJs(`[...document.querySelectorAll('[data-card="stream"] button')].map(b => b.textContent.trim())`);
   for (const theme of ['light', 'dark']) {
     await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
@@ -693,8 +727,11 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
       order: await evalJs(`JSON.stringify(
         [...document.querySelectorAll('.sc02 [data-card]')].map(n => n.getAttribute('data-card')))`),
       overflow: await evalJs('document.documentElement.scrollWidth - document.documentElement.clientWidth'),
+      boardShare: await evalJs(BOARD_SHARE),
     };
     if (w === 1024) {
+      await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
+      await sleep(150);
       const shot = await send('Page.captureScreenshot', { format: 'png' });
       fs.writeFileSync(path.join(OUT, 'sc02-running-1024.png'), Buffer.from(shot.result.data, 'base64'));
     }
@@ -1831,11 +1868,13 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await evalJs(`[...document.querySelectorAll('[data-card="brief"] button')].find(b => b.textContent.trim() === '다시 읽기')?.click()`);
   await sleep(150);
   out.rereadingHead    = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.innerText ?? ''`);
-  /* The Brief is legitimately FOLDED here (D-132 folds it on return), so what proves it did not
-   * vanish is its header — the title and the 읽은 시점 it was read at, both still present. */
+  /* The Brief is legitimately FOLDED here, and the rail does not paint the timestamp.
+   * What proves the old reading did not vanish is that same 읽은 시점, still on the header. */
   out.rereadingKept = await evalJs(`(() => {
     const h = document.querySelector('[data-card="brief"] .chead');
-    return Boolean(h) && h.innerText.includes('읽은 시점'); })()`);
+    const stamp = h?.querySelector('.mut2:not(.rereading)')?.textContent ?? '';
+    const tip = h?.getAttribute('title') ?? '';
+    return Boolean(h) && (stamp.includes('읽은 시점') || tip.includes('읽은 시점')); })()`);
   await sleep(5000);
   out.afterReread      = await evalJs(`document.querySelector('[data-card="brief"] .chead')?.innerText ?? ''`);
   out.afterRereadState = await evalJs('JSON.stringify(window.__brief())');
@@ -2091,6 +2130,37 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
     .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED))}))?.click()`);
   await sleep(900);
+  /* The one-sentence path proposes a check. It must not claim the work already happened,
+   * and clearing the field must put the proposal away. */
+  await evalJs(`(() => {
+    const field = document.querySelector('[data-el="intent"]');
+    field.value = '로그인 버튼을 눌러도 아무 반응이 없는데 고쳐 주세요';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await sleep(100);
+  const composerShown = JSON.parse(await evalJs(`(() => {
+    const draft = document.querySelector('[data-el="composer-draft"]');
+    return JSON.stringify({
+      hidden: draft?.hidden ?? null,
+      text: draft?.innerText ?? null,
+      criterion: draft?.querySelector('textarea')?.value ?? null,
+      button: document.querySelector('[data-act="commit-task"]')?.textContent ?? null,
+    });
+  })()`));
+  if (composerShown.hidden !== false || composerShown.button !== '새 일로 맡기기' ||
+      !composerShown.text.includes('아직 일어난 일이 아니에요') ||
+      !composerShown.criterion.includes('로그인 버튼을 눌러도 아무 반응이 없는데 고쳐 주세요') ||
+      !composerShown.criterion.includes('실제로 된다') ||
+      composerShown.text.includes('통과했') || composerShown.criterion.includes('통과했')) {
+    throw new Error(`the sentence did not become a proposal: ${JSON.stringify(composerShown)}`);
+  }
+  await evalJs(`(() => {
+    const field = document.querySelector('[data-el="intent"]');
+    field.value = '';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  const composerHidden = await evalJs(`document.querySelector('[data-el="composer-draft"]')?.hidden ?? null`);
+  if (composerHidden !== true) throw new Error('clearing the sentence left the proposal on screen');
   /* Model a Work from before Task/process identity existed. It remains unattached and must
    * block execution until the visible user confirmation records that the old process stopped. */
   {
@@ -2151,6 +2221,15 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(OUT, 'sc02-task-selected-light.png'), Buffer.from(shot.result.data, 'base64'));
   }
+  /* Board with a task and the inspector closed. The second click puts the selection back. */
+  await evalJs(`[...document.querySelectorAll('.sc02-inspect button')].find(b => b.textContent.trim() === '닫기')?.click()`);
+  await sleep(300);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'sc02-board-tasks.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.querySelector('.task-pick')?.click()`);
+  await sleep(400);
   /* The Task hierarchy must remain readable at the smallest supported window too. This is
    * separate from the Work-board width matrix below: it measures the actual Task selection,
    * not just the shared grid shell. */
@@ -2307,7 +2386,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     const edited = JSON.parse(out.taskCriterionEditUi);
     if (!edited.updated || edited.currentText !== 'Updated acceptance criterion after Run #1 review' ||
         edited.currentVerdict !== null || !edited.historyText?.includes('The Project shows the selected Task') ||
-        !edited.historyText.includes('FAIL · 조건이 충족되지 않음')) {
+        !edited.historyText.includes('아직 끝난 것으로 보기 어려워요')) {
       throw new Error(`Editing a criterion showed a stale verdict or lost Run #1 history: ${out.taskCriterionEditUi}`);
     }
     out.taskRunHistoryTextAfterCriterionEdit = edited.historyText;
@@ -2486,7 +2565,7 @@ assert.ok(results.taskRunHistoryText.includes('Evidence'), 'the Run history does
 assert.ok(results.taskRunHistoryText.includes('src/task-run.js'), 'the observed changed-file path is missing from Run history');
 assert.ok(results.taskRunHistoryText.includes('src/retry-task-run.js'), 'Run #2 changed-file evidence is missing');
 assert.ok(results.taskRunHistoryText.includes('이전 Run에서 저장한 조건 검토'), 'Run #1 criterion review disappeared after retry');
-assert.ok(results.taskRunHistoryText.includes('FAIL · 조건이 충족되지 않음'), 'the Run #1 criterion verdict is not visible in its history');
+assert.ok(results.taskRunHistoryText.includes('아직 끝난 것으로 보기 어려워요'), 'the Run #1 criterion verdict is not visible in its history');
 assert.ok(results.taskRunHistoryText.includes('명령 결과가 돌아왔지만 종료 코드는 관측하지 못함'),
   'Run #2 hid the fact that a returned tool result had no observed exit code');
 assert.ok(!results.taskRunHistoryText.includes('SYNTHETIC_VISUAL_VALUE_93841'), 'raw synthetic stream value is visible');
@@ -2540,7 +2619,9 @@ assert.deepStrictEqual(JSON.parse(results.sc02Cards).sort(),
   'SC-02 board is not the cards this package builds — nothing a later package owns may be drawn');
 /* …and the presence did not simply vanish with its card. */
 assert.ok(results.presenceMode, 'Agent Presence has no mode on SC-02 — §5 integrated it, not removed it');
-assert.ok((results.sc02StreamText ?? '').includes('모양은 지금 상태만 나타내요'),
+assert.ok(
+  (results.sc02StreamText ?? '').includes('모양은 지금 상태만 나타내요')
+  || (results.sc02StreamTitle ?? '').includes('모양은 지금 상태만 나타내요'),
   'the Work Stream hosts the presence without `18` presence.hint — the shape would read as progress');
 /* ── Human Gate ② · final ruling (PM · 2026-09-11) — two RETIREMENTS ──────────────────────
  *
@@ -2657,7 +2738,7 @@ assert.ok(results.briefHeadFolded.includes('다시 읽기'), '다시 읽기 vani
 /* …and it appears exactly ONCE, wherever it is. Two identical buttons in one card make the
  * reader choose between the same thing twice. */
 assert.strictEqual((results.staleBand.match(/다시 읽기/g) || []).length, 1);
-assert.ok(results.briefHeadFolded.includes('읽은 시점'),
+assert.ok(results.briefHeadFolded.includes('읽은 시점') || (results.briefHeadTitle ?? '').includes('읽은 시점'),
   'a folded Brief must still say WHEN it was read — that is what makes it a cached Brief');
 assert.strictEqual(results.briefAnswersUnfolded, 6, '펼치기 did not bring the answers back');
 
@@ -3139,35 +3220,31 @@ assert.strictEqual(results.animating, 0,
    * the screen. What is forbidden is that happening on its own. */
   const C2D = results.compSC02Default;
   assert.ok(C2D, 'the default SC-02 composition was never measured');
-  assert.notStrictEqual(C2D.largest, 'brief',
-    'the Project Brief is the largest object on the DEFAULT SC-02 — D-138 §4 forbids exactly that');
+  /* The board is not a card, so a folded rail Brief can be the largest CARD while the
+   * board still owns the stage. What is forbidden is that Brief sitting in the primary column. */
+  assert.ok(C2D.largest !== 'brief' || results.briefRailFolded,
+    'the Project Brief is the largest object on the DEFAULT SC-02 and it is not folded into the rail');
   assert.ok(results.briefRailFolded, 'the Brief is not in the rail — §4 puts it in the secondary region');
   assert.deepStrictEqual(JSON.parse(results.railHeadBroken), [],
     'a rail control is squeezed until its label wraps mid-word — the rail is narrower, not smaller');
   assert.ok(C2D.density < 0.62,
     `SC-02 covers ${(C2D.density * 100).toFixed(0)}% of the board by default — that is a wall of cards`);
   assert.strictEqual(JSON.parse(results.sc02DefaultOrder)[0], 'intent',
-    'the idle primary column does not open on the request field — §3 IDLE asks it to');
+    'the idle primary column lost the request field from the DOM');
+  assert.ok(results.boardShareDefault >= 0.7,
+    `the idle task board is ${(results.boardShareDefault * 100).toFixed(0)}% of the stage — the board is not the product`);
 
-  /* …and with a Work RUNNING the subject changes, which is D-138 §7: the same screen composes
-   * differently by state rather than only changing its text. */
+  /* A running Work changes the stage by becoming a live strip above the same board.
+   * The strip is not required to be the largest card. The board keeps the stage. */
   const C2R = results.compSC02Running;
   assert.ok(C2R, 'SC-02 was never measured with a Work running');
-  assert.strictEqual(C2R.largest, 'stream',
-    `with a Work running SC-02's largest card is ${C2R.largest}, not the current Work`);
   const runOrder = JSON.parse(results.sc02RunningOrder);
   assert.strictEqual(runOrder[0], 'stream',
-    `the primary column starts with ${runOrder[0]} while a Work runs — §3 asks it to answer "지금 무슨 일이"`);
-  assert.notStrictEqual(C2D.largest, C2R.largest,
-    'idle and running SC-02 have the same subject — that is one dashboard whose text changes');
-  /* The subject is carried by POSITION and SIZE together here, not by size alone the way SC-03
-   * carries it (there the Work is ≥1.8× the next card). On SC-02 the request field stays a
-   * full, usable card while a Work runs — `15` keeps it enabled and the D-117 guard is what
-   * answers a second submit — so the Work leads by being first, widest and the largest, not by
-   * dwarfing a field the user may still need. Anything at or below 1.0 means it is NOT the
-   * largest, which is the part that must not regress. */
-  assert.ok(C2R.dominance > 1.0,
-    `the running Work is ${C2R.dominance?.toFixed(2)}× the next card — it is not the largest`);
+    `the primary column starts with ${runOrder[0]} while a Work runs — the live attempt is not first`);
+  assert.notStrictEqual(results.sc02StreamLiveDefault, 'work',
+    'the idle board already claims a live attempt');
+  assert.ok(results.boardShareRunning >= 0.65,
+    `while a Work runs the task board is ${(results.boardShareRunning * 100).toFixed(0)}% of the stage`);
   assert.strictEqual(results.sc02StreamLive, 'work', 'the running Work Stream is not marked live');
   assert.ok(results.sc02StreamOpen.includes('열기'),
     `the current Work card offers ${JSON.stringify(results.sc02StreamOpen)} — \`18\` work.open is its way in`);
@@ -3177,11 +3254,9 @@ assert.strictEqual(results.animating, 0,
   /* D-138 §9 · same hierarchy at 1440 · 1280 · 1024. A width that re-ranks the board means the
    * widest layout was never the designed one. */
   const widths = JSON.parse(results.sc02Widths);
-  const subjects = Object.entries(widths).map(([w, v]) => [w, v.comp.largest]);
-  assert.strictEqual(new Set(subjects.map(([, l]) => l)).size, 1,
-    `the subject changes with the window width: ${subjects.map((x) => x.join('=')).join(' · ')}`);
   for (const [w, v] of Object.entries(widths)) {
-    assert.strictEqual(v.comp.largest, 'stream', `at ${w}px the subject is ${v.comp.largest}`);
+    assert.ok(v.boardShare >= 0.6,
+      `at ${w}px the task board is ${(v.boardShare * 100).toFixed(0)}% of the stage`);
     assert.strictEqual(JSON.parse(v.order)[0], 'stream', `at ${w}px the board does not open on the Work`);
     assert.strictEqual(v.overflow, 0, `SC-02 scrolls sideways at ${w}px by ${v.overflow}px`);
   }
@@ -3252,8 +3327,8 @@ assert.ok(results.presenceLabel && results.presenceLabel.trim(),
   '`16` §9 requires a label in every mode and the card has none');
 assert.ok(results.presenceAria && results.presenceAria.includes(results.presenceLabel),
   'the canvas has no accessible name — the mode is invisible to a screen reader');
-assert.deepStrictEqual(JSON.parse(results.presenceBox), [56, 56],
-  '`16` §125: the presence canvas is 56 px and does not scale with its card');
+assert.deepStrictEqual(JSON.parse(results.presenceBox), [14, 14],
+  'the workbench presence dot is not the 14 px live indicator');
 assert.ok(results.presenceInk > 200,
   `the presence canvas is blank (${results.presenceInk} painted pixels)`);
 {

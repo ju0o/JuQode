@@ -1,3 +1,4 @@
+import { C } from './copy.js';
 import { renderSC01 } from './screens/sc01.js';
 import { renderSC02 } from './screens/sc02.js';
 import { renderSC03 } from './screens/sc03.js';
@@ -95,6 +96,9 @@ const nav = {
     state.workSnapshot = null;
     state.reader = null; state.readerGroup = 0; state.readerRaw = false;
     state.prefill = opts.intent ?? null;
+    /* `이해했어요` is the one arrival that is about to type. The field has to be on screen
+     * or the focus never lands — a hidden input cannot take it. */
+    state.composerOpen = Boolean(opts.intent) || opts.focusIntent === true;
     /* `15` §Keyboard: focus returns to the request field after `이해했어요 · 다음 요청으로`.
      * Only then — an automatic focus on every arrival would steal it from the Brief, which is
      * SC-02's subject on a first open. */
@@ -160,6 +164,13 @@ await nav.toPicker();
 /* TD-01 · mounted ONCE, over whatever screen is up. `15`: the drawer covers the bottom of the
  * current screen and closing it preserves what is underneath — so it cannot be a child of
  * `#root`, which every screen render clears. */
+const termDock = document.createElement('button');
+termDock.type = 'button';
+termDock.className = 'term-dock';
+termDock.textContent = `${C.term.title} ▴`;
+termDock.addEventListener('click', () => window.__toggleDrawer?.());
+document.body.appendChild(termDock);
+
 drawer = mountDrawer(api, state, () => {
   /* A card can hand a phrase back to the Work path (미인식 · 모호함 → Claude Code 작업). That
    * is a NAVIGATION, and it belongs to the router rather than to the drawer. */

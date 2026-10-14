@@ -1,35 +1,48 @@
 /* SC-02 · Workbench.
- * Composition per 17: "모듈 보드 · 6열 격자 — 크기가 다른 카드가 여럿 놓인다".
- * This is deliberately NOT SC-01's centred sparse entry screen. */
+ * The board is the product. Rail is navigation. The inspector opens only for a selected task.
+ * A live attempt is one short strip above the columns, not a second page. */
 
 .sc02 {
   flex: 1 1 auto;
-  overflow: auto;
-  padding: 24px 32px 40px;
-  /* TWO COLUMN STACKS. `17` asks for a module board of differently sized cards; the first
-     implementation read that as a six-column grid with `grid-auto-flow: dense` and auto rows,
-     and MEASURED it drew the Brief on top of the card below it — an auto row sized to 449 px
-     around a 591 px card, with dense flow packing a second card into the space the Brief was
-     already painting on. `align-self: stretch` only moved the failure: the card then clipped
-     its own content, which `16` §4 forbids. A stack cannot overlap. */
-  /* D-138 · the two stacks are no longer peers. The MAIN column carries the subject of
-     whatever state the screen is in; the RAIL carries supporting context (folded Brief,
-     History). 1.62 : 1 is wide enough that the main column reads as the subject at 1024 and
-     narrow enough that the rail is still a usable list — the ratio is what keeps the hierarchy
-     the SAME at 1440, 1280 and 1024 rather than only at the width it was designed on. */
+  overflow: hidden;
+  padding: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-  max-width: 1440px;
+  grid-template-columns: 228px minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
+  max-width: none;
   width: 100%;
-  margin: 0 auto;
+  height: 100%;
+  margin: 0;
 }
-.sc02-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-/* The rail is quieter than the main column, and says so in weight rather than in colour:
-   `16` §2 spends colour on STATE, and "this is secondary" is not a state. */
-.sc02-rail .card { padding: 12px 14px; }
-.sc02-rail .chead .ct { font-size: 11px; }
+.sc02.is-inspect { grid-template-columns: 216px minmax(0, 1fr) minmax(260px, 320px); }
+.sc02-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
+.sc02-rail, .sc02-inspect {
+  overflow: auto;
+  padding: 12px 12px 48px;
+  background: var(--card);
+}
+/* DOM order is stage, rail, inspector. `order` places the rail on the left. */
+.sc02-rail { order: 1; border-right: 1px solid var(--line); overflow-x: hidden; }
+.sc02-main { order: 2; }
+.sc02-inspect { order: 3; display: none; border-left: 1px solid var(--line); }
+.sc02.is-inspect .sc02-inspect { display: flex; }
+.sc02-main {
+  position: relative;
+  overflow: auto;
+  padding: 12px 14px 16px;
+  background: var(--board);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  min-height: 0;
+}
+/* The request stays off the board until + 새 작업, or until a reply has to be read. */
+.sc02:not(.composer-open) > .sc02-main > [data-card="intent"] { display: none; }
+.sc02:has([data-card="stream"][data-live="work"]) .board-empty { display: none; }
+.sc02-rail .card, .sc02-inspect .card { padding: 0 0 8px; background: transparent; box-shadow: none; border: none; }
+.sc02-rail .chead .ct { font-size: 12px; }
 /* MEASURED in the rail: the header row could only SHRINK, so its own controls were squeezed
    below their labels and broke mid-word — `다시 읽\n기` · `펼치\n기`, and worse at 1024. Every
    assertion passed while that was on screen. The row wraps now and the buttons keep their own
@@ -42,10 +55,105 @@
 .sc02 .c-s, .sc02 .c-m, .sc02 .c-wide, .sc02 .c-wide2 { width: 100%; }
 
 .sc02 .card {
-  padding: 14px 16px;
-  display: flex; flex-direction: column; gap: 8px;
-  min-width: 0;                               /* long paths must wrap, not widen the column */
-  align-self: start;                          /* 16 §4: a card is as tall as its content */
+  padding: 0;
+  display: flex; flex-direction: column; gap: 10px;
+  min-width: 0;
+  align-self: start;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.sc02-main > .card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: none;
+  padding: 14px 14px 12px;
+}
+/* Idle presence stays painted for the mode checks, and stays out of the board. */
+.sc02 .sc02-main > [data-card="stream"]:not([data-live="work"]) {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+}
+.sc02 .sc02-main > [data-card="stream"]:not([data-live="work"]) > .chead,
+.sc02 .sc02-main > [data-card="stream"]:not([data-live="work"]) > .streambody,
+.sc02 .sc02-main > [data-card="stream"]:not([data-live="work"]) > .foot,
+.sc02 .sc02-main > [data-card="stream"]:not([data-live="work"]) .plabel { display: none; }
+.sc02 .sc02-main > [data-card="stream"]:not([data-live="work"]) .pbody {
+  padding: 0; margin: 0; gap: 0;
+  width: 14px; height: 14px; min-width: 0; min-height: 0;
+}
+/* The bitmap stays 56 px. The laid-out box must be 14 px, or the idle card clips itself
+   (a canvas keeps its attribute size as a flex minimum). */
+.sc02 .sc02-main > [data-card="stream"]:not([data-live="work"]) .pbody canvas {
+  width: 14px; height: 14px;
+  min-width: 0; min-height: 0;
+  max-width: 14px; max-height: 14px;
+  flex: 0 0 14px;
+}
+/* One line above the columns. The heading and the shape disclaimer stay available as a tooltip. */
+.sc02:has([data-card="stream"][data-live="work"]) .sc02-main > [data-card="stream"] {
+  flex: 0 0 auto;
+  align-self: stretch;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  padding: 8px 12px;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.sc02 [data-card="stream"][data-live="work"] > .chead,
+.sc02 [data-card="stream"][data-live="work"] > .foot { display: none; }
+.sc02 [data-card="stream"][data-live="work"] > .streambody {
+  flex: 1 1 auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.sc02 [data-card="stream"][data-live="work"] > .pbody,
+.sc02 [data-card="stream"][data-live="work"] .streamlive,
+.sc02 [data-card="stream"][data-live="work"] .streamcounts,
+.sc02 [data-card="stream"][data-live="work"] .streambody > .mut2 { display: none; }
+.sc02 [data-card="stream"][data-live="work"] .btn { min-height: 28px; padding: 2px 10px; font-size: 13px; }
+.sc02 [data-card="stream"][data-live="work"] .streamtop { flex: 1 1 160px; margin: 0; }
+.sc02 [data-card="stream"][data-live="work"] .streamtop .histname {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sc02 [data-card="stream"] .pbody canvas { width: 14px; height: 14px; }
+.sc02 .task-request-label {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--ink);
+  padding: 0;
 }
 
 
@@ -63,17 +171,21 @@
 
 .sc02 [data-card="unavail"] { background: var(--grey); }
 
-/* D-138 §9 · the hierarchy must be the SAME at every width, and the external review's own
-   observation — that shrinking the window produced a *better* order — is evidence that it was
-   not. It is the same order now at every width because the DOM order is the hierarchy:
-   main column (subject) first, rail second. Collapsing to one stack therefore reads top to
-   bottom as subject → context, which is what the wide layout reads as left → right.
+/* With the inspector open, keep the board wide enough for five column titles. */
+@media (max-width: 1099px) {
+  .sc02.is-inspect { grid-template-columns: 180px minmax(0, 1fr) 220px; }
+}
 
-   Below 1024 the rail loses its own column rather than being squeezed into an unreadable one.
-   Nothing is reordered on the way down — if it had to be, the desktop order would be wrong. */
+/* D-138 §9 · the subject stays the first card at every width. On a wide window the rail sits
+   on the left as support and the stage stays the center. Below 1024 the columns stack and the
+   stage comes first, so the work is still what you meet before the rail. */
 @media (max-width: 1023px) {
-  .sc02 { grid-template-columns: minmax(0, 1fr); padding: 20px; }
-  .sc02-rail .card { padding: 14px 16px; }
+  .sc02,
+  .sc02.is-inspect { grid-template-columns: minmax(0, 1fr); height: auto; overflow: auto; }
+  .sc02-main { order: 1; }
+  .sc02-rail { order: 2; }
+  .sc02-inspect { order: 3; }
+  .sc02-rail, .sc02-inspect { border: none; border-top: 1px solid var(--line); }
 }
 
 /* Brief — the six answers. Each row is label + chip, then the answer, then the file the
@@ -110,11 +222,19 @@
 
 /* the request field and everything a submit can produce (15 SC-02) */
 .sc02 .intentfield {
-  font: inherit; font-size: 13px; line-height: 19px;
-  width: 100%; resize: vertical; min-height: 46px;
-  padding: 10px 12px; color: var(--ink);
-  background: var(--card2); border: 1px solid var(--line2); border-radius: var(--r-inner);
+  font: inherit; font-size: 15px; line-height: 22px;
+  width: 100%; resize: vertical; min-height: 44px;
+  padding: 8px 12px; color: var(--ink);
+  background: var(--board); border: 1px solid var(--line2); border-radius: var(--r-inner);
 }
+/* Essays stay in the DOM for the route they explain. The board does not teach them. */
+.sc02 .task-intro,
+.sc02 .task-request-note,
+.sc02 [data-card="intent"] > .row-acts > .mut,
+.sc02 [data-card="history"] > .foot,
+.sc02 [data-card="brief"] .chead .mut2:not(.rereading),
+.sc02 .board-empty,
+.sc02 .col-empty { display: none; }
 .sc02 .intentfield:focus-visible { border-color: var(--line3); }
 .sc02 .consequence { display: flex; flex-direction: column; gap: 8px; }
 .sc02 .routeline { color: var(--ink2); }
@@ -144,7 +264,7 @@
 .sc02 .task-selected { display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--line); padding-top: 9px; }
 .sc02 .task-goal { display: flex; flex-direction: column; gap: 3px; }
 .sc02 .task-verdict { font-size: 11px; font-weight: 600; }
-.sc02 .task-verdict.pass { color: var(--ok); }
+.sc02 .task-verdict.pass { color: var(--rec); }
 .sc02 .task-verdict.fail { color: var(--fail); }
 .sc02 .task-criteria { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
 .sc02 .task-criteria li { overflow-wrap: anywhere; }
@@ -167,16 +287,28 @@
 .sc02 .task-run-times { overflow-wrap: anywhere; }
 .sc02 .task-prompt, .sc02 .task-run-value { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 var(--font-mono); color: var(--ink2); }
 .sc02 .task-run-fact { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.sc02 .task-request-label { padding-top: 4px; }
+.sc02 .task-request-label { padding-top: 0; }
 
 /* While a Run is live, keep the current Task identity beside the request controls and defer
    planning/history detail. This lets D-138's running Work remain the largest, first subject. */
-.sc02:has([data-card="stream"][data-live="work"]) .task-intro,
-.sc02:has([data-card="stream"][data-live="work"]) .task-rows,
-.sc02:has([data-card="stream"][data-live="work"]) .task-create,
-.sc02:has([data-card="stream"][data-live="work"]) .task-dep-line,
-.sc02:has([data-card="stream"][data-live="work"]) .task-criteria,
-.sc02:has([data-card="stream"][data-live="work"]) .task-run-review,
+.sc02 .composer-draft {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; border-radius: var(--r-inner);
+  background: var(--juqbg); border: 1px solid var(--juqline);
+}
+.sc02 .composer-draft[hidden] { display: none; }
+.sc02 .task-human, .sc02 .task-compare, .sc02 .context-human, .sc02 .task-attempt {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.sc02 .task-human > .sm:first-child { font-size: 18px; line-height: 26px; font-weight: 650; letter-spacing: -.02em; color: var(--ink); }
+.sc02 .task-voice, .sc02 .context-line { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sc02 .task-voice .sm, .sc02 .task-compare .sm, .sc02 .context-line .sm { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sc02 .task-criterion-line { display: flex; gap: 8px; align-items: flex-start; }
+.sc02 .task-mark { width: 16px; flex: 0 0 auto; color: var(--mut2); font-weight: 650; }
+.sc02 .task-mark.pass { color: var(--rec); }
+/* The proposal form and the example lines belong to starting something new. They step aside
+   while a Run is live. The task itself stays in the inspector so the objective is still readable. */
+.sc02:has([data-card="stream"][data-live="work"]) .composer-draft,
 .sc02:has([data-card="stream"][data-live="work"]) .task-request-note { display: none; }
 
 .sc02 .panel {
@@ -198,6 +330,9 @@
  * are two different questions about the same Work. */
 .sc02 .histrows { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .sc02 .hist-orient { margin: 0 0 2px; }
+.sc02 .hist-orient.is-idle,
+.sc02 .histrows > .mut:not(.hist-orient) { display: none; }
+.sc02-rail .histrow .btn { min-height: 28px; padding: 2px 8px; font-size: 12px; }
 .sc02 .histrow {
   display: flex; flex-direction: column; gap: 4px;
   padding: 8px 0; border-top: 1px solid var(--line); min-width: 0;
@@ -206,7 +341,7 @@
 .sc02 .histtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 /* The user's own words name the Work. They can be long; they wrap rather than being cut, because
    a truncated intent is a different sentence. */
-.sc02 .histname { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+.sc02 .histname { font-weight: 600; overflow-wrap: break-word; word-break: keep-all; min-width: 0; }
 .sc02 .histfacts { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* WBS-05 · 오래됨 — a STATEMENT OF FACT, so it is neutral. `16` reserves red for failure and
@@ -247,6 +382,131 @@
 /* While a Work is live this card is the visual winner of the primary column — D-138 §7. The
    weight comes from the card's own `.active` grammar (`16` §5), not from a new colour. */
 .sc02 [data-card="stream"][data-live="work"] {
-  border-color: var(--line3);
-  box-shadow: 0 1px 2px rgba(20, 23, 28, .05), 0 14px 32px -18px rgba(20, 23, 28, .22);
+  border-color: var(--line2);
+  box-shadow: none;
+}
+
+/* Left navigation. Identity, the way in, and the project. Not a second board. */
+.sc02 .nav-head { display: flex; flex-direction: column; gap: 2px; }
+.sc02 .nav-brand { font-size: 15px; font-weight: 700; letter-spacing: -.02em; padding: 2px 8px 8px; }
+.sc02 .nav-new {
+  appearance: none; -webkit-appearance: none;
+  width: 100%; text-align: left;
+  min-height: 36px; padding: 6px 8px; margin: 0 0 8px;
+  border: none; border-radius: 6px;
+  background: transparent; color: var(--ink);
+  font: inherit; font-size: 14px; font-weight: 650;
+  cursor: pointer;
+}
+.sc02 .nav-new:hover { background: var(--card2); }
+.sc02 .nav-label {
+  font-size: 11px; font-weight: 650; letter-spacing: .04em;
+  color: var(--mut); padding: 12px 8px 4px;
+}
+.sc02 .nav-item {
+  appearance: none; -webkit-appearance: none;
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; text-align: left;
+  min-height: 32px; padding: 4px 8px;
+  border: none; border-radius: 6px;
+  background: transparent; color: var(--ink);
+  font: inherit; font-size: 13px; line-height: 18px;
+  cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sc02 .nav-item:hover { background: var(--card2); }
+.sc02 .nav-item.is-current { background: var(--card2); font-weight: 650; }
+.sc02 .nav-projects .nav-item.is-current::before,
+.sc02 .nav-filters .nav-item.is-current::before {
+  content: "";
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink); flex: 0 0 auto;
+}
+.sc02 .nav-project { font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.sc02 .detail-kicker {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 12px; font-weight: 650; letter-spacing: .02em; color: var(--mut);
+}
+.sc02 .detail-kicker .btn { min-height: 28px; padding: 2px 8px; }
+
+/* Board. Tiles are not .card — the four product cards stay the measured set. */
+.sc02 .kanban {
+  flex: 1 1 auto;
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 0; min-height: 0;
+}
+.sc02 .boardbar { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 0 auto; }
+.sc02 .board-title { display: none; }
+.sc02 .board-views { display: flex; gap: 0; padding: 2px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.sc02 .board-views .btn {
+  min-height: 28px; padding: 2px 10px; font-size: 13px; font-weight: 500;
+  background: transparent; border-color: transparent; box-shadow: none;
+}
+.sc02 .board-views .btn.is-current { background: var(--card2); border-color: transparent; font-weight: 650; color: var(--ink); }
+.sc02 .board-empty { margin: 0; }
+.sc02 .board-cols {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.sc02 .board-cols.is-list { flex-direction: column; overflow-x: visible; }
+.sc02 .board-col {
+  display: flex; flex-direction: column; gap: 6px;
+  flex: 1 1 0;
+  min-width: 108px;
+  max-width: none;
+  min-height: 160px;
+  padding: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.sc02 .board-cols.is-list .board-col { flex-basis: auto; max-width: none; width: 100%; }
+.sc02 .col-head { display: flex; align-items: baseline; gap: 6px; }
+.sc02 .col-title { font-size: 12px; font-weight: 650; color: var(--ink2); white-space: nowrap; }
+.sc02 .col-count { font-size: 12px; color: var(--mut2); }
+.sc02 .col-note, .sc02 .col-empty { overflow-wrap: break-word; word-break: keep-all; }
+.sc02 .task-pick.tile {
+  appearance: none; -webkit-appearance: none;
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px;
+  width: 100%; text-align: left;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.sc02 .task-pick.tile:hover { border-color: var(--line3); }
+.sc02 .task-pick.tile.selected { border-color: var(--ink); }
+.sc02 .tile-title { font-size: 13px; font-weight: 650; line-height: 18px; overflow-wrap: break-word; word-break: keep-all; }
+.sc02 .tile-status { font-size: 12px; line-height: 16px; color: var(--mut); overflow-wrap: break-word; word-break: keep-all; }
+.sc02 .tile-status.tone-fail { color: var(--fail); }
+.sc02 .tile-status.tone-needs, .sc02 .tile-status.tone-partial { color: var(--wait); }
+.sc02 .tile-status.tone-done { color: var(--rec); }
+.sc02 .tile-status.tone-unknown { color: var(--unk); }
+.sc02 .tile-status.tone-doing { color: var(--claude); }
+.sc02 .tile-meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; line-height: 14px; color: var(--mut2); }
+.sc02 .tile.is-live { box-shadow: inset 2px 0 0 var(--claude); }
+.sc02 .tile.is-live::before {
+  content: "";
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--claude);
+  animation: tile-pulse 1.8s ease-in-out infinite;
+}
+@keyframes tile-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+@media (max-width: 1023px) {
+  .sc02-main { display: flex; flex-direction: column; }
+  .sc02 .board-col { flex-basis: auto; max-width: none; }
+  .sc02 .board-cols { overflow-x: visible; flex-wrap: wrap; }
 }

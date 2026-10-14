@@ -29,6 +29,16 @@ const { buildSignature } = require('./signing');
  * must happen before `app.whenReady()`, so it is the first thing this file does. */
 if (process.env.JUQODE_USER_DATA) app.setPath('userData', process.env.JUQODE_USER_DATA);
 
+/* E2E runs under Xvfb. An occluded or backgrounded renderer stops animation frames,
+ * and the visual harness then waits forever on requestAnimationFrame. These switches
+ * are test-only: JUQODE_TRACE is set by the e2e launcher and never by a normal start. */
+if (process.env.JUQODE_TRACE === '1') {
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('disable-background-timer-throttling');
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+}
+
 /* One instance. A second launch focuses the existing window rather than opening a second one. */
 if (!app.requestSingleInstanceLock()) {
   app.quit();

@@ -115,9 +115,12 @@ npm run demo       # 실사용 영상 다시 찍기 (Xvfb + ffmpeg 필요)
 > 돌 것으로 보이지만, 그렇게 적힌 곳은 `DEFERRED_VALIDATION.md` 의 13행이고 전부 미측정이다.
 > ConPTY · `PATHEXT` · 프로세스 트리 종료 · NTFS 대소문자는 **Windows 에서만 진짜다.**
 
-> **`main` 이 곧 현재 상태다.** 구현은 `dev/mvp-autonomous-v01` 에서 자란 뒤
-> [PR #4](https://github.com/ju0o/JuQode/pull/4) 로 병합되었다. 병합은 **인수 판정이 아니다** —
+> **지금 개발의 기준은 `dev/mvp-autonomous-v01` 이다.** `main` 은 그보다 이전 병합점이다.
+> [PR #4](https://github.com/ju0o/JuQode/pull/4) 의 병합은 **인수 판정이 아니다** —
 > 위의 `MVP_CERTIFIED = NO` 가 그대로 유효하다.
+>
+> 대표님이 바로 쓰는 경로와 다음 작업은 [`docs/design/VNEXT.md`](docs/design/VNEXT.md) 에 있다.
+> 프로젝트를 연 뒤 한 문장을 적으면 확인 조건을 제안하고, **새 일로 맡기기** 가 그 일로 실행을 시작한다.
 
 ### 저장소 지도
 
