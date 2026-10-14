@@ -156,8 +156,9 @@ body {
 }
 .term-dock {
   position: fixed;
-  left: 240px;
-  bottom: 8px;
+  left: auto;
+  right: 16px;
+  bottom: 10px;
   z-index: 30;
   height: 28px;
   padding: 0 10px;
@@ -174,7 +175,7 @@ body {
 }
 .term-dock:hover { color: var(--ink); border-color: var(--line2); }
 @media (max-width: 1023px) {
-  .term-dock { left: 12px; }
+  .term-dock { left: auto; right: 12px; }
 }
 
 /* recovery / secondary action rows */

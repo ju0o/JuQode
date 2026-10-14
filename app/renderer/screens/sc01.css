@@ -94,7 +94,7 @@
  * Quiet on purpose. The screen's primary action is opening a folder; a build fact that shouts
  * would compete with it, and 숨기지 않는다 asks for present, not loud. */
 .sc01 .buildnote {
-  width: 100%; max-width: 560px;
+  width: 100%; max-width: 640px;
   padding: 4px 0 4px 10px;
   background: transparent;
   border: none; border-left: 2px solid var(--juq);

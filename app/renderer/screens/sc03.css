@@ -169,6 +169,12 @@
 .sc03 .claim .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .sc03 .claim .body > * { overflow-wrap: anywhere; }
 .sc03 .claim .src { font-family: var(--font-mono); font-size: 10px; }
+.sc03 .claude-activity > summary,
+.sc03 .about-more > summary,
+.sc03 .claim-source > summary { cursor: pointer; color: var(--mut); }
+.sc03 .claude-activity[open],
+.sc03 .about-more[open],
+.sc03 .claim-source[open] { display: flex; flex-direction: column; gap: 6px; }
 
 /* 부분 완료 · 된 것 / 안 된 것 — two lists, because one of them alone is half an answer */
 .sc03 .itemlist { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }

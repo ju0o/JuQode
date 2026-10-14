@@ -260,6 +260,7 @@ api.onWorkUpdate?.((snapshot) => {
      * SC-04 reads a change that has already happened, and swapping the snapshot under it would
      * put another Work's changes on a screen the user opened for this one. */
     if (state.workSnapshot?.work?.id === snapshot.work.id) state.workSnapshot = snapshot;
+    if (state.screen === 'SC-02') window.__refreshBoard?.(snapshot);
     return;
   }
   state.workSnapshot = snapshot;

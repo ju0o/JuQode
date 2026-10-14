@@ -788,6 +788,8 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
         : (Array.isArray(p?.all) && p.all.length ? p.all.length : 1);
     }
     const row = document.querySelector('[data-claim="tools-observed"]');
+    const src = row?.querySelector('details');
+    if (src) src.open = true;
     return JSON.stringify({ blocks, rows: rows.length,
                             shown: row ? row.innerText : null }); })()`);
 

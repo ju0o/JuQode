@@ -28,7 +28,7 @@ import { contextFacts } from '../human-read.mjs';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
-import { stateChip } from './sc03.js';
+import { stateChip, permissionAction } from './sc03.js';
 
 export function renderSC02(root, api, nav, state) {
   root.innerHTML = '';
@@ -477,7 +477,7 @@ export function renderSC02(root, api, nav, state) {
   /* A live attempt that was never saved as a Task. It occupies the column its status
    * actually maps to, and it does not pretend to be a Task. */
   const unlinkedTile = (live) => {
-    const run = { status: live.status, outcome: live.outcome, at: live.at };
+    const run = { status: live.status, outcome: live.outcome, at: live.at, permission: live.permission ?? null };
     const tone = tileTone(null, run);
     const row = btn(`tile tone-${tone} is-live`, '', () => nav.toWork(live.snap));
     row.type = 'button';
@@ -500,23 +500,64 @@ export function renderSC02(root, api, nav, state) {
     if (sequence !== taskLoadSequence || state.selectedTaskId !== taskId) return;
     if (!result?.ok) { selectedTask.appendChild(el('div', 'xs mut2', result?.detail ?? C.gap.task.noTasks)); return; }
     const task = result.task;
-    requestLabel.textContent = C.gap.task.runRequest;
-    const goal = el('div', 'task-goal');
-    goal.append(el('div', 'xs mut2', C.gap.task.selected), el('div', 'sm', task.goal));
+    const latest = result.runs[0] ?? null;
+    const face = runFace(latest);
+    requestLabel.textContent = latest ? C.gap.task.runRequest : C.gap.stage.ask;
+    const bits = tileBits(task, face);
+    const title = el('div', 'inspect-title', task.goal);
+    const status = el('div', `inspect-status tone-${tileTone(task, face)}`);
+    if (bits.mark) status.appendChild(el('span', 'tile-mark', bits.mark));
+    status.appendChild(el('span', '', bits.status));
+    selectedTask.append(title, status);
     const lifecycleLabel = task.status === 'complete' ? C.gap.task.completeState
       : task.status === 'blocked' ? C.gap.task.blocked
         : task.status === 'in_progress' ? C.gap.task.inProgress : C.gap.task.open;
-    const lifecycle = el('div', 'xs mut2', `${C.gap.task.stateLabel}: ${lifecycleLabel}`);
-    const statusLabel = task.verdict === 'pass' ? C.gap.task.pass : task.verdict === 'fail' ? C.gap.task.fail : C.gap.task.unverified;
-    const verdict = el('div', `task-verdict ${task.verdict}`, `${C.gap.task.status}: ${statusLabel}`);
-    const acceptance = el('ul', 'task-criteria');
-    for (const criterion of task.acceptance_criteria) acceptance.appendChild(el('li', 'sm', criterion.text));
-    const deps = el('div', 'xs mut2 task-dep-line', task.dependencies.length
-      ? `${C.gap.task.dependencies}: ${task.dependencies.map((id) => currentTasks.find((item) => item.id === id)?.goal ?? id).join(' · ')}`
-      : `${C.gap.task.dependencies}: —`);
-    selectedTask.append(goal, lifecycle, verdict, deps, el('div', 'xs mut2', C.gap.task.acceptance), acceptance);
-    if (result.runs.length) selectedTask.appendChild(renderRunReview(task, result, refreshTasks, nav));
-    else selectedTask.appendChild(el('div', 'xs mut2', C.gap.task.noRuns));
+    const verdictLabel = task.verdict === 'pass' ? C.gap.task.pass
+      : task.verdict === 'fail' ? C.gap.task.fail : C.gap.task.unverified;
+    const meta = el('details', 'inspect-meta');
+    meta.appendChild(el('summary', 'xs mut', C.gap.task.stateLabel));
+    meta.append(el('div', 'xs mut2', C.gap.task.selected),
+      el('div', 'xs mut2', `${C.gap.task.stateLabel}: ${lifecycleLabel}`),
+      el('div', `xs mut2 task-verdict ${task.verdict}`, `${C.gap.task.status}: ${verdictLabel}`));
+    if (latest) selectedTask.appendChild(attemptLineCompact(latest, bits));
+    if (latest?.permission && latest.status === 'permission_waiting') {
+      selectedTask.appendChild(inspectPermission(latest, api, refreshTasks));
+    } else if (latest?.status === 'input_waiting') {
+      selectedTask.appendChild(inspectInput(latest, api));
+    } else if (latest?.work?.status === 'ended') {
+      selectedTask.appendChild(inspectResult(latest, nav));
+    }
+    if (!latest) {
+      if (task.acceptance_criteria.length) {
+        const acceptance = el('ul', 'task-criteria');
+        for (const criterion of task.acceptance_criteria) acceptance.appendChild(el('li', 'sm', criterion.text));
+        selectedTask.append(el('div', 'xs mut2', C.gap.task.acceptance), acceptance);
+      }
+      if (task.dependencies.length) {
+        selectedTask.appendChild(el('div', 'xs mut2 task-dep-line',
+          `${C.gap.task.dependencies}: ${task.dependencies.map((id) => currentTasks.find((item) => item.id === id)?.goal ?? id).join(' · ')}`));
+      }
+      selectedTask.appendChild(el('div', 'xs mut2', C.gap.task.noRuns));
+      selectedTask.appendChild(meta);
+    } else {
+      const ended = latest.work.status === 'ended';
+      const activity = inspectActivity(latest);
+      const context = inspectContext(latest);
+      const check = el('div', 'inspect-check');
+      if (!ended) {
+        check.appendChild(inspectPendingRow(C.gap.task.humanObserved, C.gap.task.humanObservedPending));
+        check.appendChild(inspectPendingRow(C.gap.task.humanTest, C.gap.task.humanTestPending));
+      }
+      check.appendChild(renderRunReview(task, result, refreshTasks, nav));
+      context.appendChild(meta);
+      selectedTask.appendChild(inspectTabs([
+        { id: 'activity', label: C.gap.board.tabActivity, panel: activity, on: !ended },
+        { id: 'check', label: C.gap.board.tabCheck, panel: check, on: ended },
+        { id: 'context', label: C.gap.board.tabContext, panel: context, on: false },
+        { id: 'prior', label: C.gap.board.tabPrior, panel: null, on: false },
+      ], selectedTask));
+      selectedTask.appendChild(btn('btn sm ghost inspect-deep', C.gap.board.deepRun, () => nav.toWork(latest)));
+    }
     submit.disabled = task.verdict === 'pass';
   };
 
@@ -532,13 +573,7 @@ export function renderSC02(root, api, nav, state) {
       const snap = detail?.runs?.[0] ?? null;
       return {
         ...task,
-        _run: snap ? {
-          status: snap.work?.status ?? null,
-          outcome: snap.work?.outcome ?? null,
-          attempt: snap.work?.attempt ?? null,
-          at: snap.work?.ended_at || snap.work?.started_at || null,
-          evidence: (snap.runEvidence ?? []).length,
-        } : null,
+        _run: runFace(snap),
       };
     });
     paintLegacyUnknown(listed.legacyUnknownRuns ?? []);
@@ -573,7 +608,7 @@ export function renderSC02(root, api, nav, state) {
       state.selectedTaskId = created.task.id;
       criteriaDirty = false;
       await refreshTasks();
-      await startWork(text, created.task.id, window.crypto.randomUUID());
+      await startWork(text, created.task.id, window.crypto.randomUUID(), true);
     } finally {
       commit.disabled = false;
       commit.textContent = C.gap.task.commitNew;
@@ -604,7 +639,7 @@ export function renderSC02(root, api, nav, state) {
     } finally { submit.disabled = false; }
   }
 
-  async function startWork(text, taskId = null, idempotencyKey = null) {
+  async function startWork(text, taskId = null, idempotencyKey = null, stayOnBoard = false) {
     consequence.appendChild(line(C.intent.routeWork));
     const pend = el('div', 'sm mut');
     pend.setAttribute('data-el', 'pending');
@@ -613,7 +648,19 @@ export function renderSC02(root, api, nav, state) {
 
     const r = await api.workStart(p.id, text, taskId, idempotencyKey);
     pend.remove();
-    if (r?.ok) { field.value = ''; return nav.toWork(r.work); }
+    if (r?.ok) {
+      field.value = '';
+      /* 새 일로 맡기기 stays with the board. 보내기 still opens the Run screen: the suite
+       * samples that arrival, and the inspector remains the way back to the same attempt. */
+      if (stayOnBoard) {
+        consequence.innerHTML = '';
+        state.composerOpen = false;
+        syncShell();
+        await refreshTasks();
+        return;
+      }
+      return nav.toWork(r.work);
+    }
 
     /* `15` SC-02 keeps the submitted text in the field for every one of these — it is never
      * queued and never thrown away (UF-RULE-NOQUEUE). */
@@ -652,10 +699,20 @@ export function renderSC02(root, api, nav, state) {
       status: snap.status,
       outcome: snap.outcome ?? snap.work.outcome ?? null,
       at: snap.work.started_at || null,
+      permission: snap.permission ?? null,
       snap,
     };
     paintTaskList();
   });
+  let boardSig = '';
+  window.__refreshBoard = (snapshot) => {
+    if (!snapshot?.work || snapshot.work.project_id !== p.id) return;
+    const sig = [snapshot.work.id, snapshot.status, snapshot.outcome, snapshot.permission?.tool ?? '',
+      snapshot.lastObserved?.kind ?? '', (snapshot.runEvidence ?? []).length].join('|');
+    if (sig === boardSig) return;
+    boardSig = sig;
+    refreshTasks();
+  };
 
   /* History — the rail. WBS-20: every Work this project started, newest first. `12`
    * F-C2-04 — it never disappears, and a failed or cancelled Work stays in it.
@@ -684,6 +741,25 @@ function shortWhen(iso) {
   return time.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+/* What a card is allowed to say about a Run. Counts come from evidence rows, or they are omitted. */
+function runFace(snap) {
+  if (!snap?.work && !snap?.status) return null;
+  const changed = (snap.runEvidence ?? []).find((item) => item.kind === 'changed_files');
+  const knownFiles = changed?.details?.known === true;
+  const tests = (snap.runEvidence ?? []).filter((item) => item.kind === 'test_command');
+  const passed = tests.map((item) => item.details?.tests_passed_count).filter((n) => Number.isInteger(n) && n > 0);
+  return {
+    status: snap.work?.status ?? snap.status ?? null,
+    outcome: snap.work?.outcome ?? snap.outcome ?? null,
+    attempt: snap.work?.attempt ?? null,
+    at: snap.work?.ended_at || snap.work?.started_at || snap.at || null,
+    evidence: (snap.runEvidence ?? []).length,
+    files: knownFiles ? (changed.details.files ?? []) : null,
+    testsPassed: passed.length ? passed.reduce((sum, n) => sum + n, 0) : null,
+    permission: snap.permission ?? null,
+  };
+}
+
 /* Painted once from the timestamp. Nothing here schedules a refresh. */
 function ago(iso) {
   const time = new Date(iso);
@@ -701,7 +777,8 @@ function ago(iso) {
 /* Title, one short state, and a reason only when the status itself names something to notice. */
 function tileBits(task, run, executing) {
   if (run?.status === 'permission_waiting') {
-    return { mark: '●', status: C.gap.board.needs, reason: C.gap.presenceLabel.permission };
+    const fileEdit = /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(run.permission?.tool ?? '');
+    return { mark: '●', status: C.gap.board.needs, reason: fileEdit ? C.gap.board.filePermit : C.gap.presenceLabel.permission };
   }
   if (run?.status === 'input_waiting') {
     return { mark: '●', status: C.gap.board.needs, reason: C.gap.presenceLabel.input };
@@ -721,7 +798,10 @@ function tileBits(task, run, executing) {
   if (task?.verdict === 'pass' || task?.status === 'complete') {
     return { mark: '✓', status: C.gap.task.completeState, reason: '' };
   }
-  if (task?.verdict === 'fail' || run?.outcome === 'failed') {
+  if (run?.outcome === 'failed') {
+    return { mark: '', status: C.gap.board.review, reason: C.work.resultTitle.failed };
+  }
+  if (task?.verdict === 'fail') {
     return { mark: '', status: C.gap.board.review, reason: C.gap.task.fail };
   }
   if (run?.outcome === 'partial' || run?.outcome === 'cancelled_partial') {
@@ -735,7 +815,9 @@ function tileBits(task, run, executing) {
 }
 
 function fillTile(row, title, bits, tone, run, unlinked = false) {
-  row.appendChild(el('span', 'tile-title', title));
+  const name = el('span', 'tile-title', title);
+  name.title = title;
+  row.appendChild(name);
   const status = el('span', `tile-status tone-${tone}`);
   if (bits.mark) status.appendChild(el('span', 'tile-mark', bits.mark));
   status.appendChild(el('span', 'tile-state', bits.status));
@@ -744,7 +826,9 @@ function fillTile(row, title, bits, tone, run, unlinked = false) {
   const meta = el('span', 'tile-meta');
   if (unlinked) meta.appendChild(el('span', '', C.gap.board.unlinked));
   if (run?.at) meta.appendChild(el('span', '', ago(run.at)));
-  if (run?.evidence > 0) meta.appendChild(el('span', '', C.gap.board.seen(run.evidence)));
+  if (Array.isArray(run?.files) && run.files.length) meta.appendChild(el('span', '', C.gap.board.fileCount(run.files.length)));
+  if (Number.isInteger(run?.testsPassed) && run.testsPassed > 0) meta.appendChild(el('span', '', C.gap.board.testCount(run.testsPassed)));
+  else if (run?.evidence > 0 && !(Array.isArray(run?.files) && run.files.length)) meta.appendChild(el('span', '', C.gap.board.seen(run.evidence)));
   if (meta.childNodes.length) row.appendChild(meta);
 }
 
@@ -791,10 +875,198 @@ function voice(label, text) {
   return block;
 }
 
+function attemptLineCompact(snap, bits) {
+  const line = el('div', 'inspect-attempt');
+  line.setAttribute('data-el', 'inspect-attempt');
+  line.appendChild(el('div', 'xs mut2', C.gap.board.thisAttempt));
+  const seen = snap.lastObserved;
+  const text = seen
+    ? `${C.work.lastSeen} ${C.gap.signal[seen.kind] ?? C.gap.signal.raw}`
+    : `${C.work.observed} ${C.work.sessionStart}`;
+  const row = el('div', 'sm', bits.reason ? `${text}` : text);
+  line.appendChild(row);
+  return line;
+}
+
+function inspectPendingRow(label, value) {
+  const row = el('div', 'inspect-pair');
+  row.append(el('span', 'xs mut2', label), el('span', 'sm', value));
+  return row;
+}
+
+function inspectPermission(snap, api, refresh) {
+  const d = snap.permission;
+  const panel = el('div', 'panel wait inspect-permit');
+  panel.setAttribute('data-el', 'inspect-permission');
+  panel.appendChild(el('div', 'sm t', C.gap.stage.permit));
+  const action = permissionAction(d);
+  if (action) {
+    panel.appendChild(el('div', 'xs mut2', C.gap.board.intend));
+    panel.appendChild(el('div', 'perm-action', action));
+  }
+  const why = el('details');
+  why.appendChild(el('summary', 'xs mut', C.gap.board.whyPermit));
+  why.appendChild(el('div', 'sm', C.work.permTitleB));
+  why.appendChild(el('div', 'sm', C.work.permGlossB));
+  panel.appendChild(why);
+  const target = d.spec?.includes?.('(') ? d.spec : (d.input?.file_path ?? d.input?.command ?? null);
+  const raw = el('details');
+  raw.appendChild(el('summary', 'xs mut', C.work.rawQ));
+  raw.appendChild(el('div', 'xs mono mut', `${C.gap.workDenialTool}: ${d.tool ?? '—'}${target ? ` · ${target}` : ''}`));
+  if (d.message) raw.appendChild(el('div', 'xs mono mut', d.message));
+  panel.appendChild(raw);
+  const acts = el('div', 'row-acts');
+  if (d.scopable === false) {
+    panel.appendChild(el('div', 'xs mut', C.gap.workNoScope));
+  } else {
+    const allow = btn('btn sm pri', C.gap.board.allowContinue, async () => {
+      allow.disabled = true;
+      await api.workAllow(snap.work.id, d.toolUseId ?? null);
+      allow.disabled = false;
+      await refresh();
+    });
+    acts.appendChild(allow);
+  }
+  acts.appendChild(btn('btn sm cancel', C.gap.permStop, async () => {
+    await api.workCancel(snap.work.id);
+    await refresh();
+  }));
+  panel.appendChild(acts);
+  return panel;
+}
+
+function inspectInput(snap, api) {
+  const q = snap.inputRequest ?? {};
+  const panel = el('div', 'panel wait');
+  panel.setAttribute('data-el', 'inspect-input');
+  panel.appendChild(el('div', 'sm t', C.work.inputTitle));
+  if (q.text) panel.appendChild(el('div', 'sm', q.text));
+  if (q.raw) {
+    const raw = el('details');
+    raw.appendChild(el('summary', 'xs mut', C.work.rawQ));
+    raw.appendChild(el('div', 'xs mono mut', q.raw));
+    panel.appendChild(raw);
+  }
+  const box = el('textarea', 'answerfield');
+  box.rows = 2;
+  box.placeholder = C.work.inputPh;
+  panel.appendChild(box);
+  panel.appendChild(btn('btn sm pri', C.work.answer, () => api.workAnswer(snap.work.id, box.value)));
+  return panel;
+}
+
+function inspectResult(snap, nav) {
+  const box = el('div', 'inspect-result');
+  box.setAttribute('data-el', 'inspect-result');
+  box.appendChild(el('div', 'inspect-result-title', outcomeKorean(snap.work?.outcome) ?? C.work.unknownTitle));
+  const evidence = snap.runEvidence ?? [];
+  const changed = evidence.find((item) => item.kind === 'changed_files');
+  const files = changed?.details?.known === true ? (changed.details.files ?? []) : null;
+  box.appendChild(el('div', 'xs mut2', C.gap.task.observedCount(evidence.length)));
+  if (files?.length) box.appendChild(el('div', 'sm', C.gap.board.filesChanged(files.length)));
+  else box.appendChild(el('div', 'sm', changed ? C.gap.task.noChanges : C.gap.task.humanObservedMissing));
+  const tests = evidence.filter((item) => item.kind === 'test_command');
+  if (tests.length) {
+    box.appendChild(el('div', 'sm', tests.map((item) => `${item.summary} · ${testStateLabel(item)}`).join('\n')));
+  } else {
+    box.appendChild(el('div', 'sm', C.gap.task.humanTestNone));
+  }
+  const report = (snap.result?.claims ?? []).find((claim) => claim.kind === 'agent-report');
+  const said = typeof report?.data?.text === 'string' ? report.data.text.trim() : '';
+  box.appendChild(el('div', 'xs mut2', C.gap.task.humanAgent));
+  box.appendChild(el('div', 'sm', said || C.gap.task.humanAgentNone));
+  if (files?.length) {
+    const list = el('div', 'inspect-files');
+    list.appendChild(el('div', 'xs mut2', C.gap.task.changedFiles));
+    for (const file of files) list.appendChild(el('div', 'sm', file));
+    box.appendChild(list);
+    box.appendChild(btn('btn sm', C.work.readChanges, () => nav.toReader(snap)));
+  }
+  const tools = (snap.result?.claims ?? []).find((claim) => claim.kind === 'tools-observed');
+  const sources = (snap.result?.claims ?? []).filter((claim) => claim.sourceRef);
+  if (sources.length || (Number.isInteger(tools?.data?.count) && tools.data.count > 0)) {
+    const fold = el('details', 'inspect-source');
+    fold.setAttribute('data-el', 'inspect-source');
+    fold.appendChild(el('summary', 'xs mut', C.gap.board.sourceFold));
+    if (Number.isInteger(tools?.data?.count) && tools.data.count > 0) {
+      fold.appendChild(el('div', 'sm', C.gap.board.toolsWatched(tools.data.count)));
+    }
+    for (const claim of sources) {
+      fold.appendChild(el('div', 'xs mut2 src', claim.sourceRef));
+    }
+    box.appendChild(fold);
+  }
+  return box;
+}
+
+function inspectActivity(snap) {
+  const node = el('div', 'inspect-activity');
+  const seen = snap.lastObserved;
+  if (seen) {
+    node.appendChild(el('div', 'sm', `${C.work.lastSeen} ${C.gap.signal[seen.kind] ?? C.gap.signal.raw}`));
+  } else if (snap.work?.started_at) {
+    node.appendChild(el('div', 'sm', `${C.work.observed} ${C.work.sessionStart}`));
+  }
+  for (const step of snap.steps ?? []) {
+    const row = el('div', 'sm inspect-step');
+    row.appendChild(el('span', '', step.title));
+    node.appendChild(row);
+  }
+  return node;
+}
+
+function inspectContext(snap) {
+  const node = el('div', 'inspect-context');
+  const bundle = snap.contextBundle?.bundle;
+  if (!bundle) return node;
+  const facts = contextFacts(bundle);
+  node.appendChild(el('div', 'sm', C.gap.board.contextCount(facts.length)));
+  const more = el('details');
+  more.appendChild(el('summary', 'xs mut', C.gap.board.contextLook));
+  for (const fact of facts) {
+    const row = el('div', 'context-line');
+    row.appendChild(el('div', 'sm', fact.text));
+    more.appendChild(row);
+  }
+  more.appendChild(el('div', 'xs mut2', C.gap.task.contextScope));
+  node.appendChild(more);
+  return node;
+}
+
+function inspectTabs(tabs, root) {
+  const wrap = el('div', 'inspect-tabs-wrap');
+  const bar = el('div', 'inspect-tabs');
+  const host = el('div', 'inspect-panels');
+  const panels = tabs.filter((tab) => tab.panel);
+  const show = (id) => {
+    if (id === 'prior') {
+      show('check');
+      const runs = root.querySelector('.task-runs');
+      if (runs) runs.open = true;
+      return;
+    }
+    for (const tab of panels) tab.panel.classList.toggle('is-off', tab.id !== id);
+    for (const button of bar.children) button.classList.toggle('is-current', button.getAttribute('data-tab') === id);
+  };
+  for (const tab of tabs) {
+    const button = btn('inspect-tab', tab.label, () => show(tab.id));
+    button.setAttribute('data-tab', tab.id);
+    if (tab.on) button.classList.add('is-current');
+    bar.appendChild(button);
+  }
+  for (const tab of panels) {
+    tab.panel.classList.add('inspect-panel');
+    if (!tab.on) tab.panel.classList.add('is-off');
+    host.appendChild(tab.panel);
+  }
+  wrap.append(bar, host);
+  return wrap;
+}
+
 function renderHumanRead(task, latest) {
-  const block = el('div', 'task-human');
+  const block = el('details', 'task-human');
   block.setAttribute('data-el', 'human-read');
-  block.appendChild(el('div', 'sm', C.gap.task.humanTitle));
+  block.appendChild(el('summary', 'xs mut', C.gap.task.humanTitle));
   block.appendChild(voice(C.gap.task.humanAsked, task.goal));
   const ended = latest.work.status === 'ended';
   const known = outcomeKorean(latest.work.outcome);
@@ -1006,7 +1278,8 @@ function renderRunReview(task, detail, refresh, nav) {
 
   if (latest.work.status === 'ended' && task.verdict !== 'pass') {
     const retry = el('details', 'task-retry');
-    retry.appendChild(el('summary', 'xs mut', C.gap.task.retryRun));
+    retry.appendChild(el('summary', 'xs mut', C.gap.board.retryShort));
+    retry.appendChild(el('div', 'xs mut2', C.gap.task.retryRun));
     const reason = el('textarea', 'intentfield task-input');
     reason.rows = 2;
     reason.placeholder = C.gap.task.retryPlaceholder;
@@ -1039,7 +1312,8 @@ function renderRunReview(task, detail, refresh, nav) {
   }
 
   const history = el('details', 'task-runs');
-  history.appendChild(el('summary', 'sm', `${C.gap.task.runHistory} · ${detail.runs.length}`));
+  history.title = C.gap.task.runHistory;
+  history.appendChild(el('summary', 'sm', `${C.gap.board.tabPrior} · ${detail.runs.length}`));
   for (const snap of detail.runs) {
     const run = el('details', 'task-run');
     const attempt = snap.work.attempt ?? 1;
@@ -1300,30 +1574,28 @@ async function fillHistory(rows, api, nav, state) {
     } else if (o) {
       top.appendChild(el('span', `chip ${o.cls}`, C.work.resultTitle[o.key] ?? C.work.unknownTitle));
     }
-    row.appendChild(top);
-
     const facts = el('div', 'xs mut histfacts');
     /* 변경 n개 only when the evidence pair actually answered. `null` means it could not tell,
      * and a zero printed in its place would be a measurement nobody made. */
     if (w.changes != null) facts.appendChild(el('span', '', C.gap.historyChanged(w.changes)));
-    facts.appendChild(el('span', '', when(w.endedAt ?? w.startedAt)));
-    row.appendChild(facts);
+    const whenAgo = ago(w.endedAt ?? w.startedAt);
+    if (whenAgo) facts.appendChild(el('span', '', whenAgo));
 
-    const acts = el('div', 'row-acts');
+    const acts = el('div', 'row-acts hist-acts');
     acts.appendChild(btn('btn sm ghost', C.history.result, async () => {
       const got = await api.workGet(w.id);
       if (got?.ok) nav.toWork(got.work);
     }));
     /* `15` SC-02: History row → SC-03 (result) or `변경 보기` → SC-04. The change reader is
-     * reachable from History and not only from a Work that just ended. */
+     * reachable from History and not only from a Work that just ended. The buttons stay in the
+     * row so a click can find them; they are shown after the row is chosen. */
     acts.appendChild(btn('btn sm ghost', C.history.changes, async () => {
       const got = await api.workGet(w.id);
       if (got?.ok) nav.toReader(got.work);
     }));
-    const more = el('details', 'hist-more');
-    more.appendChild(el('summary', 'xs mut', C.gap.board.rowMore));
-    more.appendChild(acts);
-    row.appendChild(more);
+    const pick = btn('hist-select', '', () => row.classList.toggle('is-open'));
+    pick.append(top, facts);
+    row.append(pick, acts);
 
     rows.appendChild(row);
   }

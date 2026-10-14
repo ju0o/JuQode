@@ -30,7 +30,7 @@
 .sc02-main {
   position: relative;
   overflow: auto;
-  padding: 12px 14px 16px;
+  padding: 12px 14px 44px;
   background: var(--board);
   display: flex;
   flex-direction: column;
@@ -328,17 +328,26 @@
  * A row is a fact sheet, not a link: name, outcome, what it changed, when. The two actions are
  * explicit buttons because `15` gives them different destinations — the result and the changes
  * are two different questions about the same Work. */
-.sc02 .histrows { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sc02 .histrows { display: flex; flex-direction: column; gap: 0; min-width: 0; }
 .sc02 .hist-orient { margin: 0 0 2px; }
 .sc02 .hist-orient.is-idle,
 .sc02 .histrows > .mut:not(.hist-orient) { display: none; }
 .sc02-rail .histrow .btn { min-height: 28px; padding: 2px 8px; font-size: 12px; }
 .sc02 .histrow {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 8px 0; border-top: 1px solid var(--line); min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 0; border-top: 1px solid var(--line); min-width: 0;
 }
 .sc02 .histrow:first-of-type { border-top: 0; padding-top: 0; }
-.sc02 .histtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.sc02 .hist-select {
+  appearance: none; -webkit-appearance: none;
+  display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+  width: 100%; margin: 0; padding: 0;
+  border: none; background: transparent; color: inherit;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.sc02 .histrow .hist-acts { display: none; margin-top: 4px; }
+.sc02 .histrow.is-open .hist-acts { display: flex; }
+.sc02 .histtop { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 /* The user's own words name the Work. They can be long; they wrap rather than being cut, because
    a truncated intent is a different sentence. */
 .sc02 .histname { font-weight: 600; overflow-wrap: break-word; word-break: keep-all; min-width: 0; }
@@ -513,9 +522,16 @@
   cursor: pointer;
   box-shadow: var(--sh-rest);
 }
-.sc02 .tile:hover { border-color: var(--line3); }
-.sc02 .task-pick.tile.selected { border-color: var(--ink); }
-.sc02 .tile-title { font-size: 13px; font-weight: 650; line-height: 18px; overflow-wrap: break-word; word-break: keep-all; }
+.sc02 .tile:hover { border-color: var(--line2); background: var(--card2); }
+.sc02 .task-pick.tile.selected { border-color: var(--ink); box-shadow: inset 2px 0 0 var(--ink); }
+.sc02 .tile.tone-fail { border-color: var(--failline); }
+.sc02 .tile.tone-unknown { border-style: dashed; }
+.sc02 .tile-title {
+  font-size: 13px; font-weight: 650; line-height: 18px;
+  overflow-wrap: break-word; word-break: keep-all;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden;
+}
 .sc02 .tile-status { display: flex; align-items: center; gap: 5px; font-size: 12px; line-height: 16px; color: var(--mut); overflow-wrap: break-word; word-break: keep-all; }
 .sc02 .tile-mark { flex: 0 0 auto; font-size: 11px; }
 .sc02 .tile-reason { font-size: 12px; line-height: 16px; color: var(--ink2); overflow-wrap: break-word; word-break: keep-all; }
@@ -525,9 +541,10 @@
 .sc02 .tile-status.tone-unknown { color: var(--unk); }
 .sc02 .tile-status.tone-doing { color: var(--claude); }
 .sc02 .tile-meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; line-height: 14px; color: var(--mut2); }
-.sc02 .tile.is-live { box-shadow: inset 2px 0 0 var(--claude); }
+.sc02 .tile.is-live { position: relative; box-shadow: inset 2px 0 0 var(--claude); }
 .sc02 .tile.is-live::before {
   content: "";
+  position: absolute; top: 10px; right: 8px;
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--claude);
   animation: tile-pulse 1.8s ease-in-out infinite;
@@ -541,3 +558,32 @@
   .sc02 .board-col { flex-basis: auto; max-width: none; }
   .sc02 .board-cols { overflow-x: visible; flex-wrap: wrap; }
 }
+
+/* Inspector. One reading at a time. Technical provenance stays inside a closed disclosure. */
+.sc02 .task-selected { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sc02 .inspect-title { font-size: 16px; line-height: 22px; font-weight: 650; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.sc02 .inspect-status { display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; }
+.sc02 .inspect-status.tone-fail { color: var(--fail); }
+.sc02 .inspect-status.tone-needs, .sc02 .inspect-status.tone-partial { color: var(--wait); }
+.sc02 .inspect-status.tone-done { color: var(--rec); }
+.sc02 .inspect-status.tone-unknown { color: var(--unk); }
+.sc02 .inspect-status.tone-doing { color: var(--claude); }
+.sc02 .inspect-attempt, .sc02 .inspect-result, .sc02 .inspect-activity, .sc02 .inspect-context {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.sc02 .inspect-result-title { font-size: 15px; line-height: 22px; font-weight: 650; }
+.sc02 .inspect-files { display: flex; flex-direction: column; gap: 2px; }
+.sc02 .inspect-pair { display: flex; justify-content: space-between; gap: 8px; }
+.sc02 .inspect-permit .perm-action { font-size: 14px; font-weight: 650; }
+.sc02 .inspect-tabs { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--line); }
+.sc02 .inspect-tab {
+  appearance: none; -webkit-appearance: none;
+  min-height: 32px; padding: 4px 10px; margin: 0;
+  border: none; border-bottom: 2px solid transparent; border-radius: 0;
+  background: transparent; color: var(--mut);
+  font: inherit; font-size: 12px; cursor: pointer;
+}
+.sc02 .inspect-tab.is-current { color: var(--ink); font-weight: 650; border-bottom-color: var(--ink); }
+.sc02 .inspect-panels { padding-top: 8px; }
+.sc02 .inspect-panel.is-off { display: none; }
+.sc02 .task-pick.tile.selected.is-live { box-shadow: inset 2px 0 0 var(--claude); }

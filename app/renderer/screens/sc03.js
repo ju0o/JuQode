@@ -194,7 +194,7 @@ function liveness(snap) {
  * there is nothing else to parse. A spec that does not have that shape is not shown at all —
  * the caller falls back to the raw input rather than displaying something half-read.
  */
-function permissionAction(d) {
+export function permissionAction(d) {
   const target = specTarget(d.spec)
     ?? d.input?.file_path ?? d.input?.path ?? d.input?.notebook_path
     ?? null;
@@ -353,15 +353,19 @@ const field = (k, v) => {
 function stepsCard(snap) {
   const card = el('div', 'card c-m');
   card.setAttribute('data-card', 'steps');
-  card.appendChild(head(C.work.stepsTitle));
 
+  /* Step and the empty-state sentence stay available, but they are not the reading.
+   * NEXT stays outside: an empty NEXT is a fact the screen is required to show. */
+  const fold = el('details', 'claude-activity');
+  fold.appendChild(el('summary', 'xs mut', C.gap.board.claudeActivity));
+  fold.appendChild(el('div', 'xs mut2', C.work.stepsTitle));
   if (!snap.steps.length) {
-    card.appendChild(el('div', 'sm mut', C.work.noSteps));
+    fold.appendChild(el('div', 'sm mut', C.work.noSteps));
   } else {
     /* `15` SC-03: Steps list (✓ 완료 · ● 진행 중 · ○ 선언된 다음). `18` `work.legend` is that
      * sentence, and it exists because a mark alone is a glyph the user has to decode — `16`
      * §2.1's rule that a state is never carried by shape or colour alone applies to these too. */
-    card.appendChild(el('div', 'xs mut2 steplegend', C.work.legend));
+    fold.appendChild(el('div', 'xs mut2 steplegend', C.work.legend));
     const list = el('div', 'steps');
     /* The word for each state, beside the mark. `not_executed` is the one that most needs it:
      * a `·` next to a step reads as "not started", and `18` says 실행되지 않았어요 — a Work that
@@ -374,8 +378,10 @@ function stepsCard(snap) {
       if (WORD[st.state]) row.appendChild(el('span', 'xs mut2 stepword', WORD[st.state]));
       list.appendChild(row);
     }
-    card.appendChild(list);
+    fold.appendChild(list);
   }
+  fold.appendChild(el('div', 'xs mut2 foot', C.rules.noFake));
+  card.appendChild(fold);
 
   /* The NEXT slot is ALWAYS rendered, and empty is the correct answer when nothing declared
    * one. Filling it would be the invention D-107 exists to stop. */
@@ -385,8 +391,6 @@ function stepsCard(snap) {
   next.appendChild(el('span', 'xs nlabel', C.next.stepLabel));
   next.appendChild(el('div', 'sm' + (declared ? '' : ' mut'), declared ? declared.title : C.work.nextEmpty));
   card.appendChild(next);
-
-  card.appendChild(el('div', 'xs mut2 foot', C.rules.noFake));
   return card;
 }
 
@@ -400,13 +404,16 @@ function aboutCard(snap, api) {
   const card = el('div', 'card c-m');
   card.setAttribute('data-card', 'about');
   card.appendChild(head(C.gap.workAbout));
-  card.appendChild(field(C.gap.workActor, C.actor.claude));
-  card.appendChild(field(C.gap.workBasis, snap.evidence?.before ? C.gap.workBasisOk : C.brief.chips.no));
+  const more = el('details', 'about-more');
+  more.appendChild(el('summary', 'xs mut', C.gap.task.contextDetail));
+  more.appendChild(field(C.gap.workActor, C.actor.claude));
+  more.appendChild(field(C.gap.workBasis, snap.evidence?.before ? C.gap.workBasisOk : C.brief.chips.no));
   if (snap.contextBundle?.bundle) {
-    card.appendChild(contextBlock(snap.contextBundle.bundle));
-    card.appendChild(contextDisclosure(snap.contextBundle));
+    more.appendChild(contextBlock(snap.contextBundle.bundle));
+    more.appendChild(contextDisclosure(snap.contextBundle));
   }
-  card.appendChild(el('div', 'xs mut2', C.gap.workStepsNote));
+  more.appendChild(el('div', 'xs mut2', C.gap.workStepsNote));
+  card.appendChild(more);
   card.appendChild(rawOutput(snap, api));
   return card;
 }
@@ -523,8 +530,13 @@ function claimRow(c) {
   const body = el('div', 'body');
   body.appendChild(el('div', 'sm', claimText(c)));
   if (c.data?.redacted) body.appendChild(el('div', 'xs mut2', C.gap.task.redactedContent));
-  /* A 확인됨 chip is a promise, so what it rests on is named right there. */
-  if (c.confidence === 'confirmed' && c.sourceRef) body.appendChild(el('div', 'xs mut2 src', c.sourceRef));
+  /* A 확인됨 chip still names its source. The source is one disclosure deeper than the sentence. */
+  if (c.confidence === 'confirmed' && c.sourceRef) {
+    const src = el('details', 'claim-source');
+    src.appendChild(el('summary', 'xs mut', C.gap.board.sourceFold));
+    src.appendChild(el('div', 'xs mut2 src', c.sourceRef));
+    body.appendChild(src);
+  }
   row.appendChild(body);
   return row;
 }
