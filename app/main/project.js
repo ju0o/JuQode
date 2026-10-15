@@ -8,7 +8,6 @@
  * This module returns machine reasons only. The renderer chooses the approved Korean words —
  * main never ships a user-facing sentence, so `18` stays the single copy source.
  */
-const { dialog } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { openProject, recentProjects, currentInterpretation } = require('./db/repo');
@@ -97,6 +96,9 @@ function openPath(db, target) {
 
 /** Native folder pick → project. Cancelling is not a failure and shows no card. */
 async function pick(db, win, remember = () => {}) {
+  /* Loaded here, not at the top: the rest of this module is plain Node and is exercised by unit tests
+   * that must not need the Electron binary (a fresh `npm ci` does not download it). */
+  const { dialog } = require('electron');
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
   if (r.canceled || r.filePaths.length === 0) return { ok: false, reason: 'cancelled' };
   const chosen = r.filePaths[0];
