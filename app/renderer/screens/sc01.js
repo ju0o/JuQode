@@ -5,6 +5,7 @@
 import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { mountThemeToggle } from '../design/theme.js';
+import { recentPresenceLine, recentShowsLastWork } from '../recent-presence.mjs';
 
 /* Machine reason → approved words. Main never sends a sentence; this is the only place
  * a reason becomes Korean, so `18` stays the single copy source. */
@@ -180,6 +181,16 @@ function storeCard(reason) {
 
 /* The schema's outcome codes → `18`'s own title keys. Same table as SC-02's History and
  * SC-03's result; `cancelled_nochange` is NEUTRAL — the user stopped it, which is not 지금 안 됨. */
+/* Machine presence → the muted line. Not the failure card: that card is the one red, and it
+ * appears when the row is opened. These four keys are named here so a dead copy key cannot
+ * hide behind the object that `recentPresenceLine` indexes. */
+const PRESENCE_LINE = {
+  missing: C.gap.recentMissing,
+  unreadable: C.gap.recentUnreadable,
+  'not-a-folder': C.gap.recentNotFolder,
+  unknown: C.gap.recentUnknown,
+};
+
 const LAST_OUTCOME = {
   complete:           { cls: 'ok',   key: 'complete' },
   partial:            { cls: 'part', key: 'partial' },
@@ -196,10 +207,15 @@ function recentRow(p, onOpen) {
   row.addEventListener('click', onOpen);
   row.appendChild(el('span', 'nm', p.name));
   row.appendChild(el('span', 'xs mut path', p.path));
-  /* `15` SC-01 · UF-RETURN: the row says what was last DONE here, so a returning user
-   * recognises the project by its work rather than by its folder name. Drawn only when there
-   * IS a last Work — an empty summary would be a row saying nothing at greater length. */
-  if (p.lastWork) {
+  /* A folder that is not there must not wear the last Work's finished chip. The chip would
+   * say the project is ready to continue. The row stays clickable: opening it is what shows
+   * the failure card and its two recovery actions. */
+  const absent = recentPresenceLine(p.presence, PRESENCE_LINE);
+  if (absent) {
+    const note = el('div', 'xs mut recentabsent', absent);
+    note.setAttribute('data-el', 'recent-absent');
+    row.appendChild(note);
+  } else if (recentShowsLastWork(p.presence) && p.lastWork) {
     const last = el('div', 'xs mut recentlast');
     last.appendChild(el('span', 'lbl', C.sc01.lastWork));
     last.appendChild(el('span', 'val', p.lastWork.intent));

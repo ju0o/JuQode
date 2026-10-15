@@ -346,6 +346,9 @@ export const C = {
    *                        `15` cell (`읽기 권한이 없습니다` → `읽기 권한이 없어요`), so `15`'s
    *                        un-rewritten wording is not a safe fallback. Written in the `18` voice.
    *   gap.failNotFolder  — neither `15` nor `18` states it. Written in the `18` §0 voice.
+   *   gap.recentMissing / recentUnreadable / recentNotFolder / recentUnknown — the recent
+   *                        row when the folder is no longer openable. `18` has the failure
+   *                        card, not this quieter line. The card stays the one red.
    *   gap.storeTitle/Body— DB refusal is a runtime state no planning document reaches.
    *   gap.claudeMissing  — `15` SC-02 names 설치되지 않음 · 응답 없음 as reasons; `18`
    *                        supplies only the 로그인 필요 sentence.
@@ -897,6 +900,10 @@ export const C = {
     failMissing:   '폴더가 없어요',
     failNotFolder: '폴더가 아니에요',
     failUnknown:   '이 폴더를 읽지 못했어요',
+    recentMissing:    '이 폴더는 지금 없어요',
+    recentUnreadable: '이 폴더를 읽을 수 없어요',
+    recentNotFolder:  '지금은 폴더가 아니에요',
+    recentUnknown:    '이 폴더를 확인하지 못했어요',
     claudeMissing:   'Claude Code가 설치되어 있지 않아요',
     claudeNoResp:    'Claude Code가 응답하지 않아요',
     storeTitle:    '저장소를 열지 못했어요',

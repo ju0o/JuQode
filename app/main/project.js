@@ -107,12 +107,25 @@ async function pick(db, win, remember = () => {}) {
 }
 
 /* `15` SC-01 · UF-RETURN. The store hands back the join's columns; the screen gets an object or
- * `null`, so a project with no Work cannot render a summary made of undefineds. */
-const recent = (db) => recentProjects(db).map((p) => ({
-  ...p,
-  lastWork: p.last_work_intent == null ? null : {
-    intent: p.last_work_intent, status: p.last_work_status, outcome: p.last_work_outcome,
-  },
-}));
+ * `null`, so a project with no Work cannot render a summary made of undefineds.
+ *
+ * `presence` is a fresh `inspect` of that stored path. It reads the folder root only. It does
+ * not call `openProject`, so a glance does not move `last_opened_at` and does not insert a row.
+ * A folder that is gone stays in the list: the row is how the user retries it. The chip that
+ * would say the last Work finished is the renderer's decision, and it needs this fact to
+ * refuse that claim. `detail` stays off this list; the failure card gets it from `openPath`. */
+const recent = (db) => recentProjects(db).map((p) => {
+  const seen = inspect(p.path);
+  const presence = seen.ok
+    ? { ok: true, empty: seen.empty === true }
+    : { ok: false, reason: seen.reason };
+  return {
+    ...p,
+    lastWork: p.last_work_intent == null ? null : {
+      intent: p.last_work_intent, status: p.last_work_status, outcome: p.last_work_outcome,
+    },
+    presence,
+  };
+});
 
 module.exports = { inspect, openPath, pick, recent };

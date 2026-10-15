@@ -294,6 +294,71 @@ test('an unreadable folder is a failure with a reason, and is not opened anyway'
   }
 });
 
+test('a recent folder that is still there keeps its last Work and does not move the row', () => {
+  const db = openDb(':memory:');
+  const dir = fs.realpathSync(tmp());
+  fs.writeFileSync(path.join(dir, 'readme.txt'), 'hi');
+  const opened = project.openPath(db, dir);
+  assert.ok(opened.ok);
+  const at = '2026-10-15T00:00:00.000Z';
+  db.prepare(`insert into work (id, project_id, intent, status, outcome, requested_at, started_at, ended_at)
+              values (?,?,?,?,?,?,?,?)`)
+    .run('w-here', opened.project.id, '끝낸 일', 'ended', 'complete', at, at, at);
+  const before = db.prepare('select last_opened_at from project where id = ?').get(opened.project.id).last_opened_at;
+  const rows = project.recent(db);
+  assert.strictEqual(rows.length, 1);
+  assert.deepStrictEqual(rows[0].presence, { ok: true, empty: false });
+  assert.strictEqual(rows[0].lastWork.outcome, 'complete');
+  assert.strictEqual(db.prepare('select last_opened_at from project where id = ?').get(opened.project.id).last_opened_at, before,
+    'listing recent projects must not reopen them');
+  assert.strictEqual(db.prepare('select count(*) n from project').get().n, 1);
+  db.close();
+});
+
+test('a recent folder that is gone stays listed and is not reported as present', () => {
+  const db = openDb(':memory:');
+  const dir = fs.realpathSync(tmp());
+  const opened = project.openPath(db, dir);
+  assert.ok(opened.ok);
+  const at = '2026-10-15T00:00:00.000Z';
+  db.prepare(`insert into work (id, project_id, intent, status, outcome, requested_at, started_at, ended_at)
+              values (?,?,?,?,?,?,?,?)`)
+    .run('w-gone', opened.project.id, '끝낸 일', 'ended', 'complete', at, at, at);
+  fs.rmSync(dir, { recursive: true, force: true });
+  const rows = project.recent(db);
+  assert.strictEqual(rows.length, 1, 'the history row is how the user retries the folder');
+  assert.strictEqual(rows[0].path, opened.project.path);
+  assert.deepStrictEqual(rows[0].presence, { ok: false, reason: 'missing' });
+  assert.strictEqual(rows[0].lastWork.outcome, 'complete', 'the stored Work stays; the screen decides the chip');
+  assert.ok(!('detail' in rows[0].presence), 'the list must not carry the technical detail');
+  assert.strictEqual(db.prepare('select count(*) n from project').get().n, 1);
+  db.close();
+});
+
+test('a recent path that is no longer a folder, or cannot be read, says which', { skip: asRoot && 'root bypasses mode bits' }, () => {
+  const db = openDb(':memory:');
+  const root = fs.realpathSync(tmp());
+  const locked = path.join(root, 'locked');
+  const wasDir = path.join(root, 'was-dir');
+  fs.mkdirSync(locked);
+  fs.mkdirSync(wasDir);
+  const a = project.openPath(db, locked);
+  const b = project.openPath(db, wasDir);
+  assert.ok(a.ok && b.ok);
+  fs.chmodSync(locked, 0o000);
+  fs.rmSync(wasDir, { recursive: true, force: true });
+  fs.writeFileSync(wasDir, 'now a file');
+  try {
+    const rows = Object.fromEntries(project.recent(db).map((p) => [p.path, p.presence]));
+    assert.deepStrictEqual(rows[a.project.path], { ok: false, reason: 'unreadable' });
+    assert.deepStrictEqual(rows[b.project.path], { ok: false, reason: 'not-a-folder' });
+    assert.strictEqual(db.prepare('select count(*) n from project').get().n, 2);
+  } finally {
+    fs.chmodSync(locked, 0o700);
+    db.close();
+  }
+});
+
 test('a failure carries technical detail for the disclosure, and only that', () => {
   const dir = fs.realpathSync(tmp());
   const r = project.inspect(path.join(dir, 'nope'));

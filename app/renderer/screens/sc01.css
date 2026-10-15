@@ -83,6 +83,8 @@
 .sc01 .recentlast { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .sc01 .recentlast .lbl { color: var(--mut2); flex: 0 0 auto; }
 .sc01 .recentlast .val { min-width: 0; overflow-wrap: anywhere; }
+/* The folder is not openable. Muted, not the failure red: the card after the click is that red. */
+.sc01 .recentabsent { margin-top: 4px; color: var(--mut); }
 
 /* WBS-33 · 서명되지 않은 빌드 (CF-21).
  *

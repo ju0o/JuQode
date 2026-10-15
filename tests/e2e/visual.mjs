@@ -2110,8 +2110,41 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   step('folder that is gone');
   fs.rmSync(SEED2, { recursive: true, force: true });
   fs.rmSync(SEED3, { recursive: true, force: true });
+  /* The list on screen was painted while the folder existed. Re-enter so boot inspects it
+   * again. A finished chip on that row would say the project is ready. */
   await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
-    .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED2))}))?.click()`);
+    .find(r => r.innerText.includes(${JSON.stringify(path.basename(SEED))}))?.click()`);
+  await sleep(900);
+  await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트'))?.click()`);
+  await sleep(700);
+  out.recentAbsent = await evalJs(`(() => {
+    const row = [...document.querySelectorAll('[data-el="recent-row"]')]
+      .find(r => r.querySelector('.nm')?.textContent === ${JSON.stringify(path.basename(SEED2))});
+    if (!row) return null;
+    const note = row.querySelector('[data-el="recent-absent"]');
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--fail)';
+    document.body.appendChild(probe);
+    const failColor = getComputedStyle(probe).color;
+    probe.remove();
+    return JSON.stringify({
+      absent: note?.textContent ?? null,
+      last: row.querySelector('.recentlast')?.innerText ?? null,
+      chip: row.querySelector('.chip')?.textContent ?? null,
+      failColor,
+      color: note ? getComputedStyle(note).color : null,
+    });
+  })()`);
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc01-absent-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await sleep(150);
+  await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
+    .find(r => r.querySelector('.nm')?.textContent === ${JSON.stringify(path.basename(SEED2))})?.click()`);
   await sleep(600);
   out.failCard = await evalJs(`document.querySelector('[data-el="fail"]')?.innerText ?? null`);
   out.failActions = await evalJs(`document.querySelectorAll('[data-el="fail"] .row-acts button').length`);
@@ -3963,6 +3996,15 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
   /* `17` P-06 · `16` §9: cancelled and failure share the motion; only failure is red. */
   assert.strictEqual(results.failPresence, 'failure',
     `the presence shows ${results.failPresence} for a failed Work`);
+}
+
+{
+  const gone = JSON.parse(results.recentAbsent);
+  assert.ok(gone, 'the deleted project left the recent list — the row is the way back');
+  assert.strictEqual(gone.absent, '이 폴더는 지금 없어요');
+  assert.strictEqual(gone.last, null, 'a missing folder still shows its last Work');
+  assert.strictEqual(gone.chip, null, 'a missing folder still shows an outcome chip');
+  assert.notStrictEqual(gone.color, gone.failColor, 'the missing-folder line uses the failure red');
 }
 
 assert.ok(results.recentLast, 'a recent row carries no last-Work summary (`15` UF-RETURN)');
