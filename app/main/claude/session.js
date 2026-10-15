@@ -54,15 +54,68 @@ function sameDir(a, b) {
   return ca !== null && ca === cb;
 }
 
+/* THE BINARY. `claude` on PATH is a name, not an identity: resolving it again at resume time can
+ * land on a different file (a shadowing directory earlier on PATH, a replaced install). So the
+ * resolved absolute path and the file's identity are recorded when the Work starts, the child is
+ * always spawned from that absolute path, and resume runs only while the identity still matches.
+ * POSIX: realpath + dev/ino/size/mtime/ctime (hashing a ~200 MB binary on every resume is not
+ * worth it; a replaced file changes ino or ctime). Windows: the `.cmd` launcher and, when the npm
+ * shim's package can be found next to it, the real target are identified SEPARATELY; a launcher
+ * whose target cannot be found is bound on the launcher alone and says so (`targetResolved:false`).
+ * NOT VALIDATED on Windows (DV-12). */
+function fileIdentity(file) {
+  try {
+    const realPath = fs.realpathSync.native(file);
+    const st = fs.statSync(realPath);
+    if (!st.isFile()) return null;
+    if (process.platform !== 'win32') fs.accessSync(realPath, fs.constants.X_OK);
+    return { realPath, dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs };
+  } catch { return null; }
+}
+
+function findOnPath(name) {
+  const win = process.platform === 'win32';
+  const exts = win ? ['.EXE', ...(process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean), ''] : [''];
+  for (const dir of (process.env.PATH || '').split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      const cand = path.join(dir, `${name}${ext}`);
+      if (fileIdentity(cand)) return cand;
+    }
+  }
+  return null;
+}
+
+function binaryIdentity(bin) {
+  if (typeof bin !== 'string' || !bin) return null;
+  const launchPath = /[\\/]/.test(bin) ? path.resolve(bin) : findOnPath(bin);
+  const launcher = launchPath && fileIdentity(launchPath);
+  if (!launcher) return null;
+  const id = { launchPath, ...launcher, launcher: null, target: null, targetResolved: true };
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(launchPath)) {
+    const base = path.dirname(launchPath);
+    const pkg = path.join(base, 'node_modules', '@anthropic-ai', 'claude-code');
+    const target = ['bin/claude.exe', 'claude.exe', 'cli.js'].map((f) => fileIdentity(path.join(pkg, f))).find(Boolean);
+    id.launcher = launcher; id.target = target ?? null; id.targetResolved = Boolean(target);
+  }
+  return id;
+}
+
+const sameIdentity = (a, b) => Boolean(a && b) && JSON.stringify(a) === JSON.stringify(b);
+
 /* PRE-RESUME BINDING (fail closed). The init-cwd check below runs after the child has started,
  * so it is detection, not an atomic filesystem barrier. What can be enforced BEFORE spawning is
  * that the session is resumed only into the exact folder, session and binary it was started
  * with. Claude Code offers no provider-side sandbox for headless `--allowedTools`, so when this
- * binding cannot be verified the resume is refused rather than run unbounded. */
-function bindSession({ cwd, sessionId, bin }) {
+ * binding cannot be verified the resume is refused rather than run unbounded.
+ *
+ * `reportedSessionId` is what the CLI's own init event said. A requested id the CLI never
+ * confirmed (no init, a different id, a tampered one) is UNKNOWN and gets no binding. */
+function bindSession({ cwd, sessionId, reportedSessionId, bin }) {
   const canonicalCwd = canonicalDir(cwd);
-  if (!canonicalCwd || !sessionId) return null;
-  return Object.freeze({ sessionId, canonicalCwd, bin: bin ?? null });
+  const identity = binaryIdentity(bin);
+  if (!canonicalCwd || !identity || !sessionId) return null;
+  if (typeof reportedSessionId !== 'string' || reportedSessionId !== sessionId) return null;
+  return Object.freeze({ sessionId, canonicalCwd, identity });
 }
 
 function verifyResume(binding, { cwd, sessionId, bin, projectPath }) {
@@ -70,11 +123,10 @@ function verifyResume(binding, { cwd, sessionId, bin, projectPath }) {
   if (binding.sessionId !== sessionId) return { ok: false, reason: 'session-changed' };
   if (canonicalDir(cwd) !== binding.canonicalCwd) return { ok: false, reason: 'cwd-changed' };
   if (canonicalDir(projectPath) !== binding.canonicalCwd) return { ok: false, reason: 'project-moved' };
-  if ((bin ?? null) !== binding.bin) return { ok: false, reason: 'binary-changed' };
-  if (bin && /[\\/]/.test(bin)) {
-    try { if (!fs.statSync(bin).isFile()) throw new Error('not a file'); }
-    catch { return { ok: false, reason: 'binary-missing' }; }
-  }
+  if (bin !== binding.identity.launchPath) return { ok: false, reason: 'binary-changed' };
+  const now = binaryIdentity(bin);
+  if (!now) return { ok: false, reason: 'binary-missing' };
+  if (!sameIdentity(now, binding.identity)) return { ok: false, reason: 'binary-changed' };
   return { ok: true };
 }
 
@@ -182,7 +234,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
     }
 
     let seq = 0, unparsed = 0, sawEvent = false, stderr = '', buf = '';
-    let killer = null, settled = false, cwdMismatch = null;
+    let killer = null, settled = false, mismatch = null;
 
     /* A multi-byte character split across chunk boundaries becomes U+FFFD if each Buffer is
      * stringified on its own — measured on 7-byte chunks, Korean text came back as replacement
@@ -192,7 +244,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
     child.stderr.setEncoding('utf8');
 
     const line = (text) => {
-      if (!text.trim() || cwdMismatch) return;     // after a mismatch nothing more is recorded or acted on
+      if (!text.trim() || mismatch) return;     // after a mismatch nothing more is recorded or acted on
       let raw = null;
       try { raw = JSON.parse(text); } catch { unparsed += 1; }
       sawEvent = true;
@@ -205,9 +257,10 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
       onSignal?.({ ...sig, seq: seq++ }, raw, text);
       /* DETECTION, not prevention: the child is already running and may have written before
        * this line. The init line is recorded as emitted, then the child is stopped. */
-      if (resume && raw?.type === 'system' && raw.subtype === 'init' && !sameDir(raw.cwd, cwd)) {
-        cwdMismatch = { expected: cwd, actual: raw.cwd ?? null };
-        stop(child);
+      if (resume && raw?.type === 'system' && raw.subtype === 'init') {
+        if (!sameDir(raw.cwd, cwd)) mismatch = { kind: 'cwd', expected: cwd, actual: raw.cwd ?? null };
+        else if (raw.session_id !== sessionId) mismatch = { kind: 'session', expected: sessionId, actual: raw.session_id ?? null };
+        if (mismatch) stop(child);
       }
     };
 
@@ -239,7 +292,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
         /* `19` §C3-L / `15` SC-02: a session that produced NO event before dying did not
          * start. It gets a card and no `work` row. Note the exit code is not consulted for
          * anything else — a denied run exits 0. */
-        startFailed: !sawEvent, cwdMismatch,
+        startFailed: !sawEvent, mismatch,
       });
     };
 
@@ -324,5 +377,5 @@ const grantedSignal = (denial, spec) => ({
   payload: { tool: denial?.tool ?? null, toolUseId: denial?.toolUseId ?? null, scope: spec },
 });
 
-module.exports = { run, stop, sameDir, canonicalDir, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
+module.exports = { run, stop, sameDir, canonicalDir, binaryIdentity, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
   windowsRunnerTreeMayBeAlive, processTreeMayBeAlive };

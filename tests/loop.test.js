@@ -67,7 +67,7 @@ function cliHome(dir) {
   return home;
 }
 
-function cli(dir, events, { edits = [], exit = 0, silent = false, capturePrompt = false, name = 'fake-claude', initCwd = null } = {}) {
+function cli(dir, events, { edits = [], exit = 0, silent = false, capturePrompt = false, name = 'fake-claude', initCwd = null, initSessionId = undefined } = {}) {
   const home = cliHome(dir);
   const bin = path.join(home, name);
   const script = path.join(home, `${name}.js`);
@@ -81,7 +81,13 @@ ${capturePrompt ? `fs.writeFileSync(${JSON.stringify(path.join(home, 'PROMPT.log
 ${edits.map((e) => `fs.writeFileSync(${JSON.stringify(e.path)}, ${JSON.stringify(e.body)});`).join('\n')}
 ${silent ? '' : `for (const e of ${JSON.stringify(events)}) {
   /* a real CLI's init event reports the cwd it actually runs in (measured on --resume, 2.1.283) */
-  if (e.type === 'system' && e.subtype === 'init') e.cwd = ${initCwd === null ? 'process.cwd()' : JSON.stringify(initCwd)};
+  if (e.type === 'system' && e.subtype === 'init') {
+    e.cwd = ${initCwd === null ? 'process.cwd()' : JSON.stringify(initCwd)};
+    /* a real CLI reports the session id it was given (--session-id) or resumed (--resume); the
+     * fixture used to print a constant, which made the id check unfalsifiable */
+    const a = process.argv, i = Math.max(a.indexOf('--session-id'), a.indexOf('--resume'));
+    ${initSessionId === undefined ? 'e.session_id = a[i + 1];' : initSessionId === null ? 'delete e.session_id;' : `e.session_id = ${JSON.stringify(initSessionId)};`}
+  }
   process.stdout.write(JSON.stringify(e) + '\\n');
 }`}
 process.exit(${exit});
@@ -597,7 +603,7 @@ test('two concurrent allows do not start two sessions on one session id', async 
   await r.done;
   const retryBin = path.join(dir, 'slow-retry');
   fs.writeFileSync(retryBin, `#!/bin/sh
-echo '{"type":"system","subtype":"init","session_id":"s","cwd":"'"$PWD"'"}'
+echo '{"type":"system","subtype":"init","session_id":"'"$2"'","cwd":"'"$PWD"'"}'
 sleep 1
 echo '{"type":"result","subtype":"success","is_error":false,"permission_denials":[]}'
 `, { mode: 0o755 });
@@ -1376,7 +1382,7 @@ test('specTarget reads a grant string, or refuses to read one at all', () => {
 function useBin(workId, bin) {
   const e = supervisor.live.get(workId);
   e.bin = bin;
-  e.binding = session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, bin });
+  e.binding = session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, reportedSessionId: e.sessionId, bin });
 }
 
 const sha = (f) => require('node:crypto').createHash('sha256').update(fs.readFileSync(f)).digest('hex');
@@ -1467,4 +1473,111 @@ test('canonical comparison fails closed', () => {
   const file = path.join(dir, 'f'); fs.writeFileSync(file, '');
   assert.strictEqual(session.canonicalDir(file), null, 'a file is not a project folder');
   assert.strictEqual(session.bindSession({ cwd: gone, sessionId: 's' }), null);
+});
+
+/* ───────────── session id: the CLI must CONFIRM the id JuQode asked for ───────────── */
+
+test('a session id the CLI did not confirm gets no binding, and resume is refused before any spawn', async () => {
+  const cases = [
+    ['wrong id in init', (dir) => cli(dir, [INIT, DENIED, RESULT_DENIED], { initSessionId: 'not-the-requested-id' })],
+    ['init without a session_id', (dir) => cli(dir, [INIT, DENIED, RESULT_DENIED], { initSessionId: null })],
+    ['no init event at all', (dir) => cli(dir, [DENIED, RESULT_DENIED])],
+  ];
+  for (const [name, make] of cases) {
+    const b = bench();
+    const r = await supervisor.start(b.db, b.project, 'a.txt 바꿔줘', { evidenceStore: b.store, bin: make(b.dir), detect: AVAILABLE });
+    await r.done;
+    assert.strictEqual(supervisor.live.get(r.workId).binding, null, `${name}: a binding was made for an unconfirmed session`);
+    const file = path.join(b.dir, 'a.txt');
+    const before = sha(file), calls = argvLog(b.dir).length;
+    for (const res of [await supervisor.allow(b.db, r.workId, 'tu_1'), await supervisor.answer(b.db, r.workId, 'x')]) {
+      assert.deepStrictEqual([res.ok, res.reason], [false, 'resume-binding-unverified'], name);
+    }
+    assert.strictEqual(argvLog(b.dir).length, calls, `${name}: a CLI was started anyway`);
+    assert.strictEqual(sha(file), before, name);
+  }
+});
+
+test('a resumed init that reports another session id ends the Work as ended_unknown', async () => {
+  const { dir, db, r } = await deniedWork();
+  const file = path.join(dir, 'a.txt');
+  const before = sha(file);
+  useBin(r.workId, cli(dir, [INIT, OK], { initSessionId: 'tampered', edits: [{ path: file, body: 'early\n' }] }));
+  const res = await supervisor.allow(db, r.workId, 'tu_1');
+  assert.deepStrictEqual([res.ok, res.reason], [false, 'session-mismatch']);
+  assert.notStrictEqual(sha(file), before, 'fixture precondition: the pre-init write happened and is reported, not hidden');
+  const snap = supervisor.snapshot(db, r.workId);
+  assert.deepStrictEqual([snap.status, snap.outcome], ['ended', 'ended_unknown']);
+  assert.strictEqual(repo.getWork(db, r.workId).failure_reason, 'session-mismatch');
+  assert.ok(repo.signalsFor(db, r.workId).some((x) => /juqodeSessionMismatch/.test(String(x.payload))));
+});
+
+/* ───────────── the binary: resolved once, spawned by absolute path, identity re-checked ───────────── */
+
+test('the Claude binary is pinned at start; PATH shadowing, replacement and removal never reach a spawn', async () => {
+  const savedPath = process.env.PATH, savedBin = process.env.JUQODE_CLAUDE_BIN;
+  delete process.env.JUQODE_CLAUDE_BIN;
+  try {
+    const b = bench();
+    const real = cli(b.dir, [INIT, DENIED, RESULT_DENIED], { name: 'claude' });      // `${dir}-cli/claude`
+    process.env.PATH = `${path.dirname(real)}${path.delimiter}${savedPath}`;
+    /* the ordinary product path: no `bin` given, so the name `claude` is resolved through PATH */
+    const r = await supervisor.start(b.db, b.project, 'a.txt 바꿔줘', { evidenceStore: b.store, detect: AVAILABLE });
+    await r.done;
+    const e = supervisor.live.get(r.workId);
+    assert.strictEqual(e.bin, fs.realpathSync(real).replace(/[^/]*$/, 'claude'), 'the entry kept a name instead of the resolved path');
+    assert.ok(path.isAbsolute(e.bin));
+    assert.ok(e.binding?.identity?.realPath, 'no binary identity was recorded');
+
+    /* 1. PATH shadowing: a different `claude` first on PATH must not be run */
+    const shadowDir = tempDir('juqode-shadow-');
+    const marker = path.join(shadowDir, 'SHADOW-RAN');
+    const shadow = cli(shadowDir, [INIT, OK], { name: 'claude', edits: [{ path: marker, body: 'x' }] });
+    process.env.PATH = `${path.dirname(shadow)}${path.delimiter}${process.env.PATH}`;
+    const calls = argvLog(b.dir).length;
+    const ok = await supervisor.allow(b.db, r.workId, 'tu_1');
+    assert.strictEqual(ok.ok, true, `the pinned binary was refused: ${ok.reason}`);
+    assert.strictEqual(argvLog(b.dir).length, calls + 1, 'the pinned binary did not run');
+    assert.ok(!fs.existsSync(marker), 'a shadowing `claude` ran');
+  } finally {
+    process.env.PATH = savedPath;
+    if (savedBin !== undefined) process.env.JUQODE_CLAUDE_BIN = savedBin;
+  }
+});
+
+test('a replaced, removed or non-executable pinned binary refuses resume without spawning', async () => {
+  for (const [name, tamper] of [
+    ['replaced (new inode)', (bin) => { fs.writeFileSync(`${bin}.new`, fs.readFileSync(bin), { mode: 0o755 }); fs.renameSync(`${bin}.new`, bin); }],
+    ['content rewritten in place', (bin) => { fs.appendFileSync(bin, '\n# changed\n'); }],
+    ['removed', (bin) => { fs.rmSync(bin); }],
+    ['made non-executable', (bin) => { fs.chmodSync(bin, 0o644); }],
+  ]) {
+    const { dir, db, r } = await deniedWork();
+    const e = supervisor.live.get(r.workId);
+    const tripwire = path.join(dir, 'TRIPWIRE');
+    useBin(r.workId, cli(dir, [INIT, OK], { name: 'pinned', edits: [{ path: tripwire, body: 'ran' }] }));
+    tamper(e.bin);
+    const calls = argvLog(dir).length;
+    const res = await supervisor.allow(db, r.workId, 'tu_1');
+    assert.strictEqual(res.ok, false, name);
+    assert.strictEqual(res.reason, 'resume-binding-unverified', name);
+    assert.match(res.detail, /^binary-(changed|missing)$/, name);
+    assert.strictEqual(argvLog(dir).length, calls, `${name}: the tampered binary was started`);
+    assert.ok(!fs.existsSync(tripwire), name);
+  }
+});
+
+test('binaryIdentity resolves names through PATH and refuses what is not an executable file', () => {
+  const dir = tempDir('juqode-id-');
+  const exe = path.join(dir, 'claude');
+  fs.writeFileSync(exe, '#!/bin/sh\n', { mode: 0o755 });
+  const saved = process.env.PATH;
+  try {
+    process.env.PATH = `${dir}${path.delimiter}${saved}`;
+    assert.strictEqual(session.binaryIdentity('claude').launchPath, exe);
+    process.env.PATH = '/nonexistent-dir';
+    assert.strictEqual(session.binaryIdentity('claude'), null, 'an unresolvable name must not yield an identity');
+  } finally { process.env.PATH = saved; }
+  assert.strictEqual(session.binaryIdentity(dir), null, 'a directory is not a binary');
+  assert.strictEqual(session.binaryIdentity(''), null);
 });

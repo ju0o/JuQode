@@ -163,6 +163,15 @@ async function startGuarded(db, project, intent, {
   }
 
   const sessionId = crypto.randomUUID();
+  /* Pin the binary: from here on the child is spawned from this absolute path, never from a
+   * name that PATH could resolve differently at resume. Unresolvable → spawn fails honestly and
+   * no binding is ever made. */
+  const pin = session.binaryIdentity(bin || claude.resolveBin());
+  if (pin) bin = pin.launchPath;
+  let reportedSessionId = null;      // what the CLI's own init event said; null until it does
+  const bindEntry = (e) => {
+    e.binding = session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, reportedSessionId, bin: e.bin });
+  };
   let basis;
   try {
     basis = captureBasis(project, evidenceStore, 'before', pre.useGit);
@@ -223,7 +232,7 @@ async function startGuarded(db, project, intent, {
         runEntry = e;
         e.markDone ??= markDone;
         e.child = c;
-        e.binding ??= session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, bin: e.bin });
+        bindEntry(e);
         live.set(workId, e);
         if (!e.cancelRequested) repo.setWorkState(db, workId, { status: 'running' });
         else stopEntryTree(db, workId, e, onUpdate);
@@ -231,6 +240,10 @@ async function startGuarded(db, project, intent, {
         settle({ ok: true, workId, done });
       },
       onSignal: (sig, raw, line) => {
+        if (sig.kind === KIND.SESSION_START) {
+          reportedSessionId = typeof sig.payload?.sessionId === 'string' ? sig.payload.sessionId : null;
+          if (runEntry) bindEntry(runEntry);
+        }
         if (!workId) {
           /* The session spoke, so a Work exists. The guard is re-checked here by the engine
            * itself — `beginWork` inserts, and the partial unique index is the arbiter. */
@@ -251,7 +264,7 @@ async function startGuarded(db, project, intent, {
             bin, child: pendingChild.child, store: evidenceStore, useGit: pre.useGit };
           runEntry.markDone ??= markDone;
           runEntry.child = pendingChild.child;
-          runEntry.binding ??= session.bindSession({ cwd: runEntry.cwd, sessionId: runEntry.sessionId, bin: runEntry.bin });
+          bindEntry(runEntry);
           live.set(workId, runEntry);
           for (const p of pending) {
             writeSignal(db, workId, { source: 'claude', kind: p.sig.kind, payload: p.line });
@@ -740,17 +753,18 @@ function resumeRefusal(db, entry) {
  * stopping is unknown, and a root exit proves nothing about descendants (`stop`). Never `failed`
  * and never a freed slot without acknowledgement: `ended_unknown` (D-124), side effects measured
  * and recorded, not claimed as prevented. */
-function endCwdMismatch(db, workId, entry, r, onUpdate) {
+function endResumeMismatch(db, workId, entry, r, onUpdate) {
+  const kind = r.mismatch?.kind === 'session' ? 'session' : 'cwd';
   writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW,
-    payload: JSON.stringify({ juqodeCwdMismatch: r.cwdMismatch, sideEffectsPrevented: false }) });
+    payload: JSON.stringify({ [kind === 'cwd' ? 'juqodeCwdMismatch' : 'juqodeSessionMismatch']: r.mismatch, sideEffectsPrevented: false }) });
   repo.setWorkState(db, workId, { status: 'ended', outcome: 'ended_unknown' });
-  repo.setRunFailureReason(db, workId, 'cwd-mismatch');
+  repo.setRunFailureReason(db, workId, `${kind}-mismatch`);
   const project = entry.cwd ? { path: entry.cwd } : db.prepare('select path from project where id = ?').get(entry.projectId);
   captureAfter(db, workId, project, entry.useGit ?? false, entry.store ?? null, { replace: true });
   finishResult(db, workId, project, entry.store ?? null);
   release(db, workId);
   onUpdate(snapshot(db, workId));
-  return { ok: false, reason: 'cwd-mismatch' };
+  return { ok: false, reason: `${kind}-mismatch` };
 }
 
 /**
@@ -808,7 +822,7 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
     },
   });
 
-  if (retryRun.cwdMismatch) return endCwdMismatch(db, workId, entry, retryRun, opts.onUpdate ?? (() => {}));
+  if (retryRun.mismatch) return endResumeMismatch(db, workId, entry, retryRun, opts.onUpdate ?? (() => {}));
 
   /* The retry is when the change actually lands, so the after-basis is taken again. An earlier
    * one recorded a project that had not been edited yet. */
@@ -849,7 +863,7 @@ async function answer(db, workId, text, opts = {}) {
       apply(db, workId, sig, opts.onUpdate ?? (() => {}));
     },
   });
-  if (answerRun.cwdMismatch) return endCwdMismatch(db, workId, entry, answerRun, opts.onUpdate ?? (() => {}));
+  if (answerRun.mismatch) return endResumeMismatch(db, workId, entry, answerRun, opts.onUpdate ?? (() => {}));
   return { ok: true };
 }
 

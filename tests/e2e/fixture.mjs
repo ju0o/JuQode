@@ -104,6 +104,8 @@ try {
   fs.appendFileSync(ARGV_LOG, process.argv.slice(2).join(' ') + '\\n');
 } catch { /* the log is evidence for the test, never a reason for the fixture to die */ }
 const resumed = process.argv.includes('--resume');
+/* a real CLI reports the session id it was given (--session-id) or resumed (--resume) */
+const sid = process.argv[Math.max(process.argv.indexOf('--session-id'), process.argv.indexOf('--resume')) + 1];
 /* The EXPLANATION pass (WBS-26) is distinguishable from a Work turn by the tool restriction it
  * carries: \`--tools ""\` empties the built-in tool set. Answering it with real groups is what
  * gives SC-04's explained state — the JUQODE chip, 무엇/왜/어떤 동작에, the confidence chip and
@@ -226,7 +228,7 @@ if (resumed) {
 }
 const out = resumed ? [
   /* a resumed session reports the folder it runs in; JuQode stops one that is not the project */
-  { type: 'system', subtype: 'init', session_id: 's', cwd: process.cwd(), claude_code_version: '9.9.9' },
+  { type: 'system', subtype: 'init', session_id: sid, cwd: process.cwd(), claude_code_version: '9.9.9' },
   /* TWO tool_use blocks in ONE message, and two tool_results in one reply — a parallel call,
    * which is what the real CLI emits when it edits two files at once. This is the shape that
    * made the 확인됨 tool count report 1 for 2 (batch 18 QA); without it in the recording the
@@ -239,7 +241,7 @@ const out = resumed ? [
     { type: 'tool_result', tool_use_id: 'tu_3', is_error: false }] } },
   { type: 'result', subtype: 'success', is_error: false, result: 'README.md 와 src/index.js 를 고쳤어요', permission_denials: [] },
 ] : [
-  { type: 'system', subtype: 'init', session_id: 's', cwd: '/p', claude_code_version: '9.9.9' },
+  { type: 'system', subtype: 'init', session_id: sid, cwd: process.cwd(), claude_code_version: '9.9.9' },
   { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_a', name: 'Read', input: { file_path: 'README.md' } }] } },
   { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_a', is_error: false }] } },
   { type: 'system', subtype: 'permission_denied', tool_name: 'Edit', tool_use_id: 'tu_1',
@@ -260,12 +262,13 @@ fs.writeFileSync(FAKE_CLI, [
    * SIGTERM — the shape `15` SC-03's 취소 요청했어요 and `07` §8.1's "a cancelled child can
    * still exit 0" are both about. Without it the run could only ever photograph a Work that
    * finished on its own. */
+  `SID=; prev=; for a in "$@"; do case "$prev" in --session-id|--resume) SID=$a;; esac; prev=$a; done`,
   /* A third marker makes the session FAIL — `error_max_turns`, which `19` §C3-L names and
    * which `07` §8.1 is about: the exit code is 0 and `is_error` is false, so the failure can
    * only be read from the terminal reason. It is also the ONLY red on SC-03, and the colour
    * grammar had no rendered evidence for it. */
   `if [ -f ${JSON.stringify(path.join(DB_DIR, 'failing'))} ]; then`,
-  `  echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p","claude_code_version":"9.9.9"}'`,
+  `  echo '{"type":"system","subtype":"init","session_id":"'"$SID"'","cwd":"'"$PWD"'","claude_code_version":"9.9.9"}'`,
   `  echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_f","name":"Read","input":{"file_path":"README.md"}}]}}'`,
   `  echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_f","is_error":false}]}}'`,
   `  echo '{"type":"result","subtype":"error_max_turns","is_error":false,"terminal_reason":"max_turns","result":"더 진행하지 못했어요","permission_denials":[]}'`,
@@ -281,7 +284,7 @@ fs.writeFileSync(FAKE_CLI, [
   'fi',
   `if [ -f ${JSON.stringify(path.join(DB_DIR, 'stubborn'))} ]; then`,
   '  trap "" TERM',
-  `  echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p","claude_code_version":"9.9.9"}'`,
+  `  echo '{"type":"system","subtype":"init","session_id":"'"$SID"'","cwd":"'"$PWD"'","claude_code_version":"9.9.9"}'`,
   '  sleep 60',
   '  exit 0',
   'fi',
