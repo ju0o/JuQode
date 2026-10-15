@@ -1,0 +1,6 @@
+# One byte-identical working tree on every host. A Windows checkout (core.autocrlf=true is the Git for
+# Windows default) otherwise rewrites every text file to CRLF, which breaks the tests that compare
+# shipped files byte-for-byte with Canon (schema.sql) or read source with \n-anchored patterns.
+* text=auto eol=lf
+*.png binary
+*.patch -text
