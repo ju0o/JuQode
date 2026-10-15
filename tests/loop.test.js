@@ -81,7 +81,7 @@ ${capturePrompt ? `fs.writeFileSync(${JSON.stringify(path.join(home, 'PROMPT.log
 ${edits.map((e) => `fs.writeFileSync(${JSON.stringify(e.path)}, ${JSON.stringify(e.body)});`).join('\n')}
 ${silent ? '' : `for (const e of ${JSON.stringify(events)}) {
   /* a real CLI's init event reports the cwd it actually runs in (measured on --resume, 2.1.283) */
-  if (e.type === 'system' && e.subtype === 'init') {
+  if (e.type === 'system' && e.subtype === 'init' && !e._literal) {
     e.cwd = ${initCwd === null ? 'process.cwd()' : JSON.stringify(initCwd)};
     /* a real CLI reports the session id it was given (--session-id) or resumed (--resume); the
      * fixture used to print a constant, which made the id check unfalsifiable */
@@ -311,7 +311,7 @@ test('a Task Run and its Context exist before the Claude session can spawn', asy
   };
   try {
     const r = await supervisor.start(db, project, 'Do it', {
-      evidenceStore: store, bin: 'not-spawned', detect: AVAILABLE, taskId: task.id,
+      evidenceStore: store, bin: cli(dir, [INIT, OK]) /* a real file: its identity is pinned, but session.run is stubbed */, detect: AVAILABLE, taskId: task.id,
       idempotencyKey: requestKey,
     });
     assert.strictEqual(r.ok, true);
@@ -1138,7 +1138,7 @@ test('a non-Git project is comparable too — the ✓ 확인됨 on the header ha
 
 test('WBS-13 · answering continues the SAME Work, in the same session', async () => {
   const { dir, db, project, store } = bench();
-  const bin = cli(dir, [INIT, { type: 'system', subtype: 'init', session_id: 's', cwd: '/p' }]);
+  const bin = cli(dir, [INIT]);
   const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
   await r.done;
 
@@ -1580,4 +1580,90 @@ test('binaryIdentity resolves names through PATH and refuses what is not an exec
   } finally { process.env.PATH = saved; }
   assert.strictEqual(session.binaryIdentity(dir), null, 'a directory is not a binary');
   assert.strictEqual(session.binaryIdentity(''), null);
+});
+
+/* ───────────── the FIRST init is judged once ───────────── */
+
+const initLit = (fields) => ({ type: 'system', subtype: 'init', cwd: '/', _literal: true, ...fields });
+
+test('the first init decides the session binding once; later inits can only revoke it', async () => {
+  const cases = [
+    ['wrong first id, then a correct init', (d) => [initLit({ session_id: 'bad-first' }), INIT]],
+    ['correct init, then a different id', (d) => [INIT, initLit({ session_id: 'another' })]],
+    ['missing id, then a correct init', (d) => [initLit({}), INIT]],
+    ['duplicate init with the same id', (d) => [INIT, INIT]],
+  ];
+  for (const [name, mk] of cases) {
+    const b = bench();
+    const bin = cli(b.dir, [...mk(), DENIED, RESULT_DENIED]);
+    const r = await supervisor.start(b.db, b.project, 'a.txt 바꿔줘', { evidenceStore: b.store, bin, detect: AVAILABLE });
+    await r.done;
+    assert.strictEqual(supervisor.live.get(r.workId).binding, null, `${name}: a binding exists`);
+    const file = path.join(b.dir, 'a.txt'), before = sha(file), calls = argvLog(b.dir).length;
+    const res = await supervisor.allow(b.db, r.workId, 'tu_1');
+    assert.deepStrictEqual([res.ok, res.reason], [false, 'resume-binding-unverified'], name);
+    assert.strictEqual(argvLog(b.dir).length, calls, `${name}: resume spawned a CLI`);
+    assert.strictEqual(sha(file), before, name);
+    /* the oddity is on the record: every init line is persisted verbatim */
+    assert.ok(repo.signalsFor(b.db, r.workId).filter((x) => x.kind === 'session_start').length >= 2
+      || name.startsWith('wrong first'), `${name}: the init lines were not persisted`);
+  }
+});
+
+test('later inits leave an anomaly record, and a single good init still binds (control)', async () => {
+  const b = bench();
+  const dup = await supervisor.start(b.db, b.project, 'x', { evidenceStore: b.store, bin: cli(b.dir, [INIT, INIT, OK]), detect: AVAILABLE });
+  await dup.done;
+  assert.ok(repo.signalsFor(b.db, dup.workId).some((x) => /juqodeInitAnomaly/.test(String(x.payload))), 'no anomaly record');
+  const c = bench();
+  const ok = await supervisor.start(c.db, c.project, 'x', { evidenceStore: c.store, bin: cli(c.dir, [INIT, DENIED, RESULT_DENIED]), detect: AVAILABLE });
+  await ok.done;
+  assert.ok(supervisor.live.get(ok.workId).binding, 'a single correct init no longer binds');
+});
+
+/* ───────────── an unverifiable executable is never run ───────────── */
+
+test('an executable whose identity cannot be established is refused before any spawn', async () => {
+  const savedPath = process.env.PATH, savedBin = process.env.JUQODE_CLAUDE_BIN;
+  try {
+    const b = bench();
+    /* a decoy `claude` on PATH that would run and write if anything fell back to PATH */
+    const decoyDir = tempDir('juqode-pathdecoy-');
+    const marker = path.join(decoyDir, 'DECOY-RAN');
+    const decoy = cli(decoyDir, [INIT, OK], { name: 'claude', edits: [{ path: marker, body: 'x' }] });
+    process.env.PATH = `${path.dirname(decoy)}${path.delimiter}${savedPath}`;
+    for (const [name, opt, env] of [
+      ['explicit missing path', { bin: path.join(b.dir, 'nope', 'claude') }, null],
+      ['directory as binary', { bin: b.dir }, null],
+      ['override env points nowhere', {}, path.join(b.dir, 'nope', 'claude')],
+    ]) {
+      if (env) process.env.JUQODE_CLAUDE_BIN = env; else delete process.env.JUQODE_CLAUDE_BIN;
+      const r = await supervisor.start(b.db, b.project, 'a.txt 바꿔줘', { evidenceStore: b.store, detect: AVAILABLE, ...opt });
+      assert.deepStrictEqual([r.ok, r.reason], [false, 'binary-unverified'], name);
+      assert.ok(!fs.existsSync(marker), `${name}: PATH was consulted and a CLI ran`);
+      assert.strictEqual(repo.activeWork(b.db, b.project.id), null, `${name}: a Work row was left behind`);
+    }
+    /* a Task Run reserves a row before spawn; the refusal must come before that reservation */
+    delete process.env.JUQODE_CLAUDE_BIN;
+    const task = repo.createTask(b.db, b.project.id, { goal: 'Refuse unverified binary' });
+    const t = await supervisor.start(b.db, b.project, 'x', { evidenceStore: b.store, detect: AVAILABLE,
+      bin: path.join(b.dir, 'nope'), taskId: task.id, idempotencyKey: 'unverified-1' });
+    assert.strictEqual(t.reason, 'binary-unverified');
+    assert.strictEqual(repo.activeWork(b.db, b.project.id), null, 'a Task Run row was reserved for a CLI that could not be identified');
+  } finally {
+    process.env.PATH = savedPath;
+    if (savedBin !== undefined) process.env.JUQODE_CLAUDE_BIN = savedBin; else delete process.env.JUQODE_CLAUDE_BIN;
+  }
+});
+
+test('a Windows-style shim pinned by its launcher alone is not a full binary attestation', () => {
+  const dir = tempDir('juqode-shim-');
+  const exe = path.join(dir, 'claude'); fs.writeFileSync(exe, '#!/bin/sh\n', { mode: 0o755 });
+  const id = session.binaryIdentity(exe);
+  assert.strictEqual(id.targetResolved, true, 'a plain executable is its own target');
+  const partial = Object.freeze({ sessionId: 's', canonicalCwd: session.canonicalDir(dir), identity: { ...id, targetResolved: false } });
+  const v = session.verifyResume(partial, { cwd: dir, sessionId: 's', bin: exe, projectPath: dir });
+  assert.deepStrictEqual([v.ok, v.reason], [false, 'target-unresolved']);
+  const full = Object.freeze({ sessionId: 's', canonicalCwd: session.canonicalDir(dir), identity: id });
+  assert.strictEqual(session.verifyResume(full, { cwd: dir, sessionId: 's', bin: exe, projectPath: dir }).ok, true);
 });

@@ -124,6 +124,10 @@ function verifyResume(binding, { cwd, sessionId, bin, projectPath }) {
   if (canonicalDir(cwd) !== binding.canonicalCwd) return { ok: false, reason: 'cwd-changed' };
   if (canonicalDir(projectPath) !== binding.canonicalCwd) return { ok: false, reason: 'project-moved' };
   if (bin !== binding.identity.launchPath) return { ok: false, reason: 'binary-changed' };
+  /* A Windows npm shim whose package target could not be found is pinned by its launcher alone.
+   * That is not an attestation of the executable that would act, so a scoped-write resume is
+   * refused until the target is measurable (DV-12). */
+  if (binding.identity.targetResolved === false) return { ok: false, reason: 'target-unresolved' };
   const now = binaryIdentity(bin);
   if (!now) return { ok: false, reason: 'binary-missing' };
   if (!sameIdentity(now, binding.identity)) return { ok: false, reason: 'binary-changed' };

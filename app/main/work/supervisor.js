@@ -164,13 +164,24 @@ async function startGuarded(db, project, intent, {
 
   const sessionId = crypto.randomUUID();
   /* Pin the binary: from here on the child is spawned from this absolute path, never from a
-   * name that PATH could resolve differently at resume. Unresolvable → spawn fails honestly and
-   * no binding is ever made. */
+   * name that PATH could resolve differently at resume. An executable whose identity cannot be
+   * established is refused BEFORE any process exists — falling through to `session.run` would
+   * resolve the name through PATH again, which is exactly what the pin exists to prevent. */
   const pin = session.binaryIdentity(bin || claude.resolveBin());
-  if (pin) bin = pin.launchPath;
-  let reportedSessionId = null;      // what the CLI's own init event said; null until it does
+  if (!pin) return { ok: false, reason: 'binary-unverified' };
+  bin = pin.launchPath;
+
+  /* The first init is judged ONCE. `initVerdict` is write-once: a wrong first id can never be
+   * repaired by a later, correct-looking init, and a later init (a duplicate, or one with another
+   * id) revokes an earlier good binding instead of replacing it. Every init line is also
+   * persisted verbatim by `persist`, so the anomaly is on the record. */
+  let reportedSessionId = null;      // what the FIRST init event said
+  let initCount = 0, initVerdict = null, initAnomaly = false;
   const bindEntry = (e) => {
-    e.binding = session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, reportedSessionId, bin: e.bin });
+    e.initAnomaly = initAnomaly;
+    e.binding = initVerdict === 'ok' && !initAnomaly
+      ? session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, reportedSessionId, bin: e.bin })
+      : null;
   };
   let basis;
   try {
@@ -241,7 +252,18 @@ async function startGuarded(db, project, intent, {
       },
       onSignal: (sig, raw, line) => {
         if (sig.kind === KIND.SESSION_START) {
-          reportedSessionId = typeof sig.payload?.sessionId === 'string' ? sig.payload.sessionId : null;
+          initCount += 1;
+          const said = typeof sig.payload?.sessionId === 'string' ? sig.payload.sessionId : null;
+          if (initCount === 1) {
+            reportedSessionId = said;
+            initVerdict = said !== null && said === sessionId ? 'ok' : 'bad';
+          } else {
+            initAnomaly = true;
+            if (workId) {
+              writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW,
+                payload: JSON.stringify({ juqodeInitAnomaly: { initCount, reported: said, firstVerdict: initVerdict } }) });
+            } else { pending.push({ sig: { kind: KIND.RAW, payload: null }, line: JSON.stringify({ juqodeInitAnomaly: { initCount, reported: said } }) }); }
+          }
           if (runEntry) bindEntry(runEntry);
         }
         if (!workId) {
