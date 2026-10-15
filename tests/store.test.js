@@ -27,6 +27,10 @@ const claude = require(path.join(R, 'app/main/claude-detect.js'));
 
 const tmp = () => tempDir('juqode-test-');
 const asRoot = process.getuid && process.getuid() === 0;
+const WIN = process.platform === 'win32';
+const fake = require(path.join(__dirname, 'fakecli.js'));
+/* a mode-0o000 folder is unreadable only through POSIX mode bits; Windows denies through ACLs, which is a separate H1 case */
+const NO_MODE_BITS = (asRoot && 'root bypasses mode bits') || (WIN && 'POSIX mode bits: not a Windows PASS — an ACL-denied folder needs its own H1 case');
 
 /* ─────────────────────────── WBS-21 · store ─────────────────────────── */
 
@@ -269,13 +273,13 @@ test('a folder that cannot be opened names the reason instead of failing silentl
   assert.ok(ok.ok && ok.path === dir && ok.name === path.basename(dir));
 });
 
-test('the readability check actually ran — it was not skipped away', () => {
+test('the readability check actually ran — it was not skipped away', { skip: WIN && 'the mode-bit cases are explicitly skipped on Windows (NO_MODE_BITS); this guard is for POSIX runs' }, () => {
   /* A skipped test is a green board that proves nothing. If the suite runs as root, mode
    * bits do not apply and the case below silently disappears; say so rather than pass. */
   assert.ok(!asRoot, 'suite is running as root, so the unreadable-folder case cannot run — use a normal user');
 });
 
-test('an unreadable folder is a failure with a reason, and is not opened anyway', { skip: asRoot && 'root bypasses mode bits' }, () => {
+test('an unreadable folder is a failure with a reason, and is not opened anyway', { skip: NO_MODE_BITS }, () => {
   const db = openDb(':memory:');
   const dir = fs.realpathSync(tmp());
   const locked = path.join(dir, 'locked');
@@ -334,7 +338,7 @@ test('a recent folder that is gone stays listed and is not reported as present',
   db.close();
 });
 
-test('a recent path that is no longer a folder, or cannot be read, says which', { skip: asRoot && 'root bypasses mode bits' }, () => {
+test('a recent path that is no longer a folder, or cannot be read, says which', { skip: NO_MODE_BITS }, () => {
   const db = openDb(':memory:');
   const root = fs.realpathSync(tmp());
   const locked = path.join(root, 'locked');
@@ -370,41 +374,33 @@ test('a failure carries technical detail for the disclosure, and only that', () 
 
 /** Write a fake `claude` that prints the given outputs. Never runs the real CLI. */
 function fakeClaude(dir, { version = '2.1.266 (Claude Code)', auth = '{"loggedIn":true}', authExit = 0, versionExit = 0, hang = false, ignoreTerm = false, versionStderr = '' } = {}) {
-  const f = path.join(dir, 'claude');
-  const lines = [
-    '#!/bin/sh',
-    ignoreTerm ? 'trap "" TERM' : '',
-    versionStderr ? `if [ "$1" = "--version" ]; then echo '${versionStderr}' 1>&2; exit ${versionExit}; fi` : '',
-    `if [ "$1" = "--version" ]; then echo '${version}'; exit ${versionExit}; fi`,
-    'if [ "$1" = "auth" ]; then',
-    hang ? '  sleep 30' : '',
-    `  echo '${auth}'`,
-    `  exit ${authExit}`,
-    'fi',
-    'exit 1',
-  ].filter(Boolean);
-  fs.writeFileSync(f, lines.join('\n') + '\n', { mode: 0o755 });
-  return f;
+  /* plain Node behind a launcher, so the same fixture runs under bash, zsh-less Windows and cmd.exe */
+  return fake.scriptBin(dir, 'claude', `
+${ignoreTerm ? "process.on('SIGTERM', () => {});" : ''}
+const first = process.argv[2];
+if (first === '--version') {
+  ${versionStderr ? `process.stderr.write(${JSON.stringify(versionStderr + '\n')}); process.exit(${versionExit});` : ''}
+  process.stdout.write(${JSON.stringify(version + '\n')}); process.exit(${versionExit});
+}
+if (first === 'auth') {
+  const done = () => { process.stdout.write(${JSON.stringify(auth + '\n')}); process.exit(${authExit}); };
+  ${hang ? 'setTimeout(done, 30000);' : 'done();'}
+} else process.exit(1);
+`);
 }
 
 /** Fake auth is available only when detection receives an explicitly selected profile. */
 function profileAwareFakeClaude(dir) {
-  const f = path.join(dir, 'claude-profile-fixture');
-  const lines = [
-    '#!/bin/sh',
-    'if [ "$1" = "--version" ]; then echo "2.1.999 (fixture)"; exit 0; fi',
-    'if [ "$1" = "auth" ]; then',
-    '  if [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ -f "$CLAUDE_CONFIG_DIR/.juqode-fixture-authenticated" ]; then',
-    '    echo \'{"loggedIn":true}\'',
-    '    exit 0',
-    '  fi',
-    '  echo \'{"loggedIn":false}\'',
-    '  exit 1',
-    'fi',
-    'exit 1',
-  ];
-  fs.writeFileSync(f, lines.join('\n') + '\n', { mode: 0o755 });
-  return f;
+  return fake.scriptBin(dir, 'claude-profile-fixture', `
+const first = process.argv[2];
+if (first === '--version') { process.stdout.write('2.1.999 (fixture)\\n'); process.exit(0); }
+if (first === 'auth') {
+  const d = process.env.CLAUDE_CONFIG_DIR;
+  if (d && require('node:fs').existsSync(require('node:path').join(d, '.juqode-fixture-authenticated'))) { process.stdout.write('{"loggedIn":true}\\n'); process.exit(0); }
+  process.stdout.write('{"loggedIn":false}\\n'); process.exit(1);
+}
+process.exit(1);
+`);
 }
 
 function withBin(bin, fn) {
@@ -567,7 +563,7 @@ test('a CLI that fails to start at all is reported as an error, with its own wor
   assert.strictEqual(r.reason, 'error');
 });
 
-test('a version probe that DIES on a signal is 응답 없음, not an error', async () => {
+test('a version probe that DIES on a signal is 응답 없음, not an error', { skip: WIN && 'POSIX signals: cmd.exe reports an exit code, never a signal — Windows counterpart is H1' }, async () => {
   /* FOUND BY MUTATION: `if (v.err.killed || v.err.signal)` had no test — the existing
    * `no-response` case comes from the DEADLINE race in `detect()`, which never reaches this
    * branch inside `probe()`.
@@ -577,9 +573,8 @@ test('a version probe that DIES on a signal is 응답 없음, not an error', asy
    * "errored" in a way whose stderr means anything — there is usually none. Calling it `error`
    * would put an empty 자세한 내용 보기 in front of the user. */
   const dir = tmp();
-  const f = path.join(dir, 'claude');
   /* Kills ITSELF, so `execFile` reports `signal` rather than an exit code. */
-  fs.writeFileSync(f, '#!/bin/sh\nif [ "$1" = "--version" ]; then kill -9 $$; fi\nexit 1\n', { mode: 0o755 });
+  const f = fake.scriptBin(dir, 'claude', `if (process.argv[2] === '--version') process.kill(process.pid, 'SIGKILL'); process.exit(1);`);
   const r = await withBin(f, () => claude.detect());
   assert.strictEqual(r.available, false);
   assert.strictEqual(r.reason, 'no-response',

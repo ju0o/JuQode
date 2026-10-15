@@ -119,7 +119,7 @@ test('no fabricated progress anywhere in the renderer', () => {
     for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
       if (e.isDirectory()) walk(rel);
-      else if (/\.(js|css|html)$/.test(e.name)) files.push(rel);
+      else if (/\.(js|css|html)$/.test(e.name)) files.push(rel.split(path.sep).join("/"));
     }
   })(path.join('app', 'renderer'));
   assert.ok(files.length >= 12, `expected the renderer tree, found ${files.length} files`);
@@ -155,7 +155,7 @@ test('every Korean string is either Canon 18 verbatim or a marked Canon gap', ()
     for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
       if (e.isDirectory()) walk(rel);
-      else if (/\.js$/.test(e.name)) rendererFiles.push(rel);
+      else if (/\.js$/.test(e.name)) rendererFiles.push(rel.split(path.sep).join("/"));
     }
   })(path.join('app', 'renderer'));
   assert.ok(rendererFiles.length >= 7, `expected the renderer tree, found ${rendererFiles.length}`);
@@ -238,7 +238,7 @@ test('capability containment: each privileged capability lives in exactly one mo
     for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
       if (e.isDirectory()) walk(rel);
-      else if (/\.(js|mjs|cjs|html)$/.test(e.name)) files.push(rel);
+      else if (/\.(js|mjs|cjs|html)$/.test(e.name)) files.push(rel.split(path.sep).join("/"));
     }
   })('app');
   assert.ok(files.length >= 10, `expected to scan the app tree, found ${files.length} files`);
@@ -379,7 +379,7 @@ test('every copy key the renderer NAMES actually exists', () => {
     for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
       if (e.isDirectory()) walk(rel);
-      else if (/\.js$/.test(e.name) && e.name !== 'copy.js') files.push(rel);
+      else if (/\.js$/.test(e.name) && e.name !== 'copy.js') files.push(rel.split(path.sep).join("/"));
     }
   })(path.join('app', 'renderer'));
   assert.ok(files.length >= 6, `expected the renderer tree, found ${files.length}`);
@@ -433,7 +433,7 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
     for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
       if (e.isDirectory()) walk(rel);
-      else if (/\.js$/.test(e.name) && rel !== path.join('app', 'renderer', 'copy.js')) files.push(rel);
+      else if (/\.js$/.test(e.name) && rel !== path.join('app', 'renderer', 'copy.js')) files.push(rel.split(path.sep).join("/"));
     }
   })(path.join('app', 'renderer'));
   /* Comments stripped. A key NAMED in a comment is not a key a screen renders, and leaving them

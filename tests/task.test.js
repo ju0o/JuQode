@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const fake = require(path.join(__dirname, 'fakecli.js'));
 const { DatabaseSync } = require('node:sqlite');
 
 const R = path.resolve(__dirname, '..');
@@ -504,8 +505,7 @@ test('an unattached legacy unknown Work blocks a Task Run until its process stop
     repo.setWorkState(db, legacy.id, { status: 'ended', outcome: 'ended_unknown' });
     const task = repo.createTask(db, project.id, { goal: 'Do not overlap the unknown legacy process' });
     const invoked = path.join(dir, 'invoked');
-    const bin = path.join(dir, 'claude');
-    fs.writeFileSync(bin, `#!/bin/sh\nprintf invoked >> ${JSON.stringify(invoked)}\n`, { mode: 0o755 });
+    const bin = fake.scriptBin(dir, 'claude', `require('node:fs').appendFileSync(${JSON.stringify(invoked)}, 'invoked');`);
     const result = await require(path.join(R, 'app/main/work/supervisor.js')).start(db, project, 'start Task Run', {
       evidenceStore: tempDir('juqode-legacy-unknown-store-'), bin, detect: async () => ({ available: true }),
       taskId: task.id, idempotencyKey: 'after-legacy-unknown',
@@ -524,7 +524,7 @@ test('an unattached legacy unknown Work blocks a Task Run until its process stop
     assert.strictEqual(repo.hasStoppedProcessAcknowledgement(db, legacy.id), true);
     const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'legacy-ack-session', cwd: project.path });
     const finish = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [] });
-    fs.writeFileSync(bin, `#!/bin/sh\nprintf invoked >> ${JSON.stringify(invoked)}\nprintf '%s\\n' '${init}'\nprintf '%s\\n' '${finish}'\n`, { mode: 0o755 });
+    fake.scriptBin(dir, 'claude', `require('node:fs').appendFileSync(${JSON.stringify(invoked)}, 'invoked'); process.stdout.write(${JSON.stringify(init + '\n' + finish + '\n')});`);
     const allowed = await require(path.join(R, 'app/main/work/supervisor.js')).start(db, project, 'start Task Run after acknowledgement', {
       evidenceStore: tempDir('juqode-legacy-unknown-store-2-'), bin, detect: async () => ({ available: true }),
       taskId: task.id, idempotencyKey: 'after-legacy-unknown-ack',

@@ -77,7 +77,7 @@ test('되돌리기: bytes, not text — a non-text file survives the round trip'
   assert.deepEqual(fs.readFileSync(path.join(root, 'logo.png')), original);
 });
 
-test('되돌리기: a deleted executable comes back executable', () => {
+test('되돌리기: a deleted executable comes back executable', { skip: process.platform === 'win32' && 'POSIX execute bit: NTFS has none, git records no mode there — not a Windows PASS' }, () => {
   /* Recreating a file gives it the umask's mode. A script that comes back without `+x` fails
    * at the next run with a permission error that names nothing the user did. */
   const { root, store } = repoWith({ 'run.sh': '#!/bin/sh\necho hi\n' });

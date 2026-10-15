@@ -298,7 +298,7 @@ test('an excluded directory is reported at any depth, not just the top', () => {
     'a nested excluded folder disappeared from the record entirely');
 });
 
-test('a directory the OS refuses is a real gap, and is reported as one', { skip: process.getuid?.() === 0 && 'root' }, () => {
+test('a directory the OS refuses is a real gap, and is reported as one', { skip: (process.getuid?.() === 0 && 'root') || (process.platform === 'win32' && 'POSIX mode bits (0o000): not a Windows PASS — an ACL-denied folder needs its own H1 case') }, () => {
   const dir = fixture({ 'package.json': '{"name":"n"}', 'locked/inner.txt': 'x' });
   fs.chmodSync(path.join(dir, 'locked'), 0o000);
   try {
@@ -359,7 +359,7 @@ test('partial is the only non-failed status the facts layer can reach today', ()
   assert.strictEqual(statusOf(s, answers(s)), 'partial');
 });
 
-test('an unreadable project root is a read failure, not a crash or a guess', { skip: process.getuid?.() === 0 && 'root' }, () => {
+test('an unreadable project root is a read failure, not a crash or a guess', { skip: (process.getuid?.() === 0 && 'root') || (process.platform === 'win32' && 'POSIX mode bits (0o000): not a Windows PASS — an ACL-denied folder needs its own H1 case') }, () => {
   const dir = fixture({ 'package.json': '{}' });
   fs.chmodSync(dir, 0o000);
   try {

@@ -552,6 +552,10 @@ test('every command that exists comes from the project or is fixed', () => {
 /* ───────── execution — `19` §C4's safety contract (Q-03) ───────── */
 
 const run = require(path.join(R, 'app/main/qc/run.js'));
+/* Host-neutral stand-ins for `sh -c …`: the program is this Node binary, so the same fixture runs on
+ * Windows and POSIX. The product code under test still `spawn`s argv with no shell. */
+const NODE = (js, ...args) => [process.execPath, '-e', js, ...args];
+const WIN = process.platform === 'win32';
 
 test('there is no shell — a metacharacter is argument text, not syntax', async () => {
   /* The whole safety argument ends here. Recognition already refuses anything with residue, but
@@ -559,7 +563,7 @@ test('there is no shell — a metacharacter is argument text, not syntax', async
    * command string somehow carried `&&` or `$(…)` there is no interpreter to interpret it. */
   const dir = project({});
   const canary = path.join(dir, 'CANARY');
-  const r = run.start({ argv: ['echo', `x && touch ${canary}`, '; rm -rf /', '$(id)', '`id`'], cwd: dir });
+  const r = run.start({ argv: NODE('console.log(process.argv.slice(1).join(" "))', `x && touch ${canary}`, '; rm -rf /', '$(id)', '`id`'), cwd: dir });
   const out = await r.done;
 
   assert.strictEqual(out.state, 'ok');
@@ -572,7 +576,7 @@ test('the exit code is reported as the code, and stderr is not hidden', async ()
   /* `19` §C4: 종료 코드·stderr 숨기지 않음. `07` §8.1 measured a cancelled child exiting 0, so
    * "it ended" is never read as "it worked". */
   const dir = project({});
-  const out = await run.start({ argv: ['sh', '-c', 'echo to-stdout; echo to-stderr >&2; exit 7'], cwd: dir }).done;
+  const out = await run.start({ argv: NODE('process.stdout.write("to-stdout\\n"); process.stderr.write("to-stderr\\n"); process.exit(7)'), cwd: dir }).done;
 
   assert.strictEqual(out.state, 'failed');
   assert.strictEqual(out.code, 7);
@@ -582,9 +586,9 @@ test('the exit code is reported as the code, and stderr is not hidden', async ()
 
 test('a command that succeeds is `ok`, and one that is signalled is `stopped`', async () => {
   const dir = project({});
-  assert.strictEqual((await run.start({ argv: ['sh', '-c', 'exit 0'], cwd: dir }).done).state, 'ok');
+  assert.strictEqual((await run.start({ argv: NODE('process.exit(0)'), cwd: dir }).done).state, 'ok');
 
-  const r = run.start({ argv: ['sh', '-c', 'sleep 30'], cwd: dir, kind: 'long_running' });
+  const r = run.start({ argv: NODE('setTimeout(() => {}, 30000)'), cwd: dir, kind: 'long_running' });
   await new Promise((res) => setTimeout(res, 120));
   r.stop();
   const out = await r.done;
@@ -604,14 +608,14 @@ test('the command runs in the PROJECT root', async () => {
   /* `19` §C4: cwd = 프로젝트 루트. A command that ran somewhere else would report another
    * folder's state under this project's name. */
   const dir = project({ 'marker.txt': 'here\n' });
-  const out = await run.start({ argv: ['pwd'], cwd: dir }).done;
+  const out = await run.start({ argv: NODE('console.log(process.cwd())'), cwd: dir }).done;
   assert.strictEqual(out.output.trim(), fs.realpathSync(dir));
 });
 
 test('the environment is the user\'s own, unchanged', async () => {
   /* `19` §C4: env = 사용자 환경 그대로 · 격리 아님. The product does not pretend to sandbox. */
   const dir = project({});
-  const out = await run.start({ argv: ['sh', '-c', 'echo "$JUQODE_QC_PROBE"'], cwd: dir,
+  const out = await run.start({ argv: NODE('console.log(process.env.JUQODE_QC_PROBE)'), cwd: dir,
                                 env: { ...process.env, JUQODE_QC_PROBE: 'passed-through' } }).done;
   assert.strictEqual(out.output.trim(), 'passed-through');
 });
@@ -619,7 +623,7 @@ test('the environment is the user\'s own, unchanged', async () => {
 test('a process handle is kept, with the time that makes the pid meaningful', async () => {
   /* `07` §8.5: a pid is reusable, so a pid alone cannot identify a process later. */
   const dir = project({});
-  const r = run.start({ argv: ['sh', '-c', 'sleep 5'], cwd: dir, kind: 'long_running' });
+  const r = run.start({ argv: NODE('setTimeout(() => {}, 5000)'), cwd: dir, kind: 'long_running' });
   assert.ok(r.pid > 0);
   assert.ok(Date.parse(r.startedAt) > 0, 'no start time was recorded with the pid');
   r.stop();
@@ -628,7 +632,7 @@ test('a process handle is kept, with the time that makes the pid meaningful', as
 
 test('output is bounded, and the bound is REPORTED', async () => {
   const dir = project({});
-  const out = await run.start({ argv: ['sh', '-c', `yes juqode | head -c ${run.OUTPUT_LIMIT * 3}`], cwd: dir }).done;
+  const out = await run.start({ argv: NODE(`const s = 'juqode\\n'.repeat(1000); let n = 0; while (n < ${run.OUTPUT_LIMIT * 3}) { process.stdout.write(s); n += s.length; }`), cwd: dir }).done;
   assert.ok(Buffer.byteLength(out.output, 'utf8') <= run.OUTPUT_LIMIT,
     `${Buffer.byteLength(out.output, 'utf8')} bytes were kept`);
   assert.strictEqual(out.truncated, true,
@@ -638,7 +642,7 @@ test('output is bounded, and the bound is REPORTED', async () => {
 test('the live tail is the last few lines, so a long-running card can show progress', async () => {
   const dir = project({});
   const seen = [];
-  const r = run.start({ argv: ['sh', '-c', 'for i in 1 2 3 4 5; do echo line-$i; done'], cwd: dir,
+  const r = run.start({ argv: NODE('for (let i = 1; i <= 5; i++) console.log("line-" + i)'), cwd: dir,
                         onUpdate: (u) => { if (u.state === 'running' && u.tail?.length) seen.push(u.tail); } });
   await r.done;
   const last = seen[seen.length - 1];
@@ -681,7 +685,7 @@ test('masking is a REDUCTION and the code says so — it is not measured', () =>
 
 test('masking never turns output into something that reads as clean', async () => {
   const dir = project({});
-  const out = await run.start({ argv: ['sh', '-c', 'echo "TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyz"'], cwd: dir }).done;
+  const out = await run.start({ argv: NODE('console.log("TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyz")'), cwd: dir }).done;
   assert.ok(out.output.includes('***'));
   assert.ok(!out.output.includes('ghp_0123456789'), 'the token reached the card');
 });
@@ -1223,7 +1227,7 @@ test('a full output is a genuine PREFIX, never a spliced-together middle', async
   const dir = project({});
   const big = run.OUTPUT_LIMIT;
   const out = await run.start({
-    argv: ['sh', '-c', `head -c ${big} /dev/zero | tr '\\0' 'A'; head -c 2000 /dev/zero | tr '\\0' 'B'; echo ZZZ-END`],
+    argv: NODE(`process.stdout.write('A'.repeat(${big})); process.stdout.write('B'.repeat(2000)); console.log('ZZZ-END')`),
     cwd: dir,
   }).done;
 
@@ -1281,7 +1285,7 @@ test('stopping a child that already exited signals nothing', () => {
    * code catches. What the test has to observe is that NO SIGNAL WAS SENT, so `process.kill`
    * is recorded for the length of the call. */
   const dir = project({});
-  const r = run.start({ argv: ['sh', '-c', 'exit 0'], cwd: dir });
+  const r = run.start({ argv: NODE('process.exit(0)'), cwd: dir });
   return r.done.then(() => {
     const real = process.kill;
     const sent = [];
@@ -1297,11 +1301,11 @@ test('stopping a child that already exited signals nothing', () => {
   });
 });
 
-test('stopping a child that IS running does signal it', () => {
+test('stopping a child that IS running does signal it', { skip: WIN && 'POSIX process-group signalling; see the Windows counterpart below' }, () => {
   /* The counterpart. A guard that never signals would pass the test above and make 멈추기 a
    * button that does nothing. */
   const dir = project({});
-  const r = run.start({ argv: ['sh', '-c', 'sleep 30'], cwd: dir, kind: 'long_running' });
+  const r = run.start({ argv: NODE('setTimeout(() => {}, 30000)'), cwd: dir, kind: 'long_running' });
   return new Promise((res) => setTimeout(res, 120)).then(() => {
     const real = process.kill;
     const sent = [];
@@ -1312,6 +1316,18 @@ test('stopping a child that IS running does signal it', () => {
     assert.ok(sent[0][0] < 0, '`07` §8.2: the whole process GROUP, not just the parent');
     return r.done;
   });
+});
+
+test('Windows: stopping a running child ends it and the card says stopped (root only is what run.js can reach)', { skip: !WIN && 'Windows-only' }, async () => {
+  /* There are no process groups to signal here: run.js falls back to the root handle's kill. This
+   * pins what IS true — the root dies and the state is \`stopped\` — and deliberately does NOT claim
+   * the descendants died (an unmeasured Windows tree is V1-404's, on H1). */
+  const dir = project({});
+  const r = run.start({ argv: NODE('setInterval(() => {}, 1000)'), cwd: dir, kind: 'long_running' });
+  await new Promise((res) => setTimeout(res, 300));
+  r.stop();
+  const out = await r.done;
+  assert.strictEqual(out.state, 'stopped');
 });
 
 test('a script\'s pre/post hooks are disclosed, because they also run', () => {

@@ -228,7 +228,7 @@ test('nothing in the app reads the user\'s shell or git credentials', () => {
     for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
       if (e.isDirectory()) walk(rel);
-      else if (/\.(js|mjs|cjs)$/.test(e.name)) files.push(rel);
+      else if (/\.(js|mjs|cjs)$/.test(e.name)) files.push(rel.split(path.sep).join("/"));
     }
   })('app');
 
@@ -284,7 +284,7 @@ test('no code enables crash reporting or calls out to a network', () => {
     for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
       if (e.isDirectory()) walk(rel);
-      else if (/\.(js|mjs|cjs)$/.test(e.name)) files.push(rel);
+      else if (/\.(js|mjs|cjs)$/.test(e.name)) files.push(rel.split(path.sep).join("/"));
     }
   })('app');
   assert.ok(files.length >= 20, `expected the app tree, found ${files.length} files`);

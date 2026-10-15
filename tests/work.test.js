@@ -26,6 +26,27 @@ const M = require(path.join(R, 'app/main/evidence/manifest.js'));
 const { ledger, ledgerDiff, isSecretName, isExcludedPath, pathspec } = require(path.join(R, 'app/main/evidence/exclude.js'));
 const { toSignal, reduce, replay, initial, openPermission, openPermissions, KIND } = require(path.join(R, 'app/main/work/reducer.js'));
 const { allowSpec, grantedSignal, run, stop } = require(path.join(R, 'app/main/claude/session.js'));
+const fake = require(path.join(__dirname, 'fakecli.js'));
+const WIN = process.platform === 'win32';
+const crypto = require('node:crypto');
+const NO_MODE_BITS = (process.getuid?.() === 0 && 'root bypasses mode bits') || (WIN && 'POSIX mode bits (0o000/0o111): not a Windows PASS — an ACL-denied path needs its own H1 case');
+
+/* Host-neutral replacements for the `bash -c 'find … | xargs sha256sum'` one-liners. */
+function listFiles(root, skip = () => false) {
+  const out = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      const rel = path.relative(root, full).split(path.sep).join('/');
+      if (skip(rel, e)) continue;
+      if (e.isDirectory()) walk(full); else if (e.isFile()) out.push(rel);
+    }
+  })(root);
+  return out.sort();
+}
+const countFiles = (root, rel) => (fs.existsSync(path.join(root, rel)) ? listFiles(path.join(root, rel)).length : 0);
+const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const catObject = (o, opts) => { try { return execFileSync('git', ['cat-file', '-p', o], { ...opts, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return ''; } };
 
 const MARK = 'JUQODE_SYNTHETIC_SECRET';   // synthetic, clearly labelled; never a real credential
 
@@ -53,12 +74,16 @@ function repo(files, { commit = true, gitignore = 'node_modules/\n*.log\n' } = {
  * hid the secret-exclusion regression a batch ago, in the one test that guards `07` §1.
  * Every git call here also carries `--no-optional-locks`, so the measurement cannot be the
  * thing that causes the damage it is looking for. */
-const fingerprint = (dir) => execFileSync('bash', ['-c',
-  `sha256sum .git/index 2>/dev/null || echo "no-index"; ` +
-  `git --no-optional-locks ls-files -s; git --no-optional-locks diff --cached; ` +
-  `git --no-optional-locks status --porcelain=v2; ` +
-  `find . -type f -not -path './.git/objects/*' -print0 | xargs -0 sha256sum | sort`,
-], { cwd: dir, encoding: 'utf8' });
+const fingerprint = (dir) => {
+  const git = (...a) => execFileSync('git', ['--no-optional-locks', ...a], { cwd: dir, encoding: 'utf8' });
+  const idx = path.join(dir, '.git', 'index');
+  return [
+    fs.existsSync(idx) ? `${sha256(idx)}  .git/index` : 'no-index',
+    git('ls-files', '-s'), git('diff', '--cached'), git('status', '--porcelain=v2'),
+    ...listFiles(dir, (rel) => rel === '.git/objects' || rel.startsWith('.git/objects/'))
+      .map((rel) => `${sha256(path.join(dir, rel))}  ./${rel}`),
+  ].join('\n');
+};
 
 /* ───────────────────────── WBS-08 · the corrected contract ───────────────────────── */
 
@@ -79,14 +104,14 @@ test('a capture leaves the user repository byte-identical', () => {
 
 test('objects go to a JuQode directory, never into the user repository', () => {
   const { dir, store } = repo({ 'a.txt': '1\n' });
-  const objectsBefore = execFileSync('bash', ['-c', 'find .git/objects -type f | wc -l'], { cwd: dir, encoding: 'utf8' }).trim();
+  const objectsBefore = String(countFiles(dir, '.git/objects'));
   fs.writeFileSync(path.join(dir, 'b.txt'), 'brand new content that has never been hashed\n');
   G.capture(dir, store, 'before');
-  const objectsAfter = execFileSync('bash', ['-c', 'find .git/objects -type f | wc -l'], { cwd: dir, encoding: 'utf8' }).trim();
+  const objectsAfter = String(countFiles(dir, '.git/objects'));
   assert.strictEqual(objectsAfter, objectsBefore, 'JuQode wrote objects into the user repository');
   /* `existsSync` on the directory cannot fail — capture mkdirs it unconditionally. What can
    * differ is whether anything was WRITTEN there. */
-  const written = execFileSync('bash', ['-c', 'find objects -type f | wc -l'], { cwd: store, encoding: 'utf8' }).trim();
+  const written = String(countFiles(store, 'objects'));
   assert.notStrictEqual(written, '0', 'the JuQode object store received nothing — capture wrote elsewhere');
 });
 
@@ -116,7 +141,7 @@ test('a secret the user ALREADY COMMITTED is kept out of the basis tree', () => 
     .split('\n').filter(Boolean);
   let leaked = 0;
   for (const o of objs) {
-    const body = execFileSync('bash', ['-c', `git cat-file -p ${o} 2>/dev/null || true`], {
+    const body = catObject(o, {
       cwd: dir, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, GIT_OBJECT_DIRECTORY: path.join(store, 'objects'), GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(dir, '.git/objects') },
     });
@@ -146,7 +171,7 @@ test('an UNTRACKED secret is never hashed into the JuQode object store', () => {
     { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_OBJECT_DIRECTORY: path.join(store, 'objects') } })
     .split('\n').filter(Boolean);
   for (const o of objs) {
-    const body = execFileSync('bash', ['-c', `git cat-file -p ${o} 2>/dev/null || true`], {
+    const body = catObject(o, {
       cwd: dir, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
       env: { ...process.env, GIT_OBJECT_DIRECTORY: path.join(store, 'objects'), GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(dir, '.git/objects') },
     });
@@ -200,7 +225,7 @@ test('a case-variant untracked secret is never hashed at all', () => {
     { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_OBJECT_DIRECTORY: path.join(store, 'objects') } })
     .split('\n').filter(Boolean);
   for (const o of objs) {
-    const body = execFileSync('bash', ['-c', `git cat-file -p ${o} 2>/dev/null || true`], {
+    const body = catObject(o, {
       cwd: dir, encoding: 'utf8',
       env: { ...process.env, GIT_OBJECT_DIRECTORY: path.join(store, 'objects'), GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(dir, '.git/objects') },
     });
@@ -267,7 +292,7 @@ test('a nested repository is excluded AND reported', () => {
     'a change inside a nested repository was invisible in every channel');
 });
 
-test('an unreadable FILE is refused, not thrown', { skip: process.getuid?.() === 0 && 'root' }, () => {
+test('an unreadable FILE is refused, not thrown', { skip: NO_MODE_BITS }, () => {
   /* `firstUnreadable` used to check directories only, so `capture()` threw an uncaught error
    * from git instead of producing 확립 불가 with a reason. */
   const { dir } = repo({ 'a.txt': '1\n', 'secretish.txt': '2\n' });
@@ -277,7 +302,7 @@ test('an unreadable FILE is refused, not thrown', { skip: process.getuid?.() ===
   } finally { fs.chmodSync(path.join(dir, 'secretish.txt'), 0o600); }
 });
 
-test('an unreadable directory under node_modules is refused too', { skip: process.getuid?.() === 0 && 'root' }, () => {
+test('an unreadable directory under node_modules is refused too', { skip: NO_MODE_BITS }, () => {
   /* It was skipped by the check, and `add -A` only warns — so the basis silently shrank. */
   const { dir } = repo({ 'a.txt': '1\n', 'node_modules/pkg/priv/x.js': '1\n' }, { gitignore: null });
   fs.chmodSync(path.join(dir, 'node_modules/pkg/priv'), 0o000);
@@ -347,7 +372,7 @@ test('an assistant or user message with no blocks is raw, not a lost signal', ()
   assert.strictEqual(mixed.payload.all.length, 1);
 });
 
-test('an unreadable ROOT is refused — and the refusal is truthy', { skip: process.getuid?.() === 0 && 'root' }, () => {
+test('an unreadable ROOT is refused — and the refusal is truthy', { skip: NO_MODE_BITS }, () => {
   /* FOUND BY MUTATION. `firstUnreadable` answers `rel || '.'`, and the root's `rel` is the
    * EMPTY STRING — so without the `|| '.'` the function returns `''`, `refusal()` reads it as
    * falsy, and a project whose root cannot be listed at all is allowed to start a Work. The
@@ -531,7 +556,7 @@ test('a change Work is refused when no honest basis can be built', () => {
 });
 
 test('an unreadable directory is refused BEFORE capture, not warned about during it', {
-  skip: process.getuid?.() === 0 && 'root',
+  skip: NO_MODE_BITS,
 }, () => {
   const { dir } = repo({ 'a.ts': '1\n', 'locked/inner.ts': '2\n' });
   fs.chmodSync(path.join(dir, 'locked'), 0o000);
@@ -614,7 +639,7 @@ test('non-Git projects get a basis too, with the same exclusions', () => {
     'one byte over the cap was accepted');
 });
 
-test('the non-Git basis refuses an unreadable ROOT, and says which path', { skip: process.getuid?.() === 0 && 'root' }, () => {
+test('the non-Git basis refuses an unreadable ROOT, and says which path', { skip: NO_MODE_BITS }, () => {
   /* FOUND BY MUTATION, and it is the same hole as `git.js`'s — in the OTHER evidence mechanism.
    * `detail: rel || '.'` names the path that could not be read, and the root's `rel` is the
    * empty string. Without the fallback the refusal card would name nothing.
@@ -895,9 +920,14 @@ test('allowing narrows to one tool and one target, never to the tool as a whole'
   assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: '/p/note.txt' } }, '/p'), 'Edit(note.txt)');
   assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: '/p/note.txt' } }, '/p'), 'Edit(note.txt)',
     'Claude Code Write requests must use its file-edit permission rule');
-  /* `Edit(/abs)` with ONE leading slash is read as a cwd-relative glob and silently denies. */
-  assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: '/elsewhere/x' } }, '/p'), 'Edit(//elsewhere/x)');
-  assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: '/elsewhere/x' } }, '/p'), 'Edit(//elsewhere/x)');
+  /* `Edit(/abs)` with ONE leading slash is read as a cwd-relative glob and silently denies.
+   * That is the POSIX form. How Claude Code spells an absolute path OUTSIDE the project on Windows
+   * (drive letter, backslashes) is UNKNOWN — unmeasured on H1 — so no exact Windows string is
+   * asserted here; the Windows case below only pins that it stays ONE scoped target. */
+  if (!WIN) {
+    assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: '/elsewhere/x' } }, '/p'), 'Edit(//elsewhere/x)');
+    assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: '/elsewhere/x' } }, '/p'), 'Edit(//elsewhere/x)');
+  }
   assert.strictEqual(allowSpec({ tool: 'Bash', input: { command: 'npm test' } }, '/p'), 'Bash(npm test:*)');
   assert.strictEqual(allowSpec({ tool: 'Bash', input: {} }, '/p'), null,
     'with nothing to scope to, the answer is no grant — never a grant of the whole tool');
@@ -918,6 +948,14 @@ test('allowing narrows to one tool and one target, never to the tool as a whole'
   /* A relative path is the PROJECT's, not JuQode's working directory. */
   assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: 'sub/a.txt' } }, '/p'), 'sub/a.txt'
     ? 'Edit(sub/a.txt)' : null);
+});
+
+test('Windows: an absolute path outside the project is still ONE scoped target (exact syntax UNKNOWN)', { skip: !WIN && 'Windows-only' }, () => {
+  const spec = allowSpec({ tool: 'Edit', input: { file_path: 'C:\\elsewhere\\x.txt' } }, 'C:\\p');
+  assert.ok(spec && /^Edit\(.+\)$/.test(spec), `no scoped grant: ${spec}`);
+  assert.ok(!/[*?\[\]{},]/.test(spec), `the grant is wider than one file: ${spec}`);
+  assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: 'C:\\p\\sub\\a.txt' } }, 'C:\\p'), 'Edit(sub/a.txt)',
+    'a file inside the project is named relative to it with forward slashes');
 });
 
 test('the whole permission lifecycle, driven by signals alone', () => {
@@ -989,25 +1027,25 @@ test('a stream split mid-character is not corrupted', async () => {
    * Korean character split across a boundary into U+FFFD — and `unparsed` stayed 0, because
    * corrupted text is still valid JSON, so nothing flagged it. */
   const dir = tempDir('juqode-utf8-');
-  const bin = path.join(dir, 'claude');
+  let bin = path.join(dir, 'claude');
   const line = JSON.stringify({ type: 'system', subtype: 'status', message: '변경 증거 기준을 세우는 중' });
   /* Written out seven bytes at a time, so multi-byte characters straddle the boundaries. */
   fs.writeFileSync(`${bin}.js`, `const b = Buffer.from(${JSON.stringify(line)} + "\\n", "utf8");
 for (let i = 0; i < b.length; i += 7) process.stdout.write(b.subarray(i, i + 7));
 `);
-  fs.writeFileSync(bin, `#!/bin/sh\nexec ${process.execPath} "${bin}.js"\n`, { mode: 0o755 });
+  bin = fake.launcher(dir, 'claude', `${bin}.js`);
   const lines = [];
   await run({ cwd: dir, sessionId: 'x', prompt: 'hi', bin, onSignal: (_s, _raw, text) => lines.push(text) });
   assert.ok(!lines.join('').includes('\uFFFD'), `the stream was corrupted: ${lines[0]}`);
   assert.strictEqual(JSON.parse(lines[0]).message, '변경 증거 기준을 세우는 중');
 });
 
-test('an orphan that leaves the process group cannot pin the Work forever', async () => {
+test('an orphan that leaves the process group cannot pin the Work forever', { skip: WIN && 'POSIX setsid orphan; Windows has no equivalent group escape — H1 counterpart is V1-404' }, async () => {
   /* `07` §8.7 measured this orphan class. Resolution used to hang off `close`, which waits for
    * every inherited pipe — a `setsid` grandchild holds stdout open, so the promise never
    * settled, the Work stayed `running`, and D-117's single slot was never released. */
   const dir = tempDir('juqode-orphan-');
-  const bin = path.join(dir, 'claude');
+  let bin = path.join(dir, 'claude');
   /* The orphan sleeps only briefly and clears itself. It is NOT reaped with `pkill -f` here:
    * a pattern broad enough to match the fixture also matches the test runner's own command
    * line, and the suite kills itself (measured — exit 144). */
@@ -1025,8 +1063,7 @@ sleep 6
 
 test('a session that produces no event at all did not start', async () => {
   const dir = tempDir('juqode-nostart-');
-  const bin = path.join(dir, 'claude');
-  fs.writeFileSync(bin, '#!/bin/sh\necho "boom" >&2\nexit 9\n', { mode: 0o755 });
+  const bin = fake.scriptBin(dir, 'claude', `process.stderr.write('boom\\n'); process.exit(9);`);
   const seen = [];
   const r = await run({ cwd: dir, sessionId: 'x', prompt: 'hi', bin, onSignal: (s) => seen.push(s) });
   assert.strictEqual(r.startFailed, true, '`20`: a Work that never started writes no row');
@@ -1036,12 +1073,11 @@ test('a session that produces no event at all did not start', async () => {
 
 test('every line reaches the record, including one we cannot parse', async () => {
   const dir = tempDir('juqode-raw-');
-  const bin = path.join(dir, 'claude');
-  fs.writeFileSync(bin, `#!/bin/sh
-echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
-echo 'this line is not json'
-printf '{"type":"result","subtype":"success","is_error":false}'
-`, { mode: 0o755 });
+  const bin = fake.scriptBin(dir, 'claude', `
+process.stdout.write('{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}\\n');
+process.stdout.write('this line is not json\\n');
+process.stdout.write('{"type":"result","subtype":"success","is_error":false}');   // no trailing newline
+`);
   const seen = [];
   const r = await run({ cwd: dir, sessionId: 'x', prompt: 'hi', bin, onSignal: (s) => seen.push(s) });
   assert.strictEqual(r.startFailed, false);
@@ -1055,12 +1091,12 @@ test('the prompt goes on stdin, so a variadic flag cannot swallow it', async () 
   /* Measured: `--allowedTools <tools...>` is variadic, and a prompt passed as a positional
    * after it became a second tool grant. The retry silently never ran. */
   const dir = tempDir('juqode-args-');
-  const bin = path.join(dir, 'claude');
-  fs.writeFileSync(bin, `#!/bin/sh
-printf '%s' "$*" > "${dir}/argv.txt"
-cat > "${dir}/stdin.txt"
-echo '{"type":"result","subtype":"success","is_error":false}'
-`, { mode: 0o755 });
+  const bin = fake.scriptBin(dir, 'claude', `
+const fs = require('node:fs');
+fs.writeFileSync(${JSON.stringify(path.join(dir, 'argv.txt'))}, process.argv.slice(2).join(' '));
+fs.writeFileSync(${JSON.stringify(path.join(dir, 'stdin.txt'))}, fs.readFileSync(0));
+process.stdout.write('{"type":"result","subtype":"success","is_error":false}\\n');
+`);
   await run({ cwd: dir, sessionId: 'sid', prompt: '로그인 오류 고쳐줘', allowedTools: ['Edit(a.txt)'], bin, onSignal: () => {} });
   const argv = fs.readFileSync(path.join(dir, 'argv.txt'), 'utf8');
   assert.ok(!argv.includes('로그인 오류 고쳐줘'), 'the prompt was passed as an argument');
@@ -1074,7 +1110,7 @@ echo '{"type":"result","subtype":"success","is_error":false}'
   assert.match(argv, /--verbose/);
 });
 
-test('the child is its own process group, so stopping it cannot reach JuQode', async () => {
+test('the child is its own process group, so stopping it cannot reach JuQode', { skip: WIN && 'POSIX process groups (ps -o pgid); no Windows equivalent — H1 counterpart is V1-404' }, async () => {
   /* `07` §8.2, measured: `process.kill(-pgid)` on a group that contains JuQode kills JuQode —
    * the spike driver exited 143. `detached: true` is what keeps that from being possible, and
    * nothing tested it. */
@@ -1093,11 +1129,10 @@ echo '{"type":"result","subtype":"success","is_error":false}'
 
 test('a resume asks for the same session and adds only the scoped grant', async () => {
   const dir = tempDir('juqode-resume-');
-  const bin = path.join(dir, 'claude');
-  fs.writeFileSync(bin, `#!/bin/sh
-printf '%s' "$*" > "${dir}/argv.txt"
-echo '{"type":"result","subtype":"success","is_error":false}'
-`, { mode: 0o755 });
+  const bin = fake.scriptBin(dir, 'claude', `
+require('node:fs').writeFileSync(${JSON.stringify(path.join(dir, 'argv.txt'))}, process.argv.slice(2).join(' '));
+process.stdout.write('{"type":"result","subtype":"success","is_error":false}\\n');
+`);
   await run({ cwd: dir, sessionId: 'the-session', resume: true, allowedTools: ['Edit(note.txt)'], prompt: 'x', bin, onSignal: () => {} });
   const argv = fs.readFileSync(path.join(dir, 'argv.txt'), 'utf8');
   assert.match(argv, /--resume the-session/, 'the retry started a different session');

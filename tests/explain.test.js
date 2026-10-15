@@ -11,6 +11,7 @@ const fs = require('node:fs');
 const { DatabaseSync } = require('node:sqlite');
 const os = require('node:os');
 const path = require('node:path');
+const fake = require(path.join(__dirname, 'fakecli.js'));
 
 const R = path.resolve(__dirname, '..');
 const { openDb, SCHEMA_FILE } = require(path.join(R, 'app/main/db/db.js'));
@@ -342,14 +343,14 @@ test('a prompt over budget elides files instead of growing without bound', () =>
 function fakeCli(answer, { silent = false } = {}) {
   const home = tempDir('juqode-cli-');
   const script = path.join(home, 'fake.js');
-  const bin = path.join(home, 'fake');
+  let bin;
   const events = silent ? [] : [
     { type: 'system', subtype: 'init', session_id: 's', cwd: '/p' },
     { type: 'result', subtype: 'success', is_error: false, permission_denials: [], result: answer },
   ];
   fs.writeFileSync(script,
     'for (const e of ' + JSON.stringify(events) + ') process.stdout.write(JSON.stringify(e) + "\\n");\n');
-  fs.writeFileSync(bin, '#!/bin/sh\nexec ' + process.execPath + ' ' + script + ' "$@"\n', { mode: 0o755 });
+  bin = fake.launcher(home, 'fake', script);
   return bin;
 }
 
@@ -631,13 +632,13 @@ function argvCli(answer = '[]') {
   const home = tempDir('juqode-argv-');
   const log = path.join(home, 'ARGV.log');
   const script = path.join(home, 'fake.js');
-  const bin = path.join(home, 'fake');
+  let bin;
   fs.writeFileSync(script, [
     `require('fs').appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');`,
     `process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', cwd: '/p' }) + '\\n');`,
     `process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [], result: ${JSON.stringify(answer)} }) + '\\n');`,
   ].join('\n'));
-  fs.writeFileSync(bin, '#!/bin/sh\nexec ' + process.execPath + ' ' + script + ' "$@"\n', { mode: 0o755 });
+  bin = fake.launcher(home, 'fake', script);
   return { bin, argv: () => (fs.existsSync(log) ? JSON.parse(fs.readFileSync(log, 'utf8').split('\n')[0]) : null) };
 }
 

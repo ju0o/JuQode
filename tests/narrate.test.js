@@ -11,6 +11,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const fake = require(path.join(__dirname, 'fakecli.js'));
 
 const R = path.resolve(__dirname, '..');
 const N = require(path.join(R, 'app/main/interpret/narrate.js'));
@@ -311,14 +312,14 @@ test('the budget holds even when the file list alone is bigger than it', () => {
 function fakeCli(answer, { silent = false } = {}) {
   const home = tempDir('juqode-cli-');
   const script = path.join(home, 'fake.js');
-  const bin = path.join(home, 'fake');
+  let bin;
   const events = silent ? [] : [
     { type: 'system', subtype: 'init', session_id: 's', cwd: '/p' },
     { type: 'result', subtype: 'success', is_error: false, permission_denials: [], result: answer },
   ];
   fs.writeFileSync(script,
     'for (const e of ' + JSON.stringify(events) + ') process.stdout.write(JSON.stringify(e) + "\\n");\n');
-  fs.writeFileSync(bin, '#!/bin/sh\nexec ' + process.execPath + ' ' + script + ' "$@"\n', { mode: 0o755 });
+  bin = fake.launcher(home, 'fake', script);
   return bin;
 }
 
@@ -357,13 +358,13 @@ test('the narrative pass is launched with the built-in tool set EMPTIED', async 
   const home = tempDir('juqode-argv-');
   const log = path.join(home, 'argv.json');
   const script = path.join(home, 'fake.js');
-  const bin = path.join(home, 'fake');
+  let bin;
   fs.writeFileSync(script, [
     `require('fs').writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));`,
     `process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', cwd: '/p' }) + '\\n');`,
     `process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [], result: '[]' }) + '\\n');`,
   ].join('\n'));
-  fs.writeFileSync(bin, '#!/bin/sh\nexec ' + process.execPath + ' ' + script + ' "$@"\n', { mode: 0o755 });
+  bin = fake.launcher(home, 'fake', script);
 
   const b = bench();
   await N.narrate({ ...b, cwd: b.dir, bin });
@@ -484,9 +485,9 @@ test('a pass whose CLI is broken says so in the detail, not only in the reason',
    * exactly how a broken fixture was identified as broken rather than as a refusal. */
   const home = tempDir('juqode-broken-');
   const script = path.join(home, 'fake.js');
-  const bin = path.join(home, 'fake');
+  let bin;
   fs.writeFileSync(script, 'this is not javascript (\n');
-  fs.writeFileSync(bin, '#!/bin/sh\nexec ' + process.execPath + ' ' + script + ' "$@"\n', { mode: 0o755 });
+  bin = fake.launcher(home, 'fake', script);
 
   const b = bench();
   return N.narrate({ ...b, cwd: b.dir, bin }).then((out) => {
@@ -503,7 +504,7 @@ test('a pass that answered carries no detail, even when it wrote to stderr', () 
    * indistinguishable from noise. */
   const home = tempDir('juqode-noisy-');
   const script = path.join(home, 'fake.js');
-  const bin = path.join(home, 'fake');
+  let bin;
   const six = [{ q: 1, text: '할 일 앱', cites: ['README.md'] }];
   const NL = String.raw`\n`;              // a literal backslash-n INSIDE the generated script
   fs.writeFileSync(script, [
@@ -511,7 +512,7 @@ test('a pass that answered carries no detail, even when it wrote to stderr', () 
     `process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', cwd: '/p' }) + '${NL}');`,
     `process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [], result: ${JSON.stringify(JSON.stringify(six))} }) + '${NL}');`,
   ].join('\n'));
-  fs.writeFileSync(bin, '#!/bin/sh\nexec ' + process.execPath + ' ' + script + ' "$@"\n', { mode: 0o755 });
+  bin = fake.launcher(home, 'fake', script);
 
   const b = bench();
   return N.narrate({ ...b, cwd: b.dir, bin }).then((out) => {

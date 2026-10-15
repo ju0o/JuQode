@@ -38,6 +38,7 @@ const repo = require(path.join(R, 'app/main/db/repo.js'));
 const supervisor = require(path.join(R, 'app/main/work/supervisor.js'));
 const session = require(path.join(R, 'app/main/claude/session.js'));
 const { KIND } = require(path.join(R, 'app/main/work/reducer.js'));
+const fake = require(path.join(__dirname, 'fakecli.js'));
 
 const AVAILABLE = async () => ({ available: true, version: '9.9.9-fixture' });
 
@@ -69,7 +70,6 @@ function cliHome(dir) {
 
 function cli(dir, events, { edits = [], exit = 0, silent = false, capturePrompt = false, name = 'fake-claude', initCwd = null, initSessionId = undefined } = {}) {
   const home = cliHome(dir);
-  const bin = path.join(home, name);
   const script = path.join(home, `${name}.js`);
   /* argv is appended to a log, so a test can assert what actually REACHED the process rather
    * than what the caller believed it sent — "same session, same Work" was claimed by two test
@@ -92,8 +92,7 @@ ${silent ? '' : `for (const e of ${JSON.stringify(events)}) {
 }`}
 process.exit(${exit});
 `);
-  fs.writeFileSync(bin, `#!/bin/sh\nexec ${process.execPath} ${script} "$@"\n`, { mode: 0o755 });
-  return bin;
+  return fake.launcher(home, name, script);
 }
 
 const argvLog = (dir) => {
@@ -601,12 +600,7 @@ test('two concurrent allows do not start two sessions on one session id', async 
   const bin = cli(dir, [INIT, DENIED, RESULT_DENIED]);
   const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
   await r.done;
-  const retryBin = path.join(dir, 'slow-retry');
-  fs.writeFileSync(retryBin, `#!/bin/sh
-echo '{"type":"system","subtype":"init","session_id":"'"$2"'","cwd":"'"$PWD"'"}'
-sleep 1
-echo '{"type":"result","subtype":"success","is_error":false,"permission_denials":[]}'
-`, { mode: 0o755 });
+  const retryBin = fake.scriptBin(cliHome(dir), 'slow-retry', `init(); setTimeout(() => { result(); process.exit(0); }, 1000);`);
   useBin(r.workId, retryBin);
 
   const [x, y] = await Promise.all([
@@ -775,21 +769,11 @@ test('two submits cannot start two sessions in one project', async () => {
    * the loser got the guard card while its process kept running, untracked and unstoppable,
    * and its writes were folded into the winner's after-basis. */
   const { dir, db, project, store } = bench();
-  const bin = path.join(dir, 'slow-claude');
-  fs.writeFileSync(bin, `#!/bin/sh
-echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
-sleep 2
-echo '{"type":"result","subtype":"success","is_error":false,"permission_denials":[]}'
-`, { mode: 0o755 });
 
   /* The CLI is SILENT for a moment before its first event. That is the window the DB index
    * cannot cover: `beginWork` only fires once a session speaks, so without an in-flight guard
    * both preflights pass and both spawn. A fake that answers instantly hides the whole race. */
-  fs.writeFileSync(bin, `#!/bin/sh
-sleep 1
-echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
-echo '{"type":"result","subtype":"success","is_error":false,"permission_denials":[]}'
-`, { mode: 0o755 });
+  const bin = fake.scriptBin(cliHome(dir), 'slow-claude', `setTimeout(() => { init(); result(); process.exit(0); }, 1000);`);
 
   const [a, b] = await Promise.all([
     supervisor.start(db, project, '첫', { evidenceStore: store, bin, detect: AVAILABLE }),
@@ -973,11 +957,7 @@ test('stopping a Work signals its root but records unknown without full tree pro
   const { dir, db, project, store } = bench();
   const home = `${dir}-cli`;
   fs.mkdirSync(home, { recursive: true });
-  const bin = path.join(home, 'grouped-claude');
-  fs.writeFileSync(bin, `#!/bin/sh
-echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
-exec sleep 20
-`, { mode: 0o755 });
+  const bin = fake.scriptBin(home, 'grouped-claude', `init(); setInterval(() => {}, 1000);`);
 
   const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
   assert.strictEqual(r.ok, true);
@@ -1222,12 +1202,8 @@ test('watchQuiet pushes the states that ONLY silence can produce — and nothing
    * makes it untrue). So it is also the one place where a wrong condition is invisible: the
    * screen simply never shows those states, and nothing errors. */
   const { dir, db, project, store } = bench();
-  const bin = path.join(dir, 'stubborn-claude');
-  fs.writeFileSync(bin, `#!/bin/sh
-trap "" TERM
-echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
-sleep 20
-`, { mode: 0o755 });
+  /* ignores SIGTERM where the OS lets a process do that (POSIX); on Windows kill is unconditional */
+  const bin = fake.scriptBin(cliHome(dir), 'stubborn-claude', `process.on('SIGTERM', () => {}); init(); setInterval(() => {}, 1000);`);
   const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
   const entry = supervisor.live.get(r.workId);
 
@@ -1272,12 +1248,8 @@ sleep 20
 
 test('a cancel that stays unobserved becomes 확인 불가, and never 취소됨', async () => {
   const { dir, db, project, store } = bench();
-  const bin = path.join(dir, 'stubborn-claude');
-  fs.writeFileSync(bin, `#!/bin/sh
-trap "" TERM
-echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
-sleep 20
-`, { mode: 0o755 });
+  /* ignores SIGTERM where the OS lets a process do that (POSIX); on Windows kill is unconditional */
+  const bin = fake.scriptBin(cliHome(dir), 'stubborn-claude', `process.on('SIGTERM', () => {}); init(); setInterval(() => {}, 1000);`);
   const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
   supervisor.cancel(db, r.workId);
   assert.strictEqual(supervisor.snapshot(db, r.workId).cancelUnconfirmed, false, 'it has only just been asked');
@@ -1570,7 +1542,7 @@ test('a replaced, removed or non-executable pinned binary refuses resume without
 test('binaryIdentity resolves names through PATH and refuses what is not an executable file', () => {
   const dir = tempDir('juqode-id-');
   const exe = path.join(dir, 'claude');
-  fs.writeFileSync(exe, '#!/bin/sh\n', { mode: 0o755 });
+  fs.writeFileSync(exe, 'placeholder\n', { mode: 0o755 });
   const saved = process.env.PATH;
   try {
     process.env.PATH = `${dir}${path.delimiter}${saved}`;
@@ -1658,7 +1630,7 @@ test('an executable whose identity cannot be established is refused before any s
 
 test('a Windows-style shim pinned by its launcher alone is not a full binary attestation', () => {
   const dir = tempDir('juqode-shim-');
-  const exe = path.join(dir, 'claude'); fs.writeFileSync(exe, '#!/bin/sh\n', { mode: 0o755 });
+  const exe = path.join(dir, 'claude'); fs.writeFileSync(exe, 'placeholder\n', { mode: 0o755 });
   const id = session.binaryIdentity(exe);
   assert.strictEqual(id.targetResolved, true, 'a plain executable is its own target');
   const partial = Object.freeze({ sessionId: 's', canonicalCwd: session.canonicalDir(dir), identity: { ...id, targetResolved: false } });
