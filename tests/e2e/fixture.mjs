@@ -225,7 +225,8 @@ if (resumed) {
   }
 }
 const out = resumed ? [
-  { type: 'system', subtype: 'init', session_id: 's', cwd: '/p', claude_code_version: '9.9.9' },
+  /* a resumed session reports the folder it runs in; JuQode stops one that is not the project */
+  { type: 'system', subtype: 'init', session_id: 's', cwd: process.cwd(), claude_code_version: '9.9.9' },
   /* TWO tool_use blocks in ONE message, and two tool_results in one reply — a parallel call,
    * which is what the real CLI emits when it edits two files at once. This is the shape that
    * made the 확인됨 tool count report 1 for 2 (batch 18 QA); without it in the recording the

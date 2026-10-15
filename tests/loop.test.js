@@ -67,7 +67,7 @@ function cliHome(dir) {
   return home;
 }
 
-function cli(dir, events, { edits = [], exit = 0, silent = false, capturePrompt = false, name = 'fake-claude' } = {}) {
+function cli(dir, events, { edits = [], exit = 0, silent = false, capturePrompt = false, name = 'fake-claude', initCwd = null } = {}) {
   const home = cliHome(dir);
   const bin = path.join(home, name);
   const script = path.join(home, `${name}.js`);
@@ -79,7 +79,11 @@ const fs = require('fs');
 fs.appendFileSync(${JSON.stringify(path.join(cliHome(dir), 'ARGV.log'))}, process.argv.slice(2).join(' ') + '\\n');
 ${capturePrompt ? `fs.writeFileSync(${JSON.stringify(path.join(home, 'PROMPT.log'))}, fs.readFileSync(0, 'utf8'));` : ''}
 ${edits.map((e) => `fs.writeFileSync(${JSON.stringify(e.path)}, ${JSON.stringify(e.body)});`).join('\n')}
-${silent ? '' : `for (const e of ${JSON.stringify(events)}) process.stdout.write(JSON.stringify(e) + '\\n');`}
+${silent ? '' : `for (const e of ${JSON.stringify(events)}) {
+  /* a real CLI's init event reports the cwd it actually runs in (measured on --resume, 2.1.283) */
+  if (e.type === 'system' && e.subtype === 'init') e.cwd = ${initCwd === null ? 'process.cwd()' : JSON.stringify(initCwd)};
+  process.stdout.write(JSON.stringify(e) + '\\n');
+}`}
 process.exit(${exit});
 `);
   fs.writeFileSync(bin, `#!/bin/sh\nexec ${process.execPath} ${script} "$@"\n`, { mode: 0o755 });
@@ -1363,4 +1367,35 @@ test('specTarget reads a grant string, or refuses to read one at all', () => {
   for (const bad of [null, undefined, '', 'Edit', 'Edit(', 'Edit)', 42]) {
     assert.strictEqual(specTarget(bad), null, `specTarget accepted ${JSON.stringify(bad)}`);
   }
+});
+
+/* ───────────── resume must run in the project folder (H3 2.1.283: --resume follows the caller's cwd) ───────────── */
+
+test('a resumed session whose init cwd is NOT the project is stopped and the Work fails', async () => {
+  const { dir, db, project, store } = bench();
+  const bin = cli(dir, [INIT, DENIED, RESULT_DENIED]);
+  const r = await supervisor.start(db, project, 'a.txt 바꿔줘', { evidenceStore: store, bin, detect: AVAILABLE });
+  await r.done;
+
+  /* the retry CLI reports another folder and, if left running, would edit a.txt there */
+  const other = tempDir('juqode-other-');
+  const retryBin = cli(dir, [INIT, OK], { initCwd: other, edits: [{ path: path.join(dir, 'a.txt'), body: 'wrong-place\n' }] });
+  supervisor.live.get(r.workId).bin = retryBin;
+
+  await supervisor.allow(db, r.workId, 'tu_1');
+  const snap = supervisor.snapshot(db, r.workId);
+  assert.strictEqual(snap.status, 'ended');
+  assert.strictEqual(snap.outcome, 'failed', 'a resume in the wrong folder must not read as 완료');
+  assert.ok(repo.signalsFor(db, r.workId).some((x) => /juqodeCwdMismatch/.test(String(x.payload))),
+    'the mismatch left no record');
+});
+
+test('a mismatched init cwd is not mistaken for a symlink to the project', () => {
+  const dir = tempDir('juqode-same-');
+  const link = `${dir}-link`;
+  fs.symlinkSync(dir, link);
+  juqodeTempDirs.push(link);
+  assert.strictEqual(session.sameDir(link, dir), true, 'a symlinked name of the project is the project');
+  assert.strictEqual(session.sameDir('/p', dir), false);
+  assert.strictEqual(session.sameDir(undefined, dir), false, 'an init event with no cwd is not a match');
 });

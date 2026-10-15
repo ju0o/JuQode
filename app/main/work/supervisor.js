@@ -724,6 +724,17 @@ function snapshot(db, workId) {
   };
 }
 
+/* A resumed session that started in another folder is a failure, never a success: the turn ran
+ * (or was stopped) somewhere that is not the project, so nothing it reports can be trusted. */
+function failCwdMismatch(db, workId, r, onUpdate) {
+  if (!r?.cwdMismatch) return false;
+  writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW,
+    payload: JSON.stringify({ juqodeCwdMismatch: r.cwdMismatch }) });
+  apply(db, workId, { kind: KIND.FINISH, payload: { subtype: 'error_cwd_mismatch', isError: true,
+    terminalReason: 'cwd_mismatch', apiErrorStatus: null, denials: [], text: null } }, onUpdate);
+  return true;
+}
+
 /**
  * WBS-14 · the user allows ONE refused action. D-116: JuQode never approves on their behalf,
  * so this only ever runs because a person pressed the button.
@@ -765,7 +776,7 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
   /* Same Work, same session. Restating the whole request made Claude repeat completed writes
    * after each one-action grant; the existing conversation already contains the original task
    * and denied tool call. This fixed continuation keeps that context without replaying the task. */
-  await session.run({
+  const retryRun = await session.run({
     cwd: entry.cwd, sessionId: entry.sessionId, resume: true, allowedTools: [spec],
     prompt: 'Continue the original request from this session. Retry the one action that was just allowed, then finish without repeating completed work.',
     bin: entry.bin,
@@ -775,6 +786,8 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
       apply(db, workId, sig, opts.onUpdate ?? (() => {}));
     },
   });
+
+  failCwdMismatch(db, workId, retryRun, opts.onUpdate ?? (() => {}));
 
   /* The retry is when the change actually lands, so the after-basis is taken again. An earlier
    * one recorded a project that had not been edited yet. */
@@ -804,7 +817,7 @@ async function answer(db, workId, text, opts = {}) {
   writeSignal(db, workId, { source: 'user', kind: KIND.ANSWER, payload: text });
   apply(db, workId, { kind: KIND.ANSWER, payload: { text } }, opts.onUpdate ?? (() => {}));
 
-  await session.run({
+  const answerRun = await session.run({
     cwd: entry.cwd, sessionId: entry.sessionId, resume: true, prompt: text, bin: entry.bin,
     onChild: (c) => { entry.child = c; },
     onSignal: (sig, raw, line) => {
@@ -812,6 +825,11 @@ async function answer(db, workId, text, opts = {}) {
       apply(db, workId, sig, opts.onUpdate ?? (() => {}));
     },
   });
+  if (failCwdMismatch(db, workId, answerRun, opts.onUpdate ?? (() => {}))) {
+    release(db, workId);
+    (opts.onUpdate ?? (() => {}))(snapshot(db, workId));
+    return { ok: false, reason: 'cwd-mismatch' };
+  }
   return { ok: true };
 }
 

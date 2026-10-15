@@ -16,6 +16,7 @@
  */
 const { spawn, spawnSync } = require('node:child_process');
 const path = require('node:path');
+const fs = require('node:fs');
 const { resolveBin, launchArgv } = require('../claude-detect');
 const { toSignal } = require('../work/reducer');
 
@@ -36,6 +37,14 @@ function windowsRunnerTreeMayBeAlive(pid, spawnSyncImpl = spawnSync) {
   } catch {
     return true;
   }
+}
+
+/* MEASURED (Claude Code 2.1.283, H3): `--resume` reports the CALLER's cwd in its init event, not
+ * the cwd the session was created in. A cwd-relative grant such as `Edit(hello.txt)` would then
+ * name a file in the wrong folder. The init cwd must be the project, compared canonically. */
+function sameDir(a, b) {
+  const canon = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(String(p)); } };
+  return typeof a === 'string' && typeof b === 'string' && canon(a) === canon(b);
 }
 
 function baseArgs(sessionId) {
@@ -142,7 +151,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
     }
 
     let seq = 0, unparsed = 0, sawEvent = false, stderr = '', buf = '';
-    let killer = null, settled = false;
+    let killer = null, settled = false, cwdMismatch = null;
 
     /* A multi-byte character split across chunk boundaries becomes U+FFFD if each Buffer is
      * stringified on its own — measured on 7-byte chunks, Korean text came back as replacement
@@ -152,7 +161,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
     child.stderr.setEncoding('utf8');
 
     const line = (text) => {
-      if (!text.trim()) return;
+      if (!text.trim() || cwdMismatch) return;     // after a mismatch nothing more is recorded or acted on
       let raw = null;
       try { raw = JSON.parse(text); } catch { unparsed += 1; }
       sawEvent = true;
@@ -163,6 +172,12 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
        * characters while `unparsed` stayed 0, because corrupted text is still valid JSON. */
       const sig = raw ? toSignal(raw) : { kind: 'raw', payload: { unparsed: true } };
       onSignal?.({ ...sig, seq: seq++ }, raw, text);
+      /* The init line is recorded as it was emitted, then the child is stopped before it can
+       * act in the wrong folder. */
+      if (resume && raw?.type === 'system' && raw.subtype === 'init' && !sameDir(raw.cwd, cwd)) {
+        cwdMismatch = { expected: cwd, actual: raw.cwd ?? null };
+        stop(child);
+      }
     };
 
     child.stdout.on('data', (d) => {
@@ -193,7 +208,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
         /* `19` §C3-L / `15` SC-02: a session that produced NO event before dying did not
          * start. It gets a card and no `work` row. Note the exit code is not consulted for
          * anything else — a denied run exits 0. */
-        startFailed: !sawEvent,
+        startFailed: !sawEvent, cwdMismatch,
       });
     };
 
@@ -278,5 +293,5 @@ const grantedSignal = (denial, spec) => ({
   payload: { tool: denial?.tool ?? null, toolUseId: denial?.toolUseId ?? null, scope: spec },
 });
 
-module.exports = { run, stop, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
+module.exports = { run, stop, sameDir, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
   windowsRunnerTreeMayBeAlive, processTreeMayBeAlive };
