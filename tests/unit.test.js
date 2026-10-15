@@ -10,6 +10,7 @@ const R = path.join(__dirname, '..');
  * file DESCRIBING what it does not do; `raw()` is there for the few checks whose subject IS
  * the whole file. */
 const { code: read, text: raw } = require(path.join(__dirname, 'src.js'));
+const { readCanon } = require(path.join(__dirname, 'canon.js'));
 
 /* Block comments, whole-line comments, AND trailing ones. Stripping only the first two let a
    trailing `// …` carry Korean past the copy check — a comment explaining a rule was read as
@@ -137,13 +138,11 @@ test('no fabricated progress anywhere in the renderer', () => {
 });
 
 test('every Korean string is either Canon 18 verbatim or a marked Canon gap', () => {
-  const canon = process.env.JUQODE_CANON ||
-    '/home/skkse12/Desktop/Projects/Team/JuQode-Private/docs/current/18_KOREAN_UX_COPY.md';
   let dict;
-  try { dict = fs.readFileSync(canon, 'utf8'); }
-  catch {
-    // Skipping silently is how invented copy got in. Fail loudly instead; CI must set the path.
-    assert.fail(`Canon 18 not readable at ${canon} — set JUQODE_CANON. Refusing to pass vacuously.`);
+  try { dict = readCanon('copy', 'utf8'); }
+  catch (e) {
+    // Skipping silently is how invented copy got in. Fail loudly instead; CI must provide the Canon.
+    assert.fail(e.message);
   }
 
   // Enumerate EVERY Korean string in the renderer, rather than whitelisting a few.

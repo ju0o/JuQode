@@ -13,6 +13,7 @@ const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
 const { code: srcOf, text: rawOf } = require(path.join(__dirname, 'src.js'));
+const { readCanon } = require(path.join(__dirname, 'canon.js'));
 
 /* One helper for the whole suite — see tests/tmp.js. Eight private copies each cleaned up
  * only in `process.on('exit')`, which a killed run never reaches; the leftovers filled the
@@ -222,11 +223,9 @@ test('foreign keys are on: a Work cannot point at a project that is not there', 
 });
 
 test('the shipped schema.sql has not drifted from Canon', () => {
-  const canon = process.env.JUQODE_CANON_DATA ||
-    '/home/skkse12/Desktop/Projects/Team/JuQode-Private/docs/data/schema.sql';
   let want;
-  try { want = fs.readFileSync(canon); }
-  catch { assert.fail(`Canon schema not readable at ${canon} — set JUQODE_CANON_DATA. Refusing to pass vacuously.`); }
+  try { want = readCanon('schema'); }
+  catch (e) { assert.fail(e.message); }
   assert.deepStrictEqual(fs.readFileSync(path.join(R, 'app/main/db/schema.sql')), want,
     'app/main/db/schema.sql must be a verbatim copy of Canon docs/data/schema.sql');
 });
