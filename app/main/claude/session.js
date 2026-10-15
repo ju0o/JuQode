@@ -23,6 +23,14 @@ const { toSignal } = require('../work/reducer');
 /** A Work that never produced a first event is not a Work — `20`: no row, no History entry. */
 const START_WINDOW_MS = 30_000;
 
+/* `detached` puts the child in its own PROCESS GROUP, which is what keeps a group signal from
+ * reaching JuQode — a POSIX concern. On Windows it only means DETACHED_PROCESS (no console), and
+ * MEASURED on H1 (Windows 11 26200, Node 24): a `cmd.exe /c <npm shim>.cmd` child started that way
+ * delivers NOTHING on stdout (0 bytes, exit 0), while node.exe and a native claude.exe are fine.
+ * Every Work through an npm-installed `claude.cmd` would have looked like a session that never
+ * said anything. Windows has no group to protect against, so it is simply not detached there. */
+const WINDOWS = process.platform === 'win32';
+
 /* Windows starts Claude's npm `.cmd` shim under cmd.exe. After a restart, the wrapper may be
  * gone while a descendant still owns the Project. This fixed, read-only PowerShell query runs
  * through the existing process capability owner; errors are uncertainty, never proof of death.
@@ -227,7 +235,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
        * reported Claude Code as available and then failed to start every single Work. */
       const launch = launchArgv(bin || resolveBin(), args);
       child = spawn(launch.file, launch.argv,
-                    { cwd, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+                    { cwd, env, detached: !WINDOWS, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       /* The user's words, unmodified, and nothing else. A child that exits without reading
        * makes this EPIPE, which is its choice and not an error on our side. */
       child.stdin.on('error', () => {});
