@@ -26,6 +26,8 @@ const tempDir = (prefix) => {
   juqodeTempDirs.push(d);
   return d;
 };
+/* descendants of cancelled fixtures are alive by design; they must not hold the runner open */
+test.after(() => fake.reapProcessesUnder(juqodeTempDirs));
 process.on('exit', () => {
   for (const d of juqodeTempDirs) {
     for (const target of [d, `${d}-cli`]) {
@@ -654,8 +656,7 @@ test('cancelling an unresolved Work with no live root remains unknown until ackn
 test('cancelling a Task Run with unproven descendants stays unknown and leaves its verdict unverified', async () => {
   const { dir, db, project, store } = bench({ git: false });
   const task = repo.createTask(db, project.id, { goal: 'Cancel without inventing rollback' });
-  const bin = path.join(dir, 'slow-task-claude');
-  fs.writeFileSync(bin, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(`${JSON.stringify(INIT)}\\n`)});\nsetInterval(() => {}, 1000);\n`, { mode: 0o755 });
+  const bin = fake.scriptBin(cliHome(dir), 'slow-task-claude', `init(); setInterval(() => {}, 1000);`);
   const run = await supervisor.start(db, project, 'Cancel this attempt', {
     evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey: 'cancel-task-run-1',
   });
@@ -674,20 +675,18 @@ test('cancelling a Task Run with unproven descendants stays unknown and leaves i
   assert.ok(!repo.signalsFor(db, run.workId).some((item) => item.kind === 'cancel_confirmed'));
 });
 
-test('a success signal racing after cancel cannot turn the Run into success', async () => {
+test('a success signal racing after cancel cannot turn the Run into success', { skip: fake.WIN && 'needs a SIGTERM handler that reports success before exiting; Windows terminates abruptly, so the race cannot be staged — not a Windows PASS' }, async () => {
   const { dir, db, project, store } = bench({ git: false });
   const task = repo.createTask(db, project.id, { goal: 'Cancel wins over a later Agent success report' });
-  const bin = path.join(dir, 'late-success-claude');
   const success = JSON.stringify({ type: 'result', subtype: 'success', is_error: false,
     permission_denials: [], result: 'completed successfully' });
-  fs.writeFileSync(bin, `#!${process.execPath}
-process.stdout.write(${JSON.stringify(`${JSON.stringify(INIT)}\n`)});
+  const bin = fake.scriptBin(cliHome(dir), 'late-success-claude', `init();
 process.on('SIGTERM', () => {
   process.stdout.write(${JSON.stringify(`${success}\n`)});
   setTimeout(() => process.exit(0), 100);
 });
 setInterval(() => {}, 1000);
-`, { mode: 0o755 });
+`);
   const run = await supervisor.start(db, project, 'Cancel before its late success signal', {
     evidenceStore: store, bin, detect: AVAILABLE, taskId: task.id, idempotencyKey: 'cancel-race-run',
   });
@@ -707,11 +706,7 @@ test('a stopped root remains unknown without process-tree proof', async () => {
   const { dir, db, project, store } = bench();
   /* This fixture has no descendants, but the portable adapter cannot prove that fact after
    * root exit, so it must retain the unknown outcome. */
-  const bin = path.join(dir, 'slow-claude');
-  fs.writeFileSync(bin, `#!${process.execPath}
-process.stdout.write(${JSON.stringify(`${JSON.stringify(INIT)}\n`)});
-setInterval(() => {}, 1000);
-`, { mode: 0o755 });
+  const bin = fake.scriptBin(cliHome(dir), 'slow-claude', `init(); setInterval(() => {}, 1000);`);
   const r = await supervisor.start(db, project, 'x', { evidenceStore: store, bin, detect: AVAILABLE });
   assert.strictEqual(r.ok, true);
 
@@ -985,10 +980,8 @@ test('cancel becomes unknown when the root exits before its surviving child proc
   const home = `${dir}-cli`;
   fs.mkdirSync(home, { recursive: true });
   const marker = path.join(home, 'IGNORE-TERM-PID');
-  const bin = path.join(home, 'root-exits-first');
   const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', cwd: dir });
-  const source = `#!${process.execPath}
-const fs = require('node:fs');
+  const source = `const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const helper = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: 'ignore' });
 fs.writeFileSync(${JSON.stringify(marker)}, String(helper.pid));
@@ -996,7 +989,7 @@ process.stdout.write(${JSON.stringify(`${init}\n`)});
 process.on('SIGTERM', () => process.exit(0));
 setInterval(() => {}, 1000);
 `;
-  fs.writeFileSync(bin, source, { mode: 0o755 });
+  const bin = fake.scriptBin(home, 'root-exits-first', source);
   const originalStop = session.stop;
   let helper = null;
   let child = null;
@@ -1310,10 +1303,15 @@ test('a denial carries the GRANT STRING, not only the model\'s raw input', () =>
   const cwd = '/p/app';
   const denial = { tool: 'Edit', toolUseId: 't1', input: { file_path: '../../etc/hosts' } };
   const spec = session.allowSpec(denial, cwd);
-  assert.strictEqual(spec, 'Edit(//etc/hosts)');
-  /* The raw input and the grant do NOT read the same — which is exactly why the card must
-   * carry the grant. */
-  assert.notStrictEqual(denial.input.file_path, spec);
+  if (fake.WIN) {
+    /* How Claude Code spells a path outside the project on Windows is UNKNOWN, so there is no grant. */
+    assert.strictEqual(spec, null);
+  } else {
+    assert.strictEqual(spec, 'Edit(//etc/hosts)');
+    /* The raw input and the grant do NOT read the same — which is exactly why the card must
+     * carry the grant. */
+    assert.notStrictEqual(denial.input.file_path, spec);
+  }
 
   /* The snapshot puts it there. */
   const sup = srcOf('app/main/work/supervisor.js');
@@ -1497,7 +1495,10 @@ test('the Claude binary is pinned at start; PATH shadowing, replacement and remo
     const r = await supervisor.start(b.db, b.project, 'a.txt 바꿔줘', { evidenceStore: b.store, detect: AVAILABLE });
     await r.done;
     const e = supervisor.live.get(r.workId);
-    assert.strictEqual(e.bin, fs.realpathSync(real).replace(/[^/]*$/, 'claude'), 'the entry kept a name instead of the resolved path');
+    /* the resolved ABSOLUTE launcher (Windows resolves the extension from PATHEXT, in its own case) */
+    const want = fs.realpathSync(real);
+    assert.strictEqual(fake.WIN ? e.bin.toLowerCase() : e.bin, fake.WIN ? want.toLowerCase() : want,
+      'the entry kept a name instead of the resolved path');
     assert.ok(path.isAbsolute(e.bin));
     assert.ok(e.binding?.identity?.realPath, 'no binary identity was recorded');
 
@@ -1522,7 +1523,7 @@ test('a replaced, removed or non-executable pinned binary refuses resume without
     ['replaced (new inode)', (bin) => { fs.writeFileSync(`${bin}.new`, fs.readFileSync(bin), { mode: 0o755 }); fs.renameSync(`${bin}.new`, bin); }],
     ['content rewritten in place', (bin) => { fs.appendFileSync(bin, '\n# changed\n'); }],
     ['removed', (bin) => { fs.rmSync(bin); }],
-    ['made non-executable', (bin) => { fs.chmodSync(bin, 0o644); }],
+    ...(fake.WIN ? [] : [['made non-executable', (bin) => { fs.chmodSync(bin, 0o644); }]]),   // NTFS has no execute bit — not a Windows case
   ]) {
     const { dir, db, r } = await deniedWork();
     const e = supervisor.live.get(r.workId);

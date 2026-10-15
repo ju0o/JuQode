@@ -50,4 +50,37 @@ function scriptBin(dir, name, source) {
   return launcher(dir, name, script);
 }
 
-module.exports = { WIN, PRELUDE, launcher, scriptBin };
+/* TEARDOWN BY PATH OWNERSHIP. A test that cancels a Work leaves, by the product's own design, the
+ * descendants of the fixture CLI alive (the end is `ended_unknown`, never "all gone"), and a live
+ * child handle keeps the test process — and so the whole runner — from exiting. The fixture owns
+ * those processes, but a bare pid is not an identity. What is: the command line of every process a
+ * fixture starts names the unique temp directory this file created (`mkdtemp`). Only a process whose
+ * command line contains one of THOSE directories is stopped; never a pid recorded earlier, never a
+ * group, never this process or its parent. Returns the pids it signalled. */
+function reapProcessesUnder(dirs) {
+  const roots = [...new Set((dirs || []).filter((d) => typeof d === 'string' && d.length > 8))];
+  if (!roots.length) return [];
+  const { spawnSync } = require('node:child_process');
+  const self = new Set([process.pid, process.ppid]);
+  const found = [];
+  if (WIN) {
+    const list = roots.map((r) => `'${r.replace(/'/g, "''")}'`).join(',');
+    const ps = `$d=@(${list}); Get-CimInstance Win32_Process | Where-Object { $c=$_.CommandLine; $c -and ($d | Where-Object { $c.Contains($_) }) } | ForEach-Object { $_.ProcessId }`;
+    const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8' });
+    for (const line of String(r.stdout || '').split(/\r?\n/)) { const n = Number(line.trim()); if (Number.isInteger(n) && n > 4) found.push(n); }
+  } else {
+    const r = spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
+    for (const line of String(r.stdout || '').split('\n')) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+      if (m && roots.some((d) => m[2].includes(d))) found.push(Number(m[1]));
+    }
+  }
+  const killed = [];
+  for (const pid of found) {
+    if (self.has(pid)) continue;
+    try { process.kill(pid, 'SIGKILL'); killed.push(pid); } catch { /* gone */ }   // positive pid only
+  }
+  return killed;
+}
+
+module.exports = { WIN, PRELUDE, launcher, scriptBin, reapProcessesUnder };

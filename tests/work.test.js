@@ -950,11 +950,10 @@ test('allowing narrows to one tool and one target, never to the tool as a whole'
     ? 'Edit(sub/a.txt)' : null);
 });
 
-test('Windows: an absolute path outside the project is still ONE scoped target (exact syntax UNKNOWN)', { skip: !WIN && 'Windows-only' }, () => {
-  const spec = allowSpec({ tool: 'Edit', input: { file_path: 'C:\\elsewhere\\x.txt' } }, 'C:\\p');
-  assert.ok(spec && /^Edit\(.+\)$/.test(spec), `no scoped grant: ${spec}`);
-  assert.ok(!/[*?\[\]{},]/.test(spec), `the grant is wider than one file: ${spec}`);
-  assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: 'C:\\p\\sub\\a.txt' } }, 'C:\\p'), 'Edit(sub/a.txt)',
+test('Windows: a path outside the project gets NO grant (its spelling in Claude Code is UNKNOWN); inside stays scoped', { skip: !WIN && 'Windows-only' }, () => {
+  assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: 'C:\\elsewhere\\x.txt' } }, 'C:\\p'), null,
+    'an absolute path outside the project must not become a guess such as `Edit(/C:/…)`, which reads as a cwd-relative glob');
+  assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: 'C:\\p\\sub\\a.txt' } }, 'C:\\p'), 'Edit(sub/a.txt)',
     'a file inside the project is named relative to it with forward slashes');
 });
 
