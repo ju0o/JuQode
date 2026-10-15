@@ -713,6 +713,45 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   }
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
 
+  /* V1-310 · this Work is still permission_waiting. A file-changing Quick Command explains
+   * itself as unavailable and does not run. The drawer is closed again before the later
+   * TD-01 steps, which expect it shut. */
+  step('active run blocks file qc');
+  await evalJs(`window.__toggleDrawer()`);
+  await sleep(300);
+  await evalJs(`(() => { const f = document.querySelector('[data-el="qc-input"]'); f.value = '빌드해줘'; })()`);
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
+  await sleep(600);
+  out.qcActiveRun = await evalJs(`(() => {
+    const n = document.querySelector('[data-el="qc-card"]');
+    return JSON.stringify({ kind: n?.getAttribute('data-kind') ?? null, text: n?.innerText ?? null });
+  })()`);
+  out.qcActiveRunReds = await evalJs(RED_COUNT('[data-el="qc-card"], [data-el="qc-card"] *'));
+  /* innerText still holds a sentence that `.td01-qcbody` has scrolled out of sight.
+   * The sentence has to sit inside the visible body, or the refusal is not on screen. */
+  out.qcActiveRunBox = await evalJs(`(() => {
+    const card = document.querySelector('[data-el="qc-card"]');
+    const p = card?.querySelector('p');
+    const box = document.querySelector('.td01-qcbody');
+    if (!p || !box) return null;
+    const a = p.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    return JSON.stringify({
+      visible: a.height > 8 && a.top >= b.top - 1 && a.bottom <= b.bottom + 1,
+      top: Math.round(a.top), bottom: Math.round(a.bottom),
+      boxTop: Math.round(b.top), boxBottom: Math.round(b.bottom),
+    });
+  })()`);
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `td01-active-run-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await evalJs(`if (window.__drawer().open) window.__toggleDrawer()`);
+  await sleep(300);
+
   /* ── D-138 §9 · the SAME hierarchy at every supported width ────────────────────────────
    * The external review noticed that SHRINKING the window produced a more understandable
    * order. That is evidence the wide layout was wrong, so the wide layout is what is measured:
@@ -2827,6 +2866,19 @@ assert.deepStrictEqual(JSON.parse(results.drawerBannerParts),
   'something else joined the banner, or the sentence was reworded');
 
 /* `19` §C4: 항상 설명 후 확인. Typing produced an EXPLANATION and ran nothing. */
+{
+  const blocked = JSON.parse(results.qcActiveRun);
+  assert.strictEqual(blocked.kind, 'unavailable', `the build card stayed ${blocked.kind} during a live Work`);
+  assert.ok(blocked.text.includes('지금 이 프로젝트에서 작업이 진행 중이에요'),
+    `the card did not say why the build waits: ${blocked.text}`);
+  assert.ok(blocked.text.includes('파일을 바꾸는 명령은 그 작업이 끝난 뒤에 할 수 있어요'));
+  assert.ok(!blocked.text.includes('샌드박스'));
+  assert.strictEqual(results.qcActiveRunReds, 0, 'waiting for the Work was painted as a failure');
+  const box = JSON.parse(results.qcActiveRunBox);
+  assert.strictEqual(box.visible, true,
+    `the refusal sentence is outside the visible Quick Command body: ${results.qcActiveRunBox}`);
+}
+
 assert.strictEqual(results.qcCardKind, 'explained');
 assert.ok(results.qcCard.includes('이해한 것'), 'the card does not say what it understood');
 assert.ok(results.qcCard.includes('npm run test'), 'the card does not show the command it would run');

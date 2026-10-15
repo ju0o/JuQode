@@ -181,7 +181,11 @@
    Quick Command 에 60 px 쯤 남아 카드 한 장이 들어가지 않는다 — 서랍이 열려도 아무것도
    읽을 수 없었다. 짧은 창에서는 서랍이 화면을 더 쓰고, 셸 출력이 먼저 양보한다. */
 @media (max-height: 780px) {
-  .td01 { height: min(64vh, 520px); }
+  /* Measured on the 1200×800 window (content height 770). At 64vh, `.td01-qcbody`
+   * was about 55px, so the refusal sentence under the chip was below the fold.
+   * 78vh keeps that sentence inside the visible body. The shell line stays
+   * `flex: 0 0 auto` and is not the region that shrinks. */
+  .td01 { height: min(78vh, 640px); }
   .td01-termout { max-height: 60px; }
   .td01-output { max-height: 26vh; }
 }

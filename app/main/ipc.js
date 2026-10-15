@@ -102,6 +102,14 @@ function makeHandlers(deps) {
     if (termLive && termLive.projectId !== projectId) termClose();
   };
   const liveFor = (projectId) => [...qcLive.values()].filter((e) => e.projectId === projectId);
+  /* Re-read at the moment of use. A card built earlier is a snapshot and must not be the
+   * gate: a Work can start after the list was drawn. */
+  const activeRunBlocksQc = (projectId, ruleId) =>
+    qcRules.mutatesProjectFiles(ruleId) && Boolean(repo.activeWork(db(), projectId));
+  const withActiveRun = (projectId, ruleId, avail) => {
+    if (!avail.available || !activeRunBlocksQc(projectId, ruleId)) return avail;
+    return { ...avail, available: false, reason: 'active-run' };
+  };
   /* …and with a narrative pass in flight (`19` §C1 ⑦). Both spawn a Claude Code child. */
   const narrating = new Set();
 
@@ -247,7 +255,8 @@ function makeHandlers(deps) {
       }
 
       const rule = qcRules.ruleById(match.id);
-      const avail = qcAvail.availability(match.id, { root: row.path, devServer: devServerOf(projectId) });
+      const avail = withActiveRun(projectId, match.id,
+        qcAvail.availability(match.id, { root: row.path, devServer: devServerOf(projectId) }));
       return { ok: true, route: match, phrase: String(phrase ?? ''),
                rule: { id: rule.id, kind: rule.kind, risk: rule.risk, stopRule: rule.stopRule ?? null },
                available: avail.available, reason: avail.reason, data: avail.data };
@@ -262,7 +271,8 @@ function makeHandlers(deps) {
       if (!row) return { ok: false, reason: 'no-project' };
       const dev = devServerOf(projectId);
       return { ok: true, rules: qcRules.RULES.map((r) => {
-        const a = qcAvail.availability(r.id, { root: row.path, devServer: dev });
+        const a = withActiveRun(projectId, r.id,
+          qcAvail.availability(r.id, { root: row.path, devServer: dev }));
         return { id: r.id, kind: r.kind, risk: r.risk,
                  available: a.available, reason: a.reason, data: a.data };
       }) };
@@ -312,6 +322,12 @@ function makeHandlers(deps) {
       }
 
       if (!avail.data.argv) return { ok: false, reason: 'not-executable' };
+
+      /* The gate is this read, not the card. It sits in the same synchronous turn as the
+       * spawn: Electron runs another IPC handler only at an await, and there is none between
+       * here and `qcRun.start`. `start` itself may `git add` before it spawns, so the check
+       * is before `beginQcRun` as well — a refused command leaves no row. */
+      if (activeRunBlocksQc(projectId, ruleId)) return { ok: false, reason: 'active-run' };
 
       const status = rule.kind === 'long_running' ? 'long_running' : 'running';
       const runId = repo.beginQcRun(db(), projectId, {

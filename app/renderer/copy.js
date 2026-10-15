@@ -716,6 +716,10 @@ export const C = {
       'unknown-rule':     '정해진 Quick Command 가 아니에요.',
       'not-executable':   '이 동작을 실행할 방법을 찾지 못했어요.',
       'no-project':       '열려 있는 프로젝트가 없어요.',
+      /* V1-310. An active Work already has the user's go-ahead to change files. A second
+       * writer at the same time is refused before it starts. Not a failure, and not a claim
+       * that the terminal is isolated. */
+      'active-run':       '지금 이 프로젝트에서 작업이 진행 중이에요. 파일을 바꾸는 명령은 그 작업이 끝난 뒤에 할 수 있어요.',
     },
     /* WBS-25 · 셸 명령줄. DV-11 판정(파이프 셸 · PM 2026-09-10) 이후에야 존재하는 화면이고,
      * `18` 은 이 줄에 대한 키를 갖고 있지 않다 — `term.mock` 은 고르지 않은 선택지의 문구이고,

@@ -294,4 +294,18 @@ function attempt(compact, prefix) {
 
 const ruleById = (id) => RULES.find((r) => r.id === id) ?? null;
 
-module.exports = { match, normalize, RULES, ruleById, FILLERS, ENDINGS, SYNONYMS };
+/* Commands whose action can write the project or publish it. An active Work is the only
+ * writer the product has approved for that moment, so these wait. A script body is the
+ * project's own and can do anything, which is why build, test, and dev start are in this
+ * set even when one particular script happens to be read-only.
+ *
+ * Not in the set: `qc.git.status` only reads, `qc.terminal.open` spawns nothing, and
+ * `qc.dev.stop` only signals a process JuQode already started. Stopping that process has
+ * to stay possible while a Work is open. */
+const FILE_MUTATING = new Set([
+  'qc.git.commit', 'qc.build', 'qc.test', 'qc.dev.start', 'qc.deploy',
+]);
+
+const mutatesProjectFiles = (ruleId) => FILE_MUTATING.has(ruleId);
+
+module.exports = { match, normalize, RULES, ruleById, mutatesProjectFiles, FILLERS, ENDINGS, SYNONYMS };

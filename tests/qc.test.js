@@ -23,7 +23,7 @@ const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
 const { code: srcOf, text: rawOf } = require(path.join(__dirname, 'src.js'));
-const { match, normalize, RULES, ruleById } = require(path.join(R, 'app/main/qc/rules.js'));
+const { match, normalize, RULES, ruleById, mutatesProjectFiles } = require(path.join(R, 'app/main/qc/rules.js'));
 const { availability, packageManager } = require(path.join(R, 'app/main/qc/availability.js'));
 /* The store's half of the closed set — `schema.sql` seeds Canon's six, migrations carry the rest. */
 const { MIGRATIONS } = require(path.join(R, 'app/main/db/db.js'));
@@ -981,13 +981,117 @@ test('every refusal the run handler can give has a sentence', () => {
    * 아니에요" about a command the product had just explained. Every reason either side can
    * produce must resolve to something true. */
   const copy = srcOf('app/renderer/copy.js');
-  const HANDLER = ['already-running', 'unknown-rule', 'not-executable', 'no-project'];
+  const HANDLER = ['already-running', 'unknown-rule', 'not-executable', 'no-project', 'active-run'];
   const AVAIL = ['no_script', 'no_package_json', 'already_running', 'not_running',
                  'placeholder_script', 'not_git', 'unknown_rule'];
   for (const r of [...HANDLER, ...AVAIL]) {
     assert.ok(new RegExp(`['"]?${r}['"]?\\s*:`).test(copy),
       `the card has no sentence for the refusal "${r}"`);
   }
+});
+
+test('file-changing rules are a closed set and the terminal is not called a sandbox', () => {
+  for (const id of ['qc.git.commit', 'qc.build', 'qc.test', 'qc.dev.start', 'qc.deploy']) {
+    assert.strictEqual(mutatesProjectFiles(id), true, id);
+  }
+  for (const id of ['qc.git.status', 'qc.terminal.open', 'qc.dev.stop']) {
+    assert.strictEqual(mutatesProjectFiles(id), false, id);
+  }
+  const copy = srcOf('app/renderer/copy.js');
+  assert.ok(!copy.includes('샌드박스'), 'user-facing copy calls the terminal a sandbox');
+  assert.ok(!/\bsandbox\b/i.test(copy), 'user-facing copy calls the terminal a sandbox');
+  assert.match(copy, /내 컴퓨터에서 내 권한으로 바로 실행/);
+});
+
+test('the active-Work check and the spawn are one synchronous turn', () => {
+  const ipc = srcOf('app/main/ipc.js');
+  const gate = ipc.indexOf('if (activeRunBlocksQc(projectId, ruleId))');
+  const begin = ipc.indexOf('beginQcRun', gate);
+  const spawn = ipc.indexOf('qcRun.start', begin);
+  assert.ok(gate !== -1 && begin > gate && spawn > begin, 'the run handler lost the active-Work gate');
+  assert.ok(!ipc.slice(gate, spawn).includes('await'),
+    'an await between the active-Work read and the spawn lets another handler write first');
+});
+
+test('an active Work refuses a file-changing Quick Command before it writes', async () => {
+  const b = qcBench({
+    'package.json': pkg({
+      build: 'node -e "require(\'fs\').writeFileSync(\'touched.txt\',\'x\')"',
+      test: 'node -e "require(\'fs\').writeFileSync(\'touched-test.txt\',\'x\')"',
+      dev: 'node -e "require(\'fs\').writeFileSync(\'touched-dev.txt\',\'x\')"',
+      deploy: 'node -e "require(\'fs\').writeFileSync(\'touched-deploy.txt\',\'x\')"',
+    }),
+    'keep.txt': 'same',
+    'note.txt': 'keep',
+  });
+  const before = b.h['juqode:qc-list'](null, b.project.id);
+  assert.strictEqual(before.rules.find((r) => r.id === 'qc.build').available, true,
+    'the list was already blocked before a Work existed');
+
+  const work = repo.beginWork(b.db, b.project.id, '버튼 고쳐줘');
+  assert.strictEqual(work.ok, true, work.reason);
+
+  const during = b.h['juqode:qc-list'](null, b.project.id);
+  assert.strictEqual(during.rules.find((r) => r.id === 'qc.build').reason, 'active-run');
+  assert.notStrictEqual(during.rules.find((r) => r.id === 'qc.git.status').reason, 'active-run');
+  assert.strictEqual(during.rules.find((r) => r.id === 'qc.terminal.open').available, true);
+  const routed = b.h['juqode:qc-route'](null, b.project.id, '빌드 해줘');
+  assert.strictEqual(routed.available, false);
+  assert.strictEqual(routed.reason, 'active-run');
+
+  for (const id of ['qc.build', 'qc.test', 'qc.dev.start', 'qc.deploy', 'qc.git.commit']) {
+    const run = await b.h['juqode:qc-run'](null, b.project.id, id, id);
+    assert.strictEqual(run.ok, false, id);
+    assert.strictEqual(run.reason, 'active-run', `${id} refused as ${run.reason}/${run.detail}`);
+  }
+  assert.deepStrictEqual(repo.qcRunsFor(b.db, b.project.id), [], 'a refused command became a row');
+  for (const name of ['touched.txt', 'touched-test.txt', 'touched-dev.txt', 'touched-deploy.txt', '.git']) {
+    assert.ok(!fs.existsSync(path.join(b.dir, name)), `${name} was written during an active Work`);
+  }
+  assert.strictEqual(fs.readFileSync(path.join(b.dir, 'keep.txt'), 'utf8'), 'same');
+  assert.strictEqual(fs.readFileSync(path.join(b.dir, 'note.txt'), 'utf8'), 'keep');
+
+  const opened = await b.h['juqode:qc-run'](null, b.project.id, 'qc.terminal.open', '터미널');
+  assert.strictEqual(opened.ok, true);
+  assert.strictEqual(opened.action, 'open-drawer');
+
+  const at = new Date().toISOString();
+  b.db.prepare(`update work set status = 'ended', outcome = 'complete', ended_at = ? where id = ?`)
+    .run(at, work.work.id);
+  const after = await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘');
+  assert.strictEqual(after.ok, true, `${after.reason}/${after.detail}`);
+  await new Promise((res) => {
+    const t = setInterval(() => {
+      if (b.pushed.some((u) => u.runId === after.runId && u.ended)) { clearInterval(t); res(); }
+    }, 20);
+  });
+  assert.ok(fs.existsSync(path.join(b.dir, 'touched.txt')), 'the build did not write once the Work had ended');
+});
+
+test('an active Work still allows git status and stopping a JuQode server', async () => {
+  const b = qcBench({
+    'package.json': pkg({ dev: 'node -e "setInterval(() => {}, 1000)"' }),
+    '.git/HEAD': 'ref: refs/heads/main\n',
+    'keep.txt': 'same',
+  });
+  const started = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.start', '서버 켜줘');
+  assert.strictEqual(started.ok, true, `${started.reason}/${started.detail}`);
+  const work = repo.beginWork(b.db, b.project.id, '버튼 고쳐줘');
+  assert.strictEqual(work.ok, true, work.reason);
+
+  const status = await b.h['juqode:qc-run'](null, b.project.id, 'qc.git.status', '깃 상태');
+  assert.strictEqual(status.ok, true, `${status.reason}/${status.detail}`);
+  assert.notStrictEqual(status.reason, 'active-run');
+
+  const stop = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.stop', '서버 꺼줘');
+  assert.strictEqual(stop.ok, true, `${stop.reason}/${stop.detail}`);
+  assert.strictEqual(stop.action, 'stop');
+  assert.strictEqual(fs.readFileSync(path.join(b.dir, 'keep.txt'), 'utf8'), 'same');
+  await new Promise((res) => {
+    const t = setInterval(() => {
+      if (b.pushed.some((u) => u.runId === started.runId && u.ended)) { clearInterval(t); res(); }
+    }, 20);
+  });
 });
 
 /* ───────── batch-12 security review · what the fixes have to keep true ───────── */
