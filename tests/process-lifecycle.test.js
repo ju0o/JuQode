@@ -62,7 +62,12 @@ function makeReaper(kill = process.kill) {
 const reaper = makeReaper();
 const own = (pid) => reaper.own(pid);
 /* ONE teardown, registered once. Descendants hold the event loop open, so it must run. */
-test.after(() => reaper.reap());
+test.after(() => {
+  reaper.reap();
+  /* and the directories this file made -- the earlier exit handler that removed them was dropped with
+   * the old pid-based teardown, which leaked ~12 directories per run (found on H3: 145 after a day) */
+  for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone or busy */ } }
+});
 
 /* fast stop timings, as the existing cancel tests do */
 const realStop = session.stop;
