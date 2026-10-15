@@ -560,7 +560,7 @@ test('allowing retries that ONE action, and records that a person allowed it', a
 
   /* the retry turn succeeds and edits the file */
   const retryBin = cli(dir, [INIT, OK], { edits: [{ path: path.join(dir, 'a.txt'), body: 'allowed\n' }], capturePrompt: true });
-  supervisor.live.get(r.workId).bin = retryBin;
+  useBin(r.workId, retryBin);
 
   const allowed = await supervisor.allow(db, r.workId, 'tu_1');
   assert.strictEqual(allowed.ok, true);
@@ -597,11 +597,11 @@ test('two concurrent allows do not start two sessions on one session id', async 
   await r.done;
   const retryBin = path.join(dir, 'slow-retry');
   fs.writeFileSync(retryBin, `#!/bin/sh
-echo '{"type":"system","subtype":"init","session_id":"s","cwd":"/p"}'
+echo '{"type":"system","subtype":"init","session_id":"s","cwd":"'"$PWD"'"}'
 sleep 1
 echo '{"type":"result","subtype":"success","is_error":false,"permission_denials":[]}'
 `, { mode: 0o755 });
-  supervisor.live.get(r.workId).bin = retryBin;
+  useBin(r.workId, retryBin);
 
   const [x, y] = await Promise.all([
     supervisor.allow(db, r.workId, 'tu_1'),
@@ -832,7 +832,7 @@ test('a signal that cannot be written does not take the app down', async () => {
 
   /* And a write that genuinely fails is recorded rather than thrown. */
   const retryBin = cli(dir, [INIT, OK]);
-  supervisor.live.get(r.workId).bin = retryBin;
+  useBin(r.workId, retryBin);
   await supervisor.allow(db, r.workId, 'tu_1');
   const after = repo.signalsFor(db, r.workId).map((s) => s.seq);
   assert.deepStrictEqual(after, [...new Set(after)].sort((x, y) => x - y),
@@ -1074,7 +1074,7 @@ test('a retry that lands in a SECOND refusal still refreshes the evidence', asyn
   const retryBin = cli(dir, [INIT, DENIED, RESULT_DENIED], {
     name: 'retry-claude', edits: [{ path: path.join(dir, 'a.txt'), body: 'EDITED BY THE RETRY\n' }],
   });
-  supervisor.live.get(r.workId).bin = retryBin;
+  useBin(r.workId, retryBin);
   await supervisor.allow(db, r.workId, 'tu_1');
 
   assert.notStrictEqual(repo.basisFor(db, r.workId, 'after').ref, firstAfter,
@@ -1371,31 +1371,100 @@ test('specTarget reads a grant string, or refuses to read one at all', () => {
 
 /* ───────────── resume must run in the project folder (H3 2.1.283: --resume follows the caller's cwd) ───────────── */
 
-test('a resumed session whose init cwd is NOT the project is stopped and the Work fails', async () => {
-  const { dir, db, project, store } = bench();
-  const bin = cli(dir, [INIT, DENIED, RESULT_DENIED]);
-  const r = await supervisor.start(db, project, 'a.txt 바꿔줘', { evidenceStore: store, bin, detect: AVAILABLE });
+/* test seam: point a live Work at another fake CLI AND re-bind it, as a legitimate binary change
+ * would not be silently accepted by the pre-resume binding. */
+function useBin(workId, bin) {
+  const e = supervisor.live.get(workId);
+  e.bin = bin;
+  e.binding = session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, bin });
+}
+
+const sha = (f) => require('node:crypto').createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+
+async function deniedWork(extraDenied = false) {
+  const b = bench();
+  const second = { type: 'system', subtype: 'permission_denied', tool_name: 'Edit', tool_use_id: 'tu_2', message: 'denied' };
+  const events = extraDenied ? [INIT, DENIED, second, RESULT_DENIED] : [INIT, DENIED, RESULT_DENIED];
+  const bin = cli(b.dir, events);
+  const r = await supervisor.start(b.db, b.project, 'a.txt 바꿔줘', { evidenceStore: b.store, bin, detect: AVAILABLE });
   await r.done;
+  return { ...b, r, bin };
+}
 
-  /* the retry CLI reports another folder and, if left running, would edit a.txt there */
+test('init-cwd mismatch is DETECTION: an early write is measured, never reported as prevented', async () => {
+  const { dir, db, r, project, store } = await deniedWork();
+  const file = path.join(dir, 'a.txt');
+  const before = sha(file);
   const other = tempDir('juqode-other-');
-  const retryBin = cli(dir, [INIT, OK], { initCwd: other, edits: [{ path: path.join(dir, 'a.txt'), body: 'wrong-place\n' }] });
-  supervisor.live.get(r.workId).bin = retryBin;
+  /* the fake CLI writes BEFORE it prints init — exactly the window a post-init check cannot close */
+  useBin(r.workId, cli(dir, [INIT, OK], { initCwd: other, edits: [{ path: file, body: 'early-write\n' }] }));
 
-  await supervisor.allow(db, r.workId, 'tu_1');
+  const res = await supervisor.allow(db, r.workId, 'tu_1');
+  assert.deepStrictEqual([res.ok, res.reason], [false, 'cwd-mismatch'], 'runRetry reported success for a mismatch');
+  assert.notStrictEqual(sha(file), before, 'fixture precondition: the early write really happened');
+
   const snap = supervisor.snapshot(db, r.workId);
   assert.strictEqual(snap.status, 'ended');
-  assert.strictEqual(snap.outcome, 'failed', 'a resume in the wrong folder must not read as 완료');
-  assert.ok(repo.signalsFor(db, r.workId).some((x) => /juqodeCwdMismatch/.test(String(x.payload))),
-    'the mismatch left no record');
+  assert.strictEqual(snap.outcome, 'ended_unknown', 'side effects and descendants are unverified, so not `failed`');
+  assert.strictEqual(repo.getWork(db, r.workId).failure_reason, 'cwd-mismatch');
+  const sig = repo.signalsFor(db, r.workId).find((x) => /juqodeCwdMismatch/.test(String(x.payload)));
+  assert.match(String(sig.payload), /"sideEffectsPrevented":false/);
+  assert.deepStrictEqual(supervisor.changes(db, r.workId, project, store).files, ['a.txt'],
+    'the write the check could not stop must show in the measured changes');
 });
 
-test('a mismatched init cwd is not mistaken for a symlink to the project', () => {
+test('mismatch with SEVERAL unresolved denials still ends the Work (allow and answer)', async () => {
+  for (const via of ['allow', 'answer']) {
+    const { dir, db, r } = await deniedWork(true);
+    const e = supervisor.live.get(r.workId);
+    useBin(r.workId, cli(dir, [INIT, OK], { initCwd: tempDir('juqode-other-') }));
+    const res = via === 'allow' ? await supervisor.allow(db, r.workId, 'tu_1') : await supervisor.answer(db, r.workId, 'x');
+    assert.deepStrictEqual([res.ok, res.reason], [false, 'cwd-mismatch'], via);
+    const snap = supervisor.snapshot(db, r.workId);
+    assert.strictEqual(snap.status, 'ended', `${via}: a second pending denial kept the Work open`);
+    assert.strictEqual(snap.outcome, 'ended_unknown', via);
+    assert.ok(!supervisor.live.has(r.workId), `${via}: stale live entry left behind`);
+  }
+});
+
+test('resume is refused BEFORE any process exists when the binding cannot be verified', async () => {
+  for (const [name, tamper] of [
+    ['project folder gone', (e, d) => { fs.rmSync(d, { recursive: true, force: true }); }],
+    ['cwd swapped', (e) => { e.cwd = tempDir('juqode-swap-'); }],
+    ['binary swapped', (e, d) => { e.bin = cli(d, [INIT, OK], { name: 'other-claude' }); }],
+    ['binding missing', (e) => { e.binding = null; }],
+  ]) {
+    const { dir, db, r } = await deniedWork();
+    const file = path.join(dir, 'a.txt');
+    const e = supervisor.live.get(r.workId);
+    const tripwire = cli(dir, [INIT, OK], { name: 'tripwire', edits: [{ path: file, body: 'ran\n' }] });
+    useBin(r.workId, tripwire);
+    tamper(e, dir);
+    const calls = argvLog(dir).length;
+    const before = fs.existsSync(file) ? sha(file) : null;
+    for (const res of [await supervisor.allow(db, r.workId, 'tu_1'), await supervisor.answer(db, r.workId, 'x')]) {
+      assert.strictEqual(res.ok, false, name);
+      assert.strictEqual(res.reason, 'resume-binding-unverified', name);
+    }
+    assert.strictEqual(argvLog(dir).length, calls, `${name}: a CLI process was started anyway`);
+    assert.strictEqual(fs.existsSync(file) ? sha(file) : null, before, `${name}: a file changed`);
+  }
+});
+
+test('canonical comparison fails closed', () => {
   const dir = tempDir('juqode-same-');
   const link = `${dir}-link`;
   fs.symlinkSync(dir, link);
   juqodeTempDirs.push(link);
   assert.strictEqual(session.sameDir(link, dir), true, 'a symlinked name of the project is the project');
   assert.strictEqual(session.sameDir('/p', dir), false);
-  assert.strictEqual(session.sameDir(undefined, dir), false, 'an init event with no cwd is not a match');
+  assert.strictEqual(session.sameDir(undefined, dir), false);
+  const gone = path.join(dir, 'missing');
+  assert.strictEqual(session.sameDir(gone, gone), false, 'an unresolvable path must not validate itself');
+  const loop = path.join(dir, 'loop');
+  fs.symlinkSync(loop, loop);
+  assert.strictEqual(session.sameDir(loop, loop), false, 'a symlink loop must not validate');
+  const file = path.join(dir, 'f'); fs.writeFileSync(file, '');
+  assert.strictEqual(session.canonicalDir(file), null, 'a file is not a project folder');
+  assert.strictEqual(session.bindSession({ cwd: gone, sessionId: 's' }), null);
 });

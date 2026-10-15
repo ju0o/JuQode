@@ -39,12 +39,43 @@ function windowsRunnerTreeMayBeAlive(pid, spawnSyncImpl = spawnSync) {
   }
 }
 
-/* MEASURED (Claude Code 2.1.283, H3): `--resume` reports the CALLER's cwd in its init event, not
- * the cwd the session was created in. A cwd-relative grant such as `Edit(hello.txt)` would then
- * name a file in the wrong folder. The init cwd must be the project, compared canonically. */
+/* Canonical form of a directory, or null. A path that cannot be resolved is NOT validated —
+ * there is deliberately no fallback to path.resolve, which attests nothing. */
+function canonicalDir(p) {
+  if (typeof p !== 'string' || !p) return null;
+  try {
+    const real = fs.realpathSync.native(p);
+    return fs.statSync(real).isDirectory() ? real : null;
+  } catch { return null; }
+}
+
 function sameDir(a, b) {
-  const canon = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(String(p)); } };
-  return typeof a === 'string' && typeof b === 'string' && canon(a) === canon(b);
+  const ca = canonicalDir(a), cb = canonicalDir(b);
+  return ca !== null && ca === cb;
+}
+
+/* PRE-RESUME BINDING (fail closed). The init-cwd check below runs after the child has started,
+ * so it is detection, not an atomic filesystem barrier. What can be enforced BEFORE spawning is
+ * that the session is resumed only into the exact folder, session and binary it was started
+ * with. Claude Code offers no provider-side sandbox for headless `--allowedTools`, so when this
+ * binding cannot be verified the resume is refused rather than run unbounded. */
+function bindSession({ cwd, sessionId, bin }) {
+  const canonicalCwd = canonicalDir(cwd);
+  if (!canonicalCwd || !sessionId) return null;
+  return Object.freeze({ sessionId, canonicalCwd, bin: bin ?? null });
+}
+
+function verifyResume(binding, { cwd, sessionId, bin, projectPath }) {
+  if (!binding) return { ok: false, reason: 'no-binding' };
+  if (binding.sessionId !== sessionId) return { ok: false, reason: 'session-changed' };
+  if (canonicalDir(cwd) !== binding.canonicalCwd) return { ok: false, reason: 'cwd-changed' };
+  if (canonicalDir(projectPath) !== binding.canonicalCwd) return { ok: false, reason: 'project-moved' };
+  if ((bin ?? null) !== binding.bin) return { ok: false, reason: 'binary-changed' };
+  if (bin && /[\\/]/.test(bin)) {
+    try { if (!fs.statSync(bin).isFile()) throw new Error('not a file'); }
+    catch { return { ok: false, reason: 'binary-missing' }; }
+  }
+  return { ok: true };
 }
 
 function baseArgs(sessionId) {
@@ -172,8 +203,8 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
        * characters while `unparsed` stayed 0, because corrupted text is still valid JSON. */
       const sig = raw ? toSignal(raw) : { kind: 'raw', payload: { unparsed: true } };
       onSignal?.({ ...sig, seq: seq++ }, raw, text);
-      /* The init line is recorded as it was emitted, then the child is stopped before it can
-       * act in the wrong folder. */
+      /* DETECTION, not prevention: the child is already running and may have written before
+       * this line. The init line is recorded as emitted, then the child is stopped. */
       if (resume && raw?.type === 'system' && raw.subtype === 'init' && !sameDir(raw.cwd, cwd)) {
         cwdMismatch = { expected: cwd, actual: raw.cwd ?? null };
         stop(child);
@@ -293,5 +324,5 @@ const grantedSignal = (denial, spec) => ({
   payload: { tool: denial?.tool ?? null, toolUseId: denial?.toolUseId ?? null, scope: spec },
 });
 
-module.exports = { run, stop, sameDir, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
+module.exports = { run, stop, sameDir, canonicalDir, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
   windowsRunnerTreeMayBeAlive, processTreeMayBeAlive };

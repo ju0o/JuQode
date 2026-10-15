@@ -223,6 +223,7 @@ async function startGuarded(db, project, intent, {
         runEntry = e;
         e.markDone ??= markDone;
         e.child = c;
+        e.binding ??= session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, bin: e.bin });
         live.set(workId, e);
         if (!e.cancelRequested) repo.setWorkState(db, workId, { status: 'running' });
         else stopEntryTree(db, workId, e, onUpdate);
@@ -250,6 +251,7 @@ async function startGuarded(db, project, intent, {
             bin, child: pendingChild.child, store: evidenceStore, useGit: pre.useGit };
           runEntry.markDone ??= markDone;
           runEntry.child = pendingChild.child;
+          runEntry.binding ??= session.bindSession({ cwd: runEntry.cwd, sessionId: runEntry.sessionId, bin: runEntry.bin });
           live.set(workId, runEntry);
           for (const p of pending) {
             writeSignal(db, workId, { source: 'claude', kind: p.sig.kind, payload: p.line });
@@ -724,15 +726,31 @@ function snapshot(db, workId) {
   };
 }
 
-/* A resumed session that started in another folder is a failure, never a success: the turn ran
- * (or was stopped) somewhere that is not the project, so nothing it reports can be trusted. */
-function failCwdMismatch(db, workId, r, onUpdate) {
-  if (!r?.cwdMismatch) return false;
+/* Resume is allowed only into the folder, session and binary the Work started with. Anything
+ * unverifiable refuses BEFORE a process exists, so no grant reaches a CLI that could act
+ * elsewhere. */
+function resumeRefusal(db, entry) {
+  const project = entry.projectId ? db.prepare('select path from project where id = ?').get(entry.projectId) : null;
+  const v = session.verifyResume(entry.binding, { cwd: entry.cwd, sessionId: entry.sessionId, bin: entry.bin,
+    projectPath: project?.path });
+  return v.ok ? null : { ok: false, reason: 'resume-binding-unverified', detail: v.reason };
+}
+
+/* The init-cwd check fires after the child is running, so what it may have written before
+ * stopping is unknown, and a root exit proves nothing about descendants (`stop`). Never `failed`
+ * and never a freed slot without acknowledgement: `ended_unknown` (D-124), side effects measured
+ * and recorded, not claimed as prevented. */
+function endCwdMismatch(db, workId, entry, r, onUpdate) {
   writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW,
-    payload: JSON.stringify({ juqodeCwdMismatch: r.cwdMismatch }) });
-  apply(db, workId, { kind: KIND.FINISH, payload: { subtype: 'error_cwd_mismatch', isError: true,
-    terminalReason: 'cwd_mismatch', apiErrorStatus: null, denials: [], text: null } }, onUpdate);
-  return true;
+    payload: JSON.stringify({ juqodeCwdMismatch: r.cwdMismatch, sideEffectsPrevented: false }) });
+  repo.setWorkState(db, workId, { status: 'ended', outcome: 'ended_unknown' });
+  repo.setRunFailureReason(db, workId, 'cwd-mismatch');
+  const project = entry.cwd ? { path: entry.cwd } : db.prepare('select path from project where id = ?').get(entry.projectId);
+  captureAfter(db, workId, project, entry.useGit ?? false, entry.store ?? null, { replace: true });
+  finishResult(db, workId, project, entry.store ?? null);
+  release(db, workId);
+  onUpdate(snapshot(db, workId));
+  return { ok: false, reason: 'cwd-mismatch' };
 }
 
 /**
@@ -759,6 +777,9 @@ async function allow(db, workId, toolUseId, opts = {}) {
   const spec = session.allowSpec(denial, entry.cwd);
   /* Nothing we can scope narrowly means no grant at all — never a grant of the whole tool. */
   if (!spec) return { ok: false, reason: 'cannot-scope' };
+
+  const refused = resumeRefusal(db, entry);
+  if (refused) return refused;
 
   retrying.add(workId);
   try {
@@ -787,7 +808,7 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
     },
   });
 
-  failCwdMismatch(db, workId, retryRun, opts.onUpdate ?? (() => {}));
+  if (retryRun.cwdMismatch) return endCwdMismatch(db, workId, entry, retryRun, opts.onUpdate ?? (() => {}));
 
   /* The retry is when the change actually lands, so the after-basis is taken again. An earlier
    * one recorded a project that had not been edited yet. */
@@ -814,6 +835,9 @@ async function answer(db, workId, text, opts = {}) {
   const entry = live.get(workId);
   if (!entry) return { ok: false, reason: 'not-live' };
 
+  const refused = resumeRefusal(db, entry);
+  if (refused) return refused;
+
   writeSignal(db, workId, { source: 'user', kind: KIND.ANSWER, payload: text });
   apply(db, workId, { kind: KIND.ANSWER, payload: { text } }, opts.onUpdate ?? (() => {}));
 
@@ -825,11 +849,7 @@ async function answer(db, workId, text, opts = {}) {
       apply(db, workId, sig, opts.onUpdate ?? (() => {}));
     },
   });
-  if (failCwdMismatch(db, workId, answerRun, opts.onUpdate ?? (() => {}))) {
-    release(db, workId);
-    (opts.onUpdate ?? (() => {}))(snapshot(db, workId));
-    return { ok: false, reason: 'cwd-mismatch' };
-  }
+  if (answerRun.cwdMismatch) return endCwdMismatch(db, workId, entry, answerRun, opts.onUpdate ?? (() => {}));
   return { ok: true };
 }
 
