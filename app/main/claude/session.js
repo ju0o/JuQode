@@ -173,7 +173,13 @@ function allowSpec(denial, cwd) {
      * grant named different files. */
     const abs = path.resolve(cwd, file);
     const rel = path.relative(cwd, abs).split(path.sep).join('/');
-    const target = rel && !rel.startsWith('..') ? rel : `/${abs.split(path.sep).join('/')}`;
+    const inside = Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
+    /* Outside the project the grant has to be an absolute path, whose spelling in Claude Code's
+     * rule grammar is only known on POSIX (`//abs`). On Windows it is UNKNOWN (unmeasured): the old
+     * code produced `/C:/…`, and a single leading slash is exactly the form that is read as a
+     * cwd-relative glob and silently denies. Not granting is always safe — no grant. */
+    if (!inside && WINDOWS) return null;
+    const target = inside ? rel : `/${abs.split(path.sep).join('/')}`;
     if (UNSAFE_TARGET.test(target)) return null;
     return `${tool}(${target})`;
   }
