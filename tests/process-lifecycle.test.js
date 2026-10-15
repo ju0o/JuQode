@@ -78,7 +78,7 @@ function bench() {
 
 /* A CLI that writes a file at once, spawns a descendant that ignores SIGTERM, ignores SIGTERM
  * itself (unless `rootExits`), reports its descendant's pid, and then idles. */
-function stubbornCli(dir, { rootExits = false } = {}) {
+function stubbornCli(dir, { rootExits = false, children = 1 } = {}) {
   const home = `${dir}-cli`; fs.mkdirSync(home, { recursive: true }); dirs.push(home);
   const marker = path.join(home, 'HELPER-PID');
   const bin = path.join(home, 'stubborn');
@@ -86,8 +86,14 @@ function stubbornCli(dir, { rootExits = false } = {}) {
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 fs.writeFileSync(${JSON.stringify(path.join(dir, 'a.txt'))}, 'changed-by-the-run\\n');
-const helper = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: 'ignore' });
-fs.writeFileSync(${JSON.stringify(marker)}, String(helper.pid));
+const helpers = [];
+for (let n = 0; n < ${Number(children)}; n++) {
+  /* every other helper has its own child, so the tree is two levels deep */
+  const code = n % 2 ? "const g = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' }); require('node:fs').appendFileSync(" + JSON.stringify(${JSON.stringify(marker)} + '.gc') + ", g.pid + '\\\\n'); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"
+                     : "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)";
+  helpers.push(spawn(process.execPath, ['-e', code], { stdio: 'ignore' }).pid);
+}
+fs.writeFileSync(${JSON.stringify(marker)}, helpers.join('\\n'));
 const a = process.argv, i = Math.max(a.indexOf('--session-id'), a.indexOf('--resume'));
 process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: a[i + 1], cwd: process.cwd() }) + '\\n');
 ${rootExits ? "process.on('SIGTERM', () => process.exit(0));" : "process.on('SIGTERM', () => {});"}
@@ -102,12 +108,18 @@ async function startStubborn(b, opts = {}) {
   const r = await supervisor.start(b.db, b.project, 'a.txt 바꿔줘', { evidenceStore: b.store, bin: cliBin.bin, detect: AVAILABLE, ...extra });
   assert.strictEqual(r.ok, true, r.reason);
   assert.ok(await until(() => fs.existsSync(cliBin.marker)), 'the fixture never reported its descendant');
-  const helper = Number(fs.readFileSync(cliBin.marker, 'utf8'));
-  own(helper);
+  const helpers = fs.readFileSync(cliBin.marker, 'utf8').split('\n').map(Number);
+  const helper = helpers[0];
+  helpers.forEach((pid) => own(pid));
+  /* grandchildren report themselves too, so every process the fixture creates is owned */
+  const gcLines = () => (fs.existsSync(`${cliBin.marker}.gc`) ? fs.readFileSync(`${cliBin.marker}.gc`, 'utf8').split('\n').filter(Boolean) : []);
+  const wantGc = Math.floor((opts.children ?? 1) / 2);               // every second helper has a child
+  assert.ok(await until(() => gcLines().length >= wantGc, 8000), 'a grandchild never reported itself, so it could not be owned');
+  gcLines().forEach((pid) => own(Number(pid)));
   const entry = supervisor.live.get(r.workId);
   own(entry.child.pid);
   await new Promise((res) => setTimeout(res, 150));     // let the descendant install its handler
-  return { r, helper, root: entry.child.pid, entry };
+  return { r, helper, helpers, root: entry.child.pid, entry };
 }
 
 posixTest('cancel is a REQUEST: the Work is not cancelled until an exit is observed, and a surviving descendant makes it ended_unknown', async () => {
@@ -230,12 +242,14 @@ posixTest('a live group after the root is gone is reported as MAY BE ALIVE, a de
   const root = spawn('/bin/sh', ['-c', `${process.execPath} -e "setInterval(()=>{},1000)" & echo $! > ${pidFile}; wait`], { detached: true, stdio: 'ignore' });
   own(root.pid);
   assert.ok(await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim()), 'the grandchild never reported');
-  const grandchild = own(Number(fs.readFileSync(pidFile, 'utf8')));
+  const grandchild = own(Number(fs.readFileSync(pidFile, 'utf8')));      // also in the global teardown
   root.kill('SIGKILL');
   await new Promise((res) => root.once('exit', res));
   assert.strictEqual(session.processTreeMayBeAlive(root.pid), true, 'the root exited, its group did not');
   /* end the survivor by ITS OWN pid, with the same ownership check teardown uses */
-  assert.deepStrictEqual(reaper.reap().includes(grandchild), true, 'the owned grandchild was not reaped');
+  const local = makeReaper();                       // NOT the global teardown, which must still run at the end
+  local.own(grandchild);
+  assert.deepStrictEqual(local.reap(), [grandchild], 'the owned grandchild was not reaped');
   assert.ok(await until(() => !session.processTreeMayBeAlive(root.pid)), 'a dead group is still reported alive');
   assert.strictEqual(session.processTreeMayBeAlive(NaN), true, 'an unusable pid must be treated as unknown');
 });
@@ -276,4 +290,49 @@ posixTest('a pid that exits and is not recycled is simply skipped; start time is
   await new Promise((res) => c.once('exit', res));
   assert.strictEqual(startTimeOf(c.pid), null, 'a reaped pid still answers');
   assert.deepStrictEqual(r.reap(), [], 'a dead process was signalled');
+});
+
+posixTest('the app dies right after the stop signal: the late exit of the old child cannot rewrite the recorded end', async () => {
+  const b = bench();
+  const { r, root, helper } = await startStubborn(b, { task: true, rootExits: true });
+  const child = supervisor.live.get(r.workId).child;
+  supervisor.cancel(b.db, r.workId);                       // SIGTERM is on its way; nothing observed yet
+  /* "crash": the in-memory state vanishes before the exit is seen, then startup reconciliation */
+  supervisor.live.delete(r.workId);
+  assert.deepStrictEqual(repo.reconcileLostWorks(b.db, () => true), [r.workId]);
+  const frozen = JSON.stringify(repo.getWork(b.db, r.workId));
+  const hash = sha(path.join(b.dir, 'a.txt'));
+  assert.deepStrictEqual([repo.getWork(b.db, r.workId).status, repo.getWork(b.db, r.workId).outcome], ['ended', 'ended_unknown']);
+
+  await new Promise((res) => (child.exitCode !== null || child.signalCode ? res() : child.once('exit', res)));   // the old child finally exits
+  await new Promise((res) => setTimeout(res, 600));                                                              // …and any late handlers run
+  const after = repo.getWork(b.db, r.workId);
+  assert.deepStrictEqual([after.status, after.outcome], ['ended', 'ended_unknown'], 'a late exit rewrote the end of a recovered Work');
+  assert.strictEqual(sha(path.join(b.dir, 'a.txt')), hash, 'user data changed during recovery');
+  assert.ok(!repo.signalsFor(b.db, r.workId).some((x) => x.kind === 'cancel_confirmed'), 'the late exit was read as a confirmed cancel');
+  assert.ok(alive(helper), 'precondition: the descendant outlived the app');
+  assert.ok(!alive(root), 'precondition: the root did exit');
+  /* and the project still has no safe writer until a person says so */
+  const ok = path.join(tmp('juqode-life-ok-'), 'ok'); fs.writeFileSync(ok, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  assert.strictEqual((await supervisor.start(b.db, b.project, 'x', { evidenceStore: b.store, bin: ok, detect: AVAILABLE })).reason, 'prior-process-may-still-live');
+  assert.ok(frozen.includes('ended_unknown'));
+});
+
+posixTest('several descendant trees: none is signalled by JuQode, all are reported as possibly alive, the slot stays held', async () => {
+  const b = bench();
+  const { r, helpers, root } = await startStubborn(b, { children: 4, rootExits: true });
+  assert.strictEqual(helpers.length, 4);
+  const starts = helpers.map((pid) => startTimeOf(pid));
+  supervisor.cancel(b.db, r.workId);
+  assert.ok(await until(() => repo.getWork(b.db, r.workId).status === 'ended', 6000));
+  assert.ok(await until(() => !alive(root)), 'precondition: the root exited');
+  assert.strictEqual(repo.getWork(b.db, r.workId).outcome, 'ended_unknown');
+  for (const [i, pid] of helpers.entries()) {
+    assert.ok(alive(pid), `descendant ${i} (${pid}) was killed by JuQode — it can only signal the root handle`);
+    assert.strictEqual(startTimeOf(pid), starts[i], 'precondition: identity unchanged');
+  }
+  assert.strictEqual(session.processTreeMayBeAlive(root), true, 'a group with live members was reported gone');
+  assert.deepStrictEqual(supervisor.changes(b.db, r.workId, b.project, b.store).files, ['a.txt']);
+  const ok = path.join(tmp('juqode-life-ok-'), 'ok'); fs.writeFileSync(ok, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  assert.strictEqual((await supervisor.start(b.db, b.project, 'x', { evidenceStore: b.store, bin: ok, detect: AVAILABLE })).reason, 'prior-process-may-still-live');
 });
