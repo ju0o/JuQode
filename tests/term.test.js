@@ -12,6 +12,8 @@
  * 있으면 안 된다 — 그것을 주장하는 순간 막지 못한 것이 안전하다고 가르치게 된다.
  */
 'use strict';
+const WIN = process.platform === 'win32';
+const POSIX_ONLY = 'POSIX shell protocol (`$?`/printf markers); the Windows terminal is a placeholder (DV) — not a Windows PASS';
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -19,6 +21,7 @@ const path = require('node:path');
 
 const R = path.resolve(__dirname, '..');
 const term = require(path.join(R, 'app/main/term/session.js'));
+const fake = require(path.join(__dirname, 'fakecli.js'));
 const { tempDir } = require(path.join(__dirname, 'tmp.js'));
 
 /** 한 줄을 보내고 그 줄이 끝날 때까지 기다린다 — 끝은 종료 코드가 도착하는 것이다. */
@@ -44,8 +47,7 @@ function session(cwd) {
   return s;
 }
 
-test('한 셸이므로 cd 가 다음 줄로 이어진다 — 스파이크의 LOST 를 뒤집는 조건 ④', async () => {
-  if (process.platform === 'win32') return;
+test('한 셸이므로 cd 가 다음 줄로 이어진다 — 스파이크의 LOST 를 뒤집는 조건 ④', { skip: WIN && POSIX_ONLY }, async () => {
   const root = tempDir('juqode-term-cd');
   fs.mkdirSync(path.join(root, 'sub'));
   const s = session(root);
@@ -60,8 +62,7 @@ test('한 셸이므로 cd 가 다음 줄로 이어진다 — 스파이크의 LOS
   } finally { s.stop(); }
 });
 
-test('종료 코드는 코드로 보고된다 — 0 도 0 이 아닌 것도', async () => {
-  if (process.platform === 'win32') return;
+test('종료 코드는 코드로 보고된다 — 0 도 0 이 아닌 것도', { skip: WIN && POSIX_ONLY }, async () => {
   const s = session(tempDir('juqode-term-code'));
   try {
     assert.strictEqual((await line(s, 'true')).code, 0);
@@ -72,8 +73,7 @@ test('종료 코드는 코드로 보고된다 — 0 도 0 이 아닌 것도', as
   } finally { s.stop(); }
 });
 
-test('끝난 줄도 자기가 어느 명령이었는지 말한다', async () => {
-  if (process.platform === 'win32') return;
+test('끝난 줄도 자기가 어느 명령이었는지 말한다', { skip: WIN && POSIX_ONLY }, async () => {
   /* 마지막 업데이트는 `running` 이 이미 비워진 뒤에 나간다. 그때 줄 이름을 잃으면 카드가
    * **읽을 것이 생긴 바로 그 순간** `$ …` 머리를 잃는다. */
   const s = session(tempDir('juqode-term-line'));
@@ -83,8 +83,7 @@ test('끝난 줄도 자기가 어느 명령이었는지 말한다', async () => 
   } finally { s.stop(); }
 });
 
-test('stderr 는 숨기지도 분리하지도 않는다', async () => {
-  if (process.platform === 'win32') return;
+test('stderr 는 숨기지도 분리하지도 않는다', { skip: WIN && POSIX_ONLY }, async () => {
   const s = session(tempDir('juqode-term-stderr'));
   try {
     const r = await line(s, 'echo out; echo err 1>&2');
@@ -93,8 +92,7 @@ test('stderr 는 숨기지도 분리하지도 않는다', async () => {
   } finally { s.stop(); }
 });
 
-test('마커는 프로토콜이지 출력이 아니다 — 화면에 나가지 않는다', async () => {
-  if (process.platform === 'win32') return;
+test('마커는 프로토콜이지 출력이 아니다 — 화면에 나가지 않는다', { skip: WIN && POSIX_ONLY }, async () => {
   const s = session(tempDir('juqode-term-mark'));
   try {
     const r = await line(s, 'echo hello');
@@ -103,8 +101,7 @@ test('마커는 프로토콜이지 출력이 아니다 — 화면에 나가지 �
   } finally { s.stop(); }
 });
 
-test('토큰처럼 보이는 값은 화면에서 가려진다 — 가려질 뿐이고, 그렇다고만 말한다', async () => {
-  if (process.platform === 'win32') return;
+test('토큰처럼 보이는 값은 화면에서 가려진다 — 가려질 뿐이고, 그렇다고만 말한다', { skip: WIN && POSIX_ONLY }, async () => {
   const s = session(tempDir('juqode-term-mask'));
   try {
     /* 합성 값이다. 실제 자격증명이 아니다. */
@@ -114,8 +111,7 @@ test('토큰처럼 보이는 값은 화면에서 가려진다 — 가려질 뿐�
   } finally { s.stop(); }
 });
 
-test('출력 상한은 상한을 넘을 때만 잘렸다고 말한다 — 딱 맞게 찬 출력은 잘린 것이 아니다', async () => {
-  if (process.platform === 'win32') return;
+test('출력 상한은 상한을 넘을 때만 잘렸다고 말한다 — 딱 맞게 찬 출력은 잘린 것이 아니다', { skip: WIN && POSIX_ONLY }, async () => {
   /* `20` 이 화면에 실을 출력을 64 KB 로 묶고, 남는 것은 잘렸다고 말한다. 그 경계에서 한 칸을
    * 잘못 잡으면 제품이 **잃은 것이 없는데 잃었다고 말한다** — `19` 가 금지하는 과잉주장의
    * 축소판이다.
@@ -223,13 +219,19 @@ test('한계는 지어낸 문장이 아니라 이 구현이 실제로 가진 것
   } finally { s.stop(); }
 });
 
-test('아는 POSIX 셸이면 그것을, 모르면 /bin/sh — 마커가 조용히 깨지지 않게', () => {
+test('아는 POSIX 셸이면 그것을, 모르면 /bin/sh — 마커가 조용히 깨지지 않게', { skip: WIN && POSIX_ONLY }, () => {
   assert.deepStrictEqual(term.shellFor({ SHELL: '/bin/bash' }), { path: '/bin/bash', posix: true });
   assert.deepStrictEqual(term.shellFor({ SHELL: '/usr/bin/zsh' }), { path: '/usr/bin/zsh', posix: true });
   /* fish 와 nu 는 `$?` 도 `printf` 도 다르게 쓴다. 사용자의 SHELL 을 그대로 믿으면 종료 코드가
    * 영영 도착하지 않는다 — 조용히 멈춘 것처럼 보인다. */
   assert.deepStrictEqual(term.shellFor({ SHELL: '/usr/bin/fish' }), { path: '/bin/sh', posix: true });
   assert.deepStrictEqual(term.shellFor({}), { path: '/bin/sh', posix: true });
+});
+
+test('Windows: the shell is the placeholder cmd.exe and says it is NOT a POSIX shell (no marker protocol is claimed)', { skip: !WIN && 'Windows-only' }, () => {
+  assert.deepStrictEqual(term.shellFor({ COMSPEC: 'C:\\Windows\\System32\\cmd.exe', SHELL: '/bin/bash' }), { path: 'C:\\Windows\\System32\\cmd.exe', posix: false },
+    'a POSIX SHELL variable must not be trusted on Windows');
+  assert.deepStrictEqual(term.shellFor({}), { path: 'cmd.exe', posix: false });
 });
 
 test('프로젝트가 바뀌면 셸은 끝난다 — 다음에 열 때가 아니라 바뀔 때 (`19` §C6 REC-010)', async () => {
@@ -275,8 +277,7 @@ test('사용자가 친 줄은 그대로 간다 — 걸러내는 척하지 않는
   }
 });
 
-test('WBS-25b · 경고는 경고일 뿐 — 일치한 줄도 글자 하나 안 바뀌고 그대로 실행된다', async () => {
-  if (process.platform === 'win32') return;
+test('WBS-25b · 경고는 경고일 뿐 — 일치한 줄도 글자 하나 안 바뀌고 그대로 실행된다', { skip: WIN && POSIX_ONLY }, async () => {
   /* `./tty.js` 는 프로그램 이름 목록을 갖고 있고, 그 목록이 언젠가 차단 목록이 되는 것이
    * 위 검사가 막으려는 것이다. 위 검사는 그 이름들이 셸 파일에 없다는 것만 볼 수 있으므로,
    * 아무것도 막히지 않는다는 것은 **행동으로** 측정한다: 일치하는 줄을 보내고, 셸이 실제로
@@ -304,4 +305,62 @@ test('WBS-25b · 경고는 경고일 뿐 — 일치한 줄도 글자 하나 안 
 test('WBS-25b · 목록에 없는 줄에는 경고가 붙지 않는다', () => {
   const s = session(tempDir('juqode-term-nowarn'));
   try { assert.strictEqual(s.write('echo hi').warn, null); } finally { s.stop(); }
+});
+
+/* ───────────── the marker may arrive in pieces (the H3 "line never ended" flake) ─────────────
+ *
+ * The end of a line is a marker the shell prints; the code that finds it used to look inside ONE
+ * chunk. A pipe cuts chunks wherever the kernel likes, so a marker split across two chunks was never
+ * found and the card sat on 실행 중. Not a timeout problem — a boundary one, and it needs no load to
+ * reproduce once the boundary is chosen instead of left to chance. */
+
+test('holdBack waits only for a tail that could still become the marker', () => {
+  const mark = '__JUQODE_TERM_0123456789abcdef__';
+  const h = term.holdBack;
+  assert.deepStrictEqual(h('out\n', mark), { now: 'out\n', held: '' }, 'a finished line is shown at once');
+  assert.deepStrictEqual(h('out\npartial text', mark), { now: 'out\npartial text', held: '' }, 'ordinary unterminated output is not delayed');
+  assert.deepStrictEqual(h('out\n__JUQODE', mark), { now: 'out\n', held: '__JUQODE' }, 'a marker prefix waits');
+  assert.deepStrictEqual(h(`out\n${mark}`, mark), { now: 'out\n', held: mark }, 'a whole marker with no code yet waits');
+  assert.deepStrictEqual(h(`out\n${mark} 1`, mark), { now: 'out\n', held: `${mark} 1` }, 'digits may still be coming');
+  assert.deepStrictEqual(h(`${mark} 12\n`, mark), { now: `${mark} 12\n`, held: '' }, 'a terminated marker line is processed');
+  assert.deepStrictEqual(h(`${mark}x`, mark), { now: `${mark}x`, held: '' }, 'something else that merely starts like it is not held');
+  assert.deepStrictEqual(h('', mark), { now: '', held: '' });
+});
+
+test('a marker cut at ANY point between two chunks still ends the line, with the whole exit code', { skip: WIN && POSIX_ONLY }, async () => {
+  const dir = tempDir('juqode-term-split');
+  const bin = fake.scriptBin(dir, 'fakeshell', `
+let buf = '', sent = false;
+process.stdin.on('data', (d) => {
+  buf += d;
+  const m = /printf '\\\\n%s %s\\\\n' "(__JUQODE_TERM_[0-9a-f]+__)"/.exec(buf);
+  if (!m || sent) return;
+  sent = true;
+  const payload = 'hello\\n' + '\\n' + m[1] + ' 12\\n';          // what a shell prints for: echo hello; (exit 12)
+  const at = payload.indexOf(m[1]) + Number(process.env.SPLIT_IN_MARKER);
+  process.stdout.write(payload.slice(0, at));
+  setTimeout(() => process.stdout.write(payload.slice(at)), 40);   // a separate 'data' event
+});
+setInterval(() => {}, 1000);
+`);
+  const markLen = '__JUQODE_TERM_'.length + 32 + 2;
+  // every cut inside the marker line, including between the two digits of the code
+  const offsets = [0, 1, 5, 13, 14, 20, 30, markLen - 2, markLen - 1, markLen, markLen + 1, markLen + 2, markLen + 3];
+  for (const at of offsets) {
+    const seen = [];
+    const s = term.open({ cwd: dir, onUpdate: (u) => seen.push(u), env: { ...process.env, JUQODE_TERM_SHELL: bin, SPLIT_IN_MARKER: String(at) } });
+    try {
+      const ended = await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error(`cut at +${at}: the line never ended`)), 4000);
+        const tick = setInterval(() => {
+          const u = seen.find((x) => x.code !== null && x.code !== undefined);
+          if (u) { clearTimeout(t); clearInterval(tick); resolve(u); }
+        }, 10);
+        s.write('echo hello; (exit 12)');
+      });
+      assert.strictEqual(ended.code, 12, `cut at +${at}: the exit code was read as ${ended.code}`);
+      assert.ok(!/__JUQODE_TERM_/.test(ended.output), `cut at +${at}: the protocol marker leaked into the output`);
+      assert.ok(ended.output.includes('hello'), `cut at +${at}: the user's output was lost`);
+    } finally { s.stop(); }
+  }
 });

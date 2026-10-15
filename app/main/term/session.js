@@ -44,6 +44,20 @@ const { needsTty } = require('./tty.js');
  * 파일 서술자뿐이고 그건 셸마다 다르다 — MVP 는 이 천장을 안고 가고, 대신 숨기지 않는다. */
 const MARK = () => `__JUQODE_TERM_${randomUUID().replace(/-/g, '')}__`;
 
+/* The end-of-line marker is found per CHUNK, and a pipe delivers whatever the kernel has — a
+ * large output puts the chunk boundary anywhere, including INSIDE the marker line. A split marker
+ * was never recognised, the line never ended, and the card sat on 실행 중 forever (seen once on
+ * H3 under load; the 64 KB boundary case has the marker right at the 65536-byte pipe edge).
+ * So the one thing that may be held back is an unterminated last line that could still turn into
+ * the marker line: it waits for the next chunk. Anything else is shown at once. */
+function holdBack(text, mark) {
+  const start = text.lastIndexOf('\n') + 1;
+  const tail = text.slice(start);
+  const couldBeMarker = tail.length > 0 &&
+    (mark.startsWith(tail) || (tail.startsWith(mark) && /^ ?\d*$/.test(tail.slice(mark.length))));
+  return couldBeMarker ? { now: text.slice(0, start), held: tail } : { now: text, held: '' };
+}
+
 /* POSIX 셸만. `$?` 와 `printf` 는 POSIX 가 보장하지만 fish · nu 는 둘 다 다르게 쓴다 —
  * 사용자의 `SHELL` 을 그대로 믿으면 마커 프로토콜이 조용히 깨진다. 아는 셸이면 그것을 쓰고,
  * 모르면 `/bin/sh` 로 내려간다. 어느 쪽인지는 `limits.shell` 로 화면에 나간다. */
@@ -103,8 +117,14 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
     return update;
   };
 
-  const take = (chunk) => {
+  let held = '';                   // an unterminated last stdout line that may still become the marker
+  const take = (chunk, { stdout = false, force = false } = {}) => {
     let s = String(chunk).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    if (stdout && !force) {
+      const h = holdBack(held + s, mark);
+      s = h.now; held = h.held;
+      if (s === '') return;
+    }
     /* 마커 줄은 프로토콜이지 출력이 아니다 — 화면에서 뺀다. 종료 코드는 카드가 따로 말한다. */
     const hit = new RegExp(`^${mark} (\\d+)$`, 'm').exec(s);
     if (hit) s = s.replace(hit[0], '');
@@ -149,14 +169,15 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
 
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
-  child.stdout.on('data', take);
-  child.stderr.on('data', take);
+  child.stdout.on('data', (c) => take(c, { stdout: true }));
+  child.stderr.on('data', (c) => take(c));
   /* stdin 이 닫힌 채 질문하는 프로그램은 멈추지 않고 **빈 답을 받는다**(실측). 그래서 stdin 은
    * 세션이 끝날 때까지 열어 둔다 — 사용자가 답할 수 있는 유일한 경로다. */
   child.stdin.on('error', () => { /* 셸이 먼저 죽으면 EPIPE. 아래 done 이 말한다. */ });
 
   const done = new Promise((resolve) => {
     const settle = (why) => {
+      if (held) { const rest = held; held = ''; take(rest, { force: true }); }   // never swallow a held tail
       running = null;
       resolve({ id, ended: true, why, endedAt: new Date().toISOString() });
       flush(true, null);
@@ -220,4 +241,4 @@ function open({ cwd, onUpdate = () => {}, env = process.env }) {
   };
 }
 
-module.exports = { open, shellFor, POSIX };
+module.exports = { open, shellFor, POSIX, holdBack };
