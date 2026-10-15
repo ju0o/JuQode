@@ -20,18 +20,49 @@ const supervisor = require(path.join(R, 'app/main/work/supervisor.js'));
 const session = require(path.join(R, 'app/main/claude/session.js'));
 
 const AVAILABLE = async () => ({ available: true, version: '9.9.9-fixture' });
-const dirs = [], pids = new Set();
+const dirs = [];
+const posix = process.platform !== 'win32';
+/* These cases need /bin/sh, POSIX process groups and /proc. They are NOT run on Windows; the
+ * Windows process-tree variants of V1-404 are a separate, unwritten host-specific suite. */
+const posixTest = (name, fn) => test(name, { skip: !posix && 'POSIX-only (needs /bin/sh, process groups, /proc); Windows tree tests are a separate H1 suite' }, fn);
+
 const tmp = (p) => { const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p))); dirs.push(d); return d; };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
 const sha = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 const until = async (fn, ms = 4000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 20)); } return false; };
-const reap = () => {
-  for (const pid of pids) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
-  for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone */ } }
-};
-process.on('exit', reap);
-/* descendants hold the event loop open; reap them when the file's tests are done */
-test.after(reap);
+
+/* TEARDOWN OWNERSHIP. A bare pid is not an identity (07 §8.5): after a process exits its number
+ * can be handed to an unrelated one. So the test records each process it CREATED together with
+ * its kernel start time (/proc/<pid>/stat field 22) and, at teardown, signals that exact pid only
+ * while the start time still matches. Never a negative pid / process group, never a process whose
+ * identity cannot be read (non-Linux: nothing is signalled), never a pid nobody here created. */
+function startTimeOf(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] ?? null;     // field 22 = starttime
+  } catch { return null; }
+}
+function makeReaper(kill = process.kill) {
+  const owned = new Map();
+  let done = false;
+  return {
+    own(pid, start = startTimeOf(pid)) { if (Number.isInteger(pid) && pid > 1) owned.set(pid, start); return pid; },
+    reap() {
+      if (done) return [];
+      done = true;
+      const signalled = [];
+      for (const [pid, start] of owned) {
+        if (start === null || startTimeOf(pid) !== start) continue;           // gone, recycled, or unverifiable
+        try { kill(pid, 'SIGKILL'); signalled.push(pid); } catch { /* gone */ }
+      }
+      return signalled;
+    },
+  };
+}
+const reaper = makeReaper();
+const own = (pid) => reaper.own(pid);
+/* ONE teardown, registered once. Descendants hold the event loop open, so it must run. */
+test.after(() => reaper.reap());
 
 /* fast stop timings, as the existing cancel tests do */
 const realStop = session.stop;
@@ -72,14 +103,14 @@ async function startStubborn(b, opts = {}) {
   assert.strictEqual(r.ok, true, r.reason);
   assert.ok(await until(() => fs.existsSync(cliBin.marker)), 'the fixture never reported its descendant');
   const helper = Number(fs.readFileSync(cliBin.marker, 'utf8'));
-  pids.add(helper);
+  own(helper);
   const entry = supervisor.live.get(r.workId);
-  pids.add(entry.child.pid);
+  own(entry.child.pid);
   await new Promise((res) => setTimeout(res, 150));     // let the descendant install its handler
   return { r, helper, root: entry.child.pid, entry };
 }
 
-test('cancel is a REQUEST: the Work is not cancelled until an exit is observed, and a surviving descendant makes it ended_unknown', async () => {
+posixTest('cancel is a REQUEST: the Work is not cancelled until an exit is observed, and a surviving descendant makes it ended_unknown', async () => {
   const b = bench();
   const before = 'one\n';
   const { r, helper, root } = await startStubborn(b);
@@ -102,7 +133,7 @@ test('cancel is a REQUEST: the Work is not cancelled until an exit is observed, 
   assert.ok(repo.getWork(b.db, r.workId).failure_reason, 'no typed reason for the unknown end');
 });
 
-test('while the end is unknown the project slot stays held, even after the root pid is gone, until a person acknowledges', async () => {
+posixTest('while the end is unknown the project slot stays held, even after the root pid is gone, until a person acknowledges', async () => {
   const b = bench();
   const { r, helper, root } = await startStubborn(b, { rootExits: true });
   supervisor.cancel(b.db, r.workId);
@@ -122,7 +153,7 @@ test('while the end is unknown the project slot stays held, even after the root 
   assert.notStrictEqual(next.reason, 'prior-process-may-still-live', 'acknowledgement did not release the slot');
 });
 
-test('duplicate cancels do not signal twice, double-record, or change the outcome', async () => {
+posixTest('duplicate cancels do not signal twice, double-record, or change the outcome', async () => {
   const b = bench();
   const { r } = await startStubborn(b);
   const sent = [];
@@ -137,13 +168,13 @@ test('duplicate cancels do not signal twice, double-record, or change the outcom
   assert.deepStrictEqual([again.ok, again.reason], [false, 'ended'], 'an ended Work was cancelled again');
 });
 
-test('cancel and recovery never touch an unrelated process, including one that holds a recorded pid', async () => {
+posixTest('cancel and recovery never touch an unrelated process, including one that holds a recorded pid', async () => {
   const b = bench();
   /* an unrelated, long-lived "CLI daemon": its own session, same cwd, a claude-like name */
   const decoyBin = path.join(tmp('juqode-decoy-'), 'claude-daemon');
   fs.writeFileSync(decoyBin, `#!${process.execPath}\nsetInterval(() => {}, 1000)\n`, { mode: 0o755 });
   const decoy = spawn(decoyBin, ['serve'], { cwd: b.dir, detached: true, stdio: 'ignore' });
-  decoy.unref(); pids.add(decoy.pid);
+  decoy.unref(); own(decoy.pid);
 
   const { r } = await startStubborn(b);
   supervisor.cancel(b.db, r.workId);
@@ -160,7 +191,7 @@ test('cancel and recovery never touch an unrelated process, including one that h
   assert.ok(alive(decoy.pid), 'recovery signalled a process only because it held a recorded pid');
 });
 
-test('restart: a Work whose process survived the app is ended_unknown, keeps its evidence, and blocks a new writer', async () => {
+posixTest('restart: a Work whose process survived the app is ended_unknown, keeps its evidence, and blocks a new writer', async () => {
   const b = bench();
   const { r, helper } = await startStubborn(b, { task: true });
   const hash = sha(path.join(b.dir, 'a.txt'));
@@ -177,7 +208,7 @@ test('restart: a Work whose process survived the app is ended_unknown, keeps its
   assert.strictEqual(blocked.reason, 'prior-process-may-still-live');
 });
 
-test('group/pid reuse: stopping signals only the owned handle, never a numeric pid or group', async () => {
+posixTest('group/pid reuse: stopping signals only the owned handle, never a numeric pid or group', async () => {
   assert.deepStrictEqual(session.killPlan('linux', 4242, false), { kind: 'child', signal: 'SIGTERM' });
   assert.deepStrictEqual(session.killPlan('win32', 4242, true), { kind: 'child', signal: 'SIGKILL' });
 
@@ -186,21 +217,63 @@ test('group/pid reuse: stopping signals only the owned handle, never a numeric p
   process.kill = (pid, sig) => { if (sig !== 0 && sig !== undefined) numeric.push([pid, sig]); return realKill(pid, sig); };
   try {
     const child = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { detached: true, stdio: 'ignore' });
-    pids.add(child.pid);
+    own(child.pid);
     await new Promise((res) => setTimeout(res, 150));
     await new Promise((res) => realStop(child, { graceMs: 200, confirmMs: 100, onUnconfirmed: res }));
     assert.deepStrictEqual(numeric, [], `stop() signalled by numeric pid/group: ${JSON.stringify(numeric)}`);
   } finally { process.kill = realKill; }
 });
 
-test('a live group after the root is gone is reported as MAY BE ALIVE, a dead one is not', async () => {
-  const root = spawn('/bin/sh', ['-c', `${process.execPath} -e "setInterval(()=>{},1000)" & wait`], { detached: true, stdio: 'ignore' });
-  pids.add(root.pid);
-  await new Promise((res) => setTimeout(res, 200));
+posixTest('a live group after the root is gone is reported as MAY BE ALIVE, a dead one is not', async () => {
+  const home = tmp('juqode-grp-');
+  const pidFile = path.join(home, 'GRANDCHILD-PID');
+  const root = spawn('/bin/sh', ['-c', `${process.execPath} -e "setInterval(()=>{},1000)" & echo $! > ${pidFile}; wait`], { detached: true, stdio: 'ignore' });
+  own(root.pid);
+  assert.ok(await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim()), 'the grandchild never reported');
+  const grandchild = own(Number(fs.readFileSync(pidFile, 'utf8')));
   root.kill('SIGKILL');
   await new Promise((res) => root.once('exit', res));
   assert.strictEqual(session.processTreeMayBeAlive(root.pid), true, 'the root exited, its group did not');
-  process.kill(-root.pid, 'SIGKILL');
+  /* end the survivor by ITS OWN pid, with the same ownership check teardown uses */
+  assert.deepStrictEqual(reaper.reap().includes(grandchild), true, 'the owned grandchild was not reaped');
   assert.ok(await until(() => !session.processTreeMayBeAlive(root.pid)), 'a dead group is still reported alive');
   assert.strictEqual(session.processTreeMayBeAlive(NaN), true, 'an unusable pid must be treated as unknown');
+});
+
+/* ───────────── the teardown itself is held to the same rule ───────────── */
+
+posixTest('teardown signals only processes it created and can still identify', async () => {
+  const mk = () => spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  const mine = mk(), bystander = mk(), recycled = mk();
+  const sent = [];
+  const r = makeReaper((pid, sig) => { sent.push([pid, sig]); return process.kill(pid, sig); });
+  try {
+    await new Promise((res) => setTimeout(res, 150));
+    r.own(mine.pid);
+    /* an entry whose recorded start time no longer matches = the pid was recycled to someone else */
+    r.own(recycled.pid, 'a-start-time-from-a-previous-owner');
+    /* a process that is simply not registered, and one whose identity cannot be read at all */
+    r.own(process.pid + 1_000_000, null);
+    const out = r.reap();
+    assert.deepStrictEqual(out, [mine.pid], `teardown signalled ${JSON.stringify(out)}`);
+    assert.ok(sent.every(([pid, sig]) => pid > 1 && sig === 'SIGKILL'), 'a negative pid / group signal was sent');
+    assert.ok(await until(() => !alive(mine.pid)), 'its own process survived teardown');
+    assert.ok(alive(bystander.pid), 'an unregistered process was killed');
+    assert.ok(alive(recycled.pid), 'a recycled pid was killed on the strength of its number');
+    assert.deepStrictEqual(r.reap(), [], 'teardown is not idempotent');
+    assert.strictEqual(sent.length, 1);
+  } finally { bystander.kill('SIGKILL'); recycled.kill('SIGKILL'); mine.kill('SIGKILL'); }
+});
+
+posixTest('a pid that exits and is not recycled is simply skipped; start time is read from the kernel', async () => {
+  const c = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  await new Promise((res) => setTimeout(res, 100));
+  const t = startTimeOf(c.pid);
+  assert.match(t, /^\d+$/);
+  const r = makeReaper();
+  r.own(c.pid);
+  c.kill('SIGKILL');
+  await new Promise((res) => c.once('exit', res));
+  assert.strictEqual(startTimeOf(c.pid), null, 'a reaped pid still answers');
+  assert.deepStrictEqual(r.reap(), [], 'a dead process was signalled');
 });
