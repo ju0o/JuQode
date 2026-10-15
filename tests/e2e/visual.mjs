@@ -748,7 +748,33 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(OUT, `td01-active-run-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
+  await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
+  await send('Emulation.setDeviceMetricsOverride',
+             { width: 1200, height: 600, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
+  out.qcActiveRunShort = await evalJs(`(() => {
+    const card = document.querySelector('[data-el="qc-card"]');
+    const p = card?.querySelector('p');
+    const box = document.querySelector('.td01-qcbody');
+    const shell = document.querySelector('[data-el="term-input"]');
+    if (!p || !box || !shell) return null;
+    const a = p.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const s = shell.getBoundingClientRect();
+    return JSON.stringify({
+      text: p.innerText,
+      visible: a.height > 8 && a.top >= b.top - 1 && a.bottom <= b.bottom + 1,
+      shellInside: s.height > 8 && s.top >= 0 && s.bottom <= window.innerHeight + 1,
+      vh: window.innerHeight,
+    });
+  })()`);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'td01-active-run-short-light.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  await send('Emulation.clearDeviceMetricsOverride');
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await sleep(200);
   await evalJs(`if (window.__drawer().open) window.__toggleDrawer()`);
   await sleep(300);
 
@@ -2269,6 +2295,66 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   if (JSON.parse(out.taskList).legacyUnknownRuns.length < 1) {
     throw new Error(`The Project did not disclose its unattached unknown Work: ${out.taskList}`);
   }
+  /* V1-310 · the same unacknowledged ended_unknown row blocks a file-changing Quick Command.
+   * The visible confirmation below is still what clears it. The drawer is closed first. */
+  step('unknown run blocks file qc');
+  await evalJs(`if (!window.__drawer().open) window.__toggleDrawer()`);
+  await sleep(300);
+  await evalJs(`(() => { const f = document.querySelector('[data-el="qc-input"]'); f.value = '빌드해줘'; })()`);
+  await evalJs(`[...document.querySelectorAll('.td01 button')].find(b => b.textContent.trim() === '보내기')?.click()`);
+  await sleep(600);
+  out.qcPriorUnknown = await evalJs(`(() => {
+    const n = document.querySelector('[data-el="qc-card"]');
+    return JSON.stringify({ kind: n?.getAttribute('data-kind') ?? null, text: n?.innerText ?? null });
+  })()`);
+  out.qcPriorUnknownReds = await evalJs(RED_COUNT('[data-el="qc-card"], [data-el="qc-card"] *'));
+  out.qcPriorUnknownBox = await evalJs(`(() => {
+    const card = document.querySelector('[data-el="qc-card"]');
+    const p = [...(card?.querySelectorAll('p') ?? [])].find(n => n.innerText.includes('확인하지 못했어요'));
+    const box = document.querySelector('.td01-qcbody');
+    if (!p || !box) return null;
+    const a = p.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    return JSON.stringify({
+      visible: a.height > 8 && a.top >= b.top - 1 && a.bottom <= b.bottom + 1,
+      top: Math.round(a.top), bottom: Math.round(a.bottom),
+      boxTop: Math.round(b.top), boxBottom: Math.round(b.bottom),
+    });
+  })()`);
+  for (const theme of ['light', 'dark']) {
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+    await sleep(200);
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `td01-prior-unknown-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
+  await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
+  await send('Emulation.setDeviceMetricsOverride',
+             { width: 1200, height: 600, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
+  out.qcPriorUnknownShort = await evalJs(`(() => {
+    const card = document.querySelector('[data-el="qc-card"]');
+    const p = [...(card?.querySelectorAll('p') ?? [])].find(n => n.innerText.includes('확인하지 못했어요'));
+    const box = document.querySelector('.td01-qcbody');
+    const shell = document.querySelector('[data-el="term-input"]');
+    if (!p || !box || !shell) return null;
+    const a = p.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const s = shell.getBoundingClientRect();
+    return JSON.stringify({
+      visible: a.height > 8 && a.top >= b.top - 1 && a.bottom <= b.bottom + 1,
+      shellInside: s.height > 8 && s.top >= 0 && s.bottom <= window.innerHeight + 1,
+      vh: window.innerHeight,
+    });
+  })()`);
+  {
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, 'td01-prior-unknown-short-light.png'), Buffer.from(shot.result.data, 'base64'));
+  }
+  await send('Emulation.clearDeviceMetricsOverride');
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await sleep(200);
+  await evalJs(`if (window.__drawer().open) window.__toggleDrawer()`);
+  await sleep(300);
   await evalJs(`document.documentElement.setAttribute('data-theme', 'light')`);
   await sleep(200);
   {
@@ -2877,6 +2963,29 @@ assert.deepStrictEqual(JSON.parse(results.drawerBannerParts),
   const box = JSON.parse(results.qcActiveRunBox);
   assert.strictEqual(box.visible, true,
     `the refusal sentence is outside the visible Quick Command body: ${results.qcActiveRunBox}`);
+  const short = JSON.parse(results.qcActiveRunShort);
+  assert.strictEqual(short.vh, 600, `the short capture was not 600px tall: ${results.qcActiveRunShort}`);
+  assert.ok(short.text.includes('지금 이 프로젝트에서 작업이 진행 중이에요'));
+  assert.strictEqual(short.visible, true, `the short window hid the refusal: ${results.qcActiveRunShort}`);
+  assert.strictEqual(short.shellInside, true, `the short window hid the shell line: ${results.qcActiveRunShort}`);
+}
+
+{
+  const unknown = JSON.parse(results.qcPriorUnknown);
+  assert.strictEqual(unknown.kind, 'unavailable', `the build card stayed ${unknown.kind} while a stop was unconfirmed`);
+  assert.ok(unknown.text.includes('이전 시도가 멈췄는지 아직 확인하지 못했어요'),
+    `the card did not say the stop is unconfirmed: ${unknown.text}`);
+  assert.ok(unknown.text.includes('파일을 바꾸는 명령은 확인한 뒤에 할 수 있어요'));
+  assert.ok(!unknown.text.includes('작업이 진행 중이에요'), 'an unconfirmed stop was described as a live Work');
+  assert.ok(!unknown.text.includes('샌드박스'));
+  assert.strictEqual(results.qcPriorUnknownReds, 0, 'an unconfirmed stop was painted as a failure');
+  const unknownBox = JSON.parse(results.qcPriorUnknownBox);
+  assert.strictEqual(unknownBox.visible, true,
+    `the unconfirmed-stop sentence is outside the visible body: ${results.qcPriorUnknownBox}`);
+  const unknownShort = JSON.parse(results.qcPriorUnknownShort);
+  assert.strictEqual(unknownShort.vh, 600);
+  assert.strictEqual(unknownShort.visible, true, `the short window hid the unconfirmed-stop sentence: ${results.qcPriorUnknownShort}`);
+  assert.strictEqual(unknownShort.shellInside, true, `the short window hid the shell line: ${results.qcPriorUnknownShort}`);
 }
 
 assert.strictEqual(results.qcCardKind, 'explained');

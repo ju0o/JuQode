@@ -190,7 +190,9 @@
   .td01-output { max-height: 26vh; }
 }
 @media (max-height: 660px) {
-  .td01 { height: 72vh; }
+  /* At 72vh on a 600px window the refusal sentence sat below `.td01-qcbody`. 90vh
+   * keeps that sentence in the visible body. The shell line stays at the bottom. */
+  .td01 { height: min(90vh, 560px); }
   .td01-banner { padding: 6px 16px; }
   .td01-termout { max-height: 44px; }
 }

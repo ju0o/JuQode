@@ -728,9 +728,11 @@ test('the displayed command and the executed argv describe the same thing', () =
 
 /* ───────── the drawer's main-process surface — `15` TD-01 · `19` §C4 ───────── */
 
+const { execFileSync } = require('node:child_process');
 const { openDb } = require(path.join(R, 'app/main/db/db.js'));
 const repo = require(path.join(R, 'app/main/db/repo.js'));
 const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
+const { unknownTaskRunWithLiveRunner } = require(path.join(R, 'app/main/work/runner-liveness.js'));
 
 function qcBench(files = { 'package.json': pkg({ test: 'node -e "console.log(1)"', build: 'node -e "process.exit(2)"' }) }) {
   const dir = project(files);
@@ -981,7 +983,7 @@ test('every refusal the run handler can give has a sentence', () => {
    * 아니에요" about a command the product had just explained. Every reason either side can
    * produce must resolve to something true. */
   const copy = srcOf('app/renderer/copy.js');
-  const HANDLER = ['already-running', 'unknown-rule', 'not-executable', 'no-project', 'active-run'];
+  const HANDLER = ['already-running', 'unknown-rule', 'not-executable', 'no-project', 'active-run', 'prior-run-unknown'];
   const AVAIL = ['no_script', 'no_package_json', 'already_running', 'not_running',
                  'placeholder_script', 'not_git', 'unknown_rule'];
   for (const r of [...HANDLER, ...AVAIL]) {
@@ -1005,12 +1007,17 @@ test('file-changing rules are a closed set and the terminal is not called a sand
 
 test('the active-Work check and the spawn are one synchronous turn', () => {
   const ipc = srcOf('app/main/ipc.js');
-  const gate = ipc.indexOf('if (activeRunBlocksQc(projectId, ruleId))');
-  const begin = ipc.indexOf('beginQcRun', gate);
+  const gate = ipc.indexOf('const fileGuard = fileQcBlock(projectId, ruleId)');
+  const ret = ipc.indexOf('if (fileGuard)', gate);
+  const begin = ipc.indexOf('beginQcRun', ret);
   const spawn = ipc.indexOf('qcRun.start', begin);
-  assert.ok(gate !== -1 && begin > gate && spawn > begin, 'the run handler lost the active-Work gate');
+  assert.ok(gate !== -1 && ret > gate && begin > ret && spawn > begin, 'the run handler lost the file guard');
   assert.ok(!ipc.slice(gate, spawn).includes('await'),
-    'an await between the active-Work read and the spawn lets another handler write first');
+    'an await between the file-guard read and the spawn lets another handler write first');
+  const fn = ipc.indexOf('const fileQcBlock =');
+  const fnEnd = ipc.indexOf('const withFileQcBlock', fn);
+  assert.ok(fn !== -1 && fnEnd > fn && !ipc.slice(fn, fnEnd).includes('await'),
+    'the file guard itself waits, so the read and the spawn are not one turn');
 });
 
 test('an active Work refuses a file-changing Quick Command before it writes', async () => {
@@ -1093,6 +1100,118 @@ test('an active Work still allows git status and stopping a JuQode server', asyn
     }, 20);
   });
 });
+
+test('an unacknowledged ended_unknown Work refuses a file-changing Quick Command before it writes', async () => {
+  const b = qcBench({
+    'package.json': pkg({
+      build: 'node -e "require(\'fs\').writeFileSync(\'touched.txt\',\'x\')"',
+      test: 'node -e "require(\'fs\').writeFileSync(\'touched-test.txt\',\'x\')"',
+      dev: 'node -e "setInterval(() => {}, 1000)"',
+      deploy: 'node -e "require(\'fs\').writeFileSync(\'touched-deploy.txt\',\'x\')"',
+    }),
+    'keep.txt': 'same',
+  });
+  execFileSync('git', ['init', '-q'], { cwd: b.dir });
+  execFileSync('git', ['config', 'user.email', 'qc-test@example.com'], { cwd: b.dir });
+  execFileSync('git', ['config', 'user.name', 'qc-test'], { cwd: b.dir });
+  const porcelain = () => execFileSync('git', ['status', '--porcelain'], { cwd: b.dir, encoding: 'utf8' });
+  const head = () => {
+    try {
+      return execFileSync('git', ['rev-parse', '--verify', 'HEAD'], {
+        cwd: b.dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch { return null; }
+  };
+  const beforeTree = porcelain();
+  const beforeHead = head();
+
+  const started = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.start', '서버 켜줘');
+  assert.strictEqual(started.ok, true, `${started.reason}/${started.detail}`);
+
+  const legacy = repo.beginWork(b.db, b.project.id, '예전 시도');
+  assert.strictEqual(legacy.ok, true, legacy.reason);
+  repo.setWorkState(b.db, legacy.work.id, { status: 'ended', outcome: 'ended_unknown' });
+  const task = repo.createTask(b.db, b.project.id, { goal: '버튼 고쳐줘', acceptanceCriteria: ['버튼이 눌려요'] });
+  const linked = repo.beginWork(b.db, b.project.id, '확인 못 한 시도', { taskId: task.id });
+  assert.strictEqual(linked.ok, true, linked.reason);
+  repo.setWorkState(b.db, linked.work.id, { status: 'ended', outcome: 'ended_unknown' });
+  assert.strictEqual(repo.activeWork(b.db, b.project.id), null);
+  assert.ok(unknownTaskRunWithLiveRunner(b.db, b.project.id));
+  assert.strictEqual(repo.hasStoppedProcessAcknowledgement(b.db, legacy.work.id), false);
+  assert.strictEqual(repo.hasStoppedProcessAcknowledgement(b.db, linked.work.id), false);
+
+  const listed = b.h['juqode:qc-list'](null, b.project.id);
+  assert.strictEqual(listed.rules.find((r) => r.id === 'qc.build').reason, 'prior-run-unknown');
+  assert.notStrictEqual(listed.rules.find((r) => r.id === 'qc.git.status').reason, 'prior-run-unknown');
+  const routed = b.h['juqode:qc-route'](null, b.project.id, '빌드 해줘');
+  assert.strictEqual(routed.available, false);
+  assert.strictEqual(routed.reason, 'prior-run-unknown');
+
+  const status = await b.h['juqode:qc-run'](null, b.project.id, 'qc.git.status', '깃 상태');
+  assert.strictEqual(status.ok, true, `${status.reason}/${status.detail}`);
+  const opened = await b.h['juqode:qc-run'](null, b.project.id, 'qc.terminal.open', '터미널');
+  assert.strictEqual(opened.ok, true);
+  assert.strictEqual(opened.action, 'open-drawer');
+  const stop = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.stop', '서버 꺼줘');
+  assert.strictEqual(stop.ok, true, `${stop.reason}/${stop.detail}`);
+  assert.strictEqual(stop.action, 'stop');
+  await waitFor(5000, () => b.pushed.some((u) => u.runId === started.runId && u.ended));
+
+  const runsBefore = repo.qcRunsFor(b.db, b.project.id).map((r) => r.id);
+  for (const id of ['qc.build', 'qc.test', 'qc.dev.start', 'qc.deploy', 'qc.git.commit']) {
+    const run = await b.h['juqode:qc-run'](null, b.project.id, id, id);
+    assert.strictEqual(run.ok, false, id);
+    assert.strictEqual(run.reason, 'prior-run-unknown', `${id} refused as ${run.reason}/${run.detail}`);
+  }
+  assert.deepStrictEqual(repo.qcRunsFor(b.db, b.project.id).map((r) => r.id), runsBefore,
+    'a refused command became a row');
+  assert.strictEqual(porcelain(), beforeTree, 'git add changed the index during an unacknowledged stop');
+  assert.strictEqual(head(), beforeHead, 'git commit created a commit during an unacknowledged stop');
+  for (const name of ['touched.txt', 'touched-test.txt', 'touched-deploy.txt']) {
+    assert.ok(!fs.existsSync(path.join(b.dir, name)), `${name} was written`);
+  }
+  assert.strictEqual(fs.readFileSync(path.join(b.dir, 'keep.txt'), 'utf8'), 'same');
+
+  const denied = b.h['juqode:legacy-unknown-ack'](null, b.project.id, legacy.work.id, false);
+  assert.strictEqual(denied.ok, false);
+  assert.strictEqual(denied.reason, 'confirmation-required');
+  assert.strictEqual(repo.hasStoppedProcessAcknowledgement(b.db, legacy.work.id), false);
+  const wrong = b.h['juqode:legacy-unknown-ack'](null, b.project.id, linked.work.id, true);
+  assert.strictEqual(wrong.ok, false);
+  assert.strictEqual(wrong.reason, 'not-legacy-work');
+  assert.strictEqual(repo.hasStoppedProcessAcknowledgement(b.db, linked.work.id), false);
+  const still = await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘');
+  assert.strictEqual(still.reason, 'prior-run-unknown');
+
+  const acked = b.h['juqode:legacy-unknown-ack'](null, b.project.id, legacy.work.id, true);
+  assert.strictEqual(acked.ok, true, acked.reason);
+  assert.strictEqual(repo.getWork(b.db, legacy.work.id).outcome, 'ended_unknown');
+  assert.strictEqual(repo.hasStoppedProcessAcknowledgement(b.db, legacy.work.id), true);
+  const held = await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘');
+  assert.strictEqual(held.reason, 'prior-run-unknown', 'acking one unknown Work freed another');
+
+  const cleared = repo.acknowledgeUnknownProcessStopped(b.db, b.project.id, linked.work.id);
+  assert.strictEqual(cleared.ok, true, cleared.reason);
+  assert.strictEqual(repo.getWork(b.db, linked.work.id).outcome, 'ended_unknown');
+  assert.strictEqual(unknownTaskRunWithLiveRunner(b.db, b.project.id), null);
+  const after = await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘');
+  assert.strictEqual(after.ok, true, `${after.reason}/${after.detail}`);
+  await waitFor(5000, () => b.pushed.some((u) => u.runId === after.runId && u.ended));
+  assert.ok(fs.existsSync(path.join(b.dir, 'touched.txt')), 'the build did not write after the stop was confirmed');
+});
+
+function waitFor(ms, pred) {
+  const deadline = Date.now() + ms;
+  return new Promise((resolve, reject) => {
+    const t = setInterval(() => {
+      if (pred()) { clearInterval(t); resolve(); return; }
+      if (Date.now() >= deadline) {
+        clearInterval(t);
+        reject(new Error(`timed out after ${ms}ms`));
+      }
+    }, 20);
+  });
+}
 
 /* ───────── batch-12 security review · what the fixes have to keep true ───────── */
 
