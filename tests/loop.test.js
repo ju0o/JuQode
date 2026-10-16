@@ -27,7 +27,7 @@ const tempDir = (prefix) => {
   return d;
 };
 /* descendants of cancelled fixtures are alive by design; they must not hold the runner open */
-test.after(() => fake.reapProcessesUnder(juqodeTempDirs));
+test.after(() => fake.reapProcessesUnder(juqodeTempDirs, { handles: [...supervisor.live.values()].map((e) => e.child).filter(Boolean) }));
 process.on('exit', () => {
   for (const d of juqodeTempDirs) {
     for (const target of [d, `${d}-cli`]) {

@@ -50,37 +50,85 @@ function scriptBin(dir, name, source) {
   return launcher(dir, name, script);
 }
 
-/* TEARDOWN BY PATH OWNERSHIP. A test that cancels a Work leaves, by the product's own design, the
+/* TEARDOWN BY OWNERSHIP. A test that cancels a Work leaves, by the product's own design, the
  * descendants of the fixture CLI alive (the end is `ended_unknown`, never "all gone"), and a live
- * child handle keeps the test process — and so the whole runner — from exiting. The fixture owns
- * those processes, but a bare pid is not an identity. What is: the command line of every process a
- * fixture starts names the unique temp directory this file created (`mkdtemp`). Only a process whose
- * command line contains one of THOSE directories is stopped; never a pid recorded earlier, never a
- * group, never this process or its parent. Returns the pids it signalled. */
-function reapProcessesUnder(dirs) {
-  const roots = [...new Set((dirs || []).filter((d) => typeof d === 'string' && d.length > 8))];
-  if (!roots.length) return [];
-  const { spawnSync } = require('node:child_process');
-  const self = new Set([process.pid, process.ppid]);
-  const found = [];
-  if (WIN) {
-    const list = roots.map((r) => `'${r.replace(/'/g, "''")}'`).join(',');
-    const ps = `$d=@(${list}); Get-CimInstance Win32_Process | Where-Object { $c=$_.CommandLine; $c -and ($d | Where-Object { $c.Contains($_) }) } | ForEach-Object { $_.ProcessId }`;
-    const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8' });
-    for (const line of String(r.stdout || '').split(/\r?\n/)) { const n = Number(line.trim()); if (Number.isInteger(n) && n > 4) found.push(n); }
-  } else {
-    const r = spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
-    for (const line of String(r.stdout || '').split('\n')) {
-      const m = /^\s*(\d+)\s+(.*)$/.exec(line);
-      if (m && roots.some((d) => m[2].includes(d))) found.push(Number(m[1]));
-    }
-  }
-  const killed = [];
-  for (const pid of found) {
-    if (self.has(pid)) continue;
-    try { process.kill(pid, 'SIGKILL'); killed.push(pid); } catch { /* gone */ }   // positive pid only
-  }
-  return killed;
+ * child handle keeps the test process -- and the whole runner -- from exiting. Cleaning that up must
+ * not become the thing the product refuses to do: signal a number that is no longer ours.
+ *
+ * Order of authority:
+ *   1. a ChildProcess HANDLE this process holds -- `handle.kill()`, no pid involved;
+ *   2. a process DISCOVERED by its command line naming a temp directory this test file created
+ *      (discovery is not authorization). It is signalled only if, immediately before, its identity is
+ *      read again and is unchanged: POSIX -- /proc start time + command line; Windows -- the
+ *      process CreationDate + command line from CIM. A pid that exited, was recycled by another
+ *      program, or no longer names our directory is skipped. Where identity cannot be read (no /proc,
+ *      no CIM) nothing is signalled.
+ * Single positive pids only: never a group, never this process or its parent, never a pattern kill. */
+const { spawnSync } = require('node:child_process');
+
+function procStartPosix(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] ?? null;       // field 22 = starttime
+  } catch { return null; }
 }
 
-module.exports = { WIN, PRELUDE, launcher, scriptBin, reapProcessesUnder };
+/** `{ start, cmd }` as the OS reports it NOW, or null (gone / unreadable). */
+function processIdentity(pid) {
+  if (!Number.isInteger(pid) || pid <= 4) return null;
+  if (!WIN) {
+    const start = procStartPosix(pid);
+    if (start === null) return null;
+    try { return { start, cmd: fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').join(' ') }; } catch { return null; }
+  }
+  const ps = `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p) { $p.CreationDate.ToString('o') + '|' + $p.CommandLine }`;
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8' });
+  const line = String(r.stdout || '').trim();
+  const i = line.indexOf('|');
+  return i < 0 ? null : { start: line.slice(0, i), cmd: line.slice(i + 1) };
+}
+
+/** Every process whose command line names one of `roots`: `[{ pid, start, cmd }]`. Discovery only. */
+function discoverUnder(roots) {
+  const out = [];
+  if (!WIN) {
+    let names = [];
+    try { names = fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)); } catch { return out; }
+    for (const n of names) {
+      const id = processIdentity(Number(n));
+      if (id && roots.some((d) => id.cmd.includes(d))) out.push({ pid: Number(n), ...id });
+    }
+    return out;
+  }
+  const list = roots.map((r) => `'${r.replace(/'/g, "''")}'`).join(',');
+  const ps = `$d=@(${list}); Get-CimInstance Win32_Process | Where-Object { $c=$_.CommandLine; $c -and ($d | Where-Object { $c.Contains($_) }) } | ForEach-Object { "$($_.ProcessId)|$($_.CreationDate.ToString('o'))|$($_.CommandLine)" }`;
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8' });
+  for (const line of String(r.stdout || '').split(/\r?\n/)) {
+    const m = /^(\d+)\|([^|]*)\|(.*)$/.exec(line);
+    if (m) out.push({ pid: Number(m[1]), start: m[2], cmd: m[3] });
+  }
+  return out;
+}
+
+/** Stop what this file's tests left running. Returns `{ handles: n, pids: [..] }` -- what it actually signalled. */
+function reapProcessesUnder(dirs, { handles = [], kill = process.kill, discover = discoverUnder, identityOf = processIdentity } = {}) {
+  const roots = [...new Set((dirs || []).filter((d) => typeof d === 'string' && d.length > 8))];
+  const result = { handles: 0, pids: [] };
+  for (const h of handles) {
+    if (h && typeof h.kill === 'function' && h.exitCode === null && h.signalCode === null) {
+      try { h.kill('SIGKILL'); result.handles += 1; } catch { /* gone */ }
+    }
+  }
+  if (!roots.length) return result;
+  const self = new Set([process.pid, process.ppid]);
+  for (const found of discover(roots)) {
+    if (self.has(found.pid) || !(found.pid > 4)) continue;
+    const now = identityOf(found.pid);                                    // re-read at the moment of the signal
+    if (!now || now.start !== found.start) continue;                       // exited, or the number belongs to someone else now
+    if (!roots.some((d) => now.cmd.includes(d))) continue;                 // no longer a process of ours
+    try { kill(found.pid, 'SIGKILL'); result.pids.push(found.pid); } catch { /* gone */ }
+  }
+  return result;
+}
+
+module.exports = { WIN, PRELUDE, launcher, scriptBin, reapProcessesUnder, processIdentity };
