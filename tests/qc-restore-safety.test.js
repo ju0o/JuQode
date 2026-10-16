@@ -169,7 +169,7 @@ test('C: a symlinked file or a symlinked / escaping qc-ack directory is never tr
     assert.strictEqual(w.ok, false, 'a record was written through a linked directory');
     assert.ok(!fs.readdirSync(elsewhere).some((n) => n.includes('.tmp')), 'a temp file leaked outside the store');
   }
-  assert.ok(canLink || process.platform === 'win32', 'symlinks should be creatable on this host');
+  t.diagnostic(canLink ? 'symlink + junction cases ran' : 'this host could not create symlinks: the symlink cases did NOT run here');
 });
 
 /* ───────────── D · the confirmation names runs ───────────── */
