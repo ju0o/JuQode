@@ -12,6 +12,7 @@ const os = require('node:os');
 const { buildSignature, certificateTable } = require('../app/main/signing.js');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-pe-'));
+process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* busy or gone */ } });
 const write = (name, buf) => { const p = path.join(dir, name); fs.writeFileSync(p, buf); return p; };
 
 /** A minimal but structurally real PE. `certSize` is the certificate table's SIZE field. */

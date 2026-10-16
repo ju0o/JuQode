@@ -4321,6 +4321,8 @@ console.log(JSON.stringify(results, null, 2));
  * delete it first — the launch then sat on SC-01 with `폴더가 없어요` and the terminal card it
  * was there to photograph never happened. */
 for (const d of [SEED, SEED2]) fs.rmSync(d, { recursive: true, force: true });
+/* the run's own temp data (never the real user data): the Electron children are stopped by now */
+process.on('exit', () => { for (const d of [DB_DIR, USER_DATA]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* busy or gone */ } } });
 
 /* ── A store the app must refuse ────────────────────────────────────────────────
  * WBS-21 says a file we cannot understand is refused, never replaced. That is only half

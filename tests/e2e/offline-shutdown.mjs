@@ -7,6 +7,8 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { sweepDisplays } from './xvfb.mjs';
 import { launchArgs, killTree, termTree, countElectron, WIN } from './launch.mjs';
+/* the temp data dirs this run created -- the real user data was never involved */
+process.on('exit', () => { for (const d of [path.dirname(DB), USER_DATA]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* busy or gone */ } } });
 sweepDisplays();
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

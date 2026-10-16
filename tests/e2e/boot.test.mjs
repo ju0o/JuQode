@@ -69,6 +69,8 @@ const interruptedRun = repo.beginWork(seededDb, seededProject.id, 'Interrupted b
 repo.setRunnerIdentity(seededDb, interruptedRun.id, 'fixture-claude-session', process.pid);
 seededDb.close(); // no endAppSession: this is the crash boundary
 
+/* the temp data dirs this run created -- the real user data was never involved */
+process.on('exit', () => { for (const d of [path.dirname(DB), USER_DATA, restartProjectPath]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* busy or gone */ } } });
 sweepDisplays();
 
 function boot(extraArgs = [], env = {}) {
