@@ -259,7 +259,7 @@ const app = spawnApp([
       /* WBS-33 · the notice this run has to photograph. */
       JUQODE_SIGNATURE_EXE: PE_UNSIGNED } });
 app.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
-const stopApp = () => killTree(app.pid);
+const stopApp = () => killTree(app);
 process.on('exit', stopApp);
 let appErr = '';
 app.stderr.on('data', (d) => { appErr += d; });
@@ -4230,7 +4230,7 @@ console.log(JSON.stringify(results, null, 2));
   const app3 = spawnApp(['--no-sandbox', `--remote-debugging-port=${PORT3}`],
     { cwd: ROOT, detached: true, env: { ...process.env, JUQODE_TRACE: '1', JUQODE_DB: DB,
       JUQODE_USER_DATA: USER_DATA, JUQODE_TERM_SHELL: '/nonexistent/juqode-shell' } });
-  const stop3 = () => killTree(app3.pid);
+  const stop3 = () => killTree(app3);
   process.on('exit', stop3);
   await sleep(4000);
 
@@ -4341,7 +4341,7 @@ process.on('exit', () => { for (const d of [DB_DIR, USER_DATA]) { try { fs.rmSyn
       /* A certificate table that IS present but was never judged — the OTHER half of WBS-33's
        * notice, and the one that must not borrow the certain sentence's words. */
       JUQODE_SIGNATURE_EXE: PE_SIGNED } });
-  const stop2 = () => killTree(app2.pid);
+  const stop2 = () => killTree(app2);
   process.on('exit', stop2);
   await sleep(4000);
 

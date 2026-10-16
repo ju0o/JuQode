@@ -57,19 +57,32 @@ export function launchArgs(args, plan = displayPlan()) {
   return ['xvfb-run', ['-a', ELECTRON, ...args]];
 }
 
-/** The whole tree, not just the process we hold. Safe to call on an already-dead pid. */
-export function killTree(pid) {
-  if (!pid) return;
-  if (WIN) spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
-  else { try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone */ } }
+/* Ending what a run started. Both functions take the OWNED ChildProcess HANDLE, never a bare pid:
+ * a number says nothing about whose process it is now, and "safe to call on an already-dead pid" was
+ * exactly the hazard (the number may have been given to a stranger). A handle that has already exited
+ * is never signalled. While the handle is open the OS cannot reuse its pid, which is what makes the one
+ * signal sent below land on our process. The tree under it is ended by the platform's own tree/group
+ * mechanism -- POSIX process group (the app is spawned `detached`, so the child leads its own group) and
+ * Windows `taskkill /T` -- and nothing is ever matched by name or pattern. */
+const open = (child) => Boolean(child && Number.isInteger(child.pid) && child.pid > 0 && child.exitCode === null && child.signalCode === null);
+
+/** The whole tree under the handle we own. A handle that already exited is left alone. */
+export function killTree(child) {
+  if (typeof child === 'number') throw new TypeError('killTree needs the owned ChildProcess, not a pid');
+  if (!open(child)) return false;
+  if (WIN) { spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); return true; }
+  try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } }
+  return true;
 }
 
-/** Graceful tree stop — the analogue of SIGTERM to the process group. No /F on Windows:
+/** Graceful tree stop -- the analogue of SIGTERM to the process group. No /F on Windows:
  *  `taskkill /T` alone asks the window to close, which is the path under test. */
-export function termTree(pid) {
-  if (!pid) return;
-  if (WIN) spawnSync('taskkill', ['/PID', String(pid), '/T'], { stdio: 'ignore' });
-  else { try { process.kill(-pid, 'SIGTERM'); } catch { /* already gone */ } }
+export function termTree(child) {
+  if (typeof child === 'number') throw new TypeError('termTree needs the owned ChildProcess, not a pid');
+  if (!open(child)) return false;
+  if (WIN) { spawnSync('taskkill', ['/PID', String(child.pid), '/T'], { stdio: 'ignore' }); return true; }
+  try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch { /* gone */ } }
+  return true;
 }
 
 /** How many Electron processes belonging to THIS checkout are running, as a string.

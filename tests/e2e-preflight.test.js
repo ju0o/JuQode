@@ -74,3 +74,55 @@ test('every e2e launch site hands the app a temp JUQODE_DB AND JUQODE_USER_DATA 
     assert.ok(sites >= 1, `${f}: no launch site found -- the pattern this guard relies on changed`);
   }
 });
+
+test('preflight discloses what a real run would show and write BEFORE anything starts', () => {
+  const r = spawnSync(process.execPath, [path.join(R, 'tests/e2e/preflight.mjs')], { encoding: 'utf8', env: { ...process.env } });
+  const d = JSON.parse(r.stdout).disclosure;
+  for (const k of ['windows', 'userDataAndDb', 'screenshotsGoTo', 'otherFootprint', 'endingProcesses', 'network']) {
+    assert.ok(typeof d[k] === 'string' && d[k].length > 20, `disclosure.${k} is missing`);
+  }
+  assert.match(d.userDataAndDb, /never passed/);
+  assert.match(d.screenshotsGoTo, /tmp-visual/);
+  assert.match(d.endingProcesses, /own ChildProcess handle/);
+});
+
+test('killTree/termTree take the OWNED handle: a number is refused, an exited handle is never signalled, the tree under a live one ends, a bystander does not', async () => {
+  const { killTree, termTree } = await load();
+  const { spawn } = require('node:child_process');
+  assert.throws(() => killTree(process.pid), /owned ChildProcess/);
+  assert.throws(() => termTree(1234), /owned ChildProcess/);
+
+  const real = process.kill; const sent = [];
+  process.kill = (pid, sig) => { if (sig !== 0 && sig !== undefined) sent.push([pid, sig]); return real.call(process, pid, sig); };
+  try {
+    const quick = spawn(process.execPath, ['-e', '0'], { stdio: 'ignore' });
+    await new Promise((res) => quick.once('exit', res));
+    assert.strictEqual(killTree(quick), false);
+    assert.strictEqual(termTree(quick), false);
+    assert.deepStrictEqual(sent, [], 'a handle that already exited was signalled by number');
+  } finally { process.kill = real; }
+
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
+  const fs = require('node:fs'); const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-kt-'));
+  const pidFile = path.join(dir, 'child.pid');
+  const by = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  const root = spawn(process.execPath, ['-e',
+    `const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});require('fs').writeFileSync(${JSON.stringify(pidFile)},String(c.pid));setInterval(()=>{},1000)`],
+  { stdio: 'ignore', detached: process.platform !== 'win32' });
+  try {
+    const deadline = Date.now() + 8000;
+    while (!fs.existsSync(pidFile) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    const kid = Number(fs.readFileSync(pidFile, 'utf8'));
+    assert.ok(alive(kid) && alive(root.pid));
+    assert.strictEqual(killTree(root), true);
+    const gone = async (pid) => { const end = Date.now() + 8000; while (Date.now() < end) { if (!alive(pid)) return true; await new Promise((r) => setTimeout(r, 50)); } return false; };
+    assert.ok(await gone(root.pid), 'the owned root survived');
+    assert.ok(await gone(kid), 'the tree under the owned root survived');
+    assert.ok(alive(by.pid), 'an unrelated process was ended');
+  } finally {
+    try { by.kill('SIGKILL'); } catch { /* gone */ }
+    try { root.kill('SIGKILL'); } catch { /* gone */ }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -43,7 +43,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stopAll(); proc
 /* ── 1. 화면 ──────────────────────────────────────────────────────────────────────────── */
 say(`Xvfb ${DISPLAY} (${W}x${H})`);
 const xvfb = spawn('Xvfb', [DISPLAY, '-screen', '0', `${W}x${H}x24`, '-nolisten', 'tcp'], { detached: true, stdio: 'ignore' });
-dying.push(() => killTree(xvfb.pid));
+dying.push(() => killTree(xvfb));
 await sleep(1200);
 
 /* ── 2. 앱 ────────────────────────────────────────────────────────────────────────────── */
@@ -57,7 +57,7 @@ const app = spawn(ELECTRON, ['.', '--no-sandbox', `--remote-debugging-port=${POR
     JUQODE_CLAUDE_BIN: FAKE_CLI, JUQODE_INTERPRET_DELAY_MS: '4000',
     JUQODE_SIGNATURE_EXE: PE_UNSIGNED },
 });
-dying.push(() => killTree(app.pid));
+dying.push(() => killTree(app));
 app.on('error', (e) => { throw new Error(`앱을 시작하지 못했다: ${e.message}`); });
 
 async function pageTarget() {

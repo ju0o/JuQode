@@ -40,7 +40,7 @@ function run(env = {}, args = []) {
     p.on('error', (e) => { throw new Error(`could not start the app (is xvfb-run installed?): ${e.message}`); });
     let out = '';
     p.stdout.on('data', (d) => { out += d; });
-    const t = setTimeout(() => killTree(p.pid), 30000);
+    const t = setTimeout(() => killTree(p), 30000);
     p.on('exit', (code, signal) => {
       clearTimeout(t);
       const events = out.split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
@@ -101,7 +101,7 @@ if (WIN) {
     }
   `.replace('${term.pid}', term.pid)], { stdio: 'ignore' });
 } else {
-  termTree(term.pid);
+  termTree(term);
 }
 /* Poll until all Electron processes exit or a 12-second hard timeout. */
 const termDeadline = Date.now() + 12000;
@@ -109,7 +109,7 @@ while (alive() !== '0' && Date.now() < termDeadline) {
   await sleep(500);
 }
 const after = alive();
-killTree(term.pid);
+killTree(term);
 await sleep(1500);
 
 assert.notStrictEqual(before, '0', 'app never started for the shutdown test');

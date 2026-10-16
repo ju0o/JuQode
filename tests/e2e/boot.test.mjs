@@ -87,7 +87,7 @@ function boot(extraArgs = [], env = {}) {
     let out = '', err = '';
     p.stdout.on('data', (d) => { out += d; });
     p.stderr.on('data', (d) => { err += d; });
-    const kill = setTimeout(() => killTree(p.pid), 30000);
+    const kill = setTimeout(() => killTree(p), 30000);
     p.on('exit', (code, signal) => {
       clearTimeout(kill);
       const events = out.split('\n').filter(Boolean).flatMap((l) => {
