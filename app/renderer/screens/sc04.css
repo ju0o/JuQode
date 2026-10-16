@@ -26,7 +26,7 @@
 
 .sc04-cols {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
   gap: 18px;
   align-items: start;
 }
@@ -124,8 +124,38 @@
 
 .sc04-empty { align-self: start; }
 
-@media (max-width: 1080px) {
+@media (max-width: 1099px) {
   /* One column, in reading order: meaning first. Raw last, so a narrow window never opens on
      syntax — which would invert the whole point of the screen. */
   .sc04-cols { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- D3 · summary -> files -> code -> Raw on request ---------- */
+.sc04-summary { gap: 8px; display: flex; flex-direction: column; min-width: 0; }
+.sc04 .file-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sc04 .file-chip { max-width: 100%; padding: 2px 8px; border-radius: 6px; background: var(--card2); font-size: var(--fs-caption); overflow-wrap: anywhere; }
+.sc04 .file-more { font-size: var(--fs-caption); color: var(--mut); align-self: center; }
+.sc04 .file-all { margin-top: 4px; }
+.sc04 .file-all > summary { cursor: pointer; font-size: var(--fs-caption); color: var(--ink2); min-height: 28px; display: flex; align-items: center; }
+.sc04 .file-all > summary::before { content: "▸"; margin-right: 6px; }
+.sc04 .file-all[open] > summary::before { content: "▾"; }
+.sc04 .file-all > summary::-webkit-details-marker { display: none; }
+.sc04 .file-paths { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sc04 .file-path-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sc04 .file-path { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-caption); overflow-wrap: anywhere; color: var(--ink2); }
+.sc04-files { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sc04-filehead { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sc04-filename { font-weight: 600; font-family: inherit; }
+.sc04-fullpath .file-path { padding: 2px 0; }
+/* the group's title is a real button: bare, but with a visible focus ring */
+.sc04-grouppick { background: none; border: none; padding: 2px 0; margin: 0; font: inherit; font-weight: 600; text-align: left; color: var(--ink); cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+.sc04-grouppick:focus-visible, .sc04-block:focus-visible, .sc04-patch:focus-visible, .sc04-raw:focus-visible { outline: 2px solid var(--juq); outline-offset: 2px; }
+.sc04 .chip { white-space: normal; max-width: 100%; height: auto; line-height: 1.35; overflow-wrap: anywhere; text-align: left; font-size: var(--fs-caption); }
+/* Raw sits under the code, full width, and exists only while it is open */
+.sc04-raw { margin-top: 4px; }
+.sc04-raw.closed { display: none; }
+.sc04-rawbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sc04-raw .sc04-patch { max-height: 55vh; }
+.sc04-actor { font-size: var(--fs-caption); }
+.sc04 { overflow-x: hidden; }
+@media (max-width: 1099px) { .sc04 { padding: 16px 16px 32px; } }

@@ -589,6 +589,14 @@ export const C = {
     readerUnknown:    '이 작업이 무엇을 바꿨는지 여기서 확인하지 못했어요.',
     readerUnknownFiles: (files) => `바뀐 것으로 확인된 파일: ${files}`,
     readerOrient: '먼저 무엇이 바뀌었는지 읽어요. 코드와 원문은 그다음이에요.',
+    /* SC-04 D3: summary -> files -> the chosen change's code -> Raw Diff on request */
+    reader2: {
+      counts: (files, groups) => `바뀐 파일 ${files}개 · 변경 묶음 ${groups}개`,
+      basis: '두 시점의 파일을 비교해 확인한 목록이에요. 파일 이름만으로는 무엇이 왜 바뀌었는지 알 수 없어요.',
+      selectGroup: (title) => `${title} 묶음 고르기`,
+      rawRegion: '원문 Raw Diff',
+      rawHint: 'Esc 로 닫을 수 있어요.',
+    },
     /* ── WBS-19b · 되돌리기 ────────────────────────────────────────────────────────────
      *
      * `18` has `work.unwantedBody` and `rules.noRollback`, and both say 되돌리기 버튼은 없어요.

@@ -26,6 +26,8 @@ import { mountThemeToggle } from '../design/theme.js';
 import { when } from './brief.js';
 import { nextActions } from '../nextaction.js';
 import { unwantedPanel } from './sc03.js';
+import { presentFiles, maskForDisplay } from '../path-view.mjs';
+import { fileSummary } from '../file-summary.js';
 
 /* `16` §2.1: 부분 amber FILL · 실패 red (the only red) · 알 수 없음 dashed. A change that
  * could not be explained is 알 수 없음 — dashed — and never red: nothing failed. */
@@ -95,7 +97,8 @@ export function renderSC04(root, api, nav, state) {
     if (reader?.unknown && reader.changedFiles?.length) {
       /* What IS known still gets said — `15`'s Unknown State: 아래는 확인 가능한 부분입니다. */
       empty.appendChild(el('p', 'sm mut', C.reader.remainNote));
-      empty.appendChild(el('p', 'sm mono', C.gap.readerUnknownFiles(reader.changedFiles.join(' · '))));
+      empty.appendChild(el('p', 'sm', C.gap.readerUnknownFiles('')));
+      empty.appendChild(fileSummary(reader.changedFiles));
     }
     /* `15` SC-04 Empty State: `▸ 결과 설명으로` · `▸ 다음 의도로`. `18` carries neither, so both
      * are gap-marked rather than borrowing `reader.toBlocks`/`toRaw` — those name a code view
@@ -114,12 +117,14 @@ export function renderSC04(root, api, nav, state) {
   const selected = Math.min(state.readerGroup ?? 0, reader.groups.length - 1);
   const group = reader.groups[selected];
 
+  board.appendChild(summaryCard(reader));
   board.appendChild(el('p', 'sm mut sc04-orient', C.gap.readerOrient));
   const cols = el('div', 'sc04-cols');
   cols.appendChild(groupColumn(reader, selected, api, nav, state));
   cols.appendChild(blockColumn(group, state, nav));
-  cols.appendChild(rawColumn(group, state, nav));
   board.appendChild(cols);
+  /* Raw Diff: only when asked for, below the code, full width */
+  board.appendChild(rawColumn(group, state, nav));
 
   /* `15` SC-04 Evidence-gap State: a dashed(모름) card BELOW the change list. It is context for
    * what the reader just read, not a headline — putting it on top made the excluded paths the
@@ -147,6 +152,12 @@ export function renderSC04(root, api, nav, state) {
 
   shell.appendChild(board);
   root.appendChild(shell);
+  /* focus follows the action that re-drew the screen (opening Raw -> the Raw region; closing it -> the control that opened it) */
+  const want = state.readerFocus; state.readerFocus = null;
+  if (want) {
+    const target = want === 'raw' ? board.querySelector('.sc04-raw:not(.closed)') : board.querySelector(want);
+    if (target) { target.focus({ preventScroll: false }); target.scrollIntoView?.({ block: 'nearest' }); }
+  }
   return { shell, board };
 }
 
@@ -225,11 +236,40 @@ function evidenceGapCard(reader) {
   const card = el('section', 'card c-wide sc04-gap');
   card.setAttribute('data-el', 'evidence-gap');
   card.appendChild(el('p', 'lead', C.reader.evidenceGap));
-  card.appendChild(el('p', 'sm mono', C.reader.evidenceGapPaths(gap.paths.map((p) => p.path).join(' · '))));
+  card.appendChild(el('p', 'sm', C.reader.evidenceGapPaths('')));
+  card.appendChild(fileSummary(gap.paths.map((p) => p.path)));
   card.appendChild(el('p', 'sm mut', C.reader.evidenceGapWhy));
   /* The only honest next step: JuQode does not guess at the contents, and says where to look. */
   card.appendChild(el('p', 'xs sc04-gapalt', C.reader.evidenceGapAlt));
   return card;
+}
+
+/* ── 1 · what was observed to change: counts and names, nothing inferred from the names ── */
+function summaryCard(reader) {
+  const names = [...new Set(reader.groups.flatMap((g) => g.files.map((f) => f.file)))];
+  const card = el('section', 'card c-wide sc04-summary');
+  card.setAttribute('data-el', 'reader-summary');
+  card.appendChild(el('div', 'sm result-count', C.gap.reader2.counts(names.length, reader.groups.length)));
+  card.appendChild(fileSummary(names));
+  card.appendChild(el('div', 'xs mut2', C.gap.reader2.basis));
+  return card;
+}
+
+/* the screen shows a file by NAME (a folder hint only where two names collide); the stored path is one click away */
+function nameOf(allFiles, file) {
+  const item = presentFiles(allFiles).items.find((i) => i.raw === file);
+  return item ? item.shown : maskForDisplay(file);
+}
+function fileLine(allFiles, file) {
+  const wrap = el('div', 'sc04-filehead');
+  const name = el('span', 'sm sc04-filename', nameOf(allFiles, file));
+  name.title = maskForDisplay(file);
+  wrap.appendChild(name);
+  const all = el('details', 'file-all sc04-fullpath');
+  all.appendChild(el('summary', 'xs mut', C.gap.paths.showAll));
+  all.appendChild(el('div', 'file-path', maskForDisplay(file)));
+  wrap.appendChild(all);
+  return wrap;
 }
 
 /* ── left: 변경 묶음 ── */
@@ -243,7 +283,13 @@ function groupColumn(reader, selected, api, nav, state) {
     if (!g.explainable) card.classList.add('unexplained');
 
     const head = el('div', 'sc04-grouphead');
-    head.appendChild(el('span', 'sc04-grouptitle', g.title));
+    /* a button, so the keyboard can choose a change the way the pointer does */
+    const pick = btn('sc04-grouptitle sc04-grouppick', g.title, () => select(i, state.readerRaw));
+    pick.setAttribute('aria-pressed', i === selected ? 'true' : 'false');
+    pick.setAttribute('aria-label', C.gap.reader2.selectGroup(g.title));
+    pick.setAttribute('data-act', 'select-group');
+    pick.setAttribute('data-group-pick', String(i));
+    head.appendChild(pick);
     if (g.confidence) {
       const c = CONF[g.confidence];
       if (c) head.appendChild(el('span', `chip ${c.cls}`, C.brief.chips[c.key]));
@@ -292,19 +338,27 @@ function groupColumn(reader, selected, api, nav, state) {
     /* D-118: the group-level raw skip. This button is the path that does not pass through a
      * Code Block, and `21` WBS-28 requires it to exist even when blocks do. It sits with the
      * other routes — below the file list it read as a stray line of text rather than an action. */
-    card.appendChild(btn('btn sm sc04-rawbtn',
-                         state.readerRaw && selected === i ? C.gap.readerRawClose : C.reader.openRaw,
-                         () => select(i, !(state.readerRaw && selected === i))));
+    const rawBtn = btn('btn sm sc04-rawbtn',
+                       state.readerRaw && selected === i ? C.gap.readerRawClose : C.reader.openRaw,
+                       () => select(i, !(state.readerRaw && selected === i), `[data-group-raw="${i}"]`));
+    rawBtn.setAttribute('data-group-raw', String(i));
+    card.appendChild(rawBtn);
 
-    card.appendChild(el('p', 'xs mut sc04-files', `${C.gap.readerFiles(g.files.length)} · ${g.files.map((f) => f.file).join(' · ')}`));
+    const files = el('div', 'sc04-files');
+    files.appendChild(el('div', 'xs mut2', C.gap.readerFiles(g.files.length)));
+    files.appendChild(fileSummary(g.files.map((f) => f.file)));
+    card.appendChild(files);
 
     card.addEventListener('click', (e) => { if (e.target === card) select(i, state.readerRaw); });
     col.appendChild(card);
   });
 
-  function select(i, raw) {
+  function select(i, raw, opener = null) {
     state.readerGroup = i;
     state.readerRaw = raw;
+    /* opening Raw moves focus to it; closing it returns focus to what opened it; choosing a group keeps focus on that choice */
+    state.readerOpener = raw ? (opener ?? state.readerOpener ?? null) : null;
+    state.readerFocus = raw ? 'raw' : (opener ?? `[data-group-pick="${i}"]`);
     /* The group-level button is the SKIP: it shows the whole group, so any block scope goes. */
     state.readerBlock = null;
     nav.toReader(state.workSnapshot, state.reader);
@@ -320,7 +374,7 @@ function blockColumn(group, state, nav) {
 
   for (const f of group.files) {
     const card = el('article', 'card c-m sc04-file');
-    card.appendChild(el('p', 'sm mono sc04-filename', f.file));
+    card.appendChild(fileLine(group.files.map((x) => x.file), f.file));
 
     /* 표시 불가 — binary or image. `15` gives it routes down and NO red: this is a statement
      * about the file's kind, not about anything having gone wrong. */
@@ -348,7 +402,7 @@ function blockColumn(group, state, nav) {
        * has no units and then offers no way to read it leaves the reader with nothing. */
       if (!state.readerRaw) {
         const acts = el('div', 'row-acts');
-        acts.appendChild(btn('btn sm ghost rec', C.reader.toRaw, () => { state.readerRaw = true; nav.toReader(state.workSnapshot, state.reader); }));
+        acts.appendChild(btn('btn sm ghost rec', C.reader.toRaw, () => { state.readerRaw = true; state.readerFocus = 'raw'; nav.toReader(state.workSnapshot, state.reader); }));
         card.appendChild(acts);
       }
       col.appendChild(card);
@@ -366,6 +420,8 @@ function blockColumn(group, state, nav) {
         /* Selecting a block opens raw scoped to it; selecting it again closes that. */
         state.readerBlock = on ? null : key;
         state.readerRaw = !on;
+        state.readerOpener = on ? null : `[data-block="${CSS.escape(key)}"]`;
+        state.readerFocus = on ? `[data-block="${CSS.escape(key)}"]` : 'raw';
         nav.toReader(state.workSnapshot, state.reader);
       });
       row.setAttribute('data-block', key);
@@ -390,15 +446,32 @@ function lineRange(lines) {
   return first === last ? `${first}` : `${first}–${last}`;
 }
 
-/* ── right: 원문 diff ── */
+/* ── 4 · 원문 diff: only on request, full width under the code ── */
 function rawColumn(group, state, nav) {
   const col = el('section', 'sc04-col sc04-raw');
-  col.appendChild(el('h2', 'xs mut sc04-collabel', C.reader.raw));
+  col.setAttribute('role', 'region');
+  col.setAttribute('aria-label', C.gap.reader2.rawRegion);
+  col.tabIndex = -1;
+  col.setAttribute('data-el', 'raw-diff');
 
   if (!state.readerRaw) {
     col.classList.add('closed');
     return col;
   }
+
+  const bar = el('div', 'sc04-rawbar');
+  bar.appendChild(el('h2', 'xs mut sc04-collabel', C.reader.raw));
+  const close = btn('btn sm ghost sc04-rawclose', C.gap.readerRawClose, () => closeRaw());
+  close.setAttribute('data-act', 'raw-close');
+  bar.append(close, el('span', 'xs mut2', C.gap.reader2.rawHint));
+  col.appendChild(bar);
+  function closeRaw() {
+    state.readerRaw = false;
+    state.readerBlock = null;
+    state.readerFocus = state.readerOpener ?? `[data-group-pick="${state.readerGroup ?? 0}"]`;
+    nav.toReader(state.workSnapshot, state.reader);
+  }
+  col.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeRaw(); } });
 
   /* A selected block scopes the panel to ITS file. With none selected the group's whole change
    * is shown, which is D-118's skip — the path that does not pass through a block at all. */
@@ -407,14 +480,16 @@ function rawColumn(group, state, nav) {
 
   for (const f of shown) {
     const card = el('article', 'card c-wide2 sc04-rawcard');
-    card.appendChild(el('p', 'sm mono sc04-filename', f.file));
+    card.appendChild(fileLine(group.files.map((x) => x.file), f.file));
     if (!f.displayable) {
       card.appendChild(el('p', 'sm sc04-undisplayable', C.reader.binary));
     } else {
       const pre = el('pre', 'sc04-patch');
-      /* The patch is TEXT. It is set through textContent, never parsed as markup — it is
-       * arbitrary content from the user's own repository. */
+      /* The patch is TEXT, byte for byte. It is set through textContent, never parsed as markup — it is
+       * arbitrary content from the user's own repository -- and it is focusable so the keyboard can scroll it. */
       pre.textContent = f.patch;
+      pre.tabIndex = 0;
+      pre.setAttribute('aria-label', `${C.reader.raw} · ${nameOf(group.files.map((x) => x.file), f.file)}`);
       card.appendChild(pre);
       if (f.truncated) card.appendChild(el('p', 'xs mut sc04-truncated', C.gap.readerTruncated));
     }

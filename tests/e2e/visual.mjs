@@ -1035,7 +1035,8 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     /* the RAW column's filenames. The same class also labels the middle column's file groups,
      * and counting both said three files were shown when one was. (No backticks in here: this
      * comment lives inside a template literal and one would end it.) */
-    const files = () => [...document.querySelectorAll('.sc04-rawcard .sc04-filename')].map(n => n.textContent);
+    /* D3: the screen shows the NAME; the stored path is the tooltip and the one-click detail */
+    const files = () => [...document.querySelectorAll('.sc04-rawcard .sc04-filename')].map(n => n.title || n.textContent);
     if (!blocks().length) return JSON.stringify({ count: 0 });
     const before = blocks().map(b => b.classList.contains('on'));
     const key = blocks()[0].getAttribute('data-block');
@@ -2791,6 +2792,127 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   }
   await send('Emulation.clearDeviceMetricsOverride');
 
+
+  /* ── SC-04 D3 · the real renderer in the real window, fed synthetic reader data (long Korean names, same-name files, a binary, an
+   * unblocked file, an evidence gap, an unknown remainder). Real CSS, real keys. Nothing here touches the user's data. ───────── */
+  step('SC-04 D3 matrix');
+  out.sc04d3 = {};
+  const LONG = '문서/설정/알림 수신 여부를 바꾸면 곧바로 저장되고 다시 열어도 같은 값이 보이도록 고치는 안내 문서입니다.md';
+  const SYN = {
+    explained: { outcome: 'complete', reader: { ok: true, groups: [
+      { title: '알림 설정 저장', explainable: true, confidence: 'confirmed', what: '설정 값을 저장해요', why: '다시 열어도 같은 값이 보이게 하려고요', affects: '설정 화면',
+        files: [
+          { file: LONG, displayable: true, blocks: [{ name: '알림 수신 여부를 저장하는 아주 긴 이름의 함수', change: 'modify', afterLines: [3, 9] }], patch: '@@ -1,3 +1,4 @@\n-old line\n+new line with a long text that should scroll inside the patch box and never widen the page 한글도 길게 길게 길게 길게 길게 길게 길게 길게 길게 길게\n', truncated: false },
+          { file: 'src/index.js', displayable: true, blocks: [{ name: 'save', change: 'add', afterLines: [1, 4] }], patch: '@@ -0,0 +1,4 @@\n+function save() {}\n' },
+          { file: 'docs/index.js', displayable: true, blocks: [{ name: 'load', change: 'modify', afterLines: [10, 12] }], patch: '@@ -10 +10,3 @@\n+x\n' }] },
+      { title: '설정 파일과 이미지', explainable: true, confidence: 'expected', what: '기타 파일', why: null, affects: null,
+        files: [
+          { file: 'assets/logo.png', displayable: false, note: 'undisplayable', blocks: [], patch: '' },
+          { file: 'config/app.yaml', displayable: true, note: 'unblocked', blocks: [], patch: '@@ -1 +1 @@\n-a: 1\n+a: 2\n' }] }],
+      evidenceGap: { known: true, paths: [{ path: '.env.local' }, { path: 'dist/아주 긴 이름의 생성 폴더/bundle.js' }] } } },
+    partial: { outcome: 'partial', reader: { ok: true, groups: [
+      { title: '아직 설명하지 않은 변경', explainable: false, pending: true, confidence: null,
+        files: [{ file: 'src/index.js', displayable: true, blocks: [{ name: 'main', change: 'modify', afterLines: [1, 2] }], patch: '@@ -1 +1 @@\n-a\n+b\n' },
+                { file: 'README.md', displayable: true, blocks: [], note: 'unblocked', patch: '@@ -1 +1 @@\n-x\n+y\n' }] }],
+      evidenceGap: { known: true, paths: [{ path: 'node_modules/.cache/x' }] } } },
+    unknown: { outcome: 'ended_unknown', reader: { ok: true, groups: [], unknown: true, changedFiles: [LONG, 'src/index.js', 'docs/index.js'] } },
+    refused: { outcome: 'complete', reader: { ok: false, reason: 'no-evidence' } },
+  };
+  const sc04Mount = (kind) => evalJs(`(async () => {
+    const m = await import('./screens/sc04.js');
+    const syn = ${JSON.stringify(SYN[kind])};
+    const root = document.getElementById('root');
+    const state = { project: { name: 'demo', path: '/tmp/demo' }, workSnapshot: { work: { intent: '설정 화면에서 알림 수신 여부를 바꾸면 곧바로 저장되도록 고쳐 주세요', ended_at: new Date().toISOString() }, outcome: syn.outcome },
+                    reader: syn.reader, readerGroup: 0, readerRaw: false, readerBlock: null };
+    const nav = { toReader: () => m.renderSC04(root, api, nav, state), toWork() {}, toWorkbench() {} };
+    const api = { workExplain: async () => ({ ok: false }), workRevert: async () => ({ ok: false }) };
+    window.__sc04 = { state, rerender: () => m.renderSC04(root, api, nav, state) };
+    window.__sc04.rerender();
+    return true; })()`);
+  const SC04_METRICS = `(() => {
+    const root = document.querySelector('.sc04');
+    const visible = (n) => { for (let p = n; p && p !== root; p = p.parentElement) if (p.tagName === 'DETAILS' && !p.open && !(n.tagName === 'SUMMARY' && n.parentElement === p)) return false; return !!(n.offsetParent || n === root); };
+    const leaves = [...root.querySelectorAll('*')].filter((n) => n.children.length === 0 && n.textContent.trim() && visible(n));
+    return JSON.stringify({
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      rootOverflowX: root.scrollWidth - root.clientWidth,
+      small: leaves.filter((n) => parseFloat(getComputedStyle(n).fontSize) < 12).length,
+      pastEdge: leaves.filter((n) => n.getBoundingClientRect().right > innerWidth + 1).length,
+      clippedText: [...root.querySelectorAll('.card, .sc04-summary')].filter((n) => n.scrollWidth > n.clientWidth + 1).length,
+      patches: root.querySelectorAll('.sc04-patch').length,
+      rawOpen: !!root.querySelector('.sc04-raw:not(.closed)'),
+      patchTextVisible: [...root.querySelectorAll('.sc04-patch')].some((n) => n.offsetParent),
+      groups: root.querySelectorAll('.sc04-group').length,
+      summary: root.querySelector('[data-el="reader-summary"]')?.innerText ?? null,
+      reds: ${RED_COUNT('.sc04 *')}, primary: [...root.querySelectorAll('.btn.pri')].length });
+  })()`;
+  for (const [kind, fileTag] of [['explained', 'explained'], ['partial', 'partial'], ['unknown', 'unknown'], ['refused', 'refused']]) {
+    await sc04Mount(kind);
+    const rows = [];
+    for (const [w, h] of [[880, 600], [1024, 700], [1200, 773], [1440, 900]]) {
+      await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ['light', 'dark']) {
+        /* every render re-applies the stored theme (mountThemeToggle), so the theme under test is set AFTER the render */
+        const setTheme = () => evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+        await evalJs(`window.__sc04.state.readerRaw = false; window.__sc04.state.readerGroup = 0; window.__sc04.state.readerBlock = null; window.__sc04.rerender(); window.scrollTo(0,0)`);
+        await setTheme();
+        await sleep(250);
+        const closed = JSON.parse(await evalJs(SC04_METRICS));
+        fs.writeFileSync(path.join(OUT, `sc04-d3-${fileTag}-${w}-${theme}-closed.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+        const row = { w, theme, closed };
+        if (kind === 'explained' || kind === 'partial') {
+          // Raw open (the first group's Raw button), as a user would
+          await evalJs(`document.querySelector('.sc04-rawbtn').click()`);
+          await setTheme();
+          await sleep(250);
+          row.open = JSON.parse(await evalJs(SC04_METRICS));
+          row.openFocus = await evalJs(`document.activeElement?.classList?.contains('sc04-raw') ?? false`);
+          fs.writeFileSync(path.join(OUT, `sc04-d3-${fileTag}-${w}-${theme}-raw.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+          await evalJs(`window.__sc04.state.readerRaw = false; window.__sc04.rerender()`);
+          await setTheme();
+        }
+        if (theme === 'light') {
+          await evalJs(`document.documentElement.style.zoom = '1.5'`); await sleep(150);
+          row.zoom150 = JSON.parse(await evalJs(`JSON.stringify({ pageX: document.documentElement.scrollWidth - document.documentElement.clientWidth })`));
+          await evalJs(`document.documentElement.style.zoom = ''`);
+          await evalJs(`document.activeElement?.blur?.(); window.scrollTo(0,0)`);
+          const stops = [];
+          for (let i = 0; i < 18; i += 1) {
+            await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+            await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+            stops.push(JSON.parse(await evalJs(`(() => { const a = document.activeElement; if (!a || a === document.body) return JSON.stringify(null);
+              const r = a.getBoundingClientRect(); const cs = getComputedStyle(a);
+              return JSON.stringify({ tag: a.tagName, cls: String(a.className).slice(0, 30), onScreen: r.width > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight,
+                indicator: (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0) || (cs.boxShadow && cs.boxShadow !== 'none') }); })()`)));
+          }
+          row.focus = stops.filter(Boolean);
+        }
+        rows.push(row);
+      }
+    }
+    out.sc04d3[kind] = rows;
+  }
+  /* keyboard-only flow at 1200: pick the 2nd group with Enter, open Raw with Enter, Esc closes it and focus returns to the opener */
+  await sc04Mount('explained');
+  await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 773, deviceScaleFactor: 1, mobile: false });
+  await evalJs(`window.__sc04.state.readerRaw = false; window.__sc04.state.readerGroup = 0; window.__sc04.rerender()`);
+  await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
+  const press = async (k, code, vk) => { await send('Input.dispatchKeyEvent', k === 'Enter' ? { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, text: '\r' } : { type: 'rawKeyDown', key: k, code, windowsVirtualKeyCode: vk }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }); };
+  out.sc04keys = {};
+  await evalJs(`document.querySelector('[data-group-pick="1"]').focus()`);
+  await press('Enter', 'Enter', 13); await sleep(250);
+  out.sc04keys.picked = await evalJs(`JSON.stringify({ group: window.__sc04.state.readerGroup, pressed: [...document.querySelectorAll('[data-group-pick]')].map((b) => b.getAttribute('aria-pressed')), focus: document.activeElement?.getAttribute('data-group-pick') })`);
+  await evalJs(`document.querySelector('[data-group-raw="1"]').focus()`);
+  await press('Enter', 'Enter', 13); await sleep(300);
+  out.sc04keys.rawOpened = await evalJs(`JSON.stringify({ raw: window.__sc04.state.readerRaw, focusIsRaw: document.activeElement?.classList?.contains('sc04-raw'), patches: document.querySelectorAll('.sc04-patch').length })`);
+  await press('Escape', 'Escape', 27); await sleep(300);
+  out.sc04keys.rawClosed = await evalJs(`JSON.stringify({ raw: window.__sc04.state.readerRaw, patches: document.querySelectorAll('.sc04-patch').length, focus: document.activeElement?.getAttribute('data-group-raw') })`);
+  /* the stored path is one click away and is EXACTLY what the data holds (not the shortened or masked label) */
+  out.sc04paths = await evalJs(`(() => { document.querySelector('[data-group-pick="0"]').click(); const d = [...document.querySelectorAll('.sc04-fullpath, .file-all')]; d.forEach((x) => { x.open = true; });
+    const shown = [...document.querySelectorAll('.file-path')].map((n) => n.textContent);
+    return JSON.stringify({ hasLong: shown.some((t) => t === ${JSON.stringify(LONG)}), names: [...document.querySelectorAll('.sc04-filename')].map((n) => n.textContent).slice(0, 4) }); })()`);
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+
   return out;
 });
 
@@ -4202,6 +4324,43 @@ assert.ok(results.sc03About && results.sc03About.includes('이 작업에 대해'
 assert.strictEqual(results.sc03RawCollapsed, true, '기술 출력 보기 must be collapsed by default (A-11)');
 
 fs.writeFileSync(path.join(OUT, 'sc03-d2-metrics.json'), JSON.stringify(results.sc03d2, null, 2));
+fs.writeFileSync(path.join(OUT, 'sc04-d3-metrics.json'), JSON.stringify({ matrix: results.sc04d3, keys: results.sc04keys, paths: results.sc04paths }, null, 2));
+/* SC-04 D3 (design + function) on the real renderer in the real window */
+for (const [kind, rows] of Object.entries(results.sc04d3)) {
+  assert.strictEqual(rows.length, 8, `SC-04 ${kind}: expected 4 widths x 2 themes`);
+  for (const r of rows) {
+    const at = `SC-04 ${kind} @${r.w} ${r.theme}`;
+    for (const [label, m] of [['closed', r.closed], ['raw open', r.open]].filter(([, m]) => m)) {
+      assert.strictEqual(m.overflowX, 0, `${at} (${label}): the page scrolls sideways`);
+      assert.ok(m.rootOverflowX <= 0, `${at} (${label}): the screen scrolls sideways (${m.rootOverflowX}px)`);
+      assert.strictEqual(m.small, 0, `${at} (${label}): ${m.small} visible text element(s) under 12px`);
+      assert.strictEqual(m.pastEdge, 0, `${at} (${label}): ${m.pastEdge} text element(s) run past the window edge`);
+      assert.strictEqual(m.clippedText, 0, `${at} (${label}): ${m.clippedText} card(s) clip their text`);
+      assert.strictEqual(m.reds, 0, `${at} (${label}): red on a screen where nothing failed`);
+    }
+    assert.strictEqual(r.closed.patches, 0, `${at}: Raw Diff text is on screen before anyone asked for it`);
+    assert.strictEqual(r.closed.patchTextVisible, false, `${at}: a patch is visible while Raw is closed`);
+    if (r.open) {
+      assert.ok(r.open.rawOpen && r.open.patches >= 1, `${at}: Raw Diff did not open`);
+      assert.strictEqual(r.openFocus, true, `${at}: opening Raw did not move focus to it`);
+    }
+    if (kind === 'explained' || kind === 'partial') assert.ok(/바뀐 파일 \d+개 · 변경 묶음 \d+개/.test(r.closed.summary ?? ''), `${at}: no observed-change summary first (${r.closed.summary})`);
+    if (r.zoom150) assert.ok(r.zoom150.pageX <= 0, `${at}: at 150% zoom the page scrolls sideways (${r.zoom150.pageX}px)`);
+    if (r.focus) {
+      assert.ok(r.focus.length >= 3, `${at}: Tab reached ${r.focus.length} controls`);
+      for (const f of r.focus) assert.ok(f.onScreen && f.indicator, `${at}: focus stop ${JSON.stringify(f)} is off screen or has no visible indicator`);
+    }
+  }
+}
+{
+  const k = results.sc04keys;
+  const picked = JSON.parse(k.picked), opened = JSON.parse(k.rawOpened), closed = JSON.parse(k.rawClosed);
+  assert.strictEqual(picked.group, 1, `Enter on the 2nd group's title did not select it: ${k.picked}`);
+  assert.deepStrictEqual(picked.pressed, ['false', 'true'], 'aria-pressed does not say which group is selected');
+  assert.ok(opened.raw && opened.focusIsRaw && opened.patches >= 1, `Enter on 'Raw Diff 보기' did not open Raw with focus in it: ${k.rawOpened}`);
+  assert.ok(closed.raw === false && closed.patches === 0 && closed.focus === '1', `Esc did not close Raw and return focus to its opener: ${k.rawClosed}`);
+  assert.strictEqual(JSON.parse(results.sc04paths).hasLong, true, 'the exact stored (long Korean) path is not one click away');
+}
 /* SC-03 D2 (design): measured at 880/1024/1200/1440 x light/dark on the real screen, in the states the run produced. */
 for (const [tag, rows] of Object.entries(results.sc03d2)) {
   assert.strictEqual(rows.length, 8, `${tag}: expected 4 widths x 2 themes`);
