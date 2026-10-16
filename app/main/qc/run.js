@@ -22,6 +22,7 @@
  */
 const { spawn, spawnSync } = require('node:child_process');
 const { resolveLaunch } = require('./launch');
+const { createStopper } = require('./stopper');
 
 const WINDOWS = process.platform === 'win32';
 
@@ -103,7 +104,7 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
    * milliseconds, and the FIRST failure stops the sequence with its own output attached. A
    * prepare step that failed quietly would leave a commit of the wrong thing. */
   for (const step of prepare) {
-    const resolved = resolveLaunch(step);
+    const resolved = resolveLaunch(step, { env });
     if (!resolved.ok) return refusedLaunch(resolved, startedAt, onUpdate);
     const pre = resolved.argv;
     const r = spawnSync(pre[0], pre.slice(1), {
@@ -125,7 +126,8 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
     if (r.stdout) out += r.stdout;
   }
 
-  const launch = resolveLaunch(argv);
+  /* ONE effective environment: the lookup of node/npm/pnpm and the spawned child see the same PATH. */
+  const launch = resolveLaunch(argv, { env });
   if (!launch.ok) return refusedLaunch(launch, startedAt, onUpdate);
 
   let child;
@@ -188,7 +190,7 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
 
   onUpdate({ state: 'running', pid: child.pid, startedAt, tail: [] });
 
-  let stopRequested = false;     // Windows has no signal to read; the request is what says "stopped"
+  const stopper = createStopper({ child, windows: WINDOWS });
   const done = new Promise((resolve) => {
     let settled = false;
     const settle = (result) => {
@@ -214,18 +216,16 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
     const finish = () => {
       if (!ended) return;
       const { code, signal } = ended;
-      /* `07` §8.1: a child that was cancelled can still exit 0, so "ended" is never read as
-       * "worked". The three outcomes are named from the code AND the signal together. */
+      /* `07` §8.1: a child that was cancelled can still exit 0, so "ended" is never read as "worked".
+       * What a Stop PROVED is decided in stopper.js: a request is not an observed stop, and a stop
+       * that did not reach the descendants is `unknown`, not `stopped`. */
+      const end = stopper.finalize({ code, signal });
       settle({
-        /* POSIX reads `stopped` from the signal. Windows has none: `taskkill /F` ends the tree with
-         * exit code 1, so a non-zero end of a handle WE asked to stop is `stopped`. Exit 0 stays `ok`
-         * on both -- a stopped child that exits 0 is still not read as stopped (`07` §8.1). */
-        state: (signal != null || (WINDOWS && stopRequested && code !== 0)) ? 'stopped' : (code === 0 ? 'ok' : 'failed'),
+        state: end.state,
         code, signal, pid: child.pid, startedAt,
         endedAt: new Date().toISOString(),
         output: mask(out), truncated, kind,
-        /* Windows has no signal to record, so the fact that WE asked it to stop is carried explicitly. */
-        stoppedByRequest: stopRequested,
+        stop: end.stop,
       });
     };
     child.on('exit', (code, signal) => {
@@ -243,7 +243,7 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
     /* `19` §C4: SIGTERM, then SIGKILL after five seconds. The whole GROUP, because a package
      * manager runs the real process as a child of itself and signalling only the parent leaves
      * the server running (`07` §8.2). */
-    stop: () => { stopRequested = true; stopGroup(child); },
+    stop: () => { stopper.request(stopGroup); },
   };
 }
 

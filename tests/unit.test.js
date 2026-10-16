@@ -267,7 +267,7 @@ test('capability containment: each privileged capability lives in exactly one mo
                          answerable in one place — everything else spawns an argv. */
     'child_process':  ['app/main/claude-detect.js', 'app/main/claude/session.js',
                        'app/main/evidence/git.js', 'app/main/qc/launch.js', 'app/main/qc/run.js',
-                       'app/main/term/session.js'],
+                       'app/main/qc/stopper.js', 'app/main/term/session.js'],
     'execFile':       ['app/main/claude-detect.js', 'app/main/evidence/git.js'],
     'spawn(':         ['app/main/claude/session.js', 'app/main/qc/run.js',
                        'app/main/term/session.js'],
@@ -277,8 +277,8 @@ test('capability containment: each privileged capability lives in exactly one mo
      * not a new spawner — it already owns `spawn(` — and the capability is unchanged: an argv
      * from `qc/availability`, never a shell, never anything typed. Synchronous because a
      * `git add` finishes in milliseconds and a half-staged index is not a state worth having. */
-    'spawnSync(':     ['app/main/claude/session.js', 'app/main/qc/launch.js', 'app/main/qc/run.js'],
-    'taskkill':       ['app/main/claude/session.js', 'app/main/qc/run.js'],
+    'spawnSync(':     ['app/main/claude/session.js', 'app/main/qc/launch.js', 'app/main/qc/run.js', 'app/main/qc/stopper.js'],
+    'taskkill':       ['app/main/claude/session.js', 'app/main/qc/run.js', 'app/main/qc/stopper.js'],
   };
   // never, anywhere: nothing in the built packages needs these, and each is a real hazard
   const NEVER = [

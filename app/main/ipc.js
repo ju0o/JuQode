@@ -9,6 +9,7 @@
  * `deps` is what the handlers need from the outside: the store, the project's evidence
  * directory, a way to push updates, and the dialog's owning window.
  */
+const fs = require('node:fs');
 const path = require('node:path');
 const repo = require('./db/repo');
 const project = require('./project');
@@ -61,6 +62,19 @@ function orientationOf(works) {
 
 function makeHandlers(deps) {
   const db = () => deps.db();
+  /* What a Stop proved goes beside the run as evidence, NOT into the output and NOT into a new
+   * column or status: `quick_command_run.output_ref` is the schema's "blob ref for the evidence".
+   * Only runs that were asked to stop have one. A failed write loses the detail, never the run. */
+  const saveStopEvidence = (projectId, runId, stop) => {
+    if (!stop?.requested) return null;
+    try {
+      const rel = path.join('qc-stop', `${runId}.json`);
+      const file = path.join(deps.evidenceStore(projectId), rel);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ runId, recordedAt: new Date().toISOString(), stop }, null, 2));
+      return `evidence:${rel.split(path.sep).join('/')}`;
+    } catch { return null; }
+  };
   /* The dev server JuQode ITSELF started, or null. `19` §C4: a server the user started in their
    * own terminal has no handle here and is never signalled. */
   const devServerOf = (projectId) => {
@@ -357,7 +371,8 @@ function makeHandlers(deps) {
            * child is `stopped`, never `success`, whatever code it carried. */
           status: res.state === 'ok' ? 'success' : res.state,
           exitCode: res.code, outputHead: res.output ?? null,
-          endedAt: res.endedAt, stoppedAt: (res.signal || (res.state === 'stopped' && res.stoppedByRequest)) ? res.endedAt : null,
+          endedAt: res.endedAt, stoppedAt: res.state === 'stopped' ? res.endedAt : null,
+          outputRef: saveStopEvidence(projectId, runId, res.stop),
         });
         deps.pushQc?.({ runId, projectId, ruleId, ...res, ended: true });
       /* The store can be closed before a child settles (quit races the last exit), and an

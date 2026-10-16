@@ -593,8 +593,9 @@ test('a command that succeeds is `ok`, and one that is signalled is `stopped`', 
   r.stop();
   const out = await r.done;
   assert.strictEqual(out.state, 'stopped', 'a stopped command was reported as finished');
-  /* POSIX records the signal that ended it; Windows has none, so it records that WE asked. */
-  assert.ok(WIN ? out.stoppedByRequest : out.signal, 'nothing recorded what ended it');
+  /* POSIX proves the stop with the signal that ended it; Windows has none, so it proves it with the
+   * taskkill result and the process tree it observed (stopper.js). A request alone proves nothing. */
+  assert.strictEqual(out.stop.verdict, WIN ? 'stopped-tree-observed' : 'stopped-by-signal', JSON.stringify(out.stop));
 });
 
 test('a program that does not exist fails without throwing', async () => {
