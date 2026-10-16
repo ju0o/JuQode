@@ -1570,3 +1570,114 @@ test('Writer gate: an uncertain Stop with NO recorded members (nothing to look f
   await new Promise((r) => setTimeout(r, 30));
   assert.strictEqual(uncertain.blocks('p2'), 'qc-run-3');
 });
+
+/* ── a restart must not forget a Quick Command whose processes may still be alive ── */
+/* These tests reach `work-start` only to see the gate's answer. A real `claude` may be installed, so the CLI is pointed at
+ * a path that does not exist: nothing can be launched and no model can be called, whatever the gate says. */
+const noClaude = () => { const was = process.env.JUQODE_CLAUDE_BIN; process.env.JUQODE_CLAUDE_BIN = path.join(os.tmpdir(), 'juqode-no-such-claude'); return () => { if (was === undefined) delete process.env.JUQODE_CLAUDE_BIN; else process.env.JUQODE_CLAUDE_BIN = was; }; };
+const restartOf = (b, extra = {}) => makeHandlers({ db: () => b.db, dbFault: () => null, evidenceStore: () => b.evidence,
+                                                    push: () => {}, pushQc: () => {}, ...extra });
+const strandedRun = (b, pid = 4242) => {
+  const id = repo.beginQcRun(b.db, b.project.id, { phrase: '서버 켜줘', ruleId: 'qc.dev.start', command: 'npm run dev', status: 'long_running' });
+  repo.setQcRunner(b.db, id, { sessionId: 'old-session', pid, startedAt: new Date().toISOString() });
+  return id;
+};
+
+test('restart: a run nobody saw finish keeps the Writer gate shut across restarts until the USER confirms; the row stays unknown and the record is append-only', async (t) => {
+  const restoreEnv = noClaude(); t.after(restoreEnv);
+  const b = qcBench();
+  const id = strandedRun(b);
+  repo.reconcileQcRuns(b.db);                                           // what main.js does at boot
+  assert.strictEqual(repo.qcRun(b.db, id).status, 'unknown');
+  assert.strictEqual(repo.qcRun(b.db, id).runner_pid, 4242, 'the process identity was not persisted');
+
+  for (let restart = 1; restart <= 2; restart += 1) {                  // a restart alone never opens it
+    const h = restartOf(b);
+    const build = await h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드');
+    assert.deepStrictEqual([build.ok, build.reason], [false, 'prior-run-unknown'], `restart ${restart}`);
+    const work = await h['juqode:work-start'](null, b.project.id, '고쳐줘');
+    assert.deepStrictEqual([work.ok, work.reason], [false, 'prior-process-may-still-live'], `restart ${restart}`);
+    const listed = h['juqode:qc-list'](null, b.project.id);
+    assert.deepStrictEqual(listed.held.map((x) => [x.runId, x.needsAck, x.why]), [[id, true, 'never-finished']]);
+    assert.ok(h['juqode:qc-route'](null, b.project.id, '깃 상태').reason !== 'prior-run-unknown', 'a read-only command was blocked');
+    assert.deepStrictEqual(repo.qcRunsFor(b.db, b.project.id).map((r) => r.id), [id], 'a refused command became a row');
+  }
+
+  const h = restartOf(b);
+  assert.strictEqual((await h['juqode:qc-ack-stopped'](null, b.project.id, false)).reason, 'confirmation-required');
+  assert.strictEqual((await h['juqode:qc-ack-stopped'](null, b.project.id, 'yes')).reason, 'confirmation-required');
+  assert.ok(h['juqode:qc-list'](null, b.project.id).held.length === 1, 'an unconfirmed ack released the hold');
+  const ack = await h['juqode:qc-ack-stopped'](null, b.project.id, true);
+  assert.deepStrictEqual([ack.ok, ack.acked.length, ack.acked[0].existing], [true, 1, false]);
+  const rec = JSON.parse(fs.readFileSync(path.join(b.evidence, 'qc-ack', `${id}.json`), 'utf8'));
+  assert.deepStrictEqual([rec.runId, rec.confirmedBy, rec.before.status, rec.before.runnerPid, rec.heldBecause], [id, 'user', 'unknown', 4242, 'never-finished']);
+  assert.strictEqual(repo.qcRun(b.db, id).status, 'unknown', 'a confirmation rewrote the past result');
+  assert.strictEqual(repo.qcRun(b.db, id).exit_code, null);
+
+  const after = restartOf(b);                                           // the confirmation survives a restart
+  assert.strictEqual(after['juqode:qc-list'](null, b.project.id).held.length, 0);
+  const again = await after['juqode:qc-ack-stopped'](null, b.project.id, true);
+  assert.deepStrictEqual([again.ok, again.acked.length], [true, 0]);
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(b.evidence, 'qc-ack', `${id}.json`), 'utf8')).confirmedAt, rec.confirmedAt, 'the record was overwritten');
+  const ran = await after['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트');
+  assert.strictEqual(ran.ok, true, `${ran.reason}/${ran.detail}`);
+});
+
+test('restart: a Stop that proved nothing is left alive is NOT held; one with recorded members is held until a later snapshot shows them gone (no confirmation needed)', async (t) => {
+  const restoreEnv = noClaude(); t.after(restoreEnv);
+  const b = qcBench();
+  const mk = (stop, status = 'unknown') => {
+    const id = repo.beginQcRun(b.db, b.project.id, { phrase: 'x', ruleId: 'qc.dev.start', command: 'npm run dev', status: 'long_running' });
+    const rel = path.join('qc-stop', `${id}.json`);
+    fs.mkdirSync(path.join(b.evidence, 'qc-stop'), { recursive: true });
+    fs.writeFileSync(path.join(b.evidence, rel), JSON.stringify({ runId: id, stop }));
+    repo.endQcRun(b.db, id, { status, exitCode: 1, outputRef: `evidence:qc-stop/${id}.json`, endedAt: new Date().toISOString() });
+    return id;
+  };
+  const clear = mk({ requested: true, verdict: 'stop-unconfirmed', uncertain: false, members: [] });
+  const stopped = mk({ requested: true, verdict: 'stopped-tree-observed', uncertain: undefined }, 'stopped');
+  const withMembers = mk({ requested: true, verdict: 'root-stopped-descendants-alive', uncertain: true, members: [{ pid: 777, created: 'T1' }] });
+  let alive = [{ pid: 777, created: 'T1' }];
+  const reg = createUncertain({ probe: async () => alive, retryMs: 5, maxTries: 3 });
+  const h = restartOf(b, { qcUncertain: reg });
+  assert.deepStrictEqual(h['juqode:qc-list'](null, b.project.id).held.map((x) => x.runId), [withMembers], 'only the run with a possibly-alive member is held');
+  assert.ok(![clear, stopped].some((id) => reg.has(id)));
+  assert.strictEqual(h['juqode:qc-list'](null, b.project.id).held[0].needsAck, false);
+  alive = [];
+  reg.refresh(b.project.id);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.strictEqual(reg.blocks(b.project.id), null, 'the snapshot showed every member gone, but the gate stayed shut');
+  const work = await h['juqode:work-start'](null, b.project.id, '고쳐줘');
+  assert.notStrictEqual(work.reason, 'prior-process-may-still-live');
+
+  // the same evidence after another restart: still alive -> held again (a restart is not a release)
+  alive = [{ pid: 777, created: 'T1' }];
+  const reg2 = createUncertain({ probe: async () => alive, retryMs: 5, maxTries: 3 });
+  const h2 = restartOf(b, { qcUncertain: reg2 });
+  h2['juqode:qc-list'](null, b.project.id);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.strictEqual(reg2.blocks(b.project.id), withMembers);
+});
+
+test('both directions: a running file-changing Quick Command refuses a new Work; a running Work refuses file-changing Quick Commands; a dev server and read-only commands do not', async (t) => {
+  const restoreEnv = noClaude(); t.after(restoreEnv);
+  const b = qcBench({ 'package.json': pkg({ test: 'node -e "setTimeout(()=>{},2500)"', dev: 'node -e "setInterval(()=>{},1000)"' }) });
+  const built = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트');
+  assert.strictEqual(built.ok, true, `${built.reason}/${built.detail}`);
+  const work = await b.h['juqode:work-start'](null, b.project.id, '고쳐줘');
+  assert.deepStrictEqual([work.ok, work.reason], [false, 'qc-writer-running'], 'a Work started beside a running build/test');
+  const retry = await b.h['juqode:task-retry'](null, 'no-task', 'no-work', 'x', 'k', false);
+  assert.strictEqual(retry.ok, false);
+  await waitFor(8000, () => b.pushed.some((u) => u.runId === built.runId && u.ended));
+  const after = await b.h['juqode:work-start'](null, b.project.id, '고쳐줘');
+  assert.notStrictEqual(after.reason, 'qc-writer-running', 'the gate stayed shut after the command ended');
+
+  // the dev server is how the user watches a Work: it must not lock Work out
+  const b2 = qcBench({ 'package.json': pkg({ dev: 'node -e "setInterval(()=>{},1000)"' }) });
+  const dev = await b2.h['juqode:qc-run'](null, b2.project.id, 'qc.dev.start', '서버 켜줘');
+  assert.strictEqual(dev.ok, true);
+  const w2 = await b2.h['juqode:work-start'](null, b2.project.id, '고쳐줘');
+  assert.notStrictEqual(w2.reason, 'qc-writer-running');
+  b2.h['juqode:qc-stop'](null, b2.project.id);
+  await waitFor(STOP_WORST_CASE_MS, () => b2.pushed.some((u) => u.runId === dev.runId && u.ended));
+});

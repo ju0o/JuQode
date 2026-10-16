@@ -274,3 +274,64 @@ test('real: stopNow (app quit) ends the command without waiting for any asynchro
   assert.ok(out, 'the command was still running after stopNow');
   assert.ok(await until(() => !alive(pid)), 'the process outlived stopNow');
 });
+
+/* ───────────── `child.kill()` is a REQUEST: only an observed signal at exit makes it the cause ───────────── */
+
+test('Windows: taskkill=255, the fallback kill() was handed over, the process exits 1 with NO signal -> unknown (kill-unconfirmed), never stopped; evidence and the root are kept', async () => {
+  for (const code of [1, 0, 137]) {
+    const t = tools({ taskkill: { status: 255, error: null }, survivors: [] });
+    const s = stopperFor(handle({ killReturns: true }), t);
+    s.request(() => {});
+    const end = await s.finalize({ code, signal: null });
+    assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.root], ['unknown', 'kill-unconfirmed', 'kill-requested'], `exit ${code}`);
+    assert.deepStrictEqual([end.stop.taskkill.status, end.stop.fallback.sent, end.stop.requested], [255, true, true], 'the original Stop evidence was lost');
+    assert.deepStrictEqual(end.stop.observedExit, { code, signal: null });
+    assert.deepStrictEqual(t.calls.survivors, [[4242, 5001, 5002]], 'the root was not re-checked when no signal proved the kill');
+    assert.strictEqual(end.stop.uncertain, false);
+  }
+});
+
+test('Windows: the same fallback with the signal REPORTED at exit is a stop; with a survivor it is unknown and uncertain', async () => {
+  const s = stopperFor(handle(), tools({ taskkill: { status: 255, error: null } }));
+  s.request(() => {});
+  const end = await s.finalize({ code: null, signal: 'SIGTERM' });
+  assert.deepStrictEqual([end.state, end.stop.root, end.stop.fallback.signalObserved], ['stopped', 'terminated-by-kill', 'SIGTERM']);
+
+  const s2 = stopperFor(handle(), tools({ taskkill: { status: 255, error: null }, survivors: [{ pid: 5001, created: 'x' }] }));
+  s2.request(() => {});
+  const e2 = await s2.finalize({ code: 1, signal: null });
+  assert.deepStrictEqual([e2.state, e2.stop.uncertain, e2.stop.survivorPids], ['unknown', true, [5001]]);
+});
+
+test('Windows: the handle ended between the failed taskkill and kill() -> nothing is signalled (pid reuse) and the end is unknown, not failed', async () => {
+  const child = handle();
+  const t = tools({ taskkill: { status: 255, error: null } });
+  const slow = t.taskkill;
+  t.taskkill = async (pid) => { const r = slow(pid); child.exitCode = 1; return r; };     // it ends while taskkill is answering
+  const s = stopperFor(child, t);
+  s.request(() => {});
+  const end = await s.finalize({ code: 1, signal: null });
+  assert.strictEqual(child.killed, 0, 'kill() was sent to a handle that had already ended');
+  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.fallback.sent], ['unknown', 'stop-unconfirmed', false]);
+});
+
+test('duplicate Stop after a kill was requested does nothing; a NEW run of the same command has its own, empty Stop record', async () => {
+  const child = handle();
+  const s = stopperFor(child, tools({ taskkill: { status: 255, error: null } }));
+  assert.strictEqual(s.request(() => {}), true);
+  await s.whenIdle();
+  assert.strictEqual(s.request(() => {}), false);
+  assert.strictEqual(child.killed, 1, 'a duplicate Stop signalled again');
+
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qcstop-'))); dirs.push(dir);
+  const a = run.start({ argv: NODE('setInterval(()=>{},1000)'), cwd: dir, kind: 'long_running' });
+  await new Promise((x) => setTimeout(x, 300));
+  a.stop();
+  const outA = await a.done;
+  const b = run.start({ argv: NODE('setInterval(()=>{},1000)'), cwd: dir, kind: 'long_running' });
+  await new Promise((x) => setTimeout(x, 300));
+  assert.notStrictEqual(a.pid, b.pid);
+  b.stop(); b.stop();
+  const outB = await b.done;
+  assert.deepStrictEqual([outA.stop.attempts, outB.stop.attempts], [1, 1], 'the second run inherited the first one\'s Stop record');
+});

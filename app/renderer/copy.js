@@ -418,6 +418,16 @@ export const C = {
       claudeActivity: 'Claude 활동',
       retryShort: '다시 시도',
     },
+    /* A Quick Command whose processes might still be running: the user's own confirmation lifts the hold (the run stays 확인 불가) */
+    qcHold: {
+      title: '이전에 켠 명령의 프로세스가 아직 실행 중일 수 있어요',
+      body: '끝났는지 JuQode가 확인하지 못했어요. 그동안은 새 작업과 파일을 바꾸는 명령을 시작하지 않아요.',
+      check: '이전에 켠 프로세스가 모두 끝난 것을 직접 확인했어요',
+      resolve: '확인했다고 기록하기',
+      failed: '확인을 기록하지 못했어요. 다시 시도해 주세요.',
+      reason: { 'stop-uncertain': '멈추려 했지만 끝난 것을 확인하지 못했어요', 'stop-unverified': '멈춘 뒤 남은 프로세스를 확인하지 못했어요', 'never-finished': '끝나는 것을 보지 못한 채 앱이 닫혔어요' },
+      writerRunning: '파일을 바꾸는 명령이 실행 중이에요. 끝난 뒤에 시작해 주세요.',
+    },
     /* SC-03 result: the order is the result, the changed files, ONE next action, then the folded record. */
     result: {
       agentFold: 'Agent 원문',

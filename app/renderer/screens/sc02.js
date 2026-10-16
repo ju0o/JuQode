@@ -27,6 +27,7 @@ import { columnFor, tileTone } from '../board-column.mjs';
 import { contextFacts } from '../human-read.mjs';
 import { maskForDisplay } from '../path-view.mjs';
 import { fileSummary } from '../file-summary.js';
+import { holdPanel } from '../qc-hold.js';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
@@ -1838,6 +1839,18 @@ function refusalCard(r, api, nav, state, project, { phrase = '', resubmit = null
     const n = el('div', 'panel unk');
     n.setAttribute('data-el', 'prior-process');
     n.appendChild(el('div', 'sm', C.gap.task.retryProcessStillLive));
+    /* if it is a Quick Command's process that is in question, the user can say it ended, right here */
+    api.qcList(project.id).then((l) => {
+      const hold = holdPanel(api, project.id, l?.held, () => { n.remove(); resubmit?.(); });
+      if (hold) n.appendChild(hold);
+    });
+    return n;
+  }
+
+  if (reason === 'qc-writer-running') {
+    const n = el('div', 'panel wait');
+    n.setAttribute('data-el', 'qc-writer-running');
+    n.appendChild(el('div', 'sm', C.gap.qcHold.writerRunning));
     return n;
   }
 

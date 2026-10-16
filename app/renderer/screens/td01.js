@@ -30,6 +30,7 @@
 import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { when } from './brief.js';
+import { holdPanel } from '../qc-hold.js';
 
 /* `15` TD-01: the drawer covers the bottom 40% of the current screen. */
 export function mountDrawer(api, state, onChange) {
@@ -166,7 +167,7 @@ function qcRegion(api, state, repaint) {
     repaint();
   };
 
-  if (state.qcDiscover) bodyBox.appendChild(discoverCard(state, repaint, pick));
+  if (state.qcDiscover) bodyBox.appendChild(discoverCard(state, repaint, pick, api));
   else bodyBox.appendChild(btn('btn sm ghost rec td01-discover', C.qc.discover, async () => {
     state.qcDiscover = await api.qcList(state.project.id);
     repaint();
@@ -600,11 +601,13 @@ function runCard(api, state, repaint) {
 }
 
 /* ── 무엇을 말할 수 있나요? ── */
-function discoverCard(state, repaint, onPick) {
+function discoverCard(state, repaint, onPick, api) {
   const card = el('article', 'card td01-card');
   card.setAttribute('data-el', 'qc-discover');
   card.appendChild(el('div', 'ct', C.qc.discoverTitle));
   card.appendChild(el('p', 'xs mut', C.gap.qcPickHint));
+  const hold = api ? holdPanel(api, state.project.id, state.qcDiscover.held, async () => { state.qcDiscover = await api.qcList(state.project.id); repaint(); }) : null;
+  if (hold) card.appendChild(hold);
 
   for (const rule of state.qcDiscover.rules ?? []) {
     const name = C.gap.qcUnderstood[rule.id] ?? rule.id;

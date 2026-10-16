@@ -908,6 +908,12 @@ function endQcRun(db, id, { status, exitCode = null, outputHead = null, outputRe
     .run(status, exitCode, outputHead, outputRef, endedAt ?? now(), stoppedAt, id);
 }
 
+/** The spawned process's identity, written as soon as it exists (columns from migration 5). A restart reads it back. */
+function setQcRunner(db, id, { sessionId = null, pid = null, startedAt = null }) {
+  db.prepare('update quick_command_run set runner_session_id = ?, runner_pid = ?, runner_started_at = ? where id = ?')
+    .run(sessionId, Number.isInteger(pid) ? pid : null, startedAt, id);
+}
+
 const qcRunsFor = (db, projectId, limit = 20) =>
   db.prepare(`select * from quick_command_run where project_id = ?
               order by created_at desc, rowid desc limit ?`).all(projectId, limit);
@@ -1024,7 +1030,7 @@ module.exports = {
   upsertStep, stepsFor,
   saveResult, resultFor,
   saveDiff, diffsFor, pruneDiffs,
-  beginQcRun, endQcRun, qcRunsFor, qcRun, qcRunning, reconcileQcRuns,
+  beginQcRun, endQcRun, setQcRunner, qcRunsFor, qcRun, qcRunning, reconcileQcRuns,
   saveChangeGroups, changeGroupsFor,
   reconcileLostWorks, reconcileInterpretations, processFor,
 };

@@ -103,7 +103,7 @@ function classifyEnd({ windows, code, signal, stop }) {
     return { state: signal != null ? 'stopped' : natural, stop: { ...stop, observed: signal != null ? 'signal' : null, verdict: !stop.requested ? 'not-requested' : (signal != null ? 'stopped-by-signal' : 'requested-not-observed') } };
   }
   if (!stop.requested) return { state: natural, stop: { ...stop, verdict: 'not-requested' } };
-  const rootConfirmed = stop.root === 'terminated-by-taskkill' || stop.root === 'terminated-by-kill';
+  const rootConfirmed = stop.root === 'terminated-by-taskkill' || stop.root === 'terminated-by-kill';   // the latter ONLY with an observed signal, see finalize
   if (rootConfirmed) {
     if (code === 0 && signal == null) {
       // taskkill says it terminated the process, the process says it finished cleanly: both cannot be the whole story
@@ -114,6 +114,11 @@ function classifyEnd({ windows, code, signal, stop }) {
   }
   if (stop.root === 'not-found' || stop.root === 'exited-before-request') {
     return { state: natural, stop: { ...stop, verdict: 'ended-before-stop-took-effect' } };
+  }
+  if (stop.root === 'kill-requested') {
+    /* Node's `child.kill()` returning true says a signal was DELIVERED to the handle, not that the signal ended the process. With no
+     * signal reported at exit the process ended some other way (or at the same moment), and the exit code is its own. */
+    return { state: 'unknown', stop: { ...stop, verdict: 'kill-unconfirmed', observedExit: { code, signal } } };
   }
   /* The request failed or was never confirmed and the process has ended anyway. WHY it ended is not shown: not by
    * our kill (no proof), and not "by itself" either (taskkill did not say it was gone). So it is neither `failed`
@@ -155,14 +160,14 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
     else {
       let sent = false;
       if (!exited()) { try { sent = child.kill(); } catch { sent = false; } }
-      stop.fallback = { used: true, sent };
-      stop.root = sent ? 'terminated-by-kill' : 'not-terminated';
+      stop.fallback = { used: true, sent };              // `sent` = the signal was handed over; whether it ended the process is decided at exit
+      stop.root = sent ? 'kill-requested' : 'not-terminated';
     }
   }
 
   /** @returns {boolean} whether a NEW attempt started (a duplicate while one is in flight, or after a proven stop, is not) */
   function request(posixStop) {
-    if (['terminated-by-taskkill', 'terminated-by-kill', 'signalled'].includes(stop.root)) return false;   // duplicate Stop: nothing new to say
+    if (['terminated-by-taskkill', 'terminated-by-kill', 'kill-requested', 'signalled'].includes(stop.root)) return false;   // duplicate Stop: nothing new to say
     if (stop.requested && stop.root === 'in-flight') return false;
     if (!stop.requested) { stop.requested = true; stop.requestedAt = now(); }
     stop.attempts += 1;
@@ -177,8 +182,10 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
   /** Called once the run has ended: wait for an attempt still in flight, look at what may be alive, then classify. */
   async function finalize({ code, signal }) {
     if (inflight) await inflight;
+    /* The fallback's signal counts as the cause only when the exit reports that very signal (libuv reports `signal` for a kill it issued). */
+    if (stop.root === 'kill-requested' && signal != null) { stop.root = 'terminated-by-kill'; stop.fallback = { ...stop.fallback, signalObserved: signal }; }
     const proven = stop.root === 'terminated-by-taskkill' || stop.root === 'terminated-by-kill';
-    if (windows && stop.requested && (proven || stop.root === 'not-terminated')) {
+    if (windows && stop.requested && (proven || stop.root === 'not-terminated' || stop.root === 'kill-requested')) {
       /* After a proven kill the root is gone and only its descendants are checked. When nothing proved the kill, the
        * root itself is also a process that might still be there. A tree that was never read leaves the members
        * unknown: only the root pid (without a creation time) is known, and the answer is "unverified". */

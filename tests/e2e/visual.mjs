@@ -2864,7 +2864,7 @@ assert.strictEqual(results.ready, true, 'renderer did not initialise');
 assert.strictEqual(results.screen, 'SC-01', `expected SC-01, got ${results.screen}`);
 assert.deepStrictEqual(bridge.keys.sort(),
   ['boot', 'brief', 'claudeStatus', 'history', 'interpret', 'legacyUnknownAck', 'onQcUpdate', 'onTermUpdate',
-   'onWorkUpdate', 'openPath', 'openProject', 'qcList', 'qcRoute', 'qcRun', 'qcRuns', 'qcStop',
+   'onWorkUpdate', 'openPath', 'openProject', 'qcAckStopped', 'qcList', 'qcRoute', 'qcRun', 'qcRuns', 'qcStop',
    'routeIntent', 'taskCreate', 'taskDetail', 'taskList', 'taskRetry', 'taskReviewCriterion', 'taskUpdate',
    'termOpen', 'termStop', 'termWrite',
    'versions', 'workAllow', 'workAnswer', 'workCancel', 'workChanges', 'workExplain', 'workGet',
