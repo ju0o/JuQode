@@ -2797,6 +2797,8 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   /* ── SC-04 D3 · the real renderer in the real window, fed synthetic reader data (long Korean names, same-name files, a binary, an
    * unblocked file, an evidence gap, an unknown remainder). Real CSS, real keys. Nothing here touches the user's data. ───────── */
   step('SC-04 D3 matrix');
+  /* real key presses (Enter needs a char event to activate a button) -- shared by the SC-04 and TD-01 blocks below */
+  const press = async (k, code, vk) => { await send('Input.dispatchKeyEvent', k === 'Enter' ? { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, text: '\r' } : { type: 'rawKeyDown', key: k, code, windowsVirtualKeyCode: vk }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }); };
   out.sc04d3 = {};
   const LONG = '문서/설정/알림 수신 여부를 바꾸면 곧바로 저장되고 다시 열어도 같은 값이 보이도록 고치는 안내 문서입니다.md';
   const SYN = {
@@ -2906,7 +2908,6 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 773, deviceScaleFactor: 1, mobile: false });
   await evalJs(`window.__sc04.state.readerRaw = false; window.__sc04.state.readerGroup = 0; window.__sc04.rerender()`);
   await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
-  const press = async (k, code, vk) => { await send('Input.dispatchKeyEvent', k === 'Enter' ? { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, text: '\r' } : { type: 'rawKeyDown', key: k, code, windowsVirtualKeyCode: vk }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }); };
   out.sc04keys = {};
   await evalJs(`document.querySelector('[data-group-pick="1"]').focus()`);
   await press('Enter', 'Enter', 13); await sleep(250);
