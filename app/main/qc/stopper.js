@@ -86,6 +86,9 @@ function survivorsIn(all, members, parentsExtra = []) {
   const parents = [...members, ...parentsExtra];   // a parent need not be alive: its child keeps the recorded parent pid
   for (let i = 0; i < parents.length; i += 1) {
     const par = parents[i];
+    /* the recorded parent's pid now belongs to a DIFFERENT process (another creation time): that is a reused id, and its children are not ours */
+    const now = all.find((p) => p.pid === par.pid);
+    if (now && par.created != null && now.created !== par.created) continue;
     for (const p of all) {
       if (known.has(p.pid) || p.ppid !== par.pid) continue;
       if (par.created != null && !(p.created > par.created)) continue;     // an older process cannot be its child (reused parent id)

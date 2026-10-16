@@ -382,6 +382,9 @@ test('survivorsIn: same pid + creation time is the process; a child that appeare
   assert.deepStrictEqual(got.map((p) => p.pid).sort(), [200, 300, 301]);
   assert.deepStrictEqual(got.filter((p) => p.late).map((p) => p.pid).sort(), [300, 301]);
   assert.deepStrictEqual(survivorsIn(all, [{ pid: 999, created: null }]), [], 'a pid that is not there');
+  // a recorded parent whose pid is now ANOTHER process (different creation time) does not adopt that process's children
+  const reused = [{ pid: 700, ppid: 1, created: '2026-03-03T00:00:00.0Z' }, { pid: 701, ppid: 700, created: '2026-03-03T00:00:01.0Z' }];
+  assert.deepStrictEqual(survivorsIn(reused, [{ pid: 700, created: '1999-01-01T00:00:00.0Z' }]), []);
 });
 
 test('Windows: the root is stopped and had no recorded child, but a LATE child of it is found afterwards -> unknown and uncertain (not stopped-tree-observed)', async () => {
