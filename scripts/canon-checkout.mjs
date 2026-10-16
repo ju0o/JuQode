@@ -43,7 +43,9 @@ try {
   must(dest, 'sparse-checkout', 'set', ...Object.keys(pin.files));
   /* protocol v2 (a per-command option, nothing is written to any config) lets a server serve an exact reachable commit */
   must(dest, '-c', 'protocol.version=2', 'fetch', '-q', '--depth', '1', 'origin', pin.sha);
-  must(dest, 'checkout', '-q', '--detach', 'FETCH_HEAD');
+  /* Per-command, nothing written: Git for Windows defaults to core.autocrlf=true, which would hand back
+   * CRLF bytes and make a byte-exact Canon comparison fail on bytes that are not Canon's. */
+  must(dest, '-c', 'core.autocrlf=false', '-c', 'core.eol=lf', '-c', 'core.safecrlf=false', 'checkout', '-q', '--detach', 'FETCH_HEAD');
 
   const head = must(dest, 'rev-parse', 'HEAD');
   if (head !== pin.sha) throw new Error(`HEAD ${head} != pinned ${pin.sha}`);
