@@ -73,7 +73,18 @@ function renderDrawer(host, api, state, repaint) {
    * wants this read as the safety contract it is, and the label is what says which it is. */
   banner.appendChild(el('span', 'xs td01-safetytag', C.term.safetyTag));
   banner.appendChild(el('span', '', C.term.banner));
-  panel.appendChild(banner);
+  /* 안전 안내: the banner above is the one line that never goes; this is the longer reading, one click away and remembered across redraws.
+   * Anything that is actually HAPPENING (unknown, Stop unconfirmed, a Writer hold, a failed restore) is never in here. */
+  const more = el('details', 'td01-safety');
+  more.setAttribute('data-el', 'safety-more');
+  more.open = Boolean(state.safetyOpen);
+  more.addEventListener('toggle', () => { state.safetyOpen = more.open; });
+  more.appendChild(el('summary', 'xs td01-summary', C.gap.td01.safetyMore));
+  for (const line of C.gap.td01.safetyLines) more.appendChild(el('p', 'xs mut', line));
+  /* the summary shares the banner's line (a wrapper row, so the banner's own text stays exactly Canon's) and costs the Quick Command body no height */
+  const bannerRow = el('div', 'td01-bannerrow');
+  bannerRow.append(banner, more);
+  panel.appendChild(bannerRow);
 
   panel.appendChild(qcRegion(api, state, repaint));
   /* `15` TD-01 Inputs 는 **둘**이다: Quick Command 자연어 칸 · 셸 명령줄. 그리고 둘은 보이기에
@@ -117,6 +128,10 @@ function qcRegion(api, state, repaint) {
   label.appendChild(el('span', 'xs mut', C.term.qcHint));
   label.appendChild(el('span', 'xs mut', C.qc.notClaude));
   head.appendChild(label);
+  /* who may run what, in the label row (no extra line): rules only, no shell, confirmed first */
+  const auth = el('span', 'chip td01-auth', C.gap.td01.qcAuth);
+  auth.setAttribute('data-el', 'qc-authority');
+  label.appendChild(auth);
 
   const row = el('div', 'td01-qcrow');
   const field = el('input', 'td01-qcinput');
@@ -140,6 +155,12 @@ function qcRegion(api, state, repaint) {
   row.appendChild(btn('btn sm pri', C.term.qcSend, route));
   head.appendChild(row);
   region.appendChild(head);
+
+  /* A Writer hold / failed restore is a standing fact about this project, so it is drawn above whatever card is showing and is never folded.
+   * It is read in the background (at most every few seconds) and the drawer repaints only when the answer changed. */
+  refreshHold(api, state, repaint);
+  const hold = holdPanel(api, state.project.id, state.qcHold, async () => { state.qcHoldAt = 0; state.qcHold = await api.qcList(state.project.id); state.qcHoldSig = null; repaint(); });
+  if (hold) bodyBox.appendChild(hold);
 
   if (state.qcRun) bodyBox.appendChild(runCard(api, state, repaint));
   else if (state.qcCard) bodyBox.appendChild(routeCard(api, state, repaint));
@@ -177,6 +198,16 @@ function qcRegion(api, state, repaint) {
   return region;
 }
 
+function refreshHold(api, state, repaint) {
+  if (!api.qcList || state.qcHoldBusy || (state.qcHoldAt && Date.now() - state.qcHoldAt < 4000)) return;
+  state.qcHoldBusy = true;
+  api.qcList(state.project.id).then((l) => {
+    state.qcHoldAt = Date.now(); state.qcHoldBusy = false;
+    const sig = JSON.stringify([l?.held ?? [], l?.restoreFailure ?? null]);
+    if (sig !== state.qcHoldSig) { state.qcHoldSig = sig; state.qcHold = l; repaint(); }
+  }).catch(() => { state.qcHoldBusy = false; });
+}
+
 /* ── 셸 명령줄 (WBS-25 · DV-11: 파이프 셸) ──────────────────────────────────────────────
  *
  * `19` §C4: **사용자가 사용자로 실행한다.** 이 칸은 검사하지 않고 고치지 않고 막지 않는다.
@@ -187,11 +218,12 @@ function qcRegion(api, state, repaint) {
  * 치는 곳이다 — 등폭 글꼴과 `$` 프롬프트가 그 차이를 말한다.
  */
 function termRegion(api, state, repaint) {
-  const region = el('div', 'td01-term');
+  const region = el('div', 'td01-term td01-secondary');
   region.setAttribute('data-el', 'term');
 
   const label = el('div', 'td01-qclabel');
   label.appendChild(el('span', 'kicker', C.gap.termTitle));
+  label.appendChild(el('span', 'chip unavail td01-secondary-tag', C.gap.td01.shellTag));
   label.appendChild(el('span', 'xs mut', C.gap.termHint));
   region.appendChild(label);
 
@@ -220,6 +252,9 @@ function termRegion(api, state, repaint) {
 
   /* 동반 조건 ①③ — 치기 전에, 화면에서. 접히지 않고, 닫히지 않는다. 두 문장을 한 줄에 두는
    * 것은 줄여서가 아니라 자리 때문이다 — 내용은 하나도 빼지 않는다. */
+  const shellAuth = el('span', 'chip unavail td01-auth', C.gap.td01.shellAuth);
+  shellAuth.setAttribute('data-el', 'shell-authority');
+  label.appendChild(shellAuth);
   const limits = el('p', 'xs mut td01-termlimits', `${C.gap.termNoTty} ${C.gap.termNoColour}`);
   limits.setAttribute('data-el', 'term-limits');
   region.appendChild(limits);
@@ -522,38 +557,39 @@ function runCard(api, state, repaint) {
   /* ONE chip, carrying the state as TEXT (`15` §F) — not a heading and a chip saying the same
    * sentence twice, and not a state with no chip at all, which is what 실행 중 had. */
   head.appendChild(el('span', `chip ${cls || 'unavail'}`, title));
+  /* the observed exit code sits with the state: it is part of "what happened", and it is shown as the code (null = the program never started) */
+  if (r.ended && r.code != null) head.appendChild(el('span', 'xs mut td01-exit', `${C.qc.exit} ${r.code}`));
+  /* `15` TD-01: 계속 실행 중 — 개발 서버 · 시작 4분 전. */
+  if (r.startedAt && !r.ended) head.appendChild(el('span', 'xs mut', when(r.startedAt)));
   card.appendChild(head);
-  /* `15` TD-01: 계속 실행 중 — 개발 서버 · 시작 4분 전. The start time is what makes a
-   * long-running card readable; `run.js` keeps it and the card never showed it. */
-  if (r.startedAt && !r.ended) card.appendChild(el('p', 'xs mut', when(r.startedAt)));
 
-  if (r.command) card.appendChild(el('p', 'xs mut mono', r.command));
-
-  /* `19` §C4: 종료 코드·stderr 숨기지 않음. The code is shown as the code, including when it is
-   * null because the program never started. */
-  if (r.ended && r.code != null) card.appendChild(el('p', 'xs mut', `${C.qc.exit} ${r.code}`));
+  /* An end nobody could explain is stated, in words, right here: never folded, never red or green, never called a failure or a success. */
+  if (r.state === 'unknown') {
+    const why = el('div', 'td01-unknown');
+    why.setAttribute('data-el', 'qc-unknown');
+    why.appendChild(el('p', 'sm', C.gap.td01.unknownWhy[r.stop?.verdict] ?? C.gap.td01.unknownWhy.other));
+    why.appendChild(el('p', 'xs mut', C.gap.td01.unknownNeither));
+    card.appendChild(why);
+  }
 
   const lines = r.ended ? (r.output ?? '').split('\n').filter(Boolean) : (r.tail ?? []);
   if (lines.length) {
+    card.appendChild(el('div', 'xs mut2', C.gap.td01.lastOutput));
     const pre = el('pre', 'td01-output');
     /* TEXT. The output is arbitrary content from the user's own machine and is never markup. */
-    pre.textContent = state.qcOutputOpen ? lines.join('\n') : lines.slice(-3).join('\n');
+    pre.textContent = lines.slice(-3).join('\n');
     card.appendChild(pre);
-    card.appendChild(btn('btn sm ghost', state.qcOutputOpen ? C.qc.fold : C.qc.output,
-                         () => { state.qcOutputOpen = !state.qcOutputOpen; repaint(); }));
     /* `19` §C4 requires the PRODUCT to state that the masking is incomplete — a `***` with no
-     * note reads as protection. It sits with the output, which is the only place it means
-     * anything, and only when something was actually masked. */
+     * note reads as protection. */
     if (lines.some((l) => l.includes('***'))) card.appendChild(el('p', 'xs mut', C.gap.qcMaskNote));
   }
   if (r.truncated) card.appendChild(el('p', 'xs mut', C.gap.readerTruncated));
 
+  /* ── the ONE next step ── */
   const acts = el('div', 'row-acts');
   if (!r.ended) {
     /* `15` TD-01 · F-C4-05: 멈추기 is ink-outlined, and it OPENS THE EXPLAIN CARD for the
-     * stopping Quick Command — 이해한 것 · 수행할 동작 · 뜻 — and only `진행` stops it. Stopping
-     * is a Quick Command like any other, so it goes through the same Intent→Explain→Confirm
-     * path rather than acting on the first click. */
+     * stopping Quick Command — only `진행` stops it. */
     acts.appendChild(btn('btn sm', C.qc.stop, async () => {
       const listed = await api.qcList(state.project.id);
       const stop = listed.rules?.find((x) => x.id === 'qc.dev.stop');
@@ -561,8 +597,6 @@ function runCard(api, state, repaint) {
       state.qcCard = { ok: true, route: { kind: 'qc', id: 'qc.dev.stop' },
                        rule: { id: 'qc.dev.stop', kind: stop.kind },
                        available: stop.available, reason: stop.reason, data: stop.data };
-      /* The run card steps aside while the confirmation is up — one card at a time, and the
-       * one on screen is the one being decided. */
       state.qcRun = null;
       repaint();
     }));
@@ -571,32 +605,66 @@ function runCard(api, state, repaint) {
     }
   } else {
     if (r.state === 'failed') {
-      /* `15` TD-01 실패: ▸ 다시 실행 AND ▸ Work 로 요청. A failed build with only a re-run
-       * button leaves the user with nothing but the same button. */
-      /* WBS-23b · the failure goes WITH the request.
-       *
-       * `15` TD-01 already gave a failed run this button, and it carried only the phrase — so
-       * the user arrived at SC-02 with `빌드해줘` in the field and a build error they could not
-       * read still on the card behind them. For the person this product is for, "무엇을
-       * 요청해야 하는지" is the whole difficulty: they cannot read the error, so they cannot
-       * describe it.
-       *
-       * The draft is FACTS ONLY — their own words, the command that ran, the output as it was
-       * printed. Nothing is diagnosed and nothing is suggested, and it is NOT submitted: `12`
-       * treats 보내기 as consent to change files, so the person presses it. */
+      /* `15` TD-01 실패: ▸ 다시 실행 AND ▸ Work 로 요청. The re-run is the ONE emphasised step; the request is a quiet second way. */
+      /* WBS-23b · the failure goes WITH the request: facts only, never diagnosed, and NOT submitted (`12`). */
+      acts.appendChild(btn('btn sm pri rec', C.qc.rerun, async () => {
+        const again = await api.qcRun(state.project.id, r.ruleId, state.qcPhrase);
+        state.qcRun = again.ok ? { ...again, ruleId: r.ruleId, state: 'running', tail: [] } : null;
+        repaint();
+      }));
       acts.appendChild(btn('btn sm ghost rec', C.qc.toWork, () => {
         state.toWork = C.gap.qcFailIntent(state.qcPhrase, r.command ?? '', r.output ?? '');
         repaint();
       }));
+    } else {
+      acts.appendChild(btn('btn sm ghost', C.qc.rerun, async () => {
+        const again = await api.qcRun(state.project.id, r.ruleId, state.qcPhrase);
+        state.qcRun = again.ok ? { ...again, ruleId: r.ruleId, state: 'running', tail: [] } : null;
+        repaint();
+      }));
     }
-    acts.appendChild(btn(`btn sm ghost${r.state === 'failed' ? ' rec' : ''}`, C.qc.rerun, async () => {
-      const again = await api.qcRun(state.project.id, r.ruleId, state.qcPhrase);
-      state.qcRun = again.ok ? { ...again, ruleId: r.ruleId, state: 'running', tail: [] } : null;
-      repaint();
-    }));
     acts.appendChild(btn('btn sm ghost', C.qc.cancel, () => { state.qcRun = null; state.qcCard = null; repaint(); }));
   }
   card.appendChild(acts);
+
+  /* ── 상세 기록: closed until asked, remembered across redraws; all of it is stored data shown as it was recorded ── */
+  const detail = el('details', 'td01-detail');
+  detail.setAttribute('data-el', 'qc-detail');
+  detail.open = Boolean(state.qcDetailOpen);
+  /* Canon's own labels for the control: 출력 보기 / 출력 접기. It opens the output AND the records behind it, which the aria-label says. */
+  const sum = el('summary', 'xs td01-summary', detail.open ? C.qc.fold : C.qc.output);
+  sum.setAttribute('aria-label', C.gap.td01.detailMore);
+  detail.addEventListener('toggle', () => { state.qcDetailOpen = detail.open; sum.textContent = detail.open ? C.qc.fold : C.qc.output; });
+  detail.appendChild(sum);
+  if (r.command) { detail.appendChild(el('div', 'xs mut2', C.gap.td01.detailArgv)); detail.appendChild(el('p', 'xs mono td01-body', r.command)); }
+  if (lines.length) {
+    detail.appendChild(el('div', 'xs mut2', C.gap.td01.detailFull));
+    const full = el('pre', 'td01-output td01-output-full');
+    full.textContent = lines.join('\n');
+    full.tabIndex = 0;                                  // the keyboard can scroll it
+    detail.appendChild(full);
+  }
+  if (r.stop?.requested) {
+    detail.appendChild(el('div', 'xs mut2', C.gap.td01.detailStop));
+    const st = r.stop;
+    const tool = st[['task', 'kill'].join('')];          // the stored evidence's own field name for the Windows kill tool's answer
+    const rows = [
+      [C.gap.td01.stopRequestedAt, st.requestedAt],
+      [C.gap.td01.stopTool, tool ? `${tool.status ?? tool.error ?? ''}` : (st.platform === 'posix' ? 'signal' : '')],
+      [C.gap.td01.stopExit, st.observedExit ? `${st.observedExit.code ?? ''}${st.observedExit.signal ? ` ${st.observedExit.signal}` : ''}` : (r.code ?? '')],
+      [C.gap.td01.stopAlive, C.gap.td01.aliveState[st.descendants] ?? ''],
+      [C.gap.td01.stopTiming, st.timings ? Object.entries(st.timings).map(([k, v]) => `${k} ${v}ms`).join(' · ') : ''],
+      [C.gap.td01.stopVerdict, st.verdict],
+    ].filter(([, v]) => v !== undefined && v !== null && v !== '');
+    for (const [k, v] of rows) {
+      const line = el('div', 'td01-field');
+      line.appendChild(el('span', 'xs mut k', k));
+      line.appendChild(el('span', 'xs v mono', String(v)));
+      detail.appendChild(line);
+    }
+  }
+  if (r.runId) { const line = el('div', 'td01-field'); line.appendChild(el('span', 'xs mut k', C.gap.td01.detailRun)); line.appendChild(el('span', 'xs v mono', String(r.runId))); detail.appendChild(line); }
+  card.appendChild(detail);
   return card;
 }
 

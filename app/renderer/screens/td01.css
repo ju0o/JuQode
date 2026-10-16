@@ -55,7 +55,7 @@
 .td01-qchead { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; }
 .td01-qcbody { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .td01-qclabel { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.td01-qclabel .kicker { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--juq); }
+.td01-qclabel .kicker { font-size: var(--fs-caption); font-weight: 700; letter-spacing: 0; color: var(--juq); }
 
 /* `15`: the Quick Command field is natural language and is VISUALLY DISTINCT from a shell line.
    It reads like the request field on SC-02, not like a terminal. */
@@ -71,7 +71,7 @@
 .td01-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
 .td01-card .ct { font-weight: 600; }
 /* Caps from here, words from `18` — see the note on `.sc04-actor`. */
-.td01-actor { align-self: flex-start; font-size: 10px; letter-spacing: .06em; font-weight: 600;
+.td01-actor { align-self: flex-start; font-size: var(--fs-caption); letter-spacing: 0; font-weight: 600;
               text-transform: uppercase; }
 /* 미인식 is NEUTRAL — `15` says so explicitly, and `19` §C4 explains why: the product recognises
    six things and declines the rest; it does not claim to have detected anything. */
@@ -165,7 +165,7 @@
 .td01-cardhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .td01-cardhead .td01-actor { align-self: center; }
 .td01-cardhead .kicker {
-  font-size: 11px; font-weight: 600; letter-spacing: 0; color: var(--juq);
+  font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0; color: var(--juq);
 }
 
 /* `18` `term.out` — the name of the pane below it. Quiet: it is a label on a region the user is
@@ -196,3 +196,30 @@
   .td01-banner { padding: 6px 16px; }
   .td01-termout { max-height: 44px; }
 }
+
+/* ── D4 · input -> result -> safety -> details ─────────────────────────────────────────── */
+.td01-auth { margin: 0; overflow-wrap: anywhere; }
+.td01-secondary { opacity: .98; }
+.td01-secondary .td01-prompt, .td01-secondary .td01-terminput { font-size: var(--fs-caption); }
+.td01-secondary-tag { margin-left: 4px; }
+.td01-bannerrow { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; background: var(--grey); border-bottom: 1px solid var(--line); }
+.td01-bannerrow .td01-banner { flex: 1 1 320px; min-width: 0; border-bottom: none; }
+.td01-safety { flex: 0 0 auto; padding: 0 16px; }
+.td01-safety[open] { flex: 1 1 100%; display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; }
+.td01-safety > summary { display: inline-flex; min-height: 24px; white-space: nowrap; }
+.td01-summary { cursor: pointer; color: var(--ink2); min-height: 28px; display: flex; align-items: center; }
+.td01-summary::before { content: "▸"; margin-right: 6px; }
+details[open] > .td01-summary::before { content: "▾"; }
+.td01-summary::-webkit-details-marker { display: none; }
+.td01-summary:focus-visible { outline: 2px solid var(--juq); outline-offset: 2px; }
+.td01-detail { border-top: 1px solid var(--line); padding-top: 4px; }
+.td01-detail[open] { display: flex; flex-direction: column; gap: 6px; }
+.td01-output { white-space: pre-wrap; overflow-wrap: anywhere; }
+.td01-output-full { white-space: pre; overflow-wrap: normal; max-height: 30vh; }
+.td01-output-full:focus-visible { outline: 2px solid var(--juq); outline-offset: 2px; }
+.td01-unknown { border-left: 1px dashed var(--unk); padding-left: 8px; display: flex; flex-direction: column; gap: 2px; }
+.td01-exit { font-family: var(--font-mono); }
+.td01 .chip { white-space: normal; max-width: 100%; height: auto; line-height: 1.35; overflow-wrap: anywhere; text-align: left; font-size: var(--fs-caption); }
+.td01 .btn:focus-visible, .td01 button:focus-visible { outline: 2px solid var(--juq); outline-offset: 2px; }
+.td01-qcbody .qc-hold { flex: 0 0 auto; }
+.td01-qcbody > *, .td01-qc, .td01 { min-width: 0; }

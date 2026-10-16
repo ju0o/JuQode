@@ -1040,6 +1040,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     if (!blocks().length) return JSON.stringify({ count: 0 });
     const before = blocks().map(b => b.classList.contains('on'));
     const key = blocks()[0].getAttribute('data-block');
+    const file = blocks()[0].getAttribute('data-file');
     blocks()[0].click();
     await new Promise(r => setTimeout(r, 400));
     const after = blocks().map(b => b.classList.contains('on'));
@@ -1048,7 +1049,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     blocks()[0].click();
     await new Promise(r => setTimeout(r, 400));
     return JSON.stringify({ count: blocks().length, before, after,
-      key, scopedFiles, reopened: blocks().map(b => b.classList.contains('on')),
+      key, file, scopedFiles, reopened: blocks().map(b => b.classList.contains('on')),
       afterSecondClickFiles: files() }); })()`);
   for (const theme of ['light', 'dark']) {
     await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
@@ -2815,6 +2816,14 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
         files: [{ file: 'src/index.js', displayable: true, blocks: [{ name: 'main', change: 'modify', afterLines: [1, 2] }], patch: '@@ -1 +1 @@\n-a\n+b\n' },
                 { file: 'README.md', displayable: true, blocks: [], note: 'unblocked', patch: '@@ -1 +1 @@\n-x\n+y\n' }] }],
       evidenceGap: { known: true, paths: [{ path: 'node_modules/.cache/x' }] } } },
+    special: { outcome: 'complete', reader: { ok: true, groups: [{ title: '이름이 까다로운 파일들', explainable: true, confidence: 'confirmed', what: 'x', why: null, affects: null, files: [
+      { file: 'src/a#b.js', displayable: true, blocks: [{ name: 'one', change: 'modify', afterLines: [1, 2] }, { name: 'two', change: 'add', afterLines: [5, 6] }], patch: 'PATCH-0 src/a#b.js\n+only in a#b\n' },
+      { file: 'src/a.js', displayable: true, blocks: [{ name: 'b.js', change: 'modify', afterLines: [1, 1] }], patch: 'PATCH-1 src/a.js\n+only in a\n' },
+      { file: 'C:\\proj\\src\\a#b.js', displayable: true, blocks: [{ name: 'win', change: 'modify', afterLines: [3, 4] }], patch: 'PATCH-2 windows path\n+win\n' },
+      { file: '문서/보고서#1 최종본.md', displayable: true, blocks: [{ name: '제목', change: 'modify', afterLines: [1, 1] }], patch: 'PATCH-3 한글\n+한글 내용\n' },
+      { file: 'lib/index.js', displayable: true, blocks: [{ name: 'lib', change: 'modify', afterLines: [1, 1] }], patch: 'PATCH-4 lib/index.js\n+lib\n' },
+      { file: 'app/index.js', displayable: true, blocks: [{ name: 'app', change: 'modify', afterLines: [1, 1] }], patch: 'PATCH-5 app/index.js\n+app\n' },
+      { file: 'config/no-blocks.yaml', displayable: true, note: 'unblocked', blocks: [], patch: 'PATCH-6 no blocks\n+a: 1\n' }] }] } },
     unknown: { outcome: 'ended_unknown', reader: { ok: true, groups: [], unknown: true, changedFiles: [LONG, 'src/index.js', 'docs/index.js'] } },
     refused: { outcome: 'complete', reader: { ok: false, reason: 'no-evidence' } },
   };
@@ -2911,7 +2920,153 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   out.sc04paths = await evalJs(`(() => { document.querySelector('[data-group-pick="0"]').click(); const d = [...document.querySelectorAll('.sc04-fullpath, .file-all')]; d.forEach((x) => { x.open = true; });
     const shown = [...document.querySelectorAll('.file-path')].map((n) => n.textContent);
     return JSON.stringify({ hasLong: shown.some((t) => t === ${JSON.stringify(LONG)}), names: [...document.querySelectorAll('.sc04-filename')].map((n) => n.textContent).slice(0, 4) }); })()`);
+
+  /* special file names: the raw panel shows ONLY the selected block's file, whatever characters its path holds */
+  await sc04Mount('special');
+  await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 773, deviceScaleFactor: 1, mobile: false });
+  out.sc04special = [];
+  const FILES = 7;
+  await evalJs(`window.__copied = []; Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__copied.push(t); } }, configurable: true })`);
+  for (let fi = 0; fi < 6; fi += 1) {
+    await evalJs(`window.__sc04.state.readerRaw = false; window.__sc04.state.readerBlock = null; window.__sc04.state.readerGroup = 0; window.__sc04.rerender(); window.__copied = []`);
+    const sel = `[data-block="${fi}:0"]`;
+    await evalJs(`document.querySelector('${sel}').focus()`);
+    await press('Enter', 'Enter', 13); await sleep(250);
+    const opened = JSON.parse(await evalJs(`JSON.stringify({ cards: [...document.querySelectorAll('.sc04-rawcard')].map((c) => ({ title: c.querySelector('.sc04-filename').title, patch: c.querySelector('.sc04-patch')?.textContent ?? null })),
+      focusIsRaw: document.activeElement?.classList?.contains('sc04-raw'), on: document.querySelectorAll('.sc04-block.on').length })`));
+    await evalJs(`document.querySelector('.sc04-copy').click()`); await sleep(100);
+    const copied = JSON.parse(await evalJs(`JSON.stringify(window.__copied)`));
+    await press('Escape', 'Escape', 27); await sleep(250);
+    const closed = JSON.parse(await evalJs(`JSON.stringify({ raw: window.__sc04.state.readerRaw, patches: document.querySelectorAll('.sc04-patch').length, focus: document.activeElement?.getAttribute('data-block') })`));
+    out.sc04special.push({ fi, opened, copied, closed });
+  }
+  /* a file with no code blocks reaches Raw directly (D-118) */
+  await evalJs(`window.__sc04.state.readerRaw = false; window.__sc04.state.readerBlock = null; window.__sc04.rerender()`);
+  out.sc04noBlocks = JSON.parse(await evalJs(`(() => { const b = [...document.querySelectorAll('.sc04-file')].find((c) => c.querySelector('.sc04-filename')?.title === 'config/no-blocks.yaml')?.querySelector('button'); b?.click();
+    return JSON.stringify({ had: Boolean(b), patches: [...document.querySelectorAll('.sc04-patch')].map((p) => p.textContent) }); })()`));
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+
+
+  /* ── TD-01 D4 · the REAL drawer renderer in the REAL window, fed synthetic states (long command, 200-char output, every run state,
+   * a Writer hold, a failed restore, an explain card, the shell line). The real drawer is hidden meanwhile. ───────────────────── */
+  step('TD-01 D4 matrix');
+  out.td01d4 = {};
+  const LONGCMD = 'npm run build -- --mode production --base /아주/긴/한글/경로/로/배포되는/앱/ --sourcemap --minify --report ' + 'x'.repeat(60);
+  const LONGLINE = 'ERROR in ./src/아주긴한글파일이름을가진컴포넌트.tsx  ' + 'Module not found: Error: Can\'t resolve ./설정/알림/수신여부를/저장하는/아주/긴/경로 '.repeat(2) + ' '.padEnd(10, '.') + '12345678901234567890';
+  const OUT200 = [LONGLINE.slice(0, 200), 'line two', 'line three', 'line four', 'last line'].join('\n');
+  const STOP = { requested: true, requestedAt: '2026-10-16T10:00:02.000Z', attempts: 1, root: 'not-terminated', platform: 'win32', descendants: 'none', verdict: 'stop-unconfirmed',
+                 observedExit: { code: 1, signal: null }, timings: { snapshotMs: 700, taskkillMs: 200, survivorsMs: 650 }, uncertain: false, members: [] };
+  STOP[['task', 'kill'].join('')] = { status: 255, error: null };
+  const TD = {
+    ok: { qcRun: { runId: 'run-ok-0001', ruleId: 'qc.build', state: 'ok', ended: true, code: 0, command: 'npm run build', output: OUT200 } },
+    failed: { qcRun: { runId: 'run-fail-0002', ruleId: 'qc.build', state: 'failed', ended: true, code: 2, command: LONGCMD, output: OUT200 } },
+    running: { qcRun: { runId: 'run-run-0003', ruleId: 'qc.dev.start', kind: 'long_running', state: 'running', startedAt: new Date().toISOString(), command: 'npm run dev', tail: ['VITE ready', LONGLINE.slice(0, 200)] } },
+    stopreq: { qcRun: { runId: 'run-stop-0004', ruleId: 'qc.dev.start', state: 'stopped-requested', command: 'npm run dev', tail: [] } },
+    unknown: { qcRun: { runId: 'run-unk-0005', ruleId: 'qc.dev.start', state: 'unknown', ended: true, code: 1, command: 'npm run dev', output: OUT200, stop: STOP } },
+    hold: { qcRun: null, qcHold: { ok: true, held: [{ runId: 'run-held-0006', command: 'npm run dev', why: 'never-finished', needsAck: true }, { runId: 'run-held-0007', command: 'npm run build -- 아주 긴 한글 인자를 가진 명령', why: 'evidence-incomplete', needsAck: true }], restoreFailure: null, rules: [] } },
+    restorefail: { qcRun: null, qcHold: { ok: true, held: [], restoreFailure: { reason: 'EIO: 증거 저장소를 읽을 수 없어요 ' + 'x'.repeat(80), at: new Date().toISOString() }, rules: [] } },
+    explain: { qcRun: null, qcCard: { ok: true, route: { kind: 'qc', id: 'qc.build' }, rule: { id: 'qc.build', kind: 'oneshot', risk: 'build' }, available: true, data: { command: LONGCMD, scriptBody: 'vite build && node scripts/아주긴한글이름의후처리스크립트.mjs --out dist/' + 'y'.repeat(60) } } },
+    shell: { qcRun: null, term: { id: 't1', cwd: '/tmp/demo', limits: { shell: '/bin/sh' } }, termRun: { id: 't1', line: 'ls -la ' + 'z'.repeat(150), output: OUT200 + '\n' + 'w'.repeat(220), code: 0, ended: false } },
+  };
+  const tdMount = (kind) => evalJs(`(async () => {
+    const m = await import('./screens/td01.js');
+    document.querySelectorAll('[data-el="drawer"]').forEach((n) => { n.style.display = 'none'; });
+    document.querySelectorAll('[data-el="drawer-syn"]').forEach((n) => n.remove());
+    const spec = ${JSON.stringify(TD[kind])};
+    const hold = spec.qcHold ?? { ok: true, held: [], restoreFailure: null, rules: [] };
+    const api = { qcList: async () => hold, qcRoute: async () => ({ ok: false }), qcRun: async () => ({ ok: false, reason: 'x' }), qcAckStopped: async () => ({ ok: true, acked: [], skipped: [], stillHeld: [] }),
+                  termOpen: async () => ({ ok: true }), termWrite: async () => ({ ok: true }), termStop: async () => ({ ok: true }) };
+    const state = { project: { id: 'p-syn', name: 'demo', path: '/tmp/demo' }, drawerOpen: true, qcPhrase: '빌드 해줘', qcCard: spec.qcCard ?? null, qcRun: spec.qcRun ?? null,
+                    qcHold: hold, qcHoldSig: JSON.stringify([hold.held, hold.restoreFailure]), qcHoldAt: Date.now(), term: spec.term ?? null, termRun: spec.termRun ?? null };
+    const d = m.mountDrawer(api, state, () => {});
+    d.host.setAttribute('data-el', 'drawer-syn');
+    window.__td = { state, paint: d.paint, host: d.host };
+    return true; })()`);
+  const TD_METRICS = `(() => {
+    const root = document.querySelector('[data-el="drawer-syn"] .td01');
+    const visible = (n) => { for (let p = n; p && p !== root; p = p.parentElement) if (p.tagName === 'DETAILS' && !p.open && !(n.tagName === 'SUMMARY' && n.parentElement === p)) return false; return true; };
+    const leaves = [...root.querySelectorAll('*')].filter((n) => n.children.length === 0 && n.textContent.trim() && visible(n));
+    const inBox = (n) => !!n.closest('.td01-output, .td01-termout');
+    return JSON.stringify({
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      drawerOverflowX: root.scrollWidth - root.clientWidth,
+      small: leaves.filter((n) => parseFloat(getComputedStyle(n).fontSize) < 12).length,
+      pastEdge: leaves.filter((n) => !inBox(n) && n.getBoundingClientRect().right > innerWidth + 1).length,
+      outBoxPastEdge: [...root.querySelectorAll('.td01-output, .td01-termout')].filter((n) => n.getBoundingClientRect().right > innerWidth + 1).length,
+      clipped: [...root.querySelectorAll('.td01-card, .td01-field, .td01-unknown, .qc-hold')].filter((n) => n.scrollWidth > n.clientWidth + 1).length,
+      primary: [...root.querySelectorAll('.btn.pri')].filter((b) => visible(b) && b.getAttribute('data-act') !== 'qc-send' && !b.closest('.td01-qcrow')).length,
+      fullOutputVisible: [...root.querySelectorAll('.td01-output-full')].some((n) => visible(n)),
+      detailOpen: root.querySelector('[data-el="qc-detail"]')?.open ?? null,
+      hasUnknownSentence: !!root.querySelector('[data-el="qc-unknown"]'), holdShown: !!root.querySelector('[data-el="qc-hold"]'),
+      banner: !!root.querySelector('[data-el="banner"]'), limits: !!root.querySelector('[data-el="term-limits"]'),
+      qcAuth: root.querySelector('[data-el="qc-authority"]')?.innerText ?? null, shellAuth: root.querySelector('[data-el="shell-authority"]')?.innerText ?? null,
+      reds: ${RED_COUNT('[data-el="drawer-syn"] *')}, text: root.innerText });
+  })()`;
+  for (const kind of Object.keys(TD)) {
+    await tdMount(kind);
+    const rows = [];
+    for (const [w, h] of [[880, 600], [1024, 700], [1200, 773], [1440, 900]]) {
+      await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ['light', 'dark']) {
+        await evalJs(`document.documentElement.setAttribute('data-theme','${theme}'); window.__td.state.qcDetailOpen = false; window.__td.paint()`);
+        await sleep(200);
+        const m = JSON.parse(await evalJs(TD_METRICS));
+        fs.writeFileSync(path.join(OUT, `td01-d4-${kind}-${w}-${theme}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+        const row = { w, theme, m };
+        if (kind === 'failed' || kind === 'unknown') {
+          await evalJs(`window.__td.state.qcDetailOpen = true; window.__td.paint()`);
+          await sleep(150);
+          row.open = JSON.parse(await evalJs(TD_METRICS));
+          fs.writeFileSync(path.join(OUT, `td01-d4-${kind}-${w}-${theme}-details.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+          await evalJs(`window.__td.state.qcDetailOpen = false; window.__td.paint()`);
+        }
+        if (theme === 'light') {
+          await evalJs(`document.documentElement.style.zoom = '1.5'`); await sleep(150);
+          row.zoom150 = JSON.parse(await evalJs(`JSON.stringify({ pageX: document.documentElement.scrollWidth - document.documentElement.clientWidth, drawerX: (() => { const r = document.querySelector('[data-el="drawer-syn"] .td01'); return r.scrollWidth - r.clientWidth; })() })`));
+          await evalJs(`document.documentElement.style.zoom = ''`);
+          await evalJs(`document.querySelector('[data-el="drawer-syn"] button').focus()`);   // start inside the drawer (the page behind it has its own Tab stops first)
+          const stops = [];
+          for (let i = 0; i < 16; i += 1) {
+            await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+            await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+            stops.push(JSON.parse(await evalJs(`(() => { const a = document.activeElement; if (!a || a === document.body || !a.closest('[data-el="drawer-syn"]')) return JSON.stringify(null);
+              const r = a.getBoundingClientRect(); const cs = getComputedStyle(a);
+              return JSON.stringify({ tag: a.tagName, onScreen: r.width > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight,
+                indicator: (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0) || (cs.boxShadow && cs.boxShadow !== 'none') }); })()`)));
+          }
+          row.focus = stops.filter(Boolean);
+        }
+        rows.push(row);
+      }
+    }
+    out.td01d4[kind] = rows;
+  }
+  /* keyboard: Enter on the details summary opens it, Enter again closes it; the open/closed choice survives a redraw */
+  await tdMount('failed');
+  await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 773, deviceScaleFactor: 1, mobile: false });
+  await evalJs(`document.documentElement.setAttribute('data-theme','light'); window.__td.state.qcDetailOpen = false; window.__td.paint()`);
+  out.td01keys = {};
+  await evalJs(`document.querySelector('[data-el="drawer-syn"] [data-el="qc-detail"] > summary').focus()`);
+  await press('Enter', 'Enter', 13); await sleep(200);
+  out.td01keys.opened = await evalJs(`JSON.stringify({ open: window.__td.state.qcDetailOpen, label: document.querySelector('[data-el="qc-detail"] > summary').textContent })`);
+  await evalJs(`window.__td.paint()`); await sleep(100);
+  out.td01keys.survivedRedraw = await evalJs(`document.querySelector('[data-el="qc-detail"]').open`);
+  await evalJs(`document.querySelector('[data-el="drawer-syn"] [data-el="qc-detail"] > summary').focus()`);
+  await press('Enter', 'Enter', 13); await sleep(200);
+  out.td01keys.closed = await evalJs(`JSON.stringify({ open: window.__td.state.qcDetailOpen, label: document.querySelector('[data-el="qc-detail"] > summary').textContent })`);
+  /* the Writer-hold panel: pick ONE of two runs, the button counts, and only that run is sent */
+  await tdMount('hold');
+  await evalJs(`window.__sent = null; window.__td.state.qcHoldAt = Date.now();`);
+  out.td01hold = await evalJs(`(async () => {
+    const root = document.querySelector('[data-el="drawer-syn"]');
+    const boxes = [...root.querySelectorAll('.qc-hold input[type=checkbox]')];
+    const go = () => [...root.querySelectorAll('.qc-hold button')].find((b) => b.textContent.includes('확인했다고 기록하기'));
+    const before = { boxes: boxes.length, disabled: go().disabled, label: go().textContent };
+    boxes[1].click(); await new Promise((r) => setTimeout(r, 50));
+    const one = { disabled: go().disabled, label: go().textContent };
+    return JSON.stringify({ before, one }); })()`);
+  await evalJs(`document.documentElement.setAttribute('data-theme','')`);
+  await evalJs(`document.querySelectorAll('[data-el="drawer-syn"]').forEach((n) => n.remove()); document.querySelectorAll('[data-el="drawer"]').forEach((n) => { n.style.display = ''; })`);
 
   return out;
 });
@@ -4099,7 +4254,7 @@ assert.ok(results.readerOverflow <= 0, `SC-04 scrolls sideways by ${results.read
    * the block's `on` class was checked, the thing the click is FOR was not. */
   const b = JSON.parse(results.readerBlockSel);
   if (b.count) {
-    const file = b.key.split('#')[0];
+    const file = b.file;
     assert.strictEqual(b.before.filter(Boolean).length, 0, 'a block was already selected on arrival');
     assert.strictEqual(b.after.filter(Boolean).length, 1, 'selecting a block selected more than one');
     assert.ok(b.after[0], 'clicking a block did not select it');
@@ -4324,7 +4479,47 @@ assert.ok(results.sc03About && results.sc03About.includes('이 작업에 대해'
 assert.strictEqual(results.sc03RawCollapsed, true, '기술 출력 보기 must be collapsed by default (A-11)');
 
 fs.writeFileSync(path.join(OUT, 'sc03-d2-metrics.json'), JSON.stringify(results.sc03d2, null, 2));
+fs.writeFileSync(path.join(OUT, 'td01-d4-metrics.json'), JSON.stringify({ matrix: results.td01d4, keys: results.td01keys, hold: results.td01hold }, null, 2));
 fs.writeFileSync(path.join(OUT, 'sc04-d3-metrics.json'), JSON.stringify({ matrix: results.sc04d3, keys: results.sc04keys, paths: results.sc04paths }, null, 2));
+/* TD-01 D4 on the real drawer renderer in the real window */
+for (const [kind, rows] of Object.entries(results.td01d4)) {
+  assert.strictEqual(rows.length, 8, `TD-01 ${kind}: expected 4 widths x 2 themes`);
+  for (const r of rows) {
+    const at = `TD-01 ${kind} @${r.w} ${r.theme}`;
+    for (const [label, m] of [['closed', r.m], ['details open', r.open]].filter(([, m]) => m)) {
+      assert.strictEqual(m.overflowX, 0, `${at} (${label}): the page scrolls sideways`);
+      assert.ok(m.drawerOverflowX <= 0, `${at} (${label}): the drawer scrolls sideways (${m.drawerOverflowX}px)`);
+      assert.strictEqual(m.small, 0, `${at} (${label}): ${m.small} visible text element(s) under 12px`);
+      assert.strictEqual(m.pastEdge, 0, `${at} (${label}): ${m.pastEdge} text element(s) run past the window edge`);
+      assert.strictEqual(m.outBoxPastEdge, 0, `${at} (${label}): an output box runs past the window edge`);
+      assert.strictEqual(m.clipped, 0, `${at} (${label}): ${m.clipped} card/field(s) clip their text`);
+      assert.ok(m.banner, `${at} (${label}): the standing safety banner is gone`);
+      assert.ok(m.qcAuth && m.shellAuth, `${at} (${label}): the two execution authorities are not both stated`);
+      assert.ok(m.primary <= 1, `${at} (${label}): ${m.primary} emphasised next steps`);
+      if (kind !== 'failed') assert.strictEqual(m.reds, 0, `${at} (${label}): red where nothing failed`);
+    }
+    assert.strictEqual(r.m.fullOutputVisible, false, `${at}: the full output is on screen before anyone asked`);
+    if (r.open && kind !== 'unknown') assert.strictEqual(r.open.detailOpen, true);
+    if (kind === 'unknown') {
+      assert.ok(r.m.hasUnknownSentence, `${at}: an unconfirmed end is not stated in the open`);
+      assert.ok(/성공으로도 실패로도 처리하지 않았어요/.test(r.m.text) && /끝났는지 확인할 수 없어요/.test(r.m.text), `${at}: 확인 불가 is not said plainly`);
+      assert.ok(!/(^|\s)(완료|실패했어요|성공)(\s|$)/.test(r.m.text.replace(/성공으로도 실패로도/g, '')), `${at}: an unknown end was called a success or a failure`);
+    }
+    if (kind === 'hold' || kind === 'restorefail') assert.ok(r.m.holdShown, `${at}: the Writer hold / restore failure is not shown`);
+    if (r.zoom150) assert.ok(r.zoom150.pageX <= 0 && r.zoom150.drawerX <= 0, `${at}: at 150% zoom something scrolls sideways ${JSON.stringify(r.zoom150)}`);
+    if (r.focus) {
+      assert.ok(r.focus.length >= 3, `${at}: Tab reached ${r.focus.length} controls inside the drawer`);
+      for (const f of r.focus) assert.ok(f.onScreen && f.indicator, `${at}: focus stop ${JSON.stringify(f)} is off screen or has no visible indicator`);
+    }
+  }
+}
+{
+  const k = results.td01keys;
+  assert.deepStrictEqual([JSON.parse(k.opened).open, JSON.parse(k.opened).label, k.survivedRedraw, JSON.parse(k.closed).open, JSON.parse(k.closed).label], [true, '출력 접기', true, false, '출력 보기'], `Enter on the details control: ${JSON.stringify(k)}`);
+  const h = JSON.parse(results.td01hold);
+  assert.deepStrictEqual([h.before.boxes, h.before.disabled, h.one.disabled], [2, true, false], `the hold panel: ${results.td01hold}`);
+  assert.ok(/1건/.test(h.one.label), `the confirmation button does not say how many runs are being confirmed: ${h.one.label}`);
+}
 /* SC-04 D3 (design + function) on the real renderer in the real window */
 for (const [kind, rows] of Object.entries(results.sc04d3)) {
   assert.strictEqual(rows.length, 8, `SC-04 ${kind}: expected 4 widths x 2 themes`);
@@ -4360,6 +4555,21 @@ for (const [kind, rows] of Object.entries(results.sc04d3)) {
   assert.ok(opened.raw && opened.focusIsRaw && opened.patches >= 1, `Enter on 'Raw Diff 보기' did not open Raw with focus in it: ${k.rawOpened}`);
   assert.ok(closed.raw === false && closed.patches === 0 && closed.focus === '1', `Esc did not close Raw and return focus to its opener: ${k.rawClosed}`);
   assert.strictEqual(JSON.parse(results.sc04paths).hasLong, true, 'the exact stored (long Korean) path is not one click away');
+}
+{
+  const FILES = ['src/a#b.js', 'src/a.js', 'C:\\proj\\src\\a#b.js', '문서/보고서#1 최종본.md', 'lib/index.js', 'app/index.js'];
+  const PATCH = ['PATCH-0 src/a#b.js\n+only in a#b\n', 'PATCH-1 src/a.js\n+only in a\n', 'PATCH-2 windows path\n+win\n', 'PATCH-3 한글\n+한글 내용\n', 'PATCH-4 lib/index.js\n+lib\n', 'PATCH-5 app/index.js\n+app\n'];
+  for (const r of results.sc04special) {
+    const at = `special file #${r.fi} (${FILES[r.fi]})`;
+    assert.strictEqual(r.opened.cards.length, 1, `${at}: Raw showed ${r.opened.cards.length} file(s), not just the selected block's`);
+    assert.strictEqual(r.opened.cards[0].title, FILES[r.fi], `${at}: Raw showed the wrong file (${r.opened.cards[0].title})`);
+    assert.strictEqual(r.opened.cards[0].patch, PATCH[r.fi], `${at}: the patch text is not the stored patch, byte for byte`);
+    assert.strictEqual(r.opened.on, 1, `${at}: ${r.opened.on} blocks marked selected`);
+    assert.strictEqual(r.opened.focusIsRaw, true, `${at}: opening Raw did not move focus into it`);
+    assert.deepStrictEqual(r.copied, [PATCH[r.fi]], `${at}: copy did not copy exactly this file's stored patch: ${JSON.stringify(r.copied)}`);
+    assert.deepStrictEqual([r.closed.raw, r.closed.patches, r.closed.focus], [false, 0, `${r.fi}:0`], `${at}: Esc did not close Raw and return focus to the block: ${JSON.stringify(r.closed)}`);
+  }
+  assert.ok(results.sc04noBlocks.had && results.sc04noBlocks.patches.includes('PATCH-6 no blocks\n+a: 1\n'), 'a file with no code blocks has no way to its Raw Diff');
 }
 /* SC-03 D2 (design): measured at 880/1024/1200/1440 x light/dark on the real screen, in the states the run produced. */
 for (const [tag, rows] of Object.entries(results.sc03d2)) {

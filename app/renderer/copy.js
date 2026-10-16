@@ -436,6 +436,32 @@ export const C = {
       restoreBody: (why) => `사유: ${why}`,
       restoreRetry: '다시 확인하기',
     },
+    /* TD-01 D4: input -> result -> safety -> details */
+    td01: {
+      qcAuth: '정해진 규칙만 · 셸 없음 · 실행 전 확인',
+      shellTag: '보조',
+      shellAuth: '입력한 그대로 · 걸러내지 않음',
+      safetyMore: '안전 안내 자세히 보기',
+      safetyLines: [
+        '두 입력은 실행 권한이 달라요. Quick Command는 정해진 규칙에서 만든 명령만, 셸 줄은 입력한 그대로 내 컴퓨터에서 실행돼요.',
+        '멈추기는 멈추라는 요청이에요. 끝난 것이 확인되기 전에는 멈췄다고 말하지 않아요.',
+        '확인할 수 없는 종료는 성공도 실패도 아니에요. 확인 불가로 남기고, 새 작업과 파일을 바꾸는 명령은 확인될 때까지 시작하지 않아요.',
+      ],
+      lastOutput: '마지막 출력',
+      detailMore: '자세한 기록 보기',
+      detailArgv: '실행한 명령', detailFull: '전체 출력', detailStop: '멈춤 기록', detailRun: '기록 번호',
+      stopRequestedAt: '멈춤 요청 시각', stopTool: '종료 도구 응답', stopExit: '관측한 종료 코드', stopAlive: '남은 프로세스 확인', stopTiming: '걸린 시간', stopVerdict: '판정',
+      aliveState: { none: '남은 것 없음으로 확인했어요', survivors: '남아 있는 프로세스가 있어요', unverified: '확인하지 못했어요' },
+      unknownWhy: {
+        'stop-unconfirmed': '멈추라고 요청했지만, 그 요청 때문에 끝났는지 확인하지 못했어요.',
+        'kill-unconfirmed': '종료 신호를 보냈지만, 그 신호 때문에 끝났는지 확인하지 못했어요.',
+        'contradiction-exit-0': '멈췄다는 응답과 정상 종료 기록이 서로 맞지 않아요.',
+        'root-stopped-descendants-alive': '본 프로세스는 멈췄지만 딸린 프로세스가 남아 있어요.',
+        'root-stopped-descendants-unverified': '본 프로세스는 멈췄지만 딸린 프로세스를 확인하지 못했어요.',
+        other: '끝난 이유를 확인하지 못했어요.',
+      },
+      unknownNeither: '성공으로도 실패로도 처리하지 않았어요.',
+    },
     /* SC-03 result: the order is the result, the changed files, ONE next action, then the folded record. */
     result: {
       agentFold: 'Agent 원문',
