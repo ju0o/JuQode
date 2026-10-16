@@ -357,7 +357,7 @@ function makeHandlers(deps) {
            * child is `stopped`, never `success`, whatever code it carried. */
           status: res.state === 'ok' ? 'success' : res.state,
           exitCode: res.code, outputHead: res.output ?? null,
-          endedAt: res.endedAt, stoppedAt: res.signal ? res.endedAt : null,
+          endedAt: res.endedAt, stoppedAt: (res.signal || (res.state === 'stopped' && res.stoppedByRequest)) ? res.endedAt : null,
         });
         deps.pushQc?.({ runId, projectId, ruleId, ...res, ended: true });
       /* The store can be closed before a child settles (quit races the last exit), and an

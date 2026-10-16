@@ -593,7 +593,8 @@ test('a command that succeeds is `ok`, and one that is signalled is `stopped`', 
   r.stop();
   const out = await r.done;
   assert.strictEqual(out.state, 'stopped', 'a stopped command was reported as finished');
-  assert.ok(out.signal, 'nothing recorded which signal ended it');
+  /* POSIX records the signal that ended it; Windows has none, so it records that WE asked. */
+  assert.ok(WIN ? out.stoppedByRequest : out.signal, 'nothing recorded what ended it');
 });
 
 test('a program that does not exist fails without throwing', async () => {

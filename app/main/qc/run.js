@@ -21,6 +21,9 @@
  *      its effect is UNMEASURED. The product says so on screen, not only here — see `mask()`.
  */
 const { spawn, spawnSync } = require('node:child_process');
+const { resolveLaunch } = require('./launch');
+
+const WINDOWS = process.platform === 'win32';
 
 /** `20` `quick_command_run.output_head`: the bounded head that goes on screen, in BYTES.
  *  (`output_ref` is the blob reference for the full output. Nothing writes one yet — see the
@@ -99,7 +102,10 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
    * anything typed), each is synchronous because they are index operations that finish in
    * milliseconds, and the FIRST failure stops the sequence with its own output attached. A
    * prepare step that failed quietly would leave a commit of the wrong thing. */
-  for (const pre of prepare) {
+  for (const step of prepare) {
+    const resolved = resolveLaunch(step);
+    if (!resolved.ok) return refusedLaunch(resolved, startedAt, onUpdate);
+    const pre = resolved.argv;
     const r = spawnSync(pre[0], pre.slice(1), {
       cwd, env, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8',
     });
@@ -119,16 +125,22 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
     if (r.stdout) out += r.stdout;
   }
 
+  const launch = resolveLaunch(argv);
+  if (!launch.ok) return refusedLaunch(launch, startedAt, onUpdate);
+
   let child;
   try {
     /* No shell. `spawn(program, args)` with `shell: false` (the default) means the OS execs the
      * program directly — there is no interpreter to interpret anything. */
-    child = spawn(argv[0], argv.slice(1), {
+    child = spawn(launch.argv[0], launch.argv.slice(1), {
       cwd,
       env,                        // the user's environment, unchanged (`19` §C4)
       stdio: ['ignore', 'pipe', 'pipe'],
-      /* Its own process group, so stopping it cannot reach JuQode (`07` §8.2). */
-      detached: true,
+      /* Its own process group, so stopping it cannot reach JuQode (`07` §8.2). POSIX only: on Windows
+       * `detached` is DETACHED_PROCESS (no console), under which cmd.exe -- which npm uses to run
+       * every script body -- delivered nothing on stdout in the H1 measurement for claude/session.js. */
+      detached: !WINDOWS,
+      windowsHide: true,
     });
   } catch (e) {
     const failed = { state: 'failed', code: null, signal: null, startedAt,
@@ -176,6 +188,7 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
 
   onUpdate({ state: 'running', pid: child.pid, startedAt, tail: [] });
 
+  let stopRequested = false;     // Windows has no signal to read; the request is what says "stopped"
   const done = new Promise((resolve) => {
     let settled = false;
     const settle = (result) => {
@@ -204,10 +217,15 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
       /* `07` §8.1: a child that was cancelled can still exit 0, so "ended" is never read as
        * "worked". The three outcomes are named from the code AND the signal together. */
       settle({
-        state: signal != null ? 'stopped' : (code === 0 ? 'ok' : 'failed'),
+        /* POSIX reads `stopped` from the signal. Windows has none: `taskkill /F` ends the tree with
+         * exit code 1, so a non-zero end of a handle WE asked to stop is `stopped`. Exit 0 stays `ok`
+         * on both -- a stopped child that exits 0 is still not read as stopped (`07` §8.1). */
+        state: (signal != null || (WINDOWS && stopRequested && code !== 0)) ? 'stopped' : (code === 0 ? 'ok' : 'failed'),
         code, signal, pid: child.pid, startedAt,
         endedAt: new Date().toISOString(),
         output: mask(out), truncated, kind,
+        /* Windows has no signal to record, so the fact that WE asked it to stop is carried explicitly. */
+        stoppedByRequest: stopRequested,
       });
     };
     child.on('exit', (code, signal) => {
@@ -225,8 +243,16 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
     /* `19` §C4: SIGTERM, then SIGKILL after five seconds. The whole GROUP, because a package
      * manager runs the real process as a child of itself and signalling only the parent leaves
      * the server running (`07` §8.2). */
-    stop: () => stopGroup(child),
+    stop: () => { stopRequested = true; stopGroup(child); },
   };
+}
+
+/** A launch that was refused is a failed run that never started, with the reason in plain words. */
+function refusedLaunch(refusal, startedAt, onUpdate) {
+  const failed = { state: 'failed', code: null, signal: null, startedAt, endedAt: new Date().toISOString(),
+                   output: '', spawnError: `${refusal.reason}${refusal.detail ? `: ${refusal.detail}` : ''}` };
+  onUpdate(failed);
+  return { pid: null, startedAt, done: Promise.resolve(failed), stop: () => {} };
 }
 
 const STOP_GRACE_MS = 5000;
@@ -242,6 +268,15 @@ function stopGroup(child) {
    * its handle being dropped signalled a process group id that no longer belonged to us. */
   const gone = () => child.exitCode !== null || child.signalCode !== null;
   if (gone()) return;
+  if (WINDOWS) {
+    /* No process groups and no SIGTERM. `npm run` is a node.exe whose script body runs in a cmd.exe
+     * grandchild, so ending only the root leaves the server running. `taskkill /T` ends the root's
+     * whole tree; it is addressed to the pid of the handle we hold, checked just above. There is no
+     * graceful phase on Windows: a console process cannot be asked to close. */
+    try { spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); }
+    catch { try { child.kill(); } catch { /* already gone */ } }
+    return;
+  }
   const signal = (sig) => {
     if (gone()) return;
     try { process.kill(-pid, sig); }              // the group
