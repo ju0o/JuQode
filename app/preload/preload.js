@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('juqode', {
   taskList: (projectId) => ipcRenderer.invoke('juqode:task-list', projectId),
   legacyUnknownAck: (projectId, workId, confirmedStopped) =>
     ipcRenderer.invoke('juqode:legacy-unknown-ack', projectId, workId, confirmedStopped),
-  qcAckStopped: (projectId, confirmedStopped) => ipcRenderer.invoke('juqode:qc-ack-stopped', projectId, confirmedStopped),
+  qcAckStopped: (projectId, runIds, confirmedStopped) => ipcRenderer.invoke('juqode:qc-ack-stopped', projectId, runIds, confirmedStopped),
   taskCreate: (projectId, input) => ipcRenderer.invoke('juqode:task-create', projectId, input),
   taskUpdate: (taskId, patch) => ipcRenderer.invoke('juqode:task-update', taskId, patch),
   taskDetail: (taskId) => ipcRenderer.invoke('juqode:task-detail', taskId),

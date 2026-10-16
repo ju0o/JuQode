@@ -124,12 +124,31 @@ function makeHandlers(deps) {
   /* A restart forgot nothing it should not: the holds are rebuilt once per project from the run rows and their Stop evidence
    * (the first time anything asks), so the gate does not depend on this process having seen the Stop. */
   const restoredHolds = new Set();
+  /* FAIL CLOSED. A project counts as restored only after the WHOLE pass finished. Any error (the store, the evidence, a bad row)
+   * records a restore failure -- the Writer gate stays shut with that reason -- and the next question simply tries again. */
   const ensureHolds = (projectId) => {
-    if (restoredHolds.has(projectId) || !db()) return;
-    restoredHolds.add(projectId);
-    try { restoreHolds({ rows: repo.qcRunsFor(db(), projectId, 1000), root: deps.evidenceStore(projectId), registry: qcUncertain }); }
-    catch { /* unreadable store: the rows stay `unknown` and nothing is released */ }
+    if (restoredHolds.has(projectId)) return true;
+    try {
+      if (!db()) throw new Error('no-store');
+      const rows = (deps.qcUnresolvedRuns ?? repo.qcUnresolvedRuns)(db(), projectId, [...qcLive.keys()]);
+      restoreHolds({ rows, root: deps.evidenceStore(projectId), registry: qcUncertain });
+      qcUncertain.clearRestoreFailure(projectId);
+      restoredHolds.add(projectId);
+      return true;
+    } catch (e) {
+      qcUncertain.failRestore(projectId, e?.code ?? e?.message ?? e);
+      return false;
+    }
   };
+  /* why the gate is shut for QUICK COMMAND reasons, as the approved reason key (or null) */
+  const qcHoldReason = (projectId) => {
+    ensureHolds(projectId);
+    const b = qcUncertain.blocks(projectId);
+    return b === 'restore-failed' ? 'qc-restore-failed' : (b ? 'prior-run-unknown' : null);
+  };
+  /* A Work between "the gate said yes" and "the Work row exists" (supervisor.start awaits the CLI probe first): a file-changing
+   * Quick Command must not slip into that gap. */
+  const workStarting = new Set();
   /* A Quick Command that changes files and is running NOW: a new Work must not write beside it (the other direction of
    * `fileQcBlock`). A dev server is long-running and is how the user watches the Work, so it does not count. */
   const writerQcLive = (projectId) => liveFor(projectId).find((e) => qcRules.mutatesProjectFiles(e.ruleId) && e.kind !== 'long_running') ?? null;
@@ -142,9 +161,8 @@ function makeHandlers(deps) {
     if (!qcRules.mutatesProjectFiles(ruleId)) return null;
     if (repo.activeWork(db(), projectId)) return 'active-run';
     if (unknownTaskRunWithLiveRunner(db(), projectId)) return 'prior-run-unknown';
-    ensureHolds(projectId);
-    if (qcUncertain.blocks(projectId)) return 'prior-run-unknown';
-    return null;
+    if (workStarting.has(projectId)) return 'active-run';
+    return qcHoldReason(projectId);
   };
   const withFileQcBlock = (projectId, ruleId, avail) => {
     if (!avail.available) return avail;
@@ -311,10 +329,10 @@ function makeHandlers(deps) {
       if (gate) return gate;
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
-      ensureHolds(projectId);
+      ensureHolds(projectId);                          // a failed restore is tried again every time the list is opened
       qcUncertain.refresh(projectId);                  // opening the list is a reason to look again
       const dev = devServerOf(projectId);
-      return { ok: true, held: qcUncertain.heldFor(projectId), rules: qcRules.RULES.map((r) => {
+      return { ok: true, held: qcUncertain.heldFor(projectId), restoreFailure: qcUncertain.restoreFailure(projectId), rules: qcRules.RULES.map((r) => {
         const a = withFileQcBlock(projectId, r.id,
           qcAvail.availability(r.id, { root: row.path, devServer: dev }));
         return { id: r.id, kind: r.kind, risk: r.risk,
@@ -411,23 +429,27 @@ function makeHandlers(deps) {
 
     /* The user says the previous Quick Command's processes are gone. Recorded append-only in the evidence store; the runs stay
      * `unknown`. Releases every hold of this project (the statement is about "the earlier processes", not about one pid). */
-    'juqode:qc-ack-stopped': (_e, projectId, confirmedStopped) => {
+    'juqode:qc-ack-stopped': (_e, projectId, runIds, confirmedStopped) => {
       const gate = needDb();
       if (gate) return gate;
       if (confirmedStopped !== true) return { ok: false, reason: 'confirmation-required' };
+      if (!Array.isArray(runIds) || !runIds.length || runIds.some((x) => typeof x !== 'string' || !x)) return { ok: false, reason: 'no-runs-named' };
       if (!db().prepare('select id from project where id = ?').get(projectId)) return { ok: false, reason: 'no-project' };
-      ensureHolds(projectId);
+      if (!ensureHolds(projectId)) return { ok: false, reason: 'qc-restore-failed', detail: qcUncertain.restoreFailure(projectId)?.reason ?? null };
       const root = deps.evidenceStore(projectId);
-      const acked = [];
-      for (const h of qcUncertain.heldFor(projectId)) {
-        const row = repo.qcRun(db(), h.runId);
-        if (!row || row.project_id !== projectId) continue;
+      const heldNow = new Map(qcUncertain.heldFor(projectId).map((h) => [h.runId, h]));
+      const acked = []; const skipped = [];
+      for (const runId of new Set(runIds)) {
+        const h = heldNow.get(runId);
+        const row = repo.qcRun(db(), runId);
+        /* only a run THIS project holds right now, and only the ones the user was shown and named */
+        if (!h || !row || row.project_id !== projectId) { skipped.push({ runId, reason: 'not-held-by-this-project' }); continue; }
         const w = qcAck.writeAck(root, { ...row, heldBecause: h.why });
-        if (!w.ok) return w;                       // nothing is released unless its record exists
-        qcUncertain.release(h.runId);
-        acked.push({ runId: h.runId, ref: w.ref, existing: w.existing });
+        if (!w.ok) { skipped.push({ runId, reason: w.reason, detail: w.detail ?? null }); continue; }   // nothing is released without a verified record
+        qcUncertain.release(runId);
+        acked.push({ runId, ref: w.ref, existing: w.existing });
       }
-      return { ok: true, acked };
+      return { ok: acked.length > 0, acked, skipped, stillHeld: qcUncertain.heldFor(projectId).map((x) => x.runId) };
     },
 
     /* WBS-22 · stop the one JuQode started. `19` §C4: JuQode 밖에서 켠 서버는 끄지 않는다 —
@@ -597,9 +619,8 @@ function makeHandlers(deps) {
         const acknowledged = repo.acknowledgeUnknownProcessStopped(db(), task.project_id, prior.id);
         if (!acknowledged.ok) return acknowledged;
       }
-      ensureHolds(task.project_id);
-      const qcHeld = qcUncertain.blocks(task.project_id);
-      if (qcHeld) return { ok: false, reason: 'prior-process-may-still-live', detail: { qcRunId: qcHeld } };
+      const holdWhy = qcHoldReason(task.project_id);
+      if (holdWhy) return { ok: false, reason: 'prior-process-may-still-live', detail: { qcRunId: qcUncertain.blocks(task.project_id), restoreFailed: holdWhy === 'qc-restore-failed' } };
       const qcWriter = writerQcLive(task.project_id);
       if (qcWriter) return { ok: false, reason: 'qc-writer-running', detail: { qcRunId: qcWriter.runId, command: qcWriter.command } };
       const latest = repo.worksForTask(db(), task.id, 1)[0];
@@ -612,7 +633,9 @@ function makeHandlers(deps) {
         : { ok: false, reason: 'idempotency-key-conflict' };
 
       const reason = retryReason.trim();
-      const result = await supervisor.start(db(),
+      workStarting.add(task.project_id);
+      let result;
+      try { result = await supervisor.start(db(),
         db().prepare('select * from project where id = ?').get(task.project_id), reason, {
           evidenceStore: deps.evidenceStore(task.project_id),
           onUpdate: deps.push,
@@ -623,7 +646,7 @@ function makeHandlers(deps) {
           retryReason: reason,
           appSessionId: deps.appSessionId?.() ?? null,
           allowUnknownWorkId: prior.outcome === 'ended_unknown' && confirmPriorStopped ? prior.id : null,
-        });
+        }); } finally { workStarting.delete(task.project_id); }
       return result.ok ? { ok: true, work: supervisor.snapshot(db(), result.workId), existing: Boolean(result.existing) } : result;
     },
 
@@ -643,9 +666,8 @@ function makeHandlers(deps) {
           : { ok: false, reason: 'idempotency-key-conflict' };
       }
       /* a Quick Command Stop that left something possibly alive: no new Writer, task or not */
-      ensureHolds(projectId);
-      const qcHeld = qcUncertain.blocks(projectId);
-      if (qcHeld) return { ok: false, reason: 'prior-process-may-still-live', detail: { qcRunId: qcHeld } };
+      const holdWhy = qcHoldReason(projectId);
+      if (holdWhy) return { ok: false, reason: 'prior-process-may-still-live', detail: { qcRunId: qcUncertain.blocks(projectId), restoreFailed: holdWhy === 'qc-restore-failed' } };
       const qcWriter = writerQcLive(projectId);
       if (qcWriter) return { ok: false, reason: 'qc-writer-running', detail: { qcRunId: qcWriter.runId, command: qcWriter.command } };
       if (taskId != null) {
@@ -655,13 +677,17 @@ function makeHandlers(deps) {
         if (taskRefusal) return { ok: false, reason: taskRefusal };
       }
 
-      const r = await supervisor.start(db(), row, intent, {
-        evidenceStore: deps.evidenceStore(projectId),
-        onUpdate: deps.push,
-        taskId,
-        idempotencyKey,
-        appSessionId: deps.appSessionId?.() ?? null,
-      });
+      workStarting.add(projectId);
+      let r;
+      try {
+        r = await supervisor.start(db(), row, intent, {
+          evidenceStore: deps.evidenceStore(projectId),
+          onUpdate: deps.push,
+          taskId,
+          idempotencyKey,
+          appSessionId: deps.appSessionId?.() ?? null,
+        });
+      } finally { workStarting.delete(projectId); }
       return r.ok ? { ok: true, work: supervisor.snapshot(db(), r.workId) } : r;
     },
 

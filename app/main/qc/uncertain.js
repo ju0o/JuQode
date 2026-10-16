@@ -15,9 +15,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { hasAck } = require('./ack');
 
+const inside = (root, p) => { const r = path.relative(root, p); return r !== '' && !r.startsWith('..') && !path.isAbsolute(r); };
+
 function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setTimeout } = {}) {
   const held = new Map();                  // runId -> entry
   const done = new Set();                  // runIds that were held and left this session (never re-added by a restore)
+  const failures = new Map();              // projectId -> { reason, at }: the holds could not be rebuilt, so NOTHING is known to be safe
 
   async function recheck(runId) {
     const e = held.get(runId);
@@ -44,8 +47,12 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
     has: (runId) => held.has(runId) || done.has(runId),
     blocks(projectId) {
       for (const [runId, e] of held) if (e.projectId === projectId) return runId;
-      return null;
+      return failures.has(projectId) ? 'restore-failed' : null;
     },
+    /** The restore for this project did not complete: fail closed until a later attempt completes. */
+    failRestore(projectId, reason) { failures.set(projectId, { reason: String(reason ?? 'unknown'), at: new Date().toISOString() }); },
+    clearRestoreFailure(projectId) { failures.delete(projectId); },
+    restoreFailure: (projectId) => failures.get(projectId) ?? null,
     heldFor: (projectId) => [...held.values()].filter((e) => e.projectId === projectId)
       .map(({ runId, command, startedAt, needsAck, why }) => ({ runId, command, startedAt, needsAck, why })),
     /** The user's recorded confirmation ended it (the caller wrote the audit record). */
@@ -57,10 +64,25 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
   return api;
 }
 
+/** The Stop evidence of a row, read only from a regular file inside the evidence root. {ok:true, stop|null} | {ok:false} */
+function readStop(root, ref) {
+  if (!ref) return { ok: true, stop: null };
+  try {
+    const realRoot = fs.realpathSync(root);
+    const file = path.join(realRoot, String(ref).replace(/^evidence:/, ''));
+    if (!inside(realRoot, file)) return { ok: false, why: 'outside-store' };
+    const st = fs.lstatSync(file);
+    if (st.isSymbolicLink() || !st.isFile() || !inside(realRoot, fs.realpathSync(file))) return { ok: false, why: 'not-a-plain-file' };
+    const stop = JSON.parse(fs.readFileSync(file, 'utf8'))?.stop;
+    return stop && typeof stop === 'object' ? { ok: true, stop } : { ok: false, why: 'no-stop-record' };
+  } catch (e) { return { ok: false, why: String(e?.code ?? e?.message ?? e) }; }
+}
+
 /**
- * Rebuild the holds a restart would otherwise forget.
+ * Rebuild the holds a restart would otherwise forget. FAIL CLOSED: a row whose evidence cannot be read is held (needs the user),
+ * and any error that stops the pass is thrown so the caller records a restore failure instead of "restored".
  * @param {object} o
- * @param {object[]} o.rows        quick_command_run rows of ONE project (any status)
+ * @param {object[]} o.rows        EVERY unresolved quick_command_run row of ONE project (no LIMIT; the safety query)
  * @param {string}   o.root        that project's evidence store
  * @param {object}   o.registry    createUncertain()
  * @returns {string[]} run ids now held
@@ -68,24 +90,22 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
 function restore({ rows, root, registry }) {
   const out = [];
   for (const r of rows) {
-    if (r.status !== 'unknown' || registry.has(r.id) || hasAck(root, r.id)) continue;
-    let stop = null;
-    if (r.output_ref) {
-      try { stop = JSON.parse(fs.readFileSync(path.join(root, String(r.output_ref).replace(/^evidence:/, '')), 'utf8'))?.stop ?? null; } catch { stop = null; }
-    }
-    /* The Stop looked again after the kill and found nothing alive: nothing to hold. */
-    if (stop && stop.uncertain === false) continue;
+    if (registry.has(r.id) || hasAck(root, r)) continue;
+    const read = readStop(root, r.output_ref);
+    const stop = read.ok ? read.stop : null;
+    /* The Stop looked again after the kill and found nothing alive: nothing to hold. Only a readable, complete record can say so. */
+    if (stop && stop.uncertain === false && r.status === 'unknown') continue;
     const info = { command: r.command, startedAt: r.started_at };
     if (stop && stop.uncertain === true && Array.isArray(stop.members) && stop.members.length) {
       registry.add(r.id, r.project_id, stop.members, { ...info, why: 'stop-uncertain' });
     } else {
-      /* never finished (crash/quit) or evidence without a verdict on survivors: only the user's confirmation lifts it */
+      /* never finished (crash/quit), no verdict on survivors, or evidence that cannot be trusted: only the user's confirmation lifts it */
       registry.add(r.id, r.project_id, [{ pid: r.runner_pid ?? null, created: null }].filter((m) => m.pid), {
-        ...info, needsAck: true, why: stop ? 'stop-unverified' : 'never-finished' });
+        ...info, needsAck: true, why: !read.ok ? 'evidence-unreadable' : (stop ? 'stop-unverified' : 'never-finished') });
     }
     out.push(r.id);
   }
   return out;
 }
 
-module.exports = { createUncertain, restore };
+module.exports = { createUncertain, restore, readStop };

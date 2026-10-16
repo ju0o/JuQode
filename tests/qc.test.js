@@ -1011,7 +1011,7 @@ test('every refusal the run handler can give has a sentence', () => {
    * 아니에요" about a command the product had just explained. Every reason either side can
    * produce must resolve to something true. */
   const copy = srcOf('app/renderer/copy.js');
-  const HANDLER = ['already-running', 'unknown-rule', 'not-executable', 'no-project', 'active-run', 'prior-run-unknown'];
+  const HANDLER = ['already-running', 'unknown-rule', 'not-executable', 'no-project', 'active-run', 'prior-run-unknown', 'qc-restore-failed'];
   const AVAIL = ['no_script', 'no_package_json', 'already_running', 'not_running',
                  'placeholder_script', 'not_git', 'unknown_rule'];
   for (const r of [...HANDLER, ...AVAIL]) {
@@ -1604,10 +1604,11 @@ test('restart: a run nobody saw finish keeps the Writer gate shut across restart
   }
 
   const h = restartOf(b);
-  assert.strictEqual((await h['juqode:qc-ack-stopped'](null, b.project.id, false)).reason, 'confirmation-required');
-  assert.strictEqual((await h['juqode:qc-ack-stopped'](null, b.project.id, 'yes')).reason, 'confirmation-required');
+  assert.strictEqual((await h['juqode:qc-ack-stopped'](null, b.project.id, [id], false)).reason, 'confirmation-required');
+  assert.strictEqual((await h['juqode:qc-ack-stopped'](null, b.project.id, [id], 'yes')).reason, 'confirmation-required');
+  assert.strictEqual((await h['juqode:qc-ack-stopped'](null, b.project.id, [], true)).reason, 'no-runs-named', 'a confirmation that names no run released something');
   assert.ok(h['juqode:qc-list'](null, b.project.id).held.length === 1, 'an unconfirmed ack released the hold');
-  const ack = await h['juqode:qc-ack-stopped'](null, b.project.id, true);
+  const ack = await h['juqode:qc-ack-stopped'](null, b.project.id, [id], true);
   assert.deepStrictEqual([ack.ok, ack.acked.length, ack.acked[0].existing], [true, 1, false]);
   const rec = JSON.parse(fs.readFileSync(path.join(b.evidence, 'qc-ack', `${id}.json`), 'utf8'));
   assert.deepStrictEqual([rec.runId, rec.confirmedBy, rec.before.status, rec.before.runnerPid, rec.heldBecause], [id, 'user', 'unknown', 4242, 'never-finished']);
@@ -1616,8 +1617,8 @@ test('restart: a run nobody saw finish keeps the Writer gate shut across restart
 
   const after = restartOf(b);                                           // the confirmation survives a restart
   assert.strictEqual(after['juqode:qc-list'](null, b.project.id).held.length, 0);
-  const again = await after['juqode:qc-ack-stopped'](null, b.project.id, true);
-  assert.deepStrictEqual([again.ok, again.acked.length], [true, 0]);
+  const again = await after['juqode:qc-ack-stopped'](null, b.project.id, [id], true);
+  assert.deepStrictEqual([again.ok, again.skipped.map((x) => x.reason)], [false, ['not-held-by-this-project']], 'a run that is no longer held was acknowledged again');
   assert.strictEqual(JSON.parse(fs.readFileSync(path.join(b.evidence, 'qc-ack', `${id}.json`), 'utf8')).confirmedAt, rec.confirmedAt, 'the record was overwritten');
   const ran = await after['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트');
   assert.strictEqual(ran.ok, true, `${ran.reason}/${ran.detail}`);

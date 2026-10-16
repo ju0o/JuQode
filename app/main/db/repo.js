@@ -918,6 +918,15 @@ const qcRunsFor = (db, projectId, limit = 20) =>
   db.prepare(`select * from quick_command_run where project_id = ?
               order by created_at desc, rowid desc limit ?`).all(projectId, limit);
 
+/** SAFETY query, deliberately without a LIMIT: every `unknown` run of the project, plus any run still marked running/long_running whose
+ *  process this app does not hold (`liveIds`). The History list pages; this must not. */
+const qcUnresolvedRuns = (db, projectId, liveIds = []) => {
+  const live = new Set(liveIds);
+  return db.prepare(`select * from quick_command_run where project_id = ?
+                     and status in ('unknown','running','long_running') order by created_at, rowid`).all(projectId)
+    .filter((r) => r.status === 'unknown' || !live.has(r.id));
+};
+
 const qcRun = (db, id) => db.prepare('select * from quick_command_run where id = ?').get(id) ?? null;
 
 /** The one still going, if any. `19` §C4: only a server JuQode itself started can be stopped. */
@@ -1030,7 +1039,7 @@ module.exports = {
   upsertStep, stepsFor,
   saveResult, resultFor,
   saveDiff, diffsFor, pruneDiffs,
-  beginQcRun, endQcRun, setQcRunner, qcRunsFor, qcRun, qcRunning, reconcileQcRuns,
+  beginQcRun, endQcRun, setQcRunner, qcRunsFor, qcUnresolvedRuns, qcRun, qcRunning, reconcileQcRuns,
   saveChangeGroups, changeGroupsFor,
   reconcileLostWorks, reconcileInterpretations, processFor,
 };

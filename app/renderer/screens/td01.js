@@ -606,7 +606,7 @@ function discoverCard(state, repaint, onPick, api) {
   card.setAttribute('data-el', 'qc-discover');
   card.appendChild(el('div', 'ct', C.qc.discoverTitle));
   card.appendChild(el('p', 'xs mut', C.gap.qcPickHint));
-  const hold = api ? holdPanel(api, state.project.id, state.qcDiscover.held, async () => { state.qcDiscover = await api.qcList(state.project.id); repaint(); }) : null;
+  const hold = api ? holdPanel(api, state.project.id, state.qcDiscover, async () => { state.qcDiscover = await api.qcList(state.project.id); repaint(); }) : null;
   if (hold) card.appendChild(hold);
 
   for (const rule of state.qcDiscover.rules ?? []) {

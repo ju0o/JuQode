@@ -422,11 +422,19 @@ export const C = {
     qcHold: {
       title: '이전에 켠 명령의 프로세스가 아직 실행 중일 수 있어요',
       body: '끝났는지 JuQode가 확인하지 못했어요. 그동안은 새 작업과 파일을 바꾸는 명령을 시작하지 않아요.',
-      check: '이전에 켠 프로세스가 모두 끝난 것을 직접 확인했어요',
-      resolve: '확인했다고 기록하기',
+      pick: '아래 중 직접 끝난 것을 확인한 명령만 골라 주세요. 고르지 않은 명령은 계속 막혀 있어요.',
+      check: (cmd) => `${cmd} 프로세스가 모두 끝난 것을 직접 확인했어요`,
+      resolve: (n) => `고른 ${n}건을 확인했다고 기록하기`,
+      pastResult: '확인을 기록해도 지난 실행의 결과는 그대로 확인 불가로 남아요.',
       failed: '확인을 기록하지 못했어요. 다시 시도해 주세요.',
-      reason: { 'stop-uncertain': '멈추려 했지만 끝난 것을 확인하지 못했어요', 'stop-unverified': '멈춘 뒤 남은 프로세스를 확인하지 못했어요', 'never-finished': '끝나는 것을 보지 못한 채 앱이 닫혔어요' },
+      recorded: (n) => `${n}건의 확인을 기록했어요.`,
+      stillHeld: (n) => `아직 막혀 있는 실행 ${n}건`,
+      skippedNote: '기록하지 못한 실행이 있어요. 목록을 새로 보고 다시 골라 주세요.',
+      reason: { 'stop-uncertain': '멈추려 했지만 끝난 것을 확인하지 못했어요', 'stop-unverified': '멈춘 뒤 남은 프로세스를 확인하지 못했어요', 'never-finished': '끝나는 것을 보지 못한 채 앱이 닫혔어요', 'evidence-unreadable': '멈춤 기록을 읽을 수 없어요' },
       writerRunning: '파일을 바꾸는 명령이 실행 중이에요. 끝난 뒤에 시작해 주세요.',
+      restoreTitle: '이전 실행 기록을 확인하지 못해서 새 작업과 파일을 바꾸는 명령을 막고 있어요',
+      restoreBody: (why) => `사유: ${why}`,
+      restoreRetry: '다시 확인하기',
     },
     /* SC-03 result: the order is the result, the changed files, ONE next action, then the folded record. */
     result: {
@@ -752,6 +760,7 @@ export const C = {
       /* An ended_unknown attempt is not proof the previous writer stopped. Do not call it
        * still running, and do not call it a failure. */
       'prior-run-unknown': '이전 시도가 멈췄는지 아직 확인하지 못했어요. 파일을 바꾸는 명령은 확인한 뒤에 할 수 있어요.',
+      'qc-restore-failed': '이전 실행 기록을 확인하지 못해서 파일을 바꾸는 명령을 막고 있어요. 읽기 전용 명령은 그대로 쓸 수 있어요.',
     },
     /* WBS-25 · 셸 명령줄. DV-11 판정(파이프 셸 · PM 2026-09-10) 이후에야 존재하는 화면이고,
      * `18` 은 이 줄에 대한 키를 갖고 있지 않다 — `term.mock` 은 고르지 않은 선택지의 문구이고,

@@ -1840,7 +1840,7 @@ function refusalCard(r, api, nav, state, project, { phrase = '', resubmit = null
     n.appendChild(el('div', 'sm', C.gap.task.retryProcessStillLive));
     /* if it is a Quick Command's process that is in question, the user can say it ended, right here */
     api.qcList(project.id).then((l) => {
-      const hold = holdPanel(api, project.id, l?.held, () => { n.remove(); resubmit?.(); });
+      const hold = holdPanel(api, project.id, l, async (r) => { if (r?.stillHeld?.length || r?.held?.length || r?.restoreFailure) return; n.remove(); resubmit?.(); });
       if (hold) n.appendChild(hold);
     });
     return n;
