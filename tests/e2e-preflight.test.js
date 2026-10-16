@@ -8,7 +8,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const R = path.resolve(__dirname, '..');
-const load = () => import(path.join(R, 'tests/e2e/launch.mjs'));
+const load = () => import(require('node:url').pathToFileURL(path.join(R, 'tests/e2e/launch.mjs')).href);
 
 test('a private virtual display needs no consent; a real desktop does, on every host', async () => {
   const { displayPlan, launchArgs, VISIBLE_CONSENT } = await load();
@@ -25,7 +25,7 @@ test('a private virtual display needs no consent; a real desktop does, on every 
   }
   const yes = wsl({ [VISIBLE_CONSENT]: 'yes' });
   assert.strictEqual(yes.consent, true);
-  assert.strictEqual(launchArgs(['.', '--no-sandbox'], yes)[0].endsWith('electron'), true, 'host-display must not wrap in xvfb-run');
+  assert.match(path.basename(launchArgs(['.', '--no-sandbox'], yes)[0]), /^electron(\.cmd)?$/, 'host-display must launch electron itself, not wrap it in xvfb-run');
 
   const winNo = displayPlan({ platform: 'win32', env: {} });
   assert.deepStrictEqual([winNo.mode, winNo.visible, winNo.consent], ['windows-desktop', true, false]);
