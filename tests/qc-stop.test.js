@@ -366,3 +366,29 @@ test('real Windows: a recorded scratch tree holds the gate while alive, a reused
     assert.ok(members.every((m) => !alive(m.pid)), 'a member survived');
   } finally { try { scratch.kill(); } catch { /* gone */ } }
 });
+
+test('survivorsIn: same pid + creation time is the process; a child that appeared UNDER a member after the snapshot is found; a reused parent id and unrelated processes are not', () => {
+  const { survivorsIn } = require(path.join(R, 'app/main/qc/stopper.js'));
+  const members = [{ pid: 100, created: '2026-01-01T00:00:10.0Z' }, { pid: 200, created: '2026-01-01T00:00:11.0Z' }];
+  const all = [
+    { pid: 200, ppid: 100, created: '2026-01-01T00:00:11.0Z' },   // member still alive
+    { pid: 300, ppid: 200, created: '2026-01-01T00:00:20.0Z' },   // LATE child of a member (the root 100 is already gone)
+    { pid: 301, ppid: 300, created: '2026-01-01T00:00:21.0Z' },   // its own child, transitively
+    { pid: 400, ppid: 100, created: '2026-01-01T00:00:05.0Z' },   // claims the root as parent but is OLDER: id reused
+    { pid: 500, ppid: 1, created: '2026-01-01T00:00:22.0Z' },     // unrelated
+    { pid: 100, ppid: 1, created: '2026-02-02T00:00:00.0Z' },     // pid 100 REUSED by something else: not the recorded root
+  ];
+  const got = survivorsIn(all, members);
+  assert.deepStrictEqual(got.map((p) => p.pid).sort(), [200, 300, 301]);
+  assert.deepStrictEqual(got.filter((p) => p.late).map((p) => p.pid).sort(), [300, 301]);
+  assert.deepStrictEqual(survivorsIn(all, [{ pid: 999, created: null }]), [], 'a pid that is not there');
+});
+
+test('Windows: the root is stopped and had no recorded child, but a LATE child of it is found afterwards -> unknown and uncertain (not stopped-tree-observed)', async () => {
+  const t = tools({ tree: { root: { pid: 4242, created: 'R' }, descendants: [] }, survivors: [{ pid: 9001, created: 'L', late: true }] });
+  const s = stopperFor(handle(), t);
+  s.request(() => {});
+  const end = await s.finalize({ code: 1, signal: null });
+  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.uncertain, end.stop.survivorPids], ['unknown', 'root-stopped-descendants-alive', true, [9001]]);
+  assert.deepStrictEqual(t.calls.survivors, [[]], 'the root with no children was not looked at again');
+});

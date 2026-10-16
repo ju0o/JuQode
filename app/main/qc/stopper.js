@@ -76,6 +76,25 @@ function treeOf(pid, all) {
   return { root: { pid: root.pid, created: root.created }, descendants: out };
 }
 
+/** Pure. pid AND creation time identify a process (created:null = pid only). Late children of a member are included, transitively. */
+function survivorsIn(all, members, parentsExtra = []) {
+  const same = (m, p) => p.pid === m.pid && (m.created == null || p.created === m.created);
+  const alive = members.filter((m) => all.some((p) => same(m, p)))
+    .map((m) => (m.created == null ? { pid: m.pid, created: all.find((p) => p.pid === m.pid).created } : m));
+  const known = new Set(members.map((m) => m.pid));
+  const late = [];
+  const parents = [...members, ...parentsExtra];   // a parent need not be alive: its child keeps the recorded parent pid
+  for (let i = 0; i < parents.length; i += 1) {
+    const par = parents[i];
+    for (const p of all) {
+      if (known.has(p.pid) || p.ppid !== par.pid) continue;
+      if (par.created != null && !(p.created > par.created)) continue;     // an older process cannot be its child (reused parent id)
+      known.add(p.pid); late.push({ pid: p.pid, created: p.created, late: true }); parents.push({ pid: p.pid, created: p.created });
+    }
+  }
+  return [...alive, ...late];
+}
+
 const windowsTools = {
   tree: async (pid) => treeOf(pid, await snapshotAll()),
   /** `{status, error}` -- 0 terminated, 128 not found, other = failed (255 and a timeout are "failed", not "gone") */
@@ -88,11 +107,11 @@ const windowsTools = {
       });
     } catch (e) { resolve({ status: null, error: String(e?.code ?? e?.message ?? e) }); }
   }),
-  /** Which of `members` ([{pid, created|null}]) are still the SAME process (pid AND creation time; created:null = pid only). null = could not be read. */
-  survivors: async (members) => {
+  /** Which of `members` ([{pid, created|null}]) are still the SAME process -- plus processes that appeared UNDER a member after the
+   *  snapshot (a late child the first read could not know): same parent pid, created after that parent. null = could not be read. */
+  survivors: async (members, parentsExtra = []) => {
     const all = await snapshotAll();
-    if (!all) return null;
-    return members.filter((m) => all.some((p) => p.pid === m.pid && (m.created == null || p.created === m.created)));
+    return all ? survivorsIn(all, members, parentsExtra) : null;
   },
 };
 
@@ -192,11 +211,11 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
       const members = tree ? (proven ? tree.descendants : [tree.root, ...tree.descendants])
                            : (proven ? null : [{ pid: child.pid, created: null }]);
       if (!members) stop.descendants = 'unverified';
-      else if (members.length === 0) stop.descendants = 'none';
       else {
+        /* even a root with no recorded child is looked at again: something it started AFTER the snapshot is a late child */
         let alive = null;
         const t1 = Date.now();
-        try { alive = await tools.survivors(members); } catch { alive = null; }
+        try { alive = await tools.survivors(members, proven && tree ? [tree.root] : []); } catch { alive = null; }
         timings.survivorsMs = Date.now() - t1;
         stop.descendants = alive === null ? 'unverified' : (alive.length ? 'survivors' : 'none');
         if (alive && alive.length) stop.survivorPids = alive.map((p) => p.pid);
@@ -215,4 +234,4 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
   return { request, finalize, whenIdle: () => inflight ?? Promise.resolve(), evidence: () => ({ ...stop }) };
 }
 
-module.exports = { STOP_WORST_CASE_MS, createStopper, classifyEnd, treeOf, windowsTools, parseSnapshot };
+module.exports = { STOP_WORST_CASE_MS, survivorsIn, createStopper, classifyEnd, treeOf, windowsTools, parseSnapshot };
