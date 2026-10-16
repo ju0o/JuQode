@@ -30,8 +30,11 @@ const NODE_PROBE = "JSON.stringify([process.release.name, process.version, Boole
 
 const fileOk = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
 
+/* The PATH of THIS environment object. A plain copy of process.env on Windows loses the case-
+ * insensitivity of the real thing, where the variable is usually spelled `Path`. */
 function pathDirs(env, delimiter) {
-  return String(env.PATH ?? env.Path ?? '').split(delimiter).filter(Boolean);
+  const key = Object.keys(env).find((k) => k === 'PATH') ?? Object.keys(env).find((k) => k.toUpperCase() === 'PATH');
+  return String(key ? env[key] : '').split(delimiter).filter(Boolean);
 }
 
 /** First `<name><ext>` on PATH that is a file. Windows resolves extensions in PATHEXT order. */
