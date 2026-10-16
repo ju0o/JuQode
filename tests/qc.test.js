@@ -836,6 +836,12 @@ test('a run that fails says so, with the code — never as success', async () =>
  * took effect`. MEASURED on H1: the Stop's synchronous process snapshot takes ~0.5 s idle and ~2 s under 2x CPU load, and
  * the full suite under that load failed this exact assertion (tests 489 and 494) while qc.test.js alone passed 3/3 -- see
  * qc-stop.test.js for the deterministic mechanism. */
+/* what the Stop proved for this row, read back from the evidence store the bench was given -- so a failing assertion
+ * says WHY (taskkill status, snapshot, descendants), not just the final status. */
+function stopEvidenceOf(row) {
+  try { return JSON.parse(fs.readFileSync(path.join('/tmp/x', String(row.output_ref).replace(/^evidence:/, '')), 'utf8')).stop; } catch { return null; }
+}
+
 test('a running dev server does not block a different Quick Command', async () => {
   /* `19` §C6 REC-010: long-running Quick Commands run in their OWN child processes **so the
    * drawer stays usable**. A blanket one-at-a-time rule meant a running dev server stopped the
@@ -889,7 +895,7 @@ test('a running dev server makes 켜기 사용 불가 and 끄기 가능 — from
     const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
-  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify(row).slice(0, 700)}`);
+  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: stopEvidenceOf(row) })}`);
 });
 
 test('the discoverability list names every rule and why each cannot run', () => {
@@ -984,7 +990,7 @@ test('개발 서버 꺼줘 signals the server JuQode started', async () => {
     const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
-  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify(row).slice(0, 700)}`);
+  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: stopEvidenceOf(row) })}`);
   assert.ok(row.stopped_at, '`20` keeps stopped_at for a run that was signalled');
 });
 
