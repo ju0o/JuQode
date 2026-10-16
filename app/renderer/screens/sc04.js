@@ -372,7 +372,7 @@ function blockColumn(group, state, nav) {
   const col = el('section', 'sc04-col sc04-blocks');
   col.appendChild(el('h2', 'xs mut sc04-collabel', C.reader.blocks));
 
-  for (const f of group.files) {
+  group.files.forEach((f, fi) => {
     const card = el('article', 'card c-m sc04-file');
     card.appendChild(fileLine(group.files.map((x) => x.file), f.file));
 
@@ -389,7 +389,7 @@ function blockColumn(group, state, nav) {
       acts.appendChild(btn('btn sm ghost rec', C.gap.readerToGroups, () => { state.readerRaw = false; nav.toReader(state.workSnapshot, state.reader); }));
       card.appendChild(acts);
       col.appendChild(card);
-      continue;
+      return;
     }
 
     /* 단위화 불가 — `19` §C5-B's structured formats, a parse we could not trust, and a file we
@@ -406,7 +406,7 @@ function blockColumn(group, state, nav) {
         card.appendChild(acts);
       }
       col.appendChild(card);
-      continue;
+      return;
     }
 
     f.blocks.forEach((b, bi) => {
@@ -414,17 +414,20 @@ function blockColumn(group, state, nav) {
        * Transition conditions: "block select → raw". Without this the middle column was
        * decoration — a reader who wanted the raw text for ONE function got every file in the
        * group, which is the opposite of 변경 범위 안의 코드만 표시합니다. */
-      const key = `${f.file}#${bi}`;
-      const on = state.readerBlock === key;
+      /* STRUCTURAL identity: which file of the group and which block of that file. A path is never joined with an index and split again, so a
+       * file called `src/a#b.js` cannot be mistaken for `src/a` block `b.js`. */
+      const key = `${fi}:${bi}`;
+      const on = state.readerBlock?.fi === fi && state.readerBlock?.bi === bi;
       const row = btn(`sc04-block${on ? ' on' : ''}`, null, () => {
         /* Selecting a block opens raw scoped to it; selecting it again closes that. */
-        state.readerBlock = on ? null : key;
+        state.readerBlock = on ? null : { fi, bi };
         state.readerRaw = !on;
-        state.readerOpener = on ? null : `[data-block="${CSS.escape(key)}"]`;
-        state.readerFocus = on ? `[data-block="${CSS.escape(key)}"]` : 'raw';
+        state.readerOpener = on ? null : `[data-block="${key}"]`;
+        state.readerFocus = on ? `[data-block="${key}"]` : 'raw';
         nav.toReader(state.workSnapshot, state.reader);
       });
       row.setAttribute('data-block', key);
+      row.setAttribute('data-file', f.file);           // the stored path, as data (tests and tooltips read it; nothing parses it)
       row.appendChild(el('span', `chip sc04-kind k-${b.change}`, C.reader.kinds[b.change] ?? C.reader.kinds.modify));
       row.appendChild(el('span', 'sm mono sc04-blockname', b.name ?? f.file));
       const lines = b.afterLines?.length ? b.afterLines : b.beforeLines ?? [];
@@ -434,7 +437,7 @@ function blockColumn(group, state, nav) {
 
     if (f.truncated) card.appendChild(el('p', 'xs mut sc04-truncated', C.gap.readerTruncated));
     col.appendChild(card);
-  }
+  });
 
   return col;
 }
@@ -475,8 +478,8 @@ function rawColumn(group, state, nav) {
 
   /* A selected block scopes the panel to ITS file. With none selected the group's whole change
    * is shown, which is D-118's skip — the path that does not pass through a block at all. */
-  const scoped = state.readerBlock ? String(state.readerBlock).split('#')[0] : null;
-  const shown = scoped ? group.files.filter((f) => f.file === scoped) : group.files;
+  const scoped = Number.isInteger(state.readerBlock?.fi) ? group.files[state.readerBlock.fi] : null;
+  const shown = scoped ? [scoped] : group.files;
 
   for (const f of shown) {
     const card = el('article', 'card c-wide2 sc04-rawcard');
