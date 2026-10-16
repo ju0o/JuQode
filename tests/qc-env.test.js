@@ -127,7 +127,7 @@ test('shell-injection canaries survive an env-selected launcher: metacharacters 
 });
 
 test('every launch resolution in qc/run.js receives the env the child will run with (POSIX cannot observe the difference, so it is pinned in the source)', () => {
-  const src = fs.readFileSync(path.join(R, 'app/main/qc/run.js'), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+  const src = require('./src.js').code('app/main/qc/run.js');          // comments stripped: prose must not satisfy or fool this
   const calls = src.match(/resolveLaunch\([^)]*\)/g) ?? [];
   assert.ok(calls.length >= 2, `expected the prepare and main resolution, found ${calls.length}`);
   for (const c of calls) assert.match(c, /\{\s*env\s*\}/, `${c} resolves with a different environment than it spawns with`);
