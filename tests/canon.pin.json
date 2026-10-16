@@ -1,0 +1,16 @@
+{
+  "_note": "Pins which Private Canon the Canon-comparing tests accept. Hashes and ids only -- no Canon text lives in this repository. Re-pin only after the PM reviews the new Private commit.",
+  "repo": "ju0o/JuQode-Private",
+  "branch": "canon/mvp-run-implementation-findings",
+  "sha": "334f6c9f47f56472d7efb6603d70633d8f635527",
+  "files": {
+    "docs/current/18_KOREAN_UX_COPY.md": {
+      "blob": "cd71b274a7e897a5347be0aa092a9e73bb16fa17",
+      "sha256": "440c7fffd031943d9ad14167ba626b9c31b6c1afb96ecae92630d72e5c61578d"
+    },
+    "docs/data/schema.sql": {
+      "blob": "9add10766a3d6b35907502458f94cc1390c1293e",
+      "sha256": "1a5018493267d6d4d904e62a61a114286e814e053e37142d30b5a50f37a4a0a7"
+    }
+  }
+}

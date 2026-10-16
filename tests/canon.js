@@ -10,6 +10,7 @@
  * `path: null` and must fail. The Canon text itself is never copied into this repository. */
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const ROOT = path.resolve(__dirname, '..');
 const KINDS = {
@@ -41,8 +42,15 @@ function canonPath(kind, { env = process.env, root = ROOT } = {}) {
   return { path: null, source: null, tried };
 }
 
-/** The Canon file's bytes, or a failure message naming every place that was looked at. */
-function readCanon(kind, encoding, opts) {
+/* The reviewed Private commit these tests accept (tests/canon.pin.json): ids and hashes only. A Canon
+ * that is found but whose bytes differ from the pin is not "close enough" -- it FAILS, naming both
+ * hashes, so a drifted or wrong checkout cannot make the Canon comparisons pass or fail by accident. */
+const PIN_FILE = path.join(__dirname, 'canon.pin.json');
+const loadPin = () => JSON.parse(fs.readFileSync(PIN_FILE, 'utf8'));
+const PIN_PATH = { copy: 'docs/current/18_KOREAN_UX_COPY.md', schema: 'docs/data/schema.sql' };
+
+/** The Canon file's bytes, or an error naming every place that was looked at / both hashes. */
+function readCanon(kind, encoding, opts = {}) {
   const c = canonPath(kind, opts);
   if (!c.path) {
     const k = KINDS[kind];
@@ -50,7 +58,16 @@ function readCanon(kind, encoding, opts) {
     err.canonMissing = true;
     throw err;
   }
-  return fs.readFileSync(c.path, encoding);
+  const bytes = fs.readFileSync(c.path);
+  const pin = opts.pin ?? loadPin();
+  const want = pin.files?.[PIN_PATH[kind]]?.sha256;
+  const got = crypto.createHash('sha256').update(bytes).digest('hex');
+  if (!want || got !== want) {
+    const err = new Error(`Canon ${kind} at ${c.path} (${c.source}) is not the pinned one: sha256 ${got} != pinned ${want ?? '(no pin)'} for Private ${pin.sha ?? '?'}. Refusing to compare against an unreviewed Canon.`);
+    err.canonMismatch = true;
+    throw err;
+  }
+  return encoding ? bytes.toString(encoding) : bytes;
 }
 
-module.exports = { canonPath, readCanon };
+module.exports = { canonPath, readCanon, loadPin };

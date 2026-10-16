@@ -57,3 +57,17 @@ test('with no Canon anywhere there is NO substitute: the caller gets null and re
   assert.throws(() => readCanon('copy', 'utf8', opts), (e) => e.canonMissing === true && /Refusing to pass vacuously/.test(e.message));
   assert.throws(() => canonPath('nonsense'), /unknown Canon kind/);
 });
+
+test('a Canon that is found but is not the pinned one FAILS, naming both hashes (never "close enough")', () => {
+  const parent = mk(); checkout(parent);
+  const root = path.join(parent, 'JuQode'); fs.mkdirSync(root, { recursive: true });
+  const stand = require('node:crypto').createHash('sha256').update('stand-in copy').digest('hex');
+  const pin = (hash) => ({ sha: 'x'.repeat(40), files: { 'docs/current/18_KOREAN_UX_COPY.md': { sha256: hash } } });
+  assert.strictEqual(readCanon('copy', 'utf8', { env: {}, root, pin: pin(stand) }), 'stand-in copy');            // matches the pin
+  assert.throws(() => readCanon('copy', 'utf8', { env: {}, root, pin: pin('0'.repeat(64)) }),
+    (e) => e.canonMismatch === true && e.message.includes(stand) && e.message.includes('0'.repeat(64)));
+  assert.throws(() => readCanon('copy', 'utf8', { env: {}, root, pin: { sha: 'x', files: {} } }), (e) => e.canonMismatch === true, 'no pin entry is a failure, not a pass');
+  // the same check applies to an explicit env path
+  const explicit = path.join(mk(), 'c.md'); fs.writeFileSync(explicit, 'something else');
+  assert.throws(() => readCanon('copy', 'utf8', { env: { JUQODE_CANON: explicit }, root, pin: pin(stand) }), (e) => e.canonMismatch === true);
+});
