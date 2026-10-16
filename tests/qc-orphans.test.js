@@ -31,7 +31,7 @@ test('LIMITED: a descendant whose parent died before the snapshot has no recorde
 });
 
 const settle = () => new Promise((r) => setTimeout(r, 40));
-test('the gate opens only on a SUCCESSFUL snapshot that shows every identified member gone; a failed one, a throw, a bare pid and a restart do not', async () => {
+test('POLICY: no snapshot -- gone, alive, failed, thrown, bare pid -- ever releases; the observation is only recorded; the user\'s per-Run confirmation is the release', async () => {
   let ans = null; let seen = null;
   const reg = createUncertain({ probe: async (m, parents) => { seen = { m, parents }; if (ans instanceof Error) throw ans; return ans; }, retryMs: 5, maxTries: 2 });
   reg.add('r1', 'p', [kid], { parents: [ROOT] });
@@ -39,15 +39,14 @@ test('the gate opens only on a SUCCESSFUL snapshot that shows every identified m
   assert.ok(reg.blocks('p'), 'snapshot could not be read');
   assert.deepStrictEqual(seen.parents, [ROOT], 'the dead root was not handed to the check (a late child would be missed)');
   ans = new Error('boom'); reg.refresh('p'); await settle(); assert.ok(reg.blocks('p'), 'a throwing probe opened the gate');
-  ans = [kid]; reg.refresh('p'); await settle(); assert.ok(reg.blocks('p'));
-  ans = []; reg.refresh('p'); await settle(); assert.strictEqual(reg.blocks('p'), null);
+  ans = [kid]; reg.refresh('p'); await settle(); assert.ok(reg.blocks('p')); assert.strictEqual(reg.heldFor('p')[0].observed, 'observed-alive');
+  ans = []; reg.refresh('p'); await settle();
+  assert.ok(reg.blocks('p'), 'a snapshot showing every recorded pid gone released the hold');
+  assert.deepStrictEqual([reg.heldFor('p')[0].observed, reg.heldFor('p')[0].needsAck], ['observed-gone', true]);
+  reg.release('r1'); assert.strictEqual(reg.blocks('p'), null, 'the user\'s confirmation did not release');
+  assert.strictEqual(reg.blocks('other'), null);
 
-  const bare = createUncertain({ probe: async () => [], retryMs: 5 });
-  bare.add('r2', 'p', [{ pid: 5, created: null }], {});
-  await settle();
-  assert.ok(bare.blocks('p'), 'a bare pid that is "gone" opened the gate');
-  assert.strictEqual(bare.heldFor('p')[0].needsAck, true);
-  for (const m of [[], null, [{ pid: 5 }], [{ pid: 5, created: '' }]]) {
+  for (const m of [[], null, [{ pid: 5 }], [{ pid: 5, created: '' }], [{ pid: 5, created: null }]]) {
     const r = createUncertain({ probe: async () => [], retryMs: 5 });
     r.add('r3', 'p', m, {}); await settle();
     assert.ok(r.blocks('p'), `members ${JSON.stringify(m)} opened the gate`);

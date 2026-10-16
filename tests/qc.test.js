@@ -1555,6 +1555,8 @@ test('Writer gate: an uncertain QC Stop refuses a new Work and file-changing Qui
   alive = [];
   uncertain.refresh(b.project.id);
   await new Promise((r) => setTimeout(r, 30));
+  assert.ok(uncertain.blocks(b.project.id), 'a snapshot alone released the hold (policy: only the user\'s confirmation does)');
+  uncertain.release('qc-run-1');                      // the ack handler's last step; its row/evidence checks are covered in qc-stop-proof.test.js
   assert.strictEqual(uncertain.blocks(b.project.id), null);
   const ran = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
   assert.strictEqual(ran.ok, true, `${ran.reason}/${ran.detail}`);
@@ -1624,7 +1626,7 @@ test('restart: a run nobody saw finish keeps the Writer gate shut across restart
   assert.strictEqual(ran.ok, true, `${ran.reason}/${ran.detail}`);
 });
 
-test('restart: a Stop that proved nothing is left alive is NOT held; one with recorded members is held until a later snapshot shows them gone (no confirmation needed)', async (t) => {
+test('restart: only a Stop that ended `stopped` is not held; a complete record and a record with members are held until the user confirms the run', async (t) => {
   const restoreEnv = noClaude(); t.after(restoreEnv);
   const b = qcBench();
   const T1 = '2026-10-16T10:00:01.000Z';
@@ -1647,23 +1649,23 @@ test('restart: a Stop that proved nothing is left alive is NOT held; one with re
   let alive = [{ pid: 777, created: T1 }];
   const reg = createUncertain({ probe: async () => alive, retryMs: 5, maxTries: 3 });
   const h = restartOf(b, { qcUncertain: reg });
-  assert.deepStrictEqual(h['juqode:qc-list'](null, b.project.id).held.map((x) => x.runId), [withMembers], 'only the run with a possibly-alive member is held');
-  assert.ok(![clear, stopped].some((id) => reg.has(id)));
-  assert.strictEqual(h['juqode:qc-list'](null, b.project.id).held[0].needsAck, false);
+  assert.deepStrictEqual(h['juqode:qc-list'](null, b.project.id).held.map((x) => x.runId).sort(), [clear, withMembers].sort(), 'unknown runs are held, the stopped one is not');
+  assert.ok(!reg.has(stopped));
   alive = [];
   reg.refresh(b.project.id);
   await new Promise((r) => setTimeout(r, 30));
-  assert.strictEqual(reg.blocks(b.project.id), null, 'the snapshot showed every member gone, but the gate stayed shut');
+  assert.ok(reg.blocks(b.project.id), 'a snapshot showing every member gone released the hold');
+  const r = h['juqode:qc-ack-stopped'](null, b.project.id, [clear, withMembers], true);
+  assert.deepStrictEqual(r.acked.map((x) => x.runId).sort(), [clear, withMembers].sort());
+  assert.strictEqual(reg.blocks(b.project.id), null);
   const work = await h['juqode:work-start'](null, b.project.id, '고쳐줘');
   assert.notStrictEqual(work.reason, 'prior-process-may-still-live');
 
-  // the same evidence after another restart: still alive -> held again (a restart is not a release)
-  alive = [{ pid: 777, created: T1 }];
+  // after another restart the confirmed runs stay released (the record is on disk), and nothing else appears
   const reg2 = createUncertain({ probe: async () => alive, retryMs: 5, maxTries: 3 });
   const h2 = restartOf(b, { qcUncertain: reg2 });
   h2['juqode:qc-list'](null, b.project.id);
-  await new Promise((r) => setTimeout(r, 20));
-  assert.strictEqual(reg2.blocks(b.project.id), withMembers);
+  assert.strictEqual(reg2.blocks(b.project.id), null);
 });
 
 test('both directions: a running file-changing Quick Command refuses a new Work; a running Work refuses file-changing Quick Commands; a dev server and read-only commands do not', async (t) => {

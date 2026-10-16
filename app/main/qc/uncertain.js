@@ -26,14 +26,15 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
 
   async function recheck(runId) {
     const e = held.get(runId);
-    if (!e || e.checking || e.needsAck) return;
+    if (!e || e.checking || !e.identified) return;
     if (!Array.isArray(e.members) || !e.members.length || !probe) return;
     e.checking = true;
     let alive = null;
     try { alive = await probe(e.members, e.parents); } catch { alive = null; }
     e.checking = false;
     if (!held.has(runId)) return;
-    if (Array.isArray(alive) && alive.length === 0) { held.delete(runId); done.add(runId); return; }
+    /* POLICY: what a snapshot sees is only what it sees -- it NEVER releases. It is recorded for the user's eyes; only the user's per-Run confirmation lifts the hold. */
+    if (Array.isArray(alive)) { e.observed = alive.length ? 'observed-alive' : 'observed-gone'; if (!alive.length) return; }
     e.tries += 1;
     if (Array.isArray(alive)) e.members = alive;
     if (e.tries < maxTries) { const t = schedule(() => recheck(runId), retryMs); t?.unref?.(); }
@@ -44,7 +45,8 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
       if (held.has(runId) || done.has(runId)) return;
       /* a member with no creation time is a bare pid: "that pid is gone" proves nothing about its tree (or a reused pid), so only the user lifts it */
       const identified = Array.isArray(members) && members.length > 0 && members.every((m) => m && Number.isInteger(m.pid) && typeof m.created === 'string' && m.created);
-      held.set(runId, { runId, projectId, members: Array.isArray(members) ? members : null, needsAck: Boolean(info.needsAck) || !identified,
+      held.set(runId, { runId, projectId, members: Array.isArray(members) ? members : null, needsAck: true, observed: null,   // POLICY: ownership of a Windows run's whole tree cannot be proven, so every hold waits for the user
+                        identified,
                         parents: Array.isArray(info.parents) ? info.parents : [],
                         command: info.command ?? null, startedAt: info.startedAt ?? null, why: info.why ?? null, tries: 0, checking: false });
       const t = schedule(() => recheck(runId), 0); t?.unref?.();
@@ -59,7 +61,7 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
     clearRestoreFailure(projectId) { failures.delete(projectId); },
     restoreFailure: (projectId) => failures.get(projectId) ?? null,
     heldFor: (projectId) => [...held.values()].filter((e) => e.projectId === projectId)
-      .map(({ runId, command, startedAt, needsAck, why }) => ({ runId, command, startedAt, needsAck, why })),
+      .map(({ runId, command, startedAt, needsAck, why, observed }) => ({ runId, command, startedAt, needsAck, why, observed })),
     /** The user's recorded confirmation ended it (the caller wrote the audit record). */
     release(runId) { if (held.delete(runId)) done.add(runId); },
     refresh(projectId) { for (const [runId, e] of held) if (e.projectId === projectId) { e.tries = 0; recheck(runId); } },
@@ -101,8 +103,10 @@ function restore({ rows, root, registry }) {
     const info = { command: r.command, startedAt: r.started_at };
     const proof = read.ok && read.rec ? validateStop(read.rec, r) : { kind: 'untrusted', why: read.ok ? 'no-stop-record' : read.why };
     /* The Stop looked again after the kill and found nothing alive -- and the record is complete and agrees with the row. Only then. */
-    if (proof.kind === 'clear' && r.status === 'unknown') continue;
-    if (proof.kind === 'members') {
+    if (proof.kind === 'clear' && r.status === 'unknown') {
+      /* a complete, agreeing record is still only what the Stop observed: orphans outside its snapshot cannot be excluded (QC-STOP-PROOF-CONTRACT) */
+      registry.add(r.id, r.project_id, [], { ...info, why: 'ownership-unproven' });
+    } else if (proof.kind === 'members') {
       registry.add(r.id, r.project_id, proof.members, { ...info, parents: proof.parents, why: 'stop-uncertain' });
     } else {
       /* never finished, no record, or a record that is incomplete/contradictory: nothing may be inferred; only the user lifts it */
