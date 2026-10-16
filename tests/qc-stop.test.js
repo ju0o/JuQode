@@ -192,3 +192,21 @@ test('real: a command that finishes by itself and is then "stopped" is NOT repor
   assert.strictEqual(out.state, 'ok');
   assert.notStrictEqual(out.stop?.requested, true);
 });
+
+test('a Windows stop snapshot that BLOCKS longer than a short-lived child lives ends in the child\'s own result — never `stopped` (the mechanism behind the loaded-H1 qc.test.js failure)', async () => {
+  /* stopper.request() runs the tree snapshot synchronously (a spawnSync of PowerShell: 0.5 s idle, ~2 s under
+   * 2x CPU load on H1). While it blocks, this process cannot even observe the child's exit. A child whose own
+   * timer fires inside that window is gone by the time taskkill looks (128) -- so `ok`, honestly, not `stopped`.
+   * Fake tools, real child process, real blocking; no platform dependency. */
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 250)'], { stdio: 'ignore' });
+  const ended = new Promise((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })));
+  const blocking = tools({ taskkill: { status: 128, error: null } });
+  const slowTree = blocking.tree;
+  blocking.tree = (pid) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 900); return slowTree(pid); };
+  const s = stopperFor(child, blocking);
+  s.request(() => {});
+  assert.strictEqual(child.exitCode, null, 'the event loop was blocked, so the exit could not have been seen yet');
+  const { code, signal } = await ended;
+  const end = s.finalize({ code, signal });
+  assert.deepStrictEqual([end.state, end.stop.verdict], ['ok', 'ended-before-stop-took-effect']);
+});

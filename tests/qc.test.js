@@ -831,12 +831,17 @@ test('a run that fails says so, with the code — never as success', async () =>
   assert.strictEqual(row.exit_code, 2);
 });
 
+/* A long-running fixture child must NOT end by itself. These tests stop it and assert `stopped`; a child that exits on
+ * its own (the old `setTimeout(..., 5000)`) turns every slow Stop into the correct-but-different `ended before the stop
+ * took effect`. MEASURED on H1: the Stop's synchronous process snapshot takes ~0.5 s idle and ~2 s under 2x CPU load, and
+ * the full suite under that load failed this exact assertion (tests 489 and 494) while qc.test.js alone passed 3/3 -- see
+ * qc-stop.test.js for the deterministic mechanism. */
 test('a running dev server does not block a different Quick Command', async () => {
   /* `19` §C6 REC-010: long-running Quick Commands run in their OWN child processes **so the
    * drawer stays usable**. A blanket one-at-a-time rule meant a running dev server stopped the
    * user asking for `git status` — and stopped the 개발 서버 끄기 rule from reaching its own
    * handler at all. What is refused is the SAME rule twice. */
-  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setTimeout(()=>{},5000)"', test: 'node -e "1"' }) });
+  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setInterval(()=>{},1000)"', test: 'node -e "1"' }) });
   const first = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.start', '서버 켜줘');
   assert.strictEqual(first.ok, true);
   assert.strictEqual(first.kind, 'long_running');
@@ -864,7 +869,7 @@ test('a running dev server does not block a different Quick Command', async () =
 test('a running dev server makes 켜기 사용 불가 and 끄기 가능 — from the handle, not a guess', async () => {
   /* `19` §C4: only a server JuQode ITSELF started can be stopped, and `already_running` names
    * the pid so the user can see WHICH process the product means. */
-  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setTimeout(()=>{},5000)"' }) });
+  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setInterval(()=>{},1000)"' }) });
   const stopBefore = b.h['juqode:qc-stop'](null, b.project.id);
   assert.strictEqual(stopBefore.ok, false);
   assert.strictEqual(stopBefore.reason, 'not-running', 'something offered to stop a server nobody started');
@@ -917,8 +922,8 @@ test('a running TEST is not a dev server', async () => {
   /* The handle answers "is a dev server up?", and only a `qc.dev.start` handle may. Treating any
    * live Quick Command as a server would offer to stop a test run under the 개발 서버 끄기 card
    * — and would mark 켜기 as 이미 실행 중 while nothing was serving anything. */
-  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setTimeout(()=>{},5000)"',
-                                            test: 'node -e "setTimeout(()=>{},5000)"' }) });
+  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setInterval(()=>{},1000)"',
+                                            test: 'node -e "setInterval(()=>{},1000)"' }) });
   const started = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
   assert.strictEqual(started.ok, true);
 
@@ -958,7 +963,7 @@ test('터미널 열어줘 actually does something when 실행 is pressed', async
 });
 
 test('개발 서버 꺼줘 signals the server JuQode started', async () => {
-  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setTimeout(()=>{},5000)"' }) });
+  const b = qcBench({ 'package.json': pkg({ dev: 'node -e "setInterval(()=>{},1000)"' }) });
 
   /* With nothing running it is 사용 불가 — and pressing 실행 says the SAME reason, not a
    * different one from a different vocabulary. */
