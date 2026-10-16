@@ -335,11 +335,13 @@ test('visual test writes to an untracked path unless goldens are explicitly upda
   const src = read('tests/e2e/visual.mjs');
   // default output must not be the tracked evidence directory
   assert.match(src, /const UPDATE = /);
-  assert.match(src, /UPDATE \? GOLDEN : path\.join\(ROOT, 'tmp-visual'\)/);
+  assert.match(src, /const OUT = UPDATE \? GOLDEN\s*\n\s*: process\.env\.JUQODE_E2E_SHOT_DIR \? path\.resolve\(process\.env\.JUQODE_E2E_SHOT_DIR\)\s*\n\s*: path\.join\(ROOT, PLAN\.mode === 'xvfb' \? 'tmp-visual' : `tmp-visual-\$\{HOST_LABEL\}`\);/,
+    'the golden directory may be the output ONLY when --update-golden says so');
   assert.match(src, /const GOLDEN = path\.join\(ROOT, 'docs', 'dev-evidence', 'screens'\)/);
   // and the untracked path must actually be ignored
   const ignore = read('.gitignore');
   assert.match(ignore, /^tmp-visual\/$/m, 'tmp-visual/ is not gitignored — test output would be committed');
+  assert.match(ignore, /^tmp-visual-\*\/$/m, 'per-host screenshot directories are not gitignored');
 });
 
 test('no copy block declares the same key twice', () => {

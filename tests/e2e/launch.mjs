@@ -20,11 +20,41 @@ export const WIN = process.platform === 'win32';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const ELECTRON = path.join(ROOT, 'node_modules', '.bin', WIN ? 'electron.cmd' : 'electron');
 
+/* HOW THE APP GETS A DISPLAY -- and who sees it.
+ *
+ *   xvfb          Linux with `xvfb-run`: a private virtual display. Nothing appears on anyone's screen.
+ *   host-display  Linux WITHOUT xvfb-run but with DISPLAY / WAYLAND_DISPLAY (WSLg): the app's REAL windows
+ *                 open on the user's desktop.
+ *   windows-desktop  Windows has no virtual display here: real windows on the user's desktop.
+ * The last two put windows in front of a person, so they are refused unless the run says so with
+ * JUQODE_E2E_VISIBLE=yes. A harness must never open windows on a user's screen as a side effect of
+ * `npm test`. `node tests/e2e/preflight.mjs` reports the plan without launching anything. */
+export const VISIBLE_CONSENT = 'JUQODE_E2E_VISIBLE';
+
+function hasXvfbRun() {
+  const r = spawnSync('xvfb-run', ['--help'], { stdio: 'ignore' });
+  return !(r.error && r.error.code === 'ENOENT');
+}
+
+export function displayPlan({ platform = process.platform, env = process.env, haveXvfb = hasXvfbRun } = {}) {
+  const consent = env[VISIBLE_CONSENT] === 'yes';
+  if (platform === 'win32') return { mode: 'windows-desktop', visible: true, consent };
+  if (haveXvfb()) return { mode: 'xvfb', visible: false, consent: true };
+  const display = env.DISPLAY || env.WAYLAND_DISPLAY || null;
+  if (!display) return { mode: 'refused', visible: false, consent: false, reason: 'no xvfb-run and no DISPLAY/WAYLAND_DISPLAY' };
+  return { mode: 'host-display', visible: true, consent, display, wsl: Boolean(env.WSL_DISTRO_NAME) };
+}
+
 /** [file, argv] for spawn(). `args` are the app's own arguments, e.g. ['.', '--no-sandbox']. */
-export function launchArgs(args) {
-  return WIN
-    ? [process.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', ELECTRON, ...args]]
-    : ['xvfb-run', ['-a', ELECTRON, ...args]];
+export function launchArgs(args, plan = displayPlan()) {
+  if (plan.mode === 'refused') throw new Error(`e2e cannot start: ${plan.reason}`);
+  if (plan.visible && !plan.consent) {
+    throw new Error(`e2e would open real windows on this machine's desktop (${plan.mode}). That needs an explicit ${VISIBLE_CONSENT}=yes from the person at that screen; `
+      + 'it was not given, so nothing was launched. (No virtual display is available: install xvfb-run or consent to visible windows.)');
+  }
+  if (plan.mode === 'windows-desktop') return [process.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', ELECTRON, ...args]];
+  if (plan.mode === 'host-display') return [ELECTRON, args];
+  return ['xvfb-run', ['-a', ELECTRON, ...args]];
 }
 
 /** The whole tree, not just the process we hold. Safe to call on an already-dead pid. */

@@ -14,7 +14,7 @@ import os from 'node:os';
 import { findFreePortBlock } from './port-block.mjs';
 /* Stale Xvfb locks accumulate and eventually starve `xvfb-run -a` — see xvfb.mjs. */
 import { sweepDisplays } from './xvfb.mjs';
-import { launchArgs, killTree, WIN } from './launch.mjs';
+import { launchArgs, killTree, displayPlan, WIN } from './launch.mjs';
 sweepDisplays();
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -39,7 +39,20 @@ import { DB_DIR, DB, USER_DATA, SEED, SEED2, SEED3, PE_UNSIGNED, PE_SIGNED, FAKE
  * historical record of that package; this one tracks what the app looks like NOW. */
 const GOLDEN = path.join(ROOT, 'docs', 'dev-evidence', 'screens');
 const UPDATE = process.argv.includes('--update-golden') || process.env.JUQODE_UPDATE_GOLDEN === '1';
-const OUT = UPDATE ? GOLDEN : path.join(ROOT, 'tmp-visual');
+/* Per-host screenshots. The tracked goldens are the Xvfb rendering; a screenshot taken on a real desktop
+ * (a different size, scaling and fonts) is a DIFFERENT artifact and must never replace them or be mixed
+ * into them, so it goes to its own untracked directory named for the host. */
+const PLAN = displayPlan();
+if (UPDATE && PLAN.mode !== 'xvfb') {
+  throw new Error(`--update-golden replaces the tracked Xvfb goldens; it is refused under ${PLAN.mode}.`);
+}
+const HOST_LABEL = (process.env.JUQODE_E2E_HOST || process.platform).replace(/[^A-Za-z0-9_-]/g, '');
+const OUT = UPDATE ? GOLDEN
+  : process.env.JUQODE_E2E_SHOT_DIR ? path.resolve(process.env.JUQODE_E2E_SHOT_DIR)
+  : path.join(ROOT, PLAN.mode === 'xvfb' ? 'tmp-visual' : `tmp-visual-${HOST_LABEL}`);
+if (!UPDATE && (path.resolve(OUT) + path.sep).startsWith(path.resolve(GOLDEN) + path.sep)) {
+  throw new Error('JUQODE_E2E_SHOT_DIR points into the tracked goldens');
+}
 fs.mkdirSync(OUT, { recursive: true });
 /* Reserve the CDP ports this run will use. JUQODE_E2E_PORT sets the preferred start port;
  * when that block is occupied the harness selects the next free block. */
