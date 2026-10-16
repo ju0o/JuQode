@@ -7,6 +7,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const R = path.resolve(__dirname, '..');
 const { windowsTools } = require(path.join(R, 'app/main/qc/stopper.js'));
+const { createUncertain } = require(path.join(R, 'app/main/qc/uncertain.js'));
 const win = process.platform === 'win32';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const spawned = [];
@@ -62,5 +63,11 @@ test('LIMITED (measured): a grandchild whose parent exited before the snapshot i
   assert.ok(!t.descendants.some((d) => d.pid === got.grand), 'the snapshot saw an orphan: the documented limit changed');
   p.kill(); await sleep(500);
   assert.deepStrictEqual(await windowsTools.survivors(t.descendants, [t.root]), [], 'the orphan became visible: update the README contract');
+  /* POLICY: the snapshot is blind to the orphan, so it must not release -- the hold stays with a live grandchild */
+  const reg = createUncertain({ probe: windowsTools.survivors, retryMs: 50, maxTries: 2 });
+  reg.add('run-x', 'proj', [{ pid: p.pid, created: t.root.created }], { parents: [t.root] });
+  await sleep(1500);
+  assert.ok(alive(got.grand) && reg.blocks('proj') === 'run-x', 'the hold was released while a grandchild lives');
+  assert.strictEqual(reg.heldFor('proj')[0].observed, 'observed-gone');
   process.kill(got.grand);
 });
