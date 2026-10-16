@@ -1,5 +1,6 @@
 'use strict';
-/* REAL Windows processes (isolated scratch node processes this test starts and ends itself): descendants outside the Stop's snapshot. Skipped elsewhere. */
+/* MEASURED on H1: libuv puts a Node-spawned child in a job that dies with its spawner, so only DETACHED (breakaway) children outlive a killed root -- the cases below use those.
+ * REAL Windows processes (isolated scratch node processes this test starts and ends itself): descendants outside the Stop's snapshot. Skipped elsewhere. */
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
@@ -11,9 +12,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const spawned = [];
 const idle = 'setInterval(()=>{},1000)';
 // a parent that starts a child (kept alive) and reports its pid on stdout; `late` = start another child when told to
-const parentSrc = `const {spawn}=require('child_process');const k=spawn(process.execPath,['-e','${idle}'],{stdio:'ignore'});console.log('kid '+k.pid);` +
-  `process.stdin.on('data',()=>{const l=spawn(process.execPath,['-e','${idle}'],{stdio:'ignore'});console.log('late '+l.pid)});${idle}`;
-const grandSrc = `const {spawn}=require('child_process');const m=spawn(process.execPath,['-e',"const {spawn}=require('child_process');const g=spawn(process.execPath,['-e','${idle}'],{stdio:'ignore'});console.log('grand '+g.pid);setTimeout(()=>process.exit(0),200)"],{stdio:['ignore','inherit','ignore']});m.on('exit',()=>{});${idle}`;
+const parentSrc = `const {spawn}=require('child_process');const k=spawn(process.execPath,['-e','${idle}'],{stdio:'ignore',detached:true});console.log('kid '+k.pid);` +
+  `process.stdin.on('data',()=>{const l=spawn(process.execPath,['-e','${idle}'],{stdio:'ignore',detached:true});console.log('late '+l.pid)});${idle}`;
+const grandSrc = `const {spawn}=require('child_process');const m=spawn(process.execPath,['-e',"const {spawn}=require('child_process');const g=spawn(process.execPath,['-e','${idle}'],{stdio:'ignore',detached:true});console.log('grand '+g.pid);setTimeout(()=>process.exit(0),200)"],{stdio:['ignore','inherit','ignore']});m.on('exit',()=>{});${idle}`;
 async function start(src) {
   const p = spawn(process.execPath, ['-e', src], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
   spawned.push(p);
