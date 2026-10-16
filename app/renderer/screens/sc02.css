@@ -20,25 +20,28 @@
 }
 .sc02.is-inspect { grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--inspect-w); }
 /* ADAPTIVE SHELL. The board is the product, so the side panels give way to it, not the other way round.
- *   >= 1440   rail 248 + board + inspector 360 side by side (board >= 832 at 1440)
- *   1280-1439 rail 232 + board + inspector 330
- *   < 1280    the Inspector no longer takes a column: it opens OVER the right edge of the board, so the
- *             five columns keep the width they had before a task was selected
- *   < 1024    narrower rail (200), the same overlay Inspector
- *   <  960    rail 176; the overlay Inspector covers most of the board's width
- * The two panels are never squeezed to make room for each other. */
+ *   >= 1440   rail 248 + board + inspector 360 side by side
+ *   1280-1439 rail 232 + board + inspector 330 side by side
+ *   1100-1279 rail 200 + board + inspector 300 side by side (Canon's 300px column); five columns stay >= 130px
+ *   <  1100   the Inspector is a SIDE SHEET over a dimmed board (JS adds `.is-sheet`: dialog, backdrop,
+ *             focus trap, Esc, focus back to the tile). Its sticky head always names the Task and its state.
+ * At every width >= 1100 the selected tile is never under the Inspector. */
 @media (max-width: 1439px) { .sc02 { --rail-w: 232px; --inspect-w: 330px; } }
-@media (max-width: 1279px) {
-  .sc02 { --rail-w: 216px; }
+@media (max-width: 1279px) { .sc02 { --rail-w: 200px; --inspect-w: 300px; } }
+@media (max-width: 1099px) {
   .sc02.is-inspect { grid-template-columns: var(--rail-w) minmax(0, 1fr); }
   .sc02-inspect {
-    position: absolute; top: 0; right: 0; bottom: 0; z-index: 6;
-    width: min(380px, calc(100% - var(--rail-w) - 16px));
-    box-shadow: -14px 0 28px -18px rgba(20,23,28,.35);
+    position: absolute; top: 0; right: 0; bottom: 0; z-index: 8;
+    width: min(400px, calc(100% - 48px));
+    box-shadow: -18px 0 32px -18px rgba(20,23,28,.45);
   }
+  .sc02.is-sheet .sc02-backdrop { display: block; }
 }
-@media (max-width: 1023px) { .sc02 { --rail-w: 200px; } }
-@media (max-width: 959px) { .sc02 { --rail-w: 176px; } .sc02-inspect { width: calc(100% - var(--rail-w) - 8px); } }
+.sc02-backdrop { display: none; position: absolute; inset: 0; z-index: 7; background: rgba(20,23,28,.42); }
+/* the sticky head: Task name + state stay on screen while the details scroll */
+.sc02-inspect .detail-kicker { position: sticky; top: -12px; z-index: 2; background: var(--card); padding-top: 12px; margin-top: -12px; }
+.sc02 .inspect-head { position: sticky; top: 36px; z-index: 1; background: var(--card); }
+@media (max-width: 959px) { .sc02 { --rail-w: 176px; } }
 .sc02-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
 .sc02-rail, .sc02-inspect {
   overflow: auto;
@@ -638,3 +641,13 @@
 .sc02 .file-all > summary::before { content: "▸"; margin-right: 6px; }
 .sc02 .file-all[open] > summary::before { content: "▾"; }
 .sc02 .file-all > summary::-webkit-details-marker { display: none; }
+
+/* ───── Rail recovery notice: the reason in two lines, the two actions on one row ───── */
+.sc02-rail .staleband { padding: 8px 10px; gap: 6px; }
+.sc02-rail .staleband > .sm { font-size: var(--fs-label); line-height: var(--lh-label); }
+.sc02-rail .staleband .row-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sc02-rail .staleband .btn { min-height: 28px; padding: 2px 10px; font-size: var(--fs-label); }
+.sc02 .inspect-sec-sum { list-style: none; }
+.sc02 .inspect-sec-sum::-webkit-details-marker { display: none; }
+.sc02 .inspect-sec-sum::before { content: "▸"; margin-right: 6px; color: var(--mut); }
+.sc02 .inspect-sec[open] > .inspect-sec-sum::before { content: "▾"; }

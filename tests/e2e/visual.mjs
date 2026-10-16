@@ -2469,7 +2469,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click()`);
   await sleep(700);
   out.taskRunFirstDetail = await evalJs(`(async () => JSON.stringify(await window.juqode.taskDetail(${JSON.stringify(taskId)})))()`);
-  await evalJs(`document.querySelector('.task-runs > summary')?.click()`);
+  await evalJs(`(document.querySelectorAll('details.inspect-evidence').forEach(d => { d.open = true; }), document.querySelector('.task-runs > summary')?.click())`);
   await sleep(100);
   await evalJs(`document.querySelector('.task-run > summary')?.click()`);
   await sleep(200);
@@ -2533,7 +2533,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await sleep(900);
   await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click()`);
   await sleep(700);
-  await evalJs(`document.querySelector('.task-runs > summary')?.click()`);
+  await evalJs(`(document.querySelectorAll('details.inspect-evidence').forEach(d => { d.open = true; }), document.querySelector('.task-runs > summary')?.click())`);
   await sleep(100);
   await evalJs(`document.querySelectorAll('.task-run > summary').forEach(summary => summary.click())`);
   await sleep(200);
@@ -2550,7 +2550,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click()`);
   await sleep(500);
   out.redesign = {};
-  for (const [w, h] of [[880, 600], [1024, 700], [1200, 773], [1440, 900]]) {
+  for (const [w, h] of [[880, 600], [1024, 700], [1200, 773], [1280, 800], [1440, 900]]) {
     await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
     for (const theme of ['light', 'dark']) {
       await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
@@ -2589,6 +2589,73 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
       }
     }
   }
+
+  /* ── Inspector geometry / focus (PM D1.1): nothing the person needs is under anything else ─────────────
+   * Measured with the browser's own hit-testing (elementFromPoint), not with column widths. */
+  step('SC-02 inspector geometry and focus');
+  const pressKey = async (k, code, vk) => {
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code, windowsVirtualKeyCode: vk });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk });
+    await sleep(120);
+  };
+  const HIT = `const hit = (n) => { if (!n) return 'missing'; const r = n.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return 'empty';
+      if (r.left < 0 || r.right > innerWidth + 1 || r.top < 0 || r.bottom > innerHeight + 1) return 'outside-window';
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 12));
+      return top && (top === n || n.contains(top)) ? 'ok' : 'covered-by:' + (top?.className || top?.tagName); };`;
+  out.inspectorGeometry = {};
+  for (const [w, h] of [[880, 600], [1024, 700], [1100, 700], [1200, 773], [1280, 800], [1440, 900]]) {
+    await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+    await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
+    await sleep(250);
+    const sel = `[data-el="task-list"] [data-task-id="${taskId}"]`;
+    await evalJs(`(() => { const t = document.querySelector('${sel}'); if (document.querySelector('.sc02.is-inspect')) { document.querySelector('.sc02-inspect [data-act="inspect-close"]')?.click(); } })()`);
+    await sleep(150);
+    await evalJs(`document.querySelector('${sel}')?.click()`);
+    await sleep(500);
+    const open = await evalJs(`(() => { ${HIT}
+      const q = (s) => document.querySelector(s); const ins = q('.sc02-inspect'); const tile = q('${sel}'); const board = q('.sc02');
+      const close = q('.sc02-inspect [data-act="inspect-close"]'); const title = q('.sc02-inspect .inspect-title'); const status = q('.sc02-inspect .inspect-status');
+      const tr = tile.getBoundingClientRect(); const ir = ins.getBoundingClientRect();
+      return JSON.stringify({ w: innerWidth, sheet: board.classList.contains('is-sheet'), role: ins.getAttribute('role'), modal: ins.getAttribute('aria-modal'),
+        tile: hit(tile), tileSelected: tile.getAttribute('aria-pressed'), tileOverlapsInspector: !(tr.right <= ir.left || tr.left >= ir.right || tr.bottom <= ir.top || tr.top >= ir.bottom),
+        close: hit(close), title: hit(title), status: hit(status), titleText: title?.innerText, statusText: status?.innerText,
+        backdrop: getComputedStyle(q('.sc02-backdrop')).display, focusInInspector: ins.contains(document.activeElement), focusIsClose: document.activeElement === close,
+        overflow: document.documentElement.scrollWidth - innerWidth }); })()`);
+    const o = JSON.parse(open);
+    const rec = { open: o };
+    if (o.sheet) {
+      /* Tab must stay inside the sheet, Shift+Tab as well; Escape closes it, focus goes back to the tile, selection stays */
+      const inside = [];
+      for (let i = 0; i < 40; i++) { await pressKey('Tab', 'Tab', 9); inside.push(await evalJs(`document.querySelector('.sc02-inspect').contains(document.activeElement)`)); }
+      await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 });
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 });
+      inside.push(await evalJs(`document.querySelector('.sc02-inspect').contains(document.activeElement)`));
+      rec.tabStaysInside = inside.every(Boolean);
+      rec.tabEscapedAt = inside.indexOf(false);
+      rec.tabEscapedTo = await evalJs(`document.activeElement?.outerHTML?.slice(0, 160)`);
+      await pressKey('Escape', 'Escape', 27);
+      rec.afterEscape = JSON.parse(await evalJs(`(() => JSON.stringify({ inspect: document.querySelector('.sc02').classList.contains('is-inspect'),
+        tileSelected: document.querySelector('${sel}')?.getAttribute('aria-pressed'), focusOnTile: document.activeElement === document.querySelector('${sel}'),
+        filterKept: document.querySelector('.nav-filters .is-current')?.textContent }))()`));
+      /* reopen, close with the backdrop */
+      await evalJs(`document.querySelector('${sel}')?.click()`);
+      await sleep(400);
+      await evalJs(`document.querySelector('[data-el="inspect-backdrop"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))`);
+      await sleep(200);
+      rec.afterBackdrop = await evalJs(`document.querySelector('.sc02').classList.contains('is-inspect')`);
+    } else {
+      rec.closeKeepsSelection = null;
+      await evalJs(`document.querySelector('.sc02-inspect [data-act="inspect-close"]').click()`);
+      await sleep(200);
+      rec.afterClose = JSON.parse(await evalJs(`(() => JSON.stringify({ inspect: document.querySelector('.sc02').classList.contains('is-inspect'),
+        tileSelected: document.querySelector('${sel}')?.getAttribute('aria-pressed'), focusOnTile: document.activeElement === document.querySelector('${sel}') }))()`));
+      await evalJs(`document.querySelector('${sel}')?.click()`);
+      await sleep(300);
+    }
+    out.inspectorGeometry[w] = rec;
+    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(OUT, `sc02-inspector-geometry-${w}.png`), Buffer.from(shot.result.data, 'base64'));
+  }
   await send('Emulation.clearDeviceMetricsOverride');
   await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
   await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click()`);
@@ -2604,7 +2671,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     if (!updated.ok) return JSON.stringify({ updated: false, detail: updated.detail });
     document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click();
     await new Promise(resolve => setTimeout(resolve, 180));
-    document.querySelector('.task-runs > summary')?.click();
+    (document.querySelectorAll('details.inspect-evidence').forEach(d => { d.open = true; }), document.querySelector('.task-runs > summary')?.click());
     await new Promise(resolve => setTimeout(resolve, 80));
     document.querySelectorAll('.task-run > summary').forEach(summary => summary.click());
     await new Promise(resolve => setTimeout(resolve, 120));
@@ -2790,6 +2857,33 @@ assert.strictEqual(results.taskScreen, 'SC-02', 'creating a Task left the Projec
   assert.strictEqual(narrow.columns, 2, `the Task layout has ${narrow.columns} grid columns at the minimum width (rail + board; the Inspector overlays)`);
   assert.ok(narrow.selectedVisible, 'the selected Task is missing at the minimum supported width');
 }
+for (const [w, g] of Object.entries(results.inspectorGeometry)) {
+  const o = g.open;
+  assert.strictEqual(o.overflow, 0, `inspector ${w}: horizontal overflow`);
+  assert.strictEqual(o.close, 'ok', `inspector ${w}: 닫기 is ${o.close}`);
+  assert.strictEqual(o.title, 'ok', `inspector ${w}: the selected Task's name is ${o.title}`);
+  assert.strictEqual(o.status, 'ok', `inspector ${w}: the selected Task's state is ${o.status}`);
+  assert.ok(o.titleText.includes('Visual E2E Task selection') && o.statusText.trim().length > 0, `inspector ${w}: name/state text missing`);
+  if (Number(w) >= 1100) {
+    assert.strictEqual(o.sheet, false, `inspector ${w}: should sit beside the board`);
+    assert.strictEqual(o.role, 'complementary');
+    assert.strictEqual(o.tile, 'ok', `inspector ${w}: the selected tile is ${o.tile} (it must stay visible and clickable beside the Inspector)`);
+    assert.strictEqual(o.tileOverlapsInspector, false, `inspector ${w}: the Inspector overlaps the selected tile`);
+    assert.strictEqual(g.afterClose.inspect, false, `inspector ${w}: 닫기 left the Inspector open`);
+    assert.strictEqual(g.afterClose.tileSelected, 'true', `inspector ${w}: closing forgot the selected Task`);
+    assert.strictEqual(g.afterClose.focusOnTile, true, `inspector ${w}: focus did not return to the Task tile`);
+  } else {
+    assert.strictEqual(o.sheet, true, `inspector ${w}: should be a sheet`);
+    assert.strictEqual(o.role, 'dialog'); assert.strictEqual(o.modal, 'true');
+    assert.strictEqual(o.backdrop, 'block', `inspector ${w}: no backdrop`);
+    assert.strictEqual(o.focusInInspector, true, `inspector ${w}: focus did not move into the sheet`);
+    assert.strictEqual(g.tabStaysInside, true, `inspector ${w}: Tab left the sheet at press ${g.tabEscapedAt}, focus ${g.tabEscapedTo}`);
+    assert.strictEqual(g.afterEscape.inspect, false, `inspector ${w}: Escape did not close the sheet`);
+    assert.strictEqual(g.afterEscape.tileSelected, 'true', `inspector ${w}: Escape forgot the selected Task`);
+    assert.strictEqual(g.afterEscape.focusOnTile, true, `inspector ${w}: focus did not return to the Task tile`);
+    assert.strictEqual(g.afterBackdrop, false, `inspector ${w}: the backdrop did not close the sheet`);
+  }
+}
 for (const [k, m] of Object.entries(results.redesign)) {
   assert.strictEqual(m.overflow, 0, `SC-02 redesign ${k}: horizontal overflow of ${m.overflow}px`);
   assert.strictEqual(m.boardCols, 5, `SC-02 redesign ${k}: the board must keep five state columns`);
@@ -2798,7 +2892,7 @@ for (const [k, m] of Object.entries(results.redesign)) {
   assert.strictEqual(m.positiveSpacing, 0, `SC-02 redesign ${k}: ${m.positiveSpacing} text nodes still have positive letter-spacing`);
   assert.strictEqual(m.monoBody, 0, `SC-02 redesign ${k}: prose is set in monospace`);
   if (m.inspectPos) {
-    const wide = Number(k.split('-')[0]) >= 1280;
+    const wide = Number(k.split('-')[0]) >= 1100;
     assert.strictEqual(m.inspectPos === 'absolute', !wide, `SC-02 redesign ${k}: Inspector is ${m.inspectPos} (inline ≥1280, overlay below)`);
   }
   if (k.includes('-history-closed')) assert.strictEqual(m.historyOpen, false, `SC-02 redesign ${k}: history should be folded`);

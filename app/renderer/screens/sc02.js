@@ -37,6 +37,7 @@ export function renderSC02(root, api, nav, state) {
   if (state.taskProjectId !== p.id) {
     state.taskProjectId = p.id;
     state.selectedTaskId = null;
+    state.inspectDismissed = false;
   }
   state.unlinkedLive = null;
 
@@ -283,6 +284,7 @@ export function renderSC02(root, api, nav, state) {
       return;
     }
     state.selectedTaskId = created.task.id;
+    state.inspectDismissed = false;
     taskGoal.value = '';
     taskAcceptance.value = '';
     createTask.open = false;
@@ -296,12 +298,19 @@ export function renderSC02(root, api, nav, state) {
   selectedTask.setAttribute('data-el', 'selected-task');
   const detailHead = el('div', 'detail-kicker');
   detailHead.appendChild(el('span', '', C.gap.board.detail));
-  detailHead.appendChild(btn('btn sm ghost', C.term.close, () => {
-    state.selectedTaskId = null;
+  /* Closing the Inspector does NOT forget which Task is selected: the tile stays marked and the filter
+   * stays as it was, so coming back to the board is coming back to the same place. */
+  const closeInspector = () => {
+    const was = state.selectedTaskId;
+    state.inspectDismissed = true;
     syncShell();
     paintTaskList();
-    paintSelectedTask();
-  }));
+    if (was) board.querySelector(`.task-pick[data-task-id="${was}"]`)?.focus();
+  };
+  const closeBtn = btn('btn sm ghost inspect-close', C.term.close, closeInspector);
+  closeBtn.setAttribute('data-act', 'inspect-close');
+  closeBtn.title = C.gap.board.backToBoard;
+  detailHead.appendChild(closeBtn);
   colInspect.appendChild(detailHead);
   colInspect.appendChild(selectedTask);
   colInspect.appendChild(createTask);        // the selected Task comes first; writing another one is last
@@ -355,11 +364,53 @@ export function renderSC02(root, api, nav, state) {
   const consequence = el('div', 'consequence');
   consequence.setAttribute('data-el', 'consequence');
   intent.appendChild(consequence);
+  /* Below 1100 the Inspector is a side SHEET: backdrop, a labelled dialog, focus moves in and Tab stays
+   * inside, Escape/backdrop/닫기 close it and focus goes back to the Task tile it came from. At 1100+ it is
+   * a plain column next to the board (nothing is covered, nothing is trapped). */
+  const narrowQuery = window.matchMedia('(max-width: 1099px)');
+  const backdrop = el('div', 'sc02-backdrop');
+  backdrop.setAttribute('data-el', 'inspect-backdrop');
+  backdrop.addEventListener('click', () => closeInspector());
+  board.appendChild(backdrop);
+  let sheetOpen = false;
+  const focusables = () => [...colInspect.querySelectorAll('button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])')]
+    .filter((node) => !node.disabled && node.offsetParent !== null);
+  colInspect.addEventListener('keydown', (e) => {
+    if (!sheetOpen) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeInspector(); return; }
+    if (e.key !== 'Tab') return;
+    const nodes = focusables();
+    if (!nodes.length) return;
+    const first = nodes[0]; const last = nodes[nodes.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  /* Whatever the browser's own Tab order does, focus that would leave the open sheet is brought back to it. */
+  let lastTabBack = false;
+  const keepFocusIn = (e) => {
+    if (!board.isConnected) { document.removeEventListener('focusin', keepFocusIn); document.removeEventListener('keydown', noteTab, true); return; }
+    if (!sheetOpen || colInspect.contains(e.target)) return;
+    const nodes = focusables();
+    (lastTabBack ? nodes[nodes.length - 1] : nodes[0])?.focus();
+  };
+  const noteTab = (e) => { if (e.key === 'Tab') lastTabBack = e.shiftKey; };
+  document.addEventListener('focusin', keepFocusIn);
+  document.addEventListener('keydown', noteTab, true);
   const syncShell = () => {
-    board.classList.toggle('is-inspect', Boolean(state.selectedTaskId));
+    const open = Boolean(state.selectedTaskId) && !state.inspectDismissed;
+    const sheet = open && narrowQuery.matches;
+    board.classList.toggle('is-inspect', open);
+    board.classList.toggle('is-sheet', sheet);
+    colInspect.setAttribute('role', sheet ? 'dialog' : 'complementary');
+    if (sheet) colInspect.setAttribute('aria-modal', 'true'); else colInspect.removeAttribute('aria-modal');
+    colInspect.setAttribute('aria-label', C.gap.board.detail);
+    if (sheet && !sheetOpen) setTimeout(() => closeBtn.focus(), 0);
+    sheetOpen = sheet;
     board.classList.toggle('composer-open', Boolean(state.composerOpen) || consequence.childNodes.length > 0 || draft.hidden === false);
   };
   new MutationObserver(syncShell).observe(consequence, { childList: true });
+  const onWidth = () => { if (!board.isConnected) narrowQuery.removeEventListener('change', onWidth); else syncShell(); };
+  narrowQuery.addEventListener('change', onWidth);
   field.addEventListener('input', () => { paintDraft(); syncShell(); });
   syncShell();
 
@@ -464,6 +515,7 @@ export function renderSC02(root, api, nav, state) {
     const selected = task.id === state.selectedTaskId;
     const row = btn(`task-pick tile tone-${tone}${selected ? ' selected' : ''}${executing ? ' is-live' : ''}`, '', () => {
       state.selectedTaskId = task.id;
+      state.inspectDismissed = false;
       syncShell();
       paintTaskList();
       paintSelectedTask();
@@ -535,7 +587,7 @@ export function renderSC02(root, api, nav, state) {
         head.appendChild(primary);
       }
     }
-    if (latest) selectedTask.appendChild(attemptLineCompact(latest, bits));
+    if (latest && latest.work?.status !== 'ended') selectedTask.appendChild(attemptLineCompact(latest, bits));   // an ended Run is told by its result, not twice
     if (latest?.permission && latest.status === 'permission_waiting') {
       selectedTask.appendChild(inspectPermission(latest, api, refreshTasks));
     } else if (latest?.status === 'input_waiting') {
@@ -569,7 +621,14 @@ export function renderSC02(root, api, nav, state) {
       }
       check.appendChild(renderRunReview(task, result, refreshTasks, nav));
       context.appendChild(meta);
-      selectedTask.appendChild(inspectTabs([
+      /* The Run comparison, the Agent's own words and every Evidence record are the ORIGINAL record. They
+       * stay whole, one fold below the result; a Run still in progress keeps them open (that is its content). */
+      const evidenceFold = el('details', 'inspect-sec inspect-evidence');
+      evidenceFold.setAttribute('data-el', 'inspect-evidence');
+      evidenceFold.open = !ended;
+      evidenceFold.appendChild(el('summary', 'inspect-sec-sum', C.gap.board.evidenceFold));
+      selectedTask.appendChild(evidenceFold);
+      evidenceFold.appendChild(inspectTabs([
         { id: 'activity', label: C.gap.board.tabActivity, panel: activity, on: !ended },
         { id: 'check', label: C.gap.board.tabCheck, panel: check, on: ended },
         { id: 'context', label: C.gap.board.tabContext, panel: context, on: false },
@@ -627,6 +686,7 @@ export function renderSC02(root, api, nav, state) {
       const created = await api.taskCreate(p.id, { goal: text.trim(), acceptanceCriteria: criteria });
       if (!created?.ok) { draftNote.textContent = C.gap.task.draftFailed; return; }
       state.selectedTaskId = created.task.id;
+    state.inspectDismissed = false;
       criteriaDirty = false;
       await refreshTasks();
       await startWork(text, created.task.id, window.crypto.randomUUID(), true);
@@ -641,7 +701,7 @@ export function renderSC02(root, api, nav, state) {
     if (!text.trim()) return;
     /* The route can wait for the user. Freeze the Task at submit time so changing selection
      * while that choice is open cannot attach this request to a different Task. */
-    const submittedTaskId = state.selectedTaskId ?? null;
+    const submittedTaskId = state.inspectDismissed ? null : (state.selectedTaskId ?? null);
     const idempotencyKey = submittedTaskId ? window.crypto.randomUUID() : null;
     consequence.innerHTML = '';
     submit.disabled = true;
@@ -987,26 +1047,36 @@ function inspectInput(snap, api) {
 }
 
 function inspectResult(snap, nav) {
+  /* Order: what is known now, which files changed, what to do next -- then one fold holding everything
+   * the Agent said and every command, test and source. Nothing is dropped; the fold is the original. */
   const box = el('div', 'inspect-result');
   box.setAttribute('data-el', 'inspect-result');
   box.appendChild(el('div', 'inspect-result-title', outcomeKorean(snap.work?.outcome) ?? C.work.unknownTitle));
   const evidence = snap.runEvidence ?? [];
   const changed = evidence.find((item) => item.kind === 'changed_files');
   const files = changed?.details?.known === true ? (changed.details.files ?? []) : null;
-  box.appendChild(el('div', 'xs mut2', C.gap.task.observedCount(evidence.length)));
-  if (files?.length) box.appendChild(el('div', 'sm', C.gap.board.filesChanged(files.length)));
-  else box.appendChild(el('div', 'sm', changed ? C.gap.task.noChanges : C.gap.task.humanObservedMissing));
+  if (files?.length) {
+    box.appendChild(el('div', 'sm', C.gap.board.filesChanged(files.length)));
+    box.appendChild(fileSummary(files));
+  } else {
+    box.appendChild(el('div', 'sm', changed ? C.gap.task.noChanges : C.gap.task.humanObservedMissing));
+  }
+  box.appendChild(el('div', 'xs mut2 inspect-next', C.gap.task.nextStep));
+
+  const more = el('details', 'inspect-sec inspect-more');
+  more.setAttribute('data-el', 'inspect-more');
+  more.appendChild(el('summary', 'inspect-sec-sum', C.gap.task.contextDetail));
+  more.appendChild(el('div', 'xs mut2', C.gap.task.observedCount(evidence.length)));
   const tests = evidence.filter((item) => item.kind === 'test_command');
   if (tests.length) {
-    box.appendChild(el('div', 'sm', tests.map((item) => `${item.summary} · ${testStateLabel(item)}`).join('\n')));
+    more.appendChild(el('div', 'sm', tests.map((item) => `${item.summary} · ${testStateLabel(item)}`).join('\n')));
   } else {
-    box.appendChild(el('div', 'sm', C.gap.task.humanTestNone));
+    more.appendChild(el('div', 'sm', C.gap.task.humanTestNone));
   }
   const report = (snap.result?.claims ?? []).find((claim) => claim.kind === 'agent-report');
   const said = typeof report?.data?.text === 'string' ? report.data.text.trim() : '';
-  box.appendChild(el('div', 'xs mut2', C.gap.task.humanAgent));
-  box.appendChild(el('div', 'sm', said || C.gap.task.humanAgentNone));
-  if (files?.length) box.appendChild(fileSummary(files));
+  more.appendChild(el('div', 'xs mut2', C.gap.task.humanAgent));
+  more.appendChild(el('div', 'sm', said || C.gap.task.humanAgentNone));
   const tools = (snap.result?.claims ?? []).find((claim) => claim.kind === 'tools-observed');
   const sources = (snap.result?.claims ?? []).filter((claim) => claim.sourceRef);
   if (sources.length || (Number.isInteger(tools?.data?.count) && tools.data.count > 0)) {
@@ -1019,8 +1089,9 @@ function inspectResult(snap, nav) {
     for (const claim of sources) {
       fold.appendChild(el('div', 'xs mut2 src', claim.sourceRef));
     }
-    box.appendChild(fold);
+    more.appendChild(fold);
   }
+  box.appendChild(more);
   return box;
 }
 

@@ -75,7 +75,8 @@ test('a routed request keeps the Task selected at submit time', () => {
   assert.ok(sendStart >= 0 && startWorkStart > sendStart && workStreamStart > startWorkStart);
   const send = source.slice(sendStart, startWorkStart);
   const startWork = source.slice(startWorkStart, workStreamStart);
-  assert.match(send, /const submittedTaskId = state\.selectedTaskId \?\? null/);
+  assert.match(send, /const submittedTaskId = state\.inspectDismissed \? null : \(state\.selectedTaskId \?\? null\)/,
+    'the Task is frozen at submit time, and a Task whose Inspector was closed is not attached');
   assert.match(send, /startWork\(text, submittedTaskId, idempotencyKey\)/,
     'deferred route actions must carry the Task selected when Send was pressed');
   assert.match(startWork, /api\.workStart\(p\.id, text, taskId, idempotencyKey\)/);
