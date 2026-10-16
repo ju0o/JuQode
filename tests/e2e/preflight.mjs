@@ -17,6 +17,20 @@ const electronBin = path.join(ROOT, 'node_modules', 'electron', 'dist', process.
 const electronPresent = fs.existsSync(electronBin);
 if (!electronPresent) blockers.push('the Electron binary is not installed in this checkout (node node_modules/electron/install.js; nothing was downloaded by this check)');
 if (plan.mode === 'refused') blockers.push(plan.reason);
+/* Windows: a process in Session 0 (an SSH/service session) is NOT attached to the user's desktop, whatever the
+ * consent says -- Session 0 isolation. Windows opened there are invisible to the person and prove nothing
+ * about a desktop run. The session id must belong to the session that runs the desktop shell (explorer.exe). */
+let session = null;
+if (process.platform === 'win32') {
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+    "$me=(Get-Process -Id $PID).SessionId; $d=@(Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId }); \"$me|$($d -join ',')\""], { encoding: 'utf8' });
+  const [me, desk] = String(r.stdout || '').trim().split('|');
+  session = { id: Number(me), desktopSessions: (desk || '').split(',').filter(Boolean).map(Number) };
+  session.interactive = Number.isInteger(session.id) && session.desktopSessions.includes(session.id);
+  if (plan.visible && !session.interactive) {
+    blockers.push(`this process runs in Windows session ${session.id}, not in a desktop session (${session.desktopSessions.join(',') || 'none'}): windows would not appear on the user's desktop (Session 0 isolation). Run it from a terminal opened ON the desktop`);
+  }
+}
 if (plan.visible && !plan.consent) blockers.push(`real windows would open on this desktop; needs ${VISIBLE_CONSENT}=yes from the person at the screen`);
 
 const golden = path.join('docs', 'dev-evidence', 'screens');
@@ -26,6 +40,7 @@ const host = (process.env.JUQODE_E2E_HOST || process.platform).replace(/[^A-Za-z
 const report = {
   host: { platform: process.platform, release: os.release(), wsl: Boolean(process.env.WSL_DISTRO_NAME), label: host },
   display: plan,
+  windowsSession: session,
   willOpenVisibleWindows: plan.visible,
   consentGiven: plan.consent,
   data: {
