@@ -146,6 +146,13 @@ if (fs.existsSync(${JSON.stringify(path.join(DB_DIR, 'task-run'))})) {
   const attempt = (fs.existsSync(attemptFile) ? Number(fs.readFileSync(attemptFile, 'utf8')) : 0) + 1;
   fs.writeFileSync(attemptFile, String(attempt));
   fs.writeFileSync(attempt === 1 ? 'src/task-run.js' : 'src/retry-task-run.js', 'export const dogfoodFixture = true;\\n');
+  if (attempt === 2) {
+    /* same file name in two folders, a long Korean path and a fifth file: the shapes the SC-02 file summary has to tell apart */
+    for (const extra of ['src/a/index.js', 'src/b/index.js', 'src/util/helper.js', 'docs/아주_긴_한글_폴더_이름/세부_자료_정리/최종_검토본/작업_결과_요약.md']) {
+      fs.mkdirSync(require('node:path').dirname(extra), { recursive: true });
+      fs.writeFileSync(extra, 'fixture\\n');
+    }
+  }
   const taskRunEvents = [
     { type: 'system', subtype: 'init', session_id: 'task-run-session-' + attempt, cwd: process.cwd(), claude_code_version: '9.9.9' },
     { type: 'assistant', message: { content: [

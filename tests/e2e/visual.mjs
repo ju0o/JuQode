@@ -1110,6 +1110,10 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
 
   step('history');
   await sleep(1200);                       // the list is filled by an async read of the store
+  /* SC-02 redesign: the history is collapsed by default and says only how many; a person opens it to read rows */
+  out.historyCollapsed = await evalJs(`(() => { const d = document.querySelector('details.rail-history'); return d ? { open: d.open, sum: d.querySelector('summary').innerText } : null; })()`);
+  await evalJs(`(() => { const d = document.querySelector('details.rail-history'); if (d && !d.open) d.querySelector('summary').click(); })()`);
+  await sleep(300);
   out.historyRows   = await evalJs(`document.querySelectorAll('[data-el="history-row"]').length`);
   out.historyText   = await evalJs(`document.querySelector('[data-card="history"]')?.innerText ?? null`);
   out.historyReds   = await evalJs(RED_COUNT('[data-card="history"], [data-card="history"] *'));
@@ -1833,6 +1837,9 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
    * 빈 read model 이 이 분기를 그냥 지나쳐, 아무것도 없는 읽기면이 그려진다 — 사용자에게는
    * "바꾼 게 없다" 는 말 대신 **빈 화면**이 남는다. */
   step('SC-04 empty');
+  /* the rail's history is collapsed by default (SC-02 redesign): a person opens it first, so the test does too */
+  await evalJs(`(() => { const d = document.querySelector('details.rail-history'); if (d && !d.open) d.querySelector('summary').click(); })()`);
+  await sleep(300);
   await evalJs(`[...document.querySelectorAll('[data-el="history-row"]')]
     .find(r => r.innerText.includes('남은 버튼도 고쳐줘'))
     ?.querySelectorAll('button')?.forEach(b => { if (b.textContent.trim() === '변경 보기') b.click(); })`);
@@ -2534,6 +2541,58 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   out.taskRunScreenAfterReturn = await evalJs('window.__screen()');
   out.taskRunDetail = await evalJs(`(async () => JSON.stringify(await window.juqode.taskDetail(${JSON.stringify(taskId)})))()`);
   out.taskRunHistoryText = await evalJs(`document.querySelector('.task-run-review')?.innerText ?? null`);
+
+  /* ── SC-02 redesign matrix (PM design brief): adaptive shell × history × inspector × theme ──────────────
+   * A long Korean Task is added so a long name has to wrap on the board. The selected Task is the one
+   * with Run #2, whose changed files are five (two share a file name, one has a long Korean path). */
+  step('SC-02 redesign matrix');
+  await evalJs(`window.juqode.taskCreate(window.__project().id, { goal: '설정 화면에서 알림 수신 여부를 바꾸면 곧바로 저장되고 다시 열어도 같은 값이 보이도록 고치고 관련 문구도 함께 정리해 주세요', acceptanceCriteria: [{ text: '알림 설정이 저장돼요' }] })`);
+  await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click()`);
+  await sleep(500);
+  out.redesign = {};
+  for (const [w, h] of [[880, 600], [1024, 700], [1200, 773], [1440, 900]]) {
+    await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+    for (const theme of ['light', 'dark']) {
+      await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+      const cases = [
+        ['inspect-history-closed', { inspect: true, history: false }],
+        ['inspect-history-open', { inspect: true, history: true }],
+        ['no-inspect-history-closed', { inspect: false, history: false }],
+      ];
+      for (const [name, c] of cases) {
+        if (c.inspect && !(await evalJs(`Boolean(document.querySelector('.sc02.is-inspect'))`))) {
+          await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click() ?? document.querySelector('.task-pick')?.click()`);
+        }
+        if (!c.inspect && (await evalJs(`Boolean(document.querySelector('.sc02.is-inspect'))`))) {
+          await evalJs(`[...document.querySelectorAll('.sc02-inspect button')].find(b => b.textContent.trim() === '닫기')?.click()`);
+        }
+        await evalJs(`(() => { const d = document.querySelector('details.rail-history'); if (d && d.open !== ${c.history}) d.querySelector('summary').click(); })()`);
+        await sleep(300);
+        const key = `${w}-${theme}-${name}`;
+        out.redesign[key] = await evalJs(`(() => {
+          const q = (s) => document.querySelector(s);
+          const main = q('.sc02-main'), rail = q('.sc02-rail'), insp = q('.sc02-inspect');
+          const cols = [...document.querySelectorAll('.sc02 .board-col')].map((n) => Math.round(n.getBoundingClientRect().width));
+          const mainBox = main.getBoundingClientRect();
+          const textNodes = [...document.querySelectorAll('.sc02 *')].filter((n) => n.childNodes.length && [...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim()));
+          const sizes = textNodes.map((n) => parseFloat(getComputedStyle(n).fontSize));
+          const spaced = textNodes.filter((n) => parseFloat(getComputedStyle(n).letterSpacing) > 0.01).length;
+          return { overflow: document.documentElement.scrollWidth - innerWidth, mainWidth: Math.round(mainBox.width),
+            columns: getComputedStyle(q('.sc02')).gridTemplateColumns.split(' ').length, boardCols: cols.length, minBoardCol: Math.min(...cols),
+            inspectPos: q('.sc02.is-inspect') ? getComputedStyle(insp).position : null, inspectWidth: q('.sc02.is-inspect') ? Math.round(insp.getBoundingClientRect().width) : 0,
+            railWidth: Math.round(rail.getBoundingClientRect().width), minFont: Math.min(...sizes), positiveSpacing: spaced,
+            historyOpen: Boolean(q('details.rail-history')?.open),
+            monoBody: [...document.querySelectorAll('.sc02 .task-prompt, .sc02 .inspect-title, .sc02 .histname')].filter((n) => /mono/i.test(getComputedStyle(n).fontFamily)).length };
+        })()`);
+        const shot = await send('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(path.join(OUT, `sc02-redesign-${w}-${name}-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+      }
+    }
+  }
+  await send('Emulation.clearDeviceMetricsOverride');
+  await evalJs(`document.documentElement.setAttribute('data-theme','light')`);
+  await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click()`);
+  await sleep(300);
   /* Changing the criterion after Run #1 was reviewed must not display that old verdict as if
    * it reviewed the new wording. The old criterion and verdict remain attached to Run #1. */
   out.taskCriterionEditUi = await evalJs(`(async () => {
@@ -2727,8 +2786,22 @@ assert.strictEqual(results.taskScreen, 'SC-02', 'creating a Task left the Projec
   const narrow = JSON.parse(results.taskNarrow);
   assert.strictEqual(narrow.viewport, 880, 'Task responsive capture did not use the minimum supported width');
   assert.strictEqual(narrow.overflow, 0, `the Task screen overflows horizontally by ${narrow.overflow}px at 880px`);
-  assert.strictEqual(narrow.columns, 1, `the Task layout remains ${narrow.columns} columns at the minimum width`);
+  /* adaptive shell: below 1280 the Inspector overlays the board instead of taking a third column, so the five-state board is not squeezed */
+  assert.strictEqual(narrow.columns, 2, `the Task layout has ${narrow.columns} grid columns at the minimum width (rail + board; the Inspector overlays)`);
   assert.ok(narrow.selectedVisible, 'the selected Task is missing at the minimum supported width');
+}
+for (const [k, m] of Object.entries(results.redesign)) {
+  assert.strictEqual(m.overflow, 0, `SC-02 redesign ${k}: horizontal overflow of ${m.overflow}px`);
+  assert.strictEqual(m.boardCols, 5, `SC-02 redesign ${k}: the board must keep five state columns`);
+  assert.ok(m.minBoardCol >= 100, `SC-02 redesign ${k}: a board column is ${m.minBoardCol}px, squeezed`);
+  assert.ok(m.minFont >= 12, `SC-02 redesign ${k}: text of ${m.minFont}px is below the 12px floor`);
+  assert.strictEqual(m.positiveSpacing, 0, `SC-02 redesign ${k}: ${m.positiveSpacing} text nodes still have positive letter-spacing`);
+  assert.strictEqual(m.monoBody, 0, `SC-02 redesign ${k}: prose is set in monospace`);
+  if (m.inspectPos) {
+    const wide = Number(k.split('-')[0]) >= 1280;
+    assert.strictEqual(m.inspectPos === 'absolute', !wide, `SC-02 redesign ${k}: Inspector is ${m.inspectPos} (inline ≥1280, overlay below)`);
+  }
+  if (k.includes('-history-closed')) assert.strictEqual(m.historyOpen, false, `SC-02 redesign ${k}: history should be folded`);
 }
 assert.strictEqual(results.taskRunScreen, 'SC-03', 'the Task-linked fixture Agent did not enter the Run surface');
 assert.strictEqual(results.taskRetryScreen, 'SC-03', 'the explicit retry did not create another Run surface');
@@ -3895,6 +3968,8 @@ assert.ok(!/juqode-synthetic-fixture-marker/.test(results.evidenceGap),
 assert.strictEqual(results.evidenceGapReds, 0, 'the evidence-gap card renders red — it is not a failure');
 
 /* ── History · WBS-20 ─────────────────────────────────────────────────────────────────── */
+assert.ok(results.historyCollapsed && results.historyCollapsed.open === false, 'the rail history must start collapsed');
+assert.ok(/\d/.test(results.historyCollapsed.sum), `the collapsed history summary must carry a count: ${results.historyCollapsed.sum}`);
 assert.ok(results.historyRows >= 1, 'a Work ended and History shows no row');
 assert.ok(!results.historyText.includes('아직 끝난 작업이 없어요'),
   'History claims it is empty while holding a row');
