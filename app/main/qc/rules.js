@@ -308,4 +308,9 @@ const FILE_MUTATING = new Set([
 
 const mutatesProjectFiles = (ruleId) => FILE_MUTATING.has(ruleId);
 
-module.exports = { match, normalize, RULES, ruleById, mutatesProjectFiles, FILLERS, ENDINGS, SYNONYMS };
+/* The ONLY runs that may be called read-only: the fixed rule AND its fixed command, with a start time. Anything else -- another rule, an
+ * unknown rule id, a command that is not exactly the fixed one, a run with no recorded start -- is treated as able to write. */
+const READ_ONLY_COMMANDS = new Map([['qc.git.status', 'git status --porcelain=v1 --branch']]);
+const isReadOnlyRun = (row) => Boolean(row && READ_ONLY_COMMANDS.get(row.rule_id ?? row.ruleId) === row.command && (row.started_at ?? row.startedAt));
+
+module.exports = { match, normalize, RULES, ruleById, mutatesProjectFiles, isReadOnlyRun, FILLERS, ENDINGS, SYNONYMS };

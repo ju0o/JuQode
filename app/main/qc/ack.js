@@ -16,6 +16,16 @@ const DIR = 'qc-ack';
 const SCHEMA = 1;
 
 const digestOf = (rec) => { const { digest, ...rest } = rec; return crypto.createHash('sha256').update(JSON.stringify(rest), 'utf8').digest('hex'); };
+/** sha256 of the Stop evidence file a run refers to, or null when there is none / it cannot be read as a plain file */
+function evidenceSha(root, ref) {
+  if (!ref || !root) return null;
+  try {
+    const realRoot = fs.realpathSync(root);
+    const f = path.join(realRoot, String(ref).replace(/^evidence:/, ''));
+    if (!inside(realRoot, f) || fs.lstatSync(f).isSymbolicLink()) return null;
+    return crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+  } catch { return null; }
+}
 const inside = (root, p) => { const r = path.relative(root, p); return r !== '' && !r.startsWith('..') && !path.isAbsolute(r); };
 
 /** The ack directory, only if it is a real directory inside the real evidence root. */
@@ -31,7 +41,7 @@ function safeDir(root, { create = false } = {}) {
 }
 
 /** @returns {{ok:true, record:object, file:string}|{ok:false, reason:string}} */
-function verifyFile(file, run) {
+function verifyFile(file, run, opts = {}) {
   let st;
   try { st = fs.lstatSync(file); } catch { return { ok: false, reason: 'missing' }; }
   if (st.isSymbolicLink() || !st.isFile()) return { ok: false, reason: 'not-a-regular-file' };
@@ -43,7 +53,21 @@ function verifyFile(file, run) {
   if (rec.projectId !== run.project_id) return { ok: false, reason: 'other-project' };
   if (rec.confirmedBy !== 'user') return { ok: false, reason: 'not-user' };
   if (typeof rec.confirmedAt !== 'string' || Number.isNaN(Date.parse(rec.confirmedAt))) return { ok: false, reason: 'timestamp' };
-  if (rec.before?.status !== 'unknown') return { ok: false, reason: 'before-status' };
+  const b = rec.before;
+  if (!b || typeof b !== 'object') return { ok: false, reason: 'no-before' };
+  /* the record must describe THIS run exactly as the row is now (a row never changes after it is `unknown`; any difference is a different run or tampering) */
+  if (b.status !== 'unknown' || run.status !== 'unknown') return { ok: false, reason: 'before-status' };
+  if (b.command !== run.command) return { ok: false, reason: 'command-differs' };
+  if ((b.exitCode ?? null) !== (run.exit_code ?? null)) return { ok: false, reason: 'exit-code-differs' };
+  if ((b.runnerPid ?? null) !== (run.runner_pid ?? null)) return { ok: false, reason: 'pid-differs' };
+  if ((b.runnerStartedAt ?? null) !== (run.runner_started_at ?? null)) return { ok: false, reason: 'start-differs' };
+  if ((b.stopEvidenceRef ?? null) !== (run.output_ref ?? null)) return { ok: false, reason: 'evidence-ref-differs' };
+  /* records written since the Stop evidence digest was added also pin the CONTENT of the evidence they were made against;
+   * earlier records (same schema, no digest field) are accepted on the fields above only -- see the README compatibility note */
+  if ('stopEvidenceSha256' in b) {
+    const now = evidenceSha(opts.root, run.output_ref);
+    if (b.stopEvidenceSha256 !== now) return { ok: false, reason: 'evidence-content-changed' };
+  }
   if (typeof rec.digest !== 'string' || rec.digest !== digestOf(rec)) return { ok: false, reason: 'digest' };
   return { ok: true, record: rec, file };
 }
@@ -54,7 +78,7 @@ function hasAck(root, run) {
     const dir = safeDir(root);
     if (!dir) return false;
     return fs.readdirSync(dir).filter((n) => n === `${run.id}.json` || n.startsWith(`${run.id}.`) && n.endsWith('.json'))
-      .some((n) => verifyFile(path.join(dir, n), run).ok);
+      .some((n) => verifyFile(path.join(dir, n), run, { root }).ok);
   } catch { return false; }
 }
 
@@ -63,14 +87,16 @@ function writeAck(root, run, { now = new Date().toISOString() } = {}) {
   try {
     const dir = safeDir(root, { create: true });
     if (hasAck(root, run)) {
-      const n = fs.readdirSync(dir).find((x) => (x === `${run.id}.json` || x.startsWith(`${run.id}.`)) && verifyFile(path.join(dir, x), run).ok);
+      const n = fs.readdirSync(dir).find((x) => (x === `${run.id}.json` || x.startsWith(`${run.id}.`)) && verifyFile(path.join(dir, x), run, { root }).ok);
       return { ok: true, existing: true, ref: `evidence:${DIR}/${n}` };
     }
     const rec = {
       schema: SCHEMA, runId: run.id, projectId: run.project_id, confirmedAt: now, confirmedBy: 'user',
       statement: 'the user confirmed that every process this Quick Command started has ended',
       before: { status: run.status, exitCode: run.exit_code ?? null, stopEvidenceRef: run.output_ref ?? null,
-                runnerPid: run.runner_pid ?? null, runnerStartedAt: run.runner_started_at ?? null, command: run.command },
+                runnerPid: run.runner_pid ?? null, runnerStartedAt: run.runner_started_at ?? null, command: run.command,
+                stopEvidenceSha256: evidenceSha(root, run.output_ref) },
+      source: 'ipc:qc-ack-stopped',
       heldBecause: run.heldBecause ?? null,
     };
     rec.digest = digestOf(rec);
@@ -84,7 +110,7 @@ function writeAck(root, run, { now = new Date().toISOString() } = {}) {
       try { fs.linkSync(tmp, final); }                              // atomic and refuses to replace anything
       catch (e) { fs.unlinkSync(tmp); if (e.code === 'EEXIST') continue; throw e; }
       fs.unlinkSync(tmp);
-      if (!verifyFile(final, run).ok) return { ok: false, reason: 'ack-not-verified' };    // what was written must read back as valid
+      if (!verifyFile(final, run, { root }).ok) return { ok: false, reason: 'ack-not-verified' };    // what was written must read back as valid
       return { ok: true, existing: false, ref: `evidence:${DIR}/${name}` };
     }
     return { ok: false, reason: 'ack-not-recorded', detail: 'no free name' };

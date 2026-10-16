@@ -35,6 +35,12 @@ const stranded = (b, { pid = 4242, status = 'unknown', projectId = b.project.id,
   if (status !== 'long_running') b.db.prepare('update quick_command_run set status = ?, ended_at = ? where id = ?').run(status, new Date().toISOString(), id);
   return id;
 };
+/* a COMPLETE Stop record, as the stopper writes it for a Stop that re-checked and found nothing alive */
+const completeStop = (id, over = {}, topOver = {}) => ({ runId: id, recordedAt: new Date(Date.now() + 1000).toISOString(), stop: {
+  requested: true, requestedAt: new Date().toISOString(), attempts: 1, root: 'not-terminated', taskkill: { status: 255, error: null }, fallback: { used: true, sent: false },
+  snapshot: { root: { pid: 4242, created: 'T' }, descendants: 0 }, descendants: 'none', platform: 'win32', members: [], uncertain: false,
+  verdict: 'stop-unconfirmed', observedExit: { code: 1, signal: null }, timings: { snapshotMs: 5, taskkillMs: 5, survivorsMs: 5 }, ...over }, ...topOver });
+const putStop = (b, id, rec) => { const rel = path.join('qc-stop', `${id}.json`); fs.mkdirSync(path.join(b.evidence, 'qc-stop'), { recursive: true }); fs.writeFileSync(path.join(b.evidence, rel), typeof rec === 'string' ? rec : JSON.stringify(rec)); b.db.prepare('update quick_command_run set output_ref = ? where id = ?').run(`evidence:qc-stop/${id}.json`, id); };
 const gate = async (h, projectId) => ({
   build: (await h['juqode:qc-run'](null, projectId, 'qc.build', 'b')).reason ?? 'allowed',
   work: (await h['juqode:work-start'](null, projectId, 'x')).reason ?? 'allowed',
@@ -79,7 +85,7 @@ test('A: a Stop-evidence file that cannot be trusted (directory, symlink, outsid
   const mk = (ref) => { const id = stranded(b); b.db.prepare('update quick_command_run set output_ref = ? where id = ?').run(ref, id); return id; };
   fs.mkdirSync(path.join(b.evidence, 'qc-stop', 'dir.json'), { recursive: true });
   fs.writeFileSync(path.join(b.evidence, 'qc-stop', 'broken.json'), '{"stop": ');
-  fs.writeFileSync(path.join(b.evidence, 'qc-stop', 'clear.json'), JSON.stringify({ stop: { requested: true, uncertain: false } }));
+  fs.writeFileSync(path.join(b.evidence, 'qc-stop', 'clear.json'), JSON.stringify({ stop: { requested: true, uncertain: false } }));   // bare: proves nothing
   const outside = path.join(tmp('juqode-outside-'), 'x.json'); dirs.push(path.dirname(outside));
   fs.writeFileSync(outside, JSON.stringify({ stop: { requested: true, uncertain: false } }));
   const ids = { dir: mk('evidence:qc-stop/dir.json'), broken: mk('evidence:qc-stop/broken.json'), missing: mk('evidence:qc-stop/none.json'),
@@ -90,8 +96,8 @@ test('A: a Stop-evidence file that cannot be trusted (directory, symlink, outsid
   const heldIds = held.map((x) => x.runId);
   for (const k of ['dir', 'broken', 'missing', 'escape']) assert.ok(heldIds.includes(ids[k]), `${k}: evidence that cannot be trusted released the run`);
   if (link) assert.ok(heldIds.includes(link), 'a symlinked evidence file was trusted');
-  assert.ok(!heldIds.includes(ids.clear), 'a plain, complete record saying "nothing alive" still counts');
-  assert.ok(held.filter((x) => x.runId !== ids.clear).every((x) => x.needsAck), 'untrusted evidence must need the user, not a snapshot');
+  assert.ok(heldIds.includes(ids.clear), 'a bare {"stop":{"uncertain":false}} released the run');
+  assert.ok(held.every((x) => x.needsAck), 'untrusted evidence must need the user, not a snapshot');
 });
 
 /* ───────────── B · no LIMIT in the safety query ───────────── */

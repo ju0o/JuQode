@@ -14,6 +14,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { hasAck } = require('./ack');
+const { validate: validateStop } = require('./stop-proof');
+const { isReadOnlyRun } = require('./rules');
 
 const inside = (root, p) => { const r = path.relative(root, p); return r !== '' && !r.startsWith('..') && !path.isAbsolute(r); };
 
@@ -66,15 +68,15 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
 
 /** The Stop evidence of a row, read only from a regular file inside the evidence root. {ok:true, stop|null} | {ok:false} */
 function readStop(root, ref) {
-  if (!ref) return { ok: true, stop: null };
+  if (!ref) return { ok: true, rec: null };
   try {
     const realRoot = fs.realpathSync(root);
     const file = path.join(realRoot, String(ref).replace(/^evidence:/, ''));
     if (!inside(realRoot, file)) return { ok: false, why: 'outside-store' };
     const st = fs.lstatSync(file);
     if (st.isSymbolicLink() || !st.isFile() || !inside(realRoot, fs.realpathSync(file))) return { ok: false, why: 'not-a-plain-file' };
-    const stop = JSON.parse(fs.readFileSync(file, 'utf8'))?.stop;
-    return stop && typeof stop === 'object' ? { ok: true, stop } : { ok: false, why: 'no-stop-record' };
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return rec && typeof rec === 'object' ? { ok: true, rec } : { ok: false, why: 'no-record' };
   } catch (e) { return { ok: false, why: String(e?.code ?? e?.message ?? e) }; }
 }
 
@@ -90,18 +92,19 @@ function readStop(root, ref) {
 function restore({ rows, root, registry }) {
   const out = [];
   for (const r of rows) {
-    if (registry.has(r.id) || hasAck(root, r)) continue;
+    /* a read-only run (the fixed `git status`) cannot have changed a file; everything else, and anything not provably that, can */
+    if (registry.has(r.id) || isReadOnlyRun(r) || hasAck(root, r)) continue;
     const read = readStop(root, r.output_ref);
-    const stop = read.ok ? read.stop : null;
-    /* The Stop looked again after the kill and found nothing alive: nothing to hold. Only a readable, complete record can say so. */
-    if (stop && stop.uncertain === false && r.status === 'unknown') continue;
     const info = { command: r.command, startedAt: r.started_at };
-    if (stop && stop.uncertain === true && Array.isArray(stop.members) && stop.members.length) {
-      registry.add(r.id, r.project_id, stop.members, { ...info, why: 'stop-uncertain' });
+    const proof = read.ok && read.rec ? validateStop(read.rec, r) : { kind: 'untrusted', why: read.ok ? 'no-stop-record' : read.why };
+    /* The Stop looked again after the kill and found nothing alive -- and the record is complete and agrees with the row. Only then. */
+    if (proof.kind === 'clear' && r.status === 'unknown') continue;
+    if (proof.kind === 'members') {
+      registry.add(r.id, r.project_id, proof.members, { ...info, why: 'stop-uncertain' });
     } else {
-      /* never finished (crash/quit), no verdict on survivors, or evidence that cannot be trusted: only the user's confirmation lifts it */
+      /* never finished, no record, or a record that is incomplete/contradictory: nothing may be inferred; only the user lifts it */
       registry.add(r.id, r.project_id, [{ pid: r.runner_pid ?? null, created: null }].filter((m) => m.pid), {
-        ...info, needsAck: true, why: !read.ok ? 'evidence-unreadable' : (stop ? 'stop-unverified' : 'never-finished') });
+        ...info, needsAck: true, why: !read.ok ? 'evidence-unreadable' : (read.rec ? 'evidence-incomplete' : 'never-finished') });
     }
     out.push(r.id);
   }

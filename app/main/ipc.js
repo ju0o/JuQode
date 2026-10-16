@@ -415,7 +415,7 @@ function makeHandlers(deps) {
           endedAt: res.endedAt, stoppedAt: res.state === 'stopped' ? res.endedAt : null,
           outputRef: saveStopEvidence(projectId, runId, res.stop),
         });
-        if (res.state === 'unknown' && res.stop?.uncertain) qcUncertain.add(runId, projectId, res.stop.members, { command: avail.data.command, startedAt: handle.startedAt, why: 'stop-uncertain', needsAck: !Array.isArray(res.stop.members) || !res.stop.members.length });
+        if (res.state === 'unknown' && res.stop?.uncertain && !qcRules.isReadOnlyRun({ rule_id: ruleId, command: avail.data.command, started_at: handle.startedAt })) qcUncertain.add(runId, projectId, res.stop.members, { command: avail.data.command, startedAt: handle.startedAt, why: 'stop-uncertain', needsAck: !Array.isArray(res.stop.members) || !res.stop.members.length });
         deps.pushQc?.({ runId, projectId, ruleId, ...res, ended: true });
       /* The store can be closed before a child settles (quit races the last exit), and an
        * unhandled rejection in the main process is a crash. The row is left un-ended, which

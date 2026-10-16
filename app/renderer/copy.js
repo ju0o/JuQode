@@ -430,7 +430,7 @@ export const C = {
       recorded: (n) => `${n}건의 확인을 기록했어요.`,
       stillHeld: (n) => `아직 막혀 있는 실행 ${n}건`,
       skippedNote: '기록하지 못한 실행이 있어요. 목록을 새로 보고 다시 골라 주세요.',
-      reason: { 'stop-uncertain': '멈추려 했지만 끝난 것을 확인하지 못했어요', 'stop-unverified': '멈춘 뒤 남은 프로세스를 확인하지 못했어요', 'never-finished': '끝나는 것을 보지 못한 채 앱이 닫혔어요', 'evidence-unreadable': '멈춤 기록을 읽을 수 없어요' },
+      reason: { 'stop-uncertain': '멈추려 했지만 끝난 것을 확인하지 못했어요', 'stop-unverified': '멈춘 뒤 남은 프로세스를 확인하지 못했어요', 'never-finished': '끝나는 것을 보지 못한 채 앱이 닫혔어요', 'evidence-unreadable': '멈춤 기록을 읽을 수 없어요', 'evidence-incomplete': '멈춤 기록이 불완전하거나 서로 맞지 않아요' },
       writerRunning: '파일을 바꾸는 명령이 실행 중이에요. 끝난 뒤에 시작해 주세요.',
       restoreTitle: '이전 실행 기록을 확인하지 못해서 새 작업과 파일을 바꾸는 명령을 막고 있어요',
       restoreBody: (why) => `사유: ${why}`,
