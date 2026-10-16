@@ -15,6 +15,7 @@ import { mountThemeToggle } from '../design/theme.js';
 import { presenceCard, modeFor } from '../presence.js';
 import { nextActions } from '../nextaction.js';
 import { contextFacts } from '../human-read.mjs';
+import { fileSummary } from '../file-summary.js';
 
 /* The schema's outcome codes → the class that paints them and `18`'s own title key.
  * `cancelled_nochange` is a NEUTRAL chip (`15`): the 사용 불가 grey means "지금 안 됨 · 실패
@@ -159,7 +160,7 @@ export function stateChip(snap) {
  * is happening now. `18` §0.2 bans 생각 중 · 거의 다 · 곧, and `15` bans the spinner outright.
  */
 function liveness(snap) {
-  const row = el('div', 'liveness');
+  const row = el('div', snap.status === 'ended' ? 'liveness is-past' : 'liveness');
   row.setAttribute('data-el', 'liveness');
   const seen = snap.lastObserved;
   /* `15` No-Step State (M-08): the state EVERY Work starts in, and it is not silent — the
@@ -474,46 +475,74 @@ function testStateLabel(item) {
   return C.gap.task.evidenceUnknown;
 }
 
-function labeled(label, text) {
-  const row = el('div', 'result-voice');
-  row.append(el('div', 'xs mut2', label), el('div', 'sm', text));
-  return row;
-}
-
-/* The result's first reading: what JuQode recorded, then what Claude said.
- * Claim chips stay below this. They are the precise record, not the headline. */
+/* The result's first reading: what JuQode OBSERVED changed, as names -- not paths, not a transcript.
+ * What Claude said, the commands and the raw record are folded below (`resultFolds`). A returned test
+ * command is never called a pass: only an exit code that was actually observed is counted, and the
+ * count says "observed", not "passed". */
 function humanResult(snap) {
   const block = el('div', 'result-human');
   block.setAttribute('data-el', 'result-human');
-  const report = (snap.result?.claims ?? []).find((claim) => claim.kind === 'agent-report');
-  const said = typeof report?.data?.text === 'string' ? report.data.text.trim() : '';
-  /* A Task Run's truth is run_evidence. A Work that is not a Task Run has no such rows;
-     its changed-file claim is a different record, and "0개" would deny that claim. */
+  let files = null;      // null = the evidence did not answer
   if (snap.work?.task_id) {
+    /* A Task Run's truth is run_evidence. A Work that is not a Task Run has no such rows;
+       its changed-file claim is a different record, and "0개" would deny that claim. */
     const evidence = snap.runEvidence ?? [];
-    block.appendChild(el('div', 'sm result-count', C.gap.task.observedCount(evidence.length)));
     const changed = evidence.find((item) => item.kind === 'changed_files');
-    if (changed) {
-      const files = changed.details?.files ?? [];
-      block.appendChild(labeled(C.gap.task.humanObserved, files.length ? files.join('\n') : C.gap.task.noChanges));
-    } else {
-      block.appendChild(labeled(C.gap.task.humanObserved, C.gap.task.humanObservedMissing));
-    }
+    files = changed?.details?.known === true ? (changed.details.files ?? []) : null;
+    if (!files) block.appendChild(el('div', 'sm', changed ? C.gap.task.noChanges : C.gap.task.humanObservedMissing));
     const tests = evidence.filter((item) => item.kind === 'test_command');
-    if (tests.length) {
-      block.appendChild(labeled(C.gap.task.humanTest, tests.map((item) => `${item.summary} · ${testStateLabel(item)}`).join('\n')));
-    } else {
-      block.appendChild(labeled(C.gap.task.humanTest, C.gap.task.humanTestNone));
-    }
+    const seen = tests.filter((item) => item.details?.result_state === 'returned' && item.details.exit_code != null).length;
+    block.appendChild(el('div', 'xs mut2 result-tests', tests.length ? C.gap.result.testsLead(tests.length, seen) : C.gap.task.humanTestNone));
   } else {
     const changed = (snap.result?.claims ?? []).find((claim) => claim.kind === 'changed-files');
-    if (changed) {
-      const files = changed.data?.files ?? [];
-      block.appendChild(labeled(C.gap.task.humanObserved, files.length ? files.join('\n') : C.work.noChanges));
-    }
+    if (changed) files = changed.data?.files ?? [];
   }
-  block.appendChild(labeled(C.gap.task.humanAgent, said || C.gap.task.humanAgentNone));
+  if (files?.length) {
+    block.prepend(el('div', 'sm result-count', C.gap.result.filesCount(files.length)), fileSummary(files));
+  } else if (files) {
+    block.prepend(el('div', 'sm result-count', snap.work?.task_id ? C.gap.task.noChanges : C.work.noChanges));
+  }
   return block;
+}
+
+/* Claude's own words, the commands/tests, and the claim chips with their sources: all kept, none of it first. */
+function resultFolds(snap) {
+  const out = [];
+  const report = (snap.result?.claims ?? []).find((claim) => claim.kind === 'agent-report');
+  const said = typeof report?.data?.text === 'string' ? report.data.text.trim() : '';
+  const agent = el('details', 'result-fold result-agent');
+  agent.setAttribute('data-el', 'result-agent');
+  agent.appendChild(el('summary', 'xs mut', C.gap.result.agentFold));
+  agent.appendChild(el('div', 'sm result-said', said || C.gap.task.humanAgentNone));
+  out.push(agent);
+
+  const evidence = snap.runEvidence ?? [];
+  const tests = evidence.filter((item) => item.kind === 'test_command');
+  if (tests.length) {
+    const disclosure = el('details', 'result-fold run-evidence');
+    disclosure.appendChild(el('summary', 'xs mut', `${C.gap.result.commandsFold} · ${tests.length}`));
+    for (const item of tests) {
+      const row = el('div', 'run-evidence-row');
+      row.appendChild(el('div', 'xs', item.summary));
+      row.appendChild(el('div', 'xs mut2', `${testStateLabel(item)}${item.details.exit_code == null ? '' : ` · Exit code ${item.details.exit_code}`}`));
+      if (item.details.output_excerpt) row.appendChild(el('pre', 'run-evidence-output', item.details.output_excerpt));
+      if (item.details.command_redacted || item.details.output_redacted) row.appendChild(el('div', 'xs mut2', C.gap.task.redactedContent));
+      disclosure.appendChild(row);
+    }
+    out.push(disclosure);
+  }
+
+  /* the chips + their source keys (`signals:tool_result` ...) stay, two folds deep: the raw record, not the reading */
+  const claims = (snap.result?.claims ?? []).filter((c) => c.kind !== 'agent-report');
+  if (claims.length || evidence.length) {
+    const raw = el('details', 'result-fold result-evidence');
+    raw.setAttribute('data-el', 'result-evidence');
+    raw.appendChild(el('summary', 'xs mut', C.gap.result.evidenceFold));
+    if (evidence.length) raw.appendChild(el('div', 'xs mut2', C.gap.task.observedCount(evidence.length)));
+    for (const c of claims) raw.appendChild(claimRow(c));
+    out.push(raw);
+  }
+  return out;
 }
 
 /**
@@ -545,7 +574,7 @@ function claimText(c) {
   const d = c.data ?? {};
   switch (c.kind) {
     case 'changed-files':
-      return d.files?.length ? `${C.gap.claimChanged} ${d.files.length} · ${d.files.join(' · ')}` : C.work.noChanges;
+      return d.files?.length ? `${C.gap.claimChanged} ${d.files.length}` : C.work.noChanges;
     case 'changes-unknown': return C.gap.claimUnknown;
     case 'tools-observed':  return `${C.gap.claimTools} ${d.count}`;
     case 'agent-report':    return d.text ?? '';
@@ -563,33 +592,6 @@ function resultCard(snap, api, nav, state) {
   card.appendChild(head(outcomeTitle(snap.outcome),
     el('span', `chip ${OUTCOME[snap.outcome]?.cls ?? 'unk'}`, outcomeTitle(snap.outcome))));
   card.appendChild(humanResult(snap));
-
-  /* WBS-18 · every claim carries its own chip, and a 확인됨 one names the evidence it rests
-   * on (D-114, `18` §0.9). The chip is per CLAIM, never per card — a single chip over a mixed
-   * list would be asserting one confidence for several different things. */
-  for (const c of snap.result?.claims ?? []) card.appendChild(claimRow(c));
-  const evidence = snap.runEvidence ?? [];
-  if (evidence.length) {
-    const disclosure = el('details', 'run-evidence');
-    disclosure.appendChild(el('summary', 'xs mut', `${C.gap.task.testEvidence} · ${evidence.length}`));
-    for (const item of evidence) {
-      const row = el('div', 'run-evidence-row');
-      row.appendChild(el('div', 'xs', item.kind === 'test_command' ? item.summary : C.gap.task.changedFiles));
-      if (item.kind === 'changed_files') {
-        const files = item.details.files ?? [];
-        row.appendChild(el('div', 'xs mut2', files.length ? files.join(' · ') : C.gap.task.noChanges));
-      } else {
-        const state = testStateLabel(item);
-        row.appendChild(el('div', 'xs mut2', `${state}${item.details.exit_code == null ? '' : ` · Exit code ${item.details.exit_code}`}`));
-        if (item.details.output_excerpt) row.appendChild(el('pre', 'run-evidence-output', item.details.output_excerpt));
-        if (item.details.command_redacted || item.details.output_redacted) {
-          row.appendChild(el('div', 'xs mut2', C.gap.task.redactedContent));
-        }
-      }
-      disclosure.appendChild(row);
-    }
-    card.appendChild(disclosure);
-  }
 
   /* 부분 완료 needs both lists (`15`): what was done, and what was not. */
   const done = (snap.result?.items ?? []).filter((i) => i.kind === 'done');
@@ -612,16 +614,19 @@ function resultCard(snap, api, nav, state) {
    * So the heading is drawn whenever the outcome is a 부분 one, and when there is nothing
    * measured to put under it, it says so in `18`'s own word. */
   const isPartial = snap.outcome === 'partial' || snap.outcome === 'cancelled_partial';
+  /* A finished Work already named its changed files in the lead; naming them again under 한 것 is the duplicate this
+   * redesign removes. A 부분 outcome still shows both lists (`15`), and a list with files the lead could not show stays. */
+  const leadNamedFiles = Boolean(card.querySelector('.result-human .inspect-files'));
   if (done.length || (isPartial && notDone.length)) {
     const box = el('div', 'itemlist');
     box.setAttribute('data-el', 'done');
     box.appendChild(el('div', 'xs mut2', C.work.done));
     if (done.length) {
-      box.appendChild(el('div', 'sm mono', (done[0].data?.files ?? []).join(' · ')));
+      box.appendChild(fileSummary(done[0].data?.files ?? []));
     } else {
       box.appendChild(el('span', 'chip unk', C.brief.chips.no));
     }
-    card.appendChild(box);
+    if (isPartial || !leadNamedFiles) card.appendChild(box);
   }
 
   /* `15` SC-03 Remaining-unknown (UF-REMAIN-UNKNOWN) — dashed, never red.
@@ -669,6 +674,7 @@ function resultCard(snap, api, nav, state) {
     btn('btn sm', C.work.toBench, () => nav.toWorkbench(state.project, state.interpretation)),
   ]);
   card.appendChild(acts);
+  for (const fold of resultFolds(snap)) card.appendChild(fold);
 
   card.appendChild(el('div', 'xs mut2 foot', C.rules.noRollback));
   return card;

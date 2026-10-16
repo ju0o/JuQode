@@ -25,7 +25,8 @@ import { el, btn } from '../dom.js';
 import { proposeDraft, compareRuns } from '../draft.mjs';
 import { columnFor, tileTone } from '../board-column.mjs';
 import { contextFacts } from '../human-read.mjs';
-import { presentFiles, maskForDisplay } from '../path-view.mjs';
+import { maskForDisplay } from '../path-view.mjs';
+import { fileSummary } from '../file-summary.js';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
@@ -1101,41 +1102,6 @@ function changedFilesOf(snap) {
   return changed?.details?.known === true ? (changed.details.files ?? []) : [];
 }
 
-/* Human summary of the changed files: the NAMES first (a folder hint only where two names collide),
- * a "외 n개" instead of a long list, and the exact stored paths one click away. Nothing here says what
- * a file is for -- a name is not evidence of meaning. The Raw Diff stays behind `변경 읽기`. */
-function fileSummary(files) {
-  const view = presentFiles(files);
-  const wrap = el('div', 'inspect-files');
-  wrap.setAttribute('data-el', 'inspect-files');
-  wrap.appendChild(el('div', 'xs mut2', C.gap.task.changedFiles));
-  const chips = el('div', 'file-chips');
-  const LIMIT = 4;
-  for (const item of view.items.slice(0, LIMIT)) {
-    const chip = el('span', 'file-chip', item.shown);
-    chip.title = maskForDisplay(item.raw);
-    chips.appendChild(chip);
-  }
-  if (view.count > LIMIT) chips.appendChild(el('span', 'file-more', C.gap.paths.more(view.count - LIMIT)));
-  wrap.appendChild(chips);
-  const all = el('details', 'file-all');
-  all.appendChild(el('summary', 'xs mut', C.gap.paths.showAll));
-  const list = el('div', 'file-paths');
-  for (const item of view.items) {
-    const row = el('div', 'file-path-row');
-    row.appendChild(el('span', 'file-path', maskForDisplay(item.raw)));
-    const copy = btn('btn sm ghost file-copy', C.gap.paths.copy, async () => {
-      try { await navigator.clipboard.writeText(item.raw); copy.textContent = C.gap.paths.copied; } catch { /* clipboard unavailable */ }
-    });
-    row.appendChild(copy);
-    list.appendChild(row);
-  }
-  list.appendChild(el('div', 'xs mut2', C.gap.paths.exactNote));
-  all.appendChild(list);
-  wrap.appendChild(all);
-  return wrap;
-}
-
 function inspectActivity(snap) {
   const node = el('div', 'inspect-activity');
   const seen = snap.lastObserved;
@@ -1865,6 +1831,13 @@ function refusalCard(r, api, nav, state, project, { phrase = '', resubmit = null
     n.appendChild(el('div', 'sm t', C.gap.task.retryRequired));
     const retry = document.querySelector('.task-retry');
     if (retry) { retry.open = true; retry.scrollIntoView({ block: 'nearest' }); }
+    return n;
+  }
+
+  if (reason === 'prior-process-may-still-live') {
+    const n = el('div', 'panel unk');
+    n.setAttribute('data-el', 'prior-process');
+    n.appendChild(el('div', 'sm', C.gap.task.retryProcessStillLive));
     return n;
   }
 

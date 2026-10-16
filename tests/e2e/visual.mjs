@@ -304,6 +304,46 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   const samplePanels = async (where) =>
     out.panelSamples.push(`${where}|` + await evalJs(PANELS));
 
+  /* SC-03 D2: the same screen state at the four supported widths x both themes. Records what a reader sees
+   * (the VISIBLE text only -- a closed <details> renders nothing) and whether the layout holds. Restores the viewport. */
+  out.sc03d2 = {};
+  const sc03Matrix = async (tag) => {
+    const { w: w0, h: h0 } = JSON.parse(await evalJs('JSON.stringify({ w: innerWidth, h: innerHeight })'));
+    const theme0 = await evalJs(`document.documentElement.getAttribute('data-theme') || ''`);
+    const rows = [];
+    for (const [w, h] of [[880, 600], [1024, 700], [1200, 773], [1440, 900]]) {
+      await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ['light', 'dark']) {
+        await evalJs(`document.documentElement.setAttribute('data-theme','${theme}')`);
+        await evalJs(`document.querySelectorAll('.sc03 [data-card="result"] details').forEach(d => { d.open = false; })`);   // the default reading, whatever an earlier check opened
+        await sleep(250);
+        const m = JSON.parse(await evalJs(`(() => {
+          const root = document.querySelector('.sc03');
+          const visible = (n) => { for (let p = n; p && p !== root; p = p.parentElement) if (p.tagName === 'DETAILS' && !p.open && !(n.tagName === 'SUMMARY' && n.parentElement === p)) return false; return true; };
+          const text = [...root.querySelectorAll('*')].filter((n) => n.children.length === 0 && n.textContent.trim() && visible(n)).map((n) => n.textContent).join('\\n');
+          const small = [...root.querySelectorAll('*')].filter((n) => n.children.length === 0 && n.textContent.trim() && visible(n) && parseFloat(getComputedStyle(n).fontSize) < 12).length;
+          const card = root.querySelector('[data-card="result"]') ?? root.querySelector('[data-card="work"]');
+          return JSON.stringify({
+            overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            clipped: [...root.querySelectorAll('.card')].filter((n) => n.scrollHeight > n.clientHeight + 1 && getComputedStyle(n).overflow !== 'visible').length,
+            small, rawKeyVisible: /signals:|claude:result/.test(text),
+            pathRepeats: (text.match(/index\\.js/g) ?? []).length,
+            cardHeight: card ? Math.round(card.getBoundingClientRect().height) : null,
+            primary: [...root.querySelectorAll('.btn.pri')].filter(visible).length,
+            buttons: [...root.querySelectorAll('button')].filter(visible).map((b) => b.textContent.trim()).filter(Boolean),
+            visibleLines: text.split('\\n').filter(Boolean).length });
+        })()`));
+        rows.push({ w, theme, ...m });
+        const shot = await send('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(path.join(OUT, `sc03-d2-${tag}-${w}-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+      }
+    }
+    await send('Emulation.setDeviceMetricsOverride', { width: w0, height: h0, deviceScaleFactor: 1, mobile: false });
+    await evalJs(`document.documentElement.setAttribute('data-theme','${theme0}')`);
+    await sleep(150);
+    out.sc03d2[tag] = rows;
+  };
+
   out.ready  = await evalJs('window.__ready === true');
   out.screen = await evalJs('window.__screen()');
 
@@ -694,6 +734,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(OUT, `sc03-permission-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
+  await sc03Matrix('permission');
 
   /* the guard: a second submit while this Work is open must be refused, not queued */
   step('guard');
@@ -865,6 +906,8 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
         ? (content.filter(b => b?.type === 'tool_result').length || 1)
         : (Array.isArray(p?.all) && p.all.length ? p.all.length : 1);
     }
+    const fold = document.querySelector('[data-el="result-evidence"]');
+    if (fold) fold.open = true;                       // the raw record is folded since D2; the claim must still be there
     const row = document.querySelector('[data-claim="tools-observed"]');
     const src = row?.querySelector('details');
     if (src) src.open = true;
@@ -903,6 +946,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(OUT, `sc03-result-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
+  await sc03Matrix('result-complete');
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
   await sleep(200);
 
@@ -1716,6 +1760,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(path.join(OUT, `sc03-quiet-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
+  await sc03Matrix('quiet');
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
 
   /* ② 취소 요청했어요 — `15` DS §1: ONE cancel, ink-outlined, with its fixed sub-line. */
@@ -1767,7 +1812,11 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await sleep(2500);
   out.partialWork = await evalJs('JSON.stringify(window.__work())');
   await samplePanels('partial');
+  await sc03Matrix('unknown-partial');
+  /* the raw record is folded since D2 (it is present, one click away): open it so the card text still contains every claim */
+  await evalJs(`document.querySelectorAll('.sc03 [data-card="result"] details').forEach(d => { d.open = true; })`);
   out.partialCard = await evalJs(`document.querySelector('.sc03 [data-card="result"]')?.innerText ?? null`);
+  await evalJs(`document.querySelectorAll('.sc03 [data-card="result"] details').forEach(d => { d.open = false; })`);
   out.partialDone = await evalJs(`document.querySelector('.sc03 [data-el="done"]')?.innerText ?? null`);
   out.partialNotDone = await evalJs(`document.querySelector('.sc03 [data-el="not-done"]')?.innerText ?? null`);
   out.partialReds = await evalJs(RED_COUNT('.sc03 [data-card="result"], .sc03 [data-card="result"] *'));
@@ -4126,6 +4175,27 @@ assert.strictEqual(results.overlaps, 0, 'two cards are drawn on top of each othe
 assert.ok(results.sc03Times && results.sc03Times.includes('시작'), `header times: ${results.sc03Times}`);
 assert.ok(results.sc03About && results.sc03About.includes('이 작업에 대해'), `right rail: ${results.sc03About}`);
 assert.strictEqual(results.sc03RawCollapsed, true, '기술 출력 보기 must be collapsed by default (A-11)');
+
+fs.writeFileSync(path.join(OUT, 'sc03-d2-metrics.json'), JSON.stringify(results.sc03d2, null, 2));
+/* SC-03 D2 (design): measured at 880/1024/1200/1440 x light/dark on the real screen, in the states the run produced. */
+for (const [tag, rows] of Object.entries(results.sc03d2)) {
+  assert.strictEqual(rows.length, 8, `${tag}: expected 4 widths x 2 themes`);
+  for (const r of rows) {
+    const at = `SC-03 ${tag} @${r.w} ${r.theme}`;
+    assert.strictEqual(r.overflowX, 0, `${at}: page scrolls sideways`);
+    assert.strictEqual(r.clipped, 0, `${at}: a card clips its content`);
+    assert.strictEqual(r.small, 0, `${at}: visible text under 12px`);
+    assert.strictEqual(r.rawKeyVisible, false, `${at}: a raw provider key (signals:/claude:result) is visible without opening anything`);
+    assert.ok(r.primary <= 1, `${at}: ${r.primary} primary buttons -- one next action is emphasised`);
+  }
+}
+{
+  const done = results.sc03d2['result-complete'];
+  for (const r of done) {
+    assert.strictEqual(r.primary, 1, `result-complete @${r.w} ${r.theme}: the next action is not the single emphasised one`);
+    assert.ok(r.pathRepeats <= 2, `result-complete @${r.w} ${r.theme}: the same file path is repeated ${r.pathRepeats} times in the visible text`);
+  }
+}
 {
   /* 열 때 한 번만 읽는다 — 두 번째 열기는 이미 있는 것을 그대로 둔다. */
   const once = JSON.parse(results.sc03RawOnce);

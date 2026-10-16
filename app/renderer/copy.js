@@ -418,6 +418,14 @@ export const C = {
       claudeActivity: 'Claude 활동',
       retryShort: '다시 시도',
     },
+    /* SC-03 result: the order is the result, the changed files, ONE next action, then the folded record. */
+    result: {
+      agentFold: 'Agent 원문',
+      commandsFold: '명령과 테스트',
+      evidenceFold: '근거와 원본 기록',
+      testsLead: (n, seen) => `테스트 명령 ${n}개 · 종료 코드를 관측한 것 ${seen}개`,
+      filesCount: (n) => `바뀐 파일 ${n}개`,
+    },
     /* DG-11 · PM approved the WBS workflow before Canon 18 was updated. Keep its visible copy
      * explicitly marked as a Canon gap until the source dictionary adopts these strings. */
     task: {

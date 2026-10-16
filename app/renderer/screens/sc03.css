@@ -63,7 +63,7 @@
 .sc03 .run-context, .sc03 .run-evidence { border-top: 1px solid var(--line); padding-top: 7px; }
 .sc03 .run-context summary, .sc03 .run-evidence summary { cursor: pointer; }
 .sc03 .run-context[open], .sc03 .run-evidence[open] { display: flex; flex-direction: column; gap: 7px; }
-.sc03 .run-context-prompt, .sc03 .run-evidence-output { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 var(--font-mono); color: var(--ink2); }
+.sc03 .run-context-prompt, .sc03 .run-evidence-output { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-caption)/1.5 var(--font-mono); color: var(--ink2); }
 .sc03 .run-evidence-row { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
 
 /* the liveness line — a fact and a time, and nothing that moves on its own */
@@ -90,7 +90,7 @@
 
 .sc03 .steps { display: flex; flex-direction: column; gap: 4px; }
 .sc03 .step { display: flex; align-items: baseline; gap: 8px; }
-.sc03 .step .mark { font-size: 11px; width: 12px; color: var(--mut); }
+.sc03 .step .mark { font-size: var(--fs-caption); width: 12px; color: var(--mut); }
 .sc03 .step.done .mark { color: var(--rec); }
 .sc03 .step.running .mark { color: var(--claude); }
 .sc03 .step.not_executed { color: var(--mut2); }
@@ -109,13 +109,13 @@
   margin-top: 4px;
   display: flex; flex-direction: column; gap: 2px;
 }
-.sc03 .nextslot .nlabel { color: var(--claude); font-weight: 600; letter-spacing: 0; font-size: 11px; }
+.sc03 .nextslot .nlabel { color: var(--claude); font-weight: 600; letter-spacing: 0; font-size: var(--fs-caption); }
 .sc03 .unknownline { border-left: 1px dashed var(--unk); padding-left: 8px; }
 
 .sc03 .rawout {
   margin: 0; padding: 10px 12px; max-height: 320px; overflow: auto;
   background: var(--grey); border-radius: var(--r-inner);
-  font-family: var(--font-mono); font-size: 11px; line-height: 16px;
+  font-family: var(--font-mono); font-size: var(--fs-caption); line-height: 16px;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
@@ -123,7 +123,9 @@
    있었다 — 950 px 창에서 칼럼 하나가 145 px 다. sc02 와 같은 경계로 맞춘다. 1024 는 e2e 가
    같은 서열을 요구하며 재는 폭이므로 건드리지 않는다. */
 @media (max-width: 1023px) {
-  .sc03 { grid-template-columns: minmax(0, 1fr); height: auto; overflow: auto; }
+  .sc03 { grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; align-content: start; height: auto; overflow: auto; }
+  /* one reading column: the page scrolls, not two little panes inside it (D2) */
+  .sc03-stage, .sc03-side { overflow: visible; }
   .sc03 .c-l, .sc03 .c-wide, .sc03 .c-m { grid-column: auto; grid-row: auto; }
   .sc03-side { border-left: none; border-top: 1px solid var(--line); }
 }
@@ -146,7 +148,7 @@
 .sc03 [data-card="presence"] .foot {
   flex: 1 1 140px;
   margin: 0; padding: 0;
-  font-size: 11px; line-height: 15px;
+  font-size: var(--fs-caption); line-height: 16px;
 }
 
 /* label · value rows: the label must not run into the value it introduces */
@@ -168,7 +170,7 @@
 .sc03 .claim .chip { flex: 0 0 auto; }
 .sc03 .claim .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .sc03 .claim .body > * { overflow-wrap: anywhere; }
-.sc03 .claim .src { font-family: var(--font-mono); font-size: 10px; }
+.sc03 .claim .src { font-family: var(--font-mono); font-size: var(--fs-caption); }
 .sc03 .claude-activity > summary,
 .sc03 .about-more > summary,
 .sc03 .claim-source > summary { cursor: pointer; color: var(--mut); }
@@ -181,3 +183,42 @@
 /* A chip is a LABEL, so it is as wide as its word. In a flex COLUMN it would otherwise stretch
  * to the card and read as a band — which is a different thing in `16` §2.1's grammar. */
 .sc03 .itemlist .chip { align-self: flex-start; }
+
+/* the same changed-file summary SC-02's Inspector shows (file-summary.js) */
+.sc03 .inspect-files { display: flex; flex-direction: column; gap: 2px; }
+.sc03 .file-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sc03 .file-chip { max-width: 100%; padding: 2px 8px; border-radius: 6px; background: var(--card2); font-size: var(--fs-caption); overflow-wrap: anywhere; }
+.sc03 .file-more { font-size: var(--fs-caption); color: var(--mut); align-self: center; }
+.sc03 .file-all { margin-top: 6px; }
+.sc03 .file-all > summary { cursor: pointer; font-size: var(--fs-caption); color: var(--ink2); min-height: 28px; display: flex; align-items: center; }
+.sc03 .file-paths { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sc03 .file-path-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sc03 .file-path { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-caption); overflow-wrap: anywhere; color: var(--ink2); }
+.sc03 .file-all > summary::before { content: "▸"; margin-right: 6px; }
+.sc03 .file-all[open] > summary::before { content: "▾"; }
+.sc03 .file-all > summary::-webkit-details-marker { display: none; }
+
+/* result folds: Claude's words, the commands, the raw record -- present, one click away, never the first reading */
+.sc03 .result-fold { border-top: 1px solid var(--line); padding-top: 6px; }
+.sc03 .result-fold > summary { cursor: pointer; min-height: 28px; display: flex; align-items: center; color: var(--ink2); }
+.sc03 .result-fold[open] { display: flex; flex-direction: column; gap: 6px; }
+.sc03 .result-said { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sc03 .result-human { gap: 6px; }
+.sc03 .result-evidence .claim { padding-top: 4px; }
+
+/* D2: the reading is the result; clock times and the "evidence established" fact are quiet, one muted line each */
+.sc03 .times { gap: 4px 12px; }
+.sc03 .times .fieldrow { font-size: var(--fs-caption); color: var(--mut2); gap: 4px; }
+.sc03 .times .fieldrow .k { font-weight: 500; }
+.sc03 .routeline { gap: 6px; font-size: var(--fs-caption); color: var(--mut2); }
+.sc03-side .card { padding-bottom: 8px; }
+.sc03 [data-card="result"] .row-acts, .sc03 [data-card="result"] [data-el="next-actions"] { margin-top: 2px; }
+
+/* Canon chip is 11px; PM decision B (D1.1) allows the 12px floor, which SC-03 now keeps too */
+.sc03 .chip, .sc03 .chip::before { font-size: var(--fs-caption); }
+.sc03 .result-fold > summary::before, .sc03 .inspect-more > summary::before { content: "▸"; margin-right: 6px; }
+.sc03 .result-fold[open] > summary::before { content: "▾"; }
+.sc03 .result-fold > summary::-webkit-details-marker { display: none; }
+/* an ended Work's "last seen" line is history, not status */
+.sc03 .liveness.is-past { padding: 2px 0; border-top: none; }
+.sc03 .liveness.is-past * { font-size: var(--fs-caption); color: var(--mut2); }
