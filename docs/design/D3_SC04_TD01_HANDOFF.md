@@ -71,3 +71,25 @@ Layout: ≥ 1200 summary + list left, code right, Raw below the code (full width
 ## Tests the Batch must bring
 Unit: source scan that SC-04 prints files via `presentFiles` only; a Raw-only path exists for each of 단위화 불가 / 설명 불가 / binary.
 Real screen (`screenMatrix`, generalised from `sc03Matrix`): 880/1024/1200/1440 × light/dark × {explained group, 단위화 불가, binary, unknown remainder, evidence gap}: overflow 0, text ≥ 12 px, Raw text absent from the visible text until opened, selected group keeps focus after fold toggle, Tab order summary → list → code → Raw → actions; H3 WSLg visible run + ASUS Xvfb; Before/After in a new Private evidence directory.
+
+---
+
+# Addendum (D3 / SC-04 done) — TD-01 implementation scope, confirmed against `td01.js` (643 lines)
+
+Status: **proposal; not implemented.** SC-04 shipped in `d32c1ca` (summary → names → selected code → Raw on request); this is the next Batch.
+
+## What exists
+`mountDrawer` → `renderDrawer`: a non-closable banner, then two stacked regions. `qcRegion`: label + hint, the Quick Command input, then ONE of `routeCard` (what the phrase meant, before running), `runCard` (state chip + command + exit code + last 3 output lines + 더 보기), `discoverCard` (every rule with its reason). `termRegion`: label, `term-limits` line (no TTY / no colour), output box, `$` input.
+Facts already true and to keep: `unknown` is shown as 확인 불가 and is never rewritten; Stop is a request (`stopped-requested` chip) until observed; masked output; the shell line is the one place that runs what the user typed.
+
+## Scope (in this order)
+1. **명령 입력** — the two inputs stay put and focus returns to the one just used after a run / Esc. The Quick Command input is primary; the shell line is secondary (collapsed to one row until focused).
+2. **실행 결과** — `runCard` leads with the state chip, the observed exit code (never inferred), a one-line "what ran" (rule name; the argv is detail) and the last lines of output. `unknown` / uncertain-Stop and the restore-failure / hold panel (`qc-hold`, per-run confirmation) are never folded and stay dashed, never red/green.
+3. **안전 안내** — the limits banner and `term-limits` become ONE compact line (full text on demand); the Writer-gate sentences (`prior-run-unknown`, `qc-restore-failed`, `qc-writer-running`) sit next to the commands they block.
+4. **세부 출력** — full masked output, the argv, Stop evidence (taskkill status, snapshot, survivors, timings) and `이 Run의 확인 기록` folded behind one control (`details`), closed by default, keyboard-openable; paths in output masked for display only.
+
+## Must be preserved
+Output text is bytes the program wrote (masked only for tokens); copy copies the stored text; no new outcome enum; Stop semantics and the hold/ack records of the P0 work; the terminal toggle on every screen; the drawer's per-project lifetime.
+
+## Tests the Batch must bring
+`screenMatrix` on the real drawer (synthetic runs through the real renderer, as SC-04 D3 did): 880/1024/1200/1440 × light/dark × {ok, failed, stopped-requested, stopped, unknown, running dev server, unavailable rule, hold panel, restore failure}: no sideways scroll, text ≥ 12 px, 150 % zoom, real Tab order input → result → safety → details, Esc/focus return, long Korean command and 200-char output line; H3 WSLg visible run + ASUS Xvfb; Before/After in a new Private evidence directory.

@@ -159,3 +159,4 @@
 .sc04-actor { font-size: var(--fs-caption); }
 .sc04 { overflow-x: hidden; }
 @media (max-width: 1099px) { .sc04 { padding: 16px 16px 32px; } }
+.sc04-summary { padding: 14px 16px; }
