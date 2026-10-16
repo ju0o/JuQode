@@ -7,7 +7,7 @@ const path = require('node:path');
 const R = path.resolve(__dirname, '..');
 
 test('changedFilesState tells missing / unknown / zero / files apart', async () => {
-  const { changedFilesState } = await import(path.join(R, 'app/renderer/human-read.mjs'));
+  const { changedFilesState } = await import(require('node:url').pathToFileURL(path.join(R, 'app/renderer/human-read.mjs')).href);
   const row = (details) => ({ id: 'e1', kind: 'changed_files', details });
   assert.strictEqual(changedFilesState(undefined).state, 'missing');
   assert.strictEqual(changedFilesState([{ kind: 'test_command', details: {} }]).state, 'missing', 'a test row is not a changed-files answer');
