@@ -889,7 +889,7 @@ test('a running dev server makes 켜기 사용 불가 and 끄기 가능 — from
     const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
-  assert.strictEqual(row.status, 'stopped', 'a stopped server was recorded as finished');
+  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify(row).slice(0, 700)}`);
 });
 
 test('the discoverability list names every rule and why each cannot run', () => {
@@ -984,7 +984,7 @@ test('개발 서버 꺼줘 signals the server JuQode started', async () => {
     const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
-  assert.strictEqual(row.status, 'stopped', 'a stopped server was recorded as finished');
+  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify(row).slice(0, 700)}`);
   assert.ok(row.stopped_at, '`20` keeps stopped_at for a run that was signalled');
 });
 
