@@ -30,96 +30,134 @@ const tools = (o = {}) => {
 };
 const stopperFor = (child, t, windows = true) => createStopper({ child, windows, tools: t, now: () => 'T' });
 
-test('Windows: taskkill succeeded and the whole observed tree is gone -> stopped, with the proof recorded', () => {
+test('Windows: taskkill succeeded and the whole observed tree is gone -> stopped, with the proof recorded', async () => {
   const child = handle(); const t = tools(); const s = stopperFor(child, t);
   assert.strictEqual(s.request(() => {}), true);
-  const end = s.finalize({ code: 1, signal: null });
+  const end = await s.finalize({ code: 1, signal: null });
   assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.root, end.stop.descendants], ['stopped', 'stopped-tree-observed', 'terminated-by-taskkill', 'none']);
   assert.deepStrictEqual(t.calls.taskkill, [4242], 'taskkill must address only the owned pid');
   assert.deepStrictEqual(t.calls.survivors, [[5001, 5002]]);
 });
 
-test('Windows: the run ended by itself BEFORE the request got in (handle already exited) -> its own result, never a stop', () => {
+test('Windows: the run ended by itself BEFORE the request got in (handle already exited) -> its own result, never a stop', async () => {
   for (const [code, want] of [[0, 'ok'], [1, 'failed']]) {
     const child = handle({ exitCode: code }); const t = tools(); const s = stopperFor(child, t);
     assert.strictEqual(s.request(() => {}), false);
-    const end = s.finalize({ code, signal: null });
+    const end = await s.finalize({ code, signal: null });
     assert.strictEqual(end.state, want, `exit ${code} after a late Stop was reported as ${end.state}`);
     assert.strictEqual(end.stop.verdict, 'ended-before-stop-took-effect');
     assert.deepStrictEqual(t.calls.taskkill, [], 'a pid that already exited was addressed');
   }
 });
 
-test('Windows: taskkill says "not found" (128): it ended by itself in the race -> failed/ok by its own code, NOT stopped', () => {
+test('Windows: taskkill says "not found" (128): it ended by itself in the race -> failed/ok by its own code, NOT stopped', async () => {
   for (const [code, want] of [[1, 'failed'], [0, 'ok'], [7, 'failed']]) {
     const s = stopperFor(handle(), tools({ taskkill: { status: 128, error: null } }));
     s.request(() => {});
-    const end = s.finalize({ code, signal: null });
+    const end = await s.finalize({ code, signal: null });
     assert.deepStrictEqual([end.state, end.stop.verdict], [want, 'ended-before-stop-took-effect'], `code ${code}`);
   }
 });
 
-test('Windows: taskkill FAILS -> the owned handle is asked to end it; a signal from that is a stop, no signal is not', () => {
+test('Windows: taskkill FAILS -> the owned handle is asked to end it; a signal from that is a stop, no signal is not', async () => {
   const child = handle(); const s = stopperFor(child, tools({ taskkill: { status: 5, error: null } }));
   s.request(() => {});
+  await s.whenIdle();
   assert.strictEqual(child.killed, 1, 'no handle fallback');
-  assert.strictEqual(s.finalize({ code: null, signal: 'SIGTERM' }).state, 'stopped');
-
-  const dead = handle({ killReturns: false }); const s2 = stopperFor(dead, tools({ taskkill: { status: null, error: 'ENOENT' } }));
-  s2.request(() => {});
-  const end = s2.finalize({ code: 1, signal: null });
-  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.root], ['failed', 'stop-unconfirmed', 'not-terminated'],
-    'a failed stop that then exits non-zero must not be reported as stopped');
+  assert.strictEqual((await s.finalize({ code: null, signal: 'SIGTERM' })).state, 'stopped');
 });
 
-test('Windows: the root stopped but a descendant is still alive -> unknown (not stopped), the survivor named', () => {
+test('Windows: taskkill=255 and the root gone is NOT a stop, NOT `failed` -> unknown, exit code and taskkill status kept (PM policy)', async () => {
+  for (const status of [255, null]) {
+    const dead = handle({ killReturns: false });
+    const t = tools({ taskkill: { status, error: status === null ? 'ENOENT' : null }, survivors: [] });
+    const s = stopperFor(dead, t);
+    s.request(() => {});
+    const end = await s.finalize({ code: 1, signal: null });
+    assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.root], ['unknown', 'stop-unconfirmed', 'not-terminated'],
+      'a failed stop that then exits non-zero must be neither stopped nor failed');
+    assert.deepStrictEqual(end.stop.observedExit, { code: 1, signal: null }, 'the observed exit code is evidence');
+    assert.strictEqual(end.stop.taskkill.status, status, 'the taskkill status is evidence');
+    assert.strictEqual(end.stop.requested, true, 'the request is not erased');
+    /* …and the root + tree were looked at again: nothing alive, so the Writer gate has nothing to hold on to */
+    assert.deepStrictEqual([end.stop.descendants, end.stop.uncertain, end.stop.members], ['none', false, []]);
+  }
+});
+
+test('Windows: taskkill=255 and something still alive (or unreadable) -> unknown AND uncertain, members named for the Writer gate', async () => {
+  const alive = tools({ taskkill: { status: 255, error: null }, survivors: [{ pid: 5002, created: 'x' }] });
+  const s = stopperFor(handle({ killReturns: false }), alive);
+  s.request(() => {});
+  const end = await s.finalize({ code: 1, signal: null });
+  assert.deepStrictEqual([end.state, end.stop.uncertain, end.stop.survivorPids], ['unknown', true, [5002]]);
+  assert.deepStrictEqual(alive.calls.survivors, [[4242, 5001, 5002]], 'when nothing proved the kill, the ROOT is checked too');
+
+  /* tree unreadable: only the root pid is known, and it is looked up by pid alone -- gone means gone */
+  const noTree = tools({ taskkill: { status: 255, error: null }, tree: null });
+  const s3 = stopperFor(handle({ killReturns: false }), noTree);
+  s3.request(() => {});
+  const e3 = await s3.finalize({ code: 1, signal: null });
+  assert.deepStrictEqual([e3.state, e3.stop.descendants, e3.stop.uncertain], ['unknown', 'none', false]);
+  assert.deepStrictEqual(noTree.calls.survivors, [[4242]]);
+
+  for (const o of [{ survivors: null }, { survivorsThrows: true }]) {
+    const s2 = stopperFor(handle({ killReturns: false }), tools({ taskkill: { status: 255, error: null }, ...o }));
+    s2.request(() => {});
+    const e2 = await s2.finalize({ code: 1, signal: null });
+    assert.deepStrictEqual([e2.state, e2.stop.descendants, e2.stop.uncertain], ['unknown', 'unverified', true], JSON.stringify(Object.keys(o)));
+    assert.ok(Array.isArray(e2.stop.members) && e2.stop.members.length >= 1, 'the root pid is at least known');
+  }
+});
+
+test('Windows: the root stopped but a descendant is still alive -> unknown (not stopped), the survivor named', async () => {
   const s = stopperFor(handle(), tools({ survivors: [{ pid: 5002, created: 'x' }] }));
   s.request(() => {});
-  const end = s.finalize({ code: 1, signal: null });
-  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.descendants, end.stop.survivorPids], ['unknown', 'root-stopped-descendants-alive', 'survivors', [5002]]);
+  const end = await s.finalize({ code: 1, signal: null });
+  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.descendants, end.stop.survivorPids, end.stop.uncertain], ['unknown', 'root-stopped-descendants-alive', 'survivors', [5002], true]);
 });
 
-test('Windows: descendants that cannot be checked are unverified -> unknown, never stopped', () => {
+test('Windows: descendants that cannot be checked are unverified -> unknown, never stopped', async () => {
   for (const o of [{ tree: null }, { survivors: null }, { survivorsThrows: true }]) {
     const s = stopperFor(handle(), tools(o));
     s.request(() => {});
-    const end = s.finalize({ code: 1, signal: null });
+    const end = await s.finalize({ code: 1, signal: null });
     assert.deepStrictEqual([end.state, end.stop.verdict], ['unknown', 'root-stopped-descendants-unverified'], JSON.stringify(Object.keys(o)));
   }
 });
 
-test('Windows: taskkill says terminated but the process says it finished cleanly (exit 0) -> unknown, not stopped and not ok', () => {
+test('Windows: taskkill says terminated but the process says it finished cleanly (exit 0) -> unknown, not stopped and not ok', async () => {
   const s = stopperFor(handle(), tools());
   s.request(() => {});
-  const end = s.finalize({ code: 0, signal: null });
+  const end = await s.finalize({ code: 0, signal: null });
   assert.deepStrictEqual([end.state, end.stop.verdict], ['unknown', 'contradiction-exit-0']);
 });
 
-test('duplicate Stop does nothing new; a FAILED stop may be retried', () => {
+test('duplicate Stop does nothing new (also while the first is still in flight); a FAILED stop may be retried', async () => {
   const t = tools();
   const s = stopperFor(handle(), t);
   assert.strictEqual(s.request(() => {}), true);
-  assert.strictEqual(s.request(() => {}), false);
+  assert.strictEqual(s.request(() => {}), false, 'a second Stop while the first reads its snapshot started another attempt');
+  await s.whenIdle();
   assert.strictEqual(s.request(() => {}), false);
   assert.deepStrictEqual(t.calls.taskkill, [4242], 'the second/third Stop ran taskkill again');
 
   const t2 = tools({ taskkill: { status: 5, error: null } });
   const s2 = stopperFor(handle({ killReturns: false }), t2);
-  s2.request(() => {}); s2.request(() => {});
+  s2.request(() => {}); await s2.whenIdle(); s2.request(() => {}); await s2.whenIdle();
   assert.deepStrictEqual(t2.calls.taskkill, [4242, 4242], 'a failed stop could not be retried');
   assert.strictEqual(s2.evidence().attempts, 2);
 });
 
-test('POSIX: a signal proves the stop; a clean exit 0 after a request is still `ok` (a cancelled child can exit 0)', () => {
+test('POSIX: a signal proves the stop; a clean exit 0 after a request is still `ok` (a cancelled child can exit 0)', async () => {
   const sent = [];
   const s = stopperFor(handle(), tools(), false);
   s.request((c) => sent.push(c.pid)); s.request((c) => sent.push(c.pid));
   assert.deepStrictEqual(sent, [4242], 'duplicate POSIX Stop signalled twice');
-  const end = s.finalize({ code: null, signal: 'SIGTERM' });
+  const end = await s.finalize({ code: null, signal: 'SIGTERM' });
   assert.deepStrictEqual([end.state, end.stop.verdict], ['stopped', 'stopped-by-signal']);
 
   const s2 = stopperFor(handle(), tools(), false); s2.request(() => {});
-  const e2 = s2.finalize({ code: 0, signal: null });
+  const e2 = await s2.finalize({ code: 0, signal: null });
   assert.deepStrictEqual([e2.state, e2.stop.verdict], ['ok', 'requested-not-observed']);
 });
 
@@ -193,20 +231,46 @@ test('real: a command that finishes by itself and is then "stopped" is NOT repor
   assert.notStrictEqual(out.stop?.requested, true);
 });
 
-test('a Windows stop snapshot that BLOCKS longer than a short-lived child lives ends in the child\'s own result — never `stopped` (the mechanism behind the loaded-H1 qc.test.js failure)', async () => {
-  /* stopper.request() runs the tree snapshot synchronously (a spawnSync of PowerShell: 0.5 s idle, ~2 s under
-   * 2x CPU load on H1). While it blocks, this process cannot even observe the child's exit. A child whose own
-   * timer fires inside that window is gone by the time taskkill looks (128) -- so `ok`, honestly, not `stopped`.
-   * Fake tools, real child process, real blocking; no platform dependency. */
+test('the Windows stop snapshot never blocks the event loop; a child that ends DURING it is not addressed by taskkill (pid reuse) and keeps its own result (the loaded-H1 qc.test.js mechanism)', async () => {
+  /* The snapshot used to be a spawnSync of PowerShell: 0.5 s idle, ~2 s under 2x CPU load on H1 -- the Electron main
+   * process could not even observe the child's exit meanwhile. Now it is awaited. Fake slow tool, real child. */
   const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 250)'], { stdio: 'ignore' });
   const ended = new Promise((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })));
-  const blocking = tools({ taskkill: { status: 128, error: null } });
-  const slowTree = blocking.tree;
-  blocking.tree = (pid) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 900); return slowTree(pid); };
-  const s = stopperFor(child, blocking);
+  const slow = tools({ taskkill: { status: 128, error: null } });
+  const fastTree = slow.tree;
+  slow.tree = async (pid) => { await new Promise((r) => setTimeout(r, 900)); return fastTree(pid); };
+  const s = stopperFor(child, slow);
+  let ticks = 0; const beat = setInterval(() => { ticks += 1; }, 50);
   s.request(() => {});
-  assert.strictEqual(child.exitCode, null, 'the event loop was blocked, so the exit could not have been seen yet');
-  const { code, signal } = await ended;
-  const end = s.finalize({ code, signal });
-  assert.deepStrictEqual([end.state, end.stop.verdict], ['ok', 'ended-before-stop-took-effect']);
+  const { code, signal } = await ended;                   // the exit IS observed while the snapshot is still being read
+  assert.ok(ticks >= 3, `the event loop was blocked during the snapshot (${ticks} ticks)`);
+  const end = await s.finalize({ code, signal });         // waits for the in-flight attempt
+  clearInterval(beat);
+  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.root], ['ok', 'ended-before-stop-took-effect', 'exited-before-request']);
+  assert.deepStrictEqual(slow.calls.taskkill, [], 'taskkill addressed a pid whose handle had already closed');
+});
+
+test('real (any host): run.start with a snapshot that is slow keeps the loop alive and still ends the command with `stopped`', { skip: !WIN && 'the Windows path needs taskkill' }, async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qcstop-'))); dirs.push(dir);
+  const r = run.start({ argv: NODE('setInterval(()=>{},1000)'), cwd: dir, kind: 'long_running' });
+  await new Promise((x) => setTimeout(x, 400));
+  let ticks = 0; const beat = setInterval(() => { ticks += 1; }, 20);
+  r.stop();
+  const out = await r.done;
+  clearInterval(beat);
+  assert.strictEqual(out.state, 'stopped', JSON.stringify(out.stop));
+  assert.ok(ticks >= 5, `the main loop was starved while Stop read the process tree (${ticks} ticks)`);
+});
+
+test('real: stopNow (app quit) ends the command without waiting for any asynchronous snapshot', async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qcstop-'))); dirs.push(dir);
+  const r = run.start({ argv: NODE('setInterval(()=>{},1000)'), cwd: dir, kind: 'long_running' });
+  await new Promise((x) => setTimeout(x, 300));
+  const pid = r.pid;
+  r.stopNow();
+  /* on Windows taskkill ran synchronously inside stopNow: the process is already gone when it returns */
+  if (WIN) assert.ok(!alive(pid), 'quit left the command running');
+  const out = await Promise.race([r.done, new Promise((x) => setTimeout(() => x(null), 8000))]);
+  assert.ok(out, 'the command was still running after stopNow');
+  assert.ok(await until(() => !alive(pid)), 'the process outlived stopNow');
 });

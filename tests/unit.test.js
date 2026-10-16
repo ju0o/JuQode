@@ -268,7 +268,11 @@ test('capability containment: each privileged capability lives in exactly one mo
     'child_process':  ['app/main/claude-detect.js', 'app/main/claude/session.js',
                        'app/main/evidence/git.js', 'app/main/qc/launch.js', 'app/main/qc/run.js',
                        'app/main/qc/stopper.js', 'app/main/term/session.js'],
-    'execFile':       ['app/main/claude-detect.js', 'app/main/evidence/git.js'],
+    /* qc/stopper joined for the Windows Stop (PM D2 · STEP 4): the process snapshot (`powershell` with a CONSTANT
+       command) and `taskkill /PID <pid> /T /F` are now asynchronous so the Electron main process is not blocked.
+       Same two fixed vectors the file already ran with spawnSync; nothing typed reaches them, and the pid is the
+       one of the handle this process holds. */
+    'execFile':       ['app/main/claude-detect.js', 'app/main/evidence/git.js', 'app/main/qc/stopper.js'],
     'spawn(':         ['app/main/claude/session.js', 'app/main/qc/run.js',
                        'app/main/term/session.js'],
     /* the ONLY synchronous spawn in the product: Windows cancel, which has no process group

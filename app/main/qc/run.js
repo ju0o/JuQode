@@ -119,7 +119,7 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
                        endedAt: new Date().toISOString(), output: mask(why),
                        spawnError: r.error ? String(r.error.code ?? r.error.message) : null };
       onUpdate(failed);
-      return { pid: null, startedAt, done: Promise.resolve(failed), stop: () => {} };
+      return { pid: null, startedAt, done: Promise.resolve(failed), stop: () => {}, stopNow: () => {} };
     }
     /* Its output is kept: `git init` says where it made the repository, and that is the one
      * line telling a user their folder is now a Git project. */
@@ -213,13 +213,15 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
      * a package manager is exactly that), so the drain is bounded: the code is already known,
      * and after the grace whatever arrived is what there is. */
     let ended = null;
-    const finish = () => {
-      if (!ended) return;
+    let finishing = false;
+    const finish = async () => {
+      if (!ended || finishing) return;
+      finishing = true;
       const { code, signal } = ended;
       /* `07` §8.1: a child that was cancelled can still exit 0, so "ended" is never read as "worked".
        * What a Stop PROVED is decided in stopper.js: a request is not an observed stop, and a stop
        * that did not reach the descendants is `unknown`, not `stopped`. */
-      const end = stopper.finalize({ code, signal });
+      const end = await stopper.finalize({ code, signal });
       settle({
         state: end.state,
         code, signal, pid: child.pid, startedAt,
@@ -244,6 +246,10 @@ function start({ argv, cwd, kind = 'oneshot', onUpdate = () => {}, env = process
      * manager runs the real process as a child of itself and signalling only the parent leaves
      * the server running (`07` §8.2). */
     stop: () => { stopper.request(stopGroup); },
+    /* The app is quitting: there is no event loop left to await a process snapshot, so nothing may be deferred. On
+     * Windows that is the synchronous `taskkill /T /F` of `stopGroup` straight away (no verdict is recorded -- the
+     * process that would record it is going away). Elsewhere it is the same signal path as `stop`. */
+    stopNow: () => { if (WINDOWS) { try { stopGroup(child); } catch { /* gone */ } } else stopper.request(stopGroup); },
   };
 }
 

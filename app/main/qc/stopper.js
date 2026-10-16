@@ -21,21 +21,37 @@
  *     `spawnSync` keeps the event loop from closing it, so taskkill addresses OUR process.
  *   - descendants are judged against a snapshot taken just before the kill, matched by pid AND creation
  *     time, with a child required to be younger than its parent (a recycled parent id cannot adopt it).
- *     The snapshot is what was observed, not a promise about processes started after it. */
-const { spawnSync } = require('node:child_process');
+ *     The snapshot is what was observed, not a promise about processes started after it.
+ *   - Nothing here blocks the Electron main process: the snapshot and taskkill are asynchronous (a PowerShell
+ *     snapshot took 0.5 s idle and ~2 s under load on H1, and up to its 15 s timeout when stuck). Because the
+ *     owned handle can now close while the snapshot is read, the pid is re-checked against the handle
+ *     IMMEDIATELY before taskkill: a process that ended in the meantime is never addressed (a pid is reusable).
+ *   - A Stop that was requested and whose cause of ending cannot be shown (taskkill failed, no signal from the
+ *     fallback) is `unknown` -- never `failed` and never `stopped`. `stop.uncertain` + `stop.members` say which
+ *     processes might still be alive, so the Writer gate can hold until a later snapshot shows them gone. */
+const { execFile } = require('node:child_process');
 
 const PS_SNAPSHOT = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToString('o') }";
+const SNAPSHOT_TIMEOUT_MS = 15000;
 
-/** `[{pid, ppid, created}]` for every process, or null if it could not be read. */
-function snapshotAll(run = spawnSync) {
-  const r = run('powershell', ['-NoProfile', '-NonInteractive', '-Command', PS_SNAPSHOT], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
-  if (!r || r.error || r.status !== 0) return null;
+function parseSnapshot(stdout) {
   const rows = [];
-  for (const line of String(r.stdout || '').split(/\r?\n/)) {
+  for (const line of String(stdout || '').split(/\r?\n/)) {
     const m = /^(\d+)\|(\d+)\|(.+)$/.exec(line.trim());
     if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), created: m[3] });
   }
   return rows.length ? rows : null;
+}
+
+/** `[{pid, ppid, created}]` for every process, or null if it could not be read. Asynchronous: the event loop keeps running. */
+function snapshotAll(exec = execFile) {
+  return new Promise((resolve) => {
+    try {
+      exec('powershell', ['-NoProfile', '-NonInteractive', '-Command', PS_SNAPSHOT],
+        { encoding: 'utf8', windowsHide: true, timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
+        (err, stdout) => resolve(err ? null : parseSnapshot(stdout)));
+    } catch { resolve(null); }
+  });
 }
 
 /** The root and its descendants as they are now: `{ root, descendants:[{pid, created}] }` or null. */
@@ -58,17 +74,22 @@ function treeOf(pid, all) {
 }
 
 const windowsTools = {
-  tree: (pid) => treeOf(pid, snapshotAll()),
-  /** `{status, error}` -- 0 terminated, 128 not found, other = failed */
-  taskkill: (pid) => {
-    const r = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 15000 });
-    return { status: r.status, error: r.error ? String(r.error.code ?? r.error.message) : null };
-  },
-  /** Which of `members` ([{pid, created}]) are still the SAME process. null = could not be read. */
-  survivors: (members) => {
-    const all = snapshotAll();
+  tree: async (pid) => treeOf(pid, await snapshotAll()),
+  /** `{status, error}` -- 0 terminated, 128 not found, other = failed (255 and a timeout are "failed", not "gone") */
+  taskkill: (pid) => new Promise((resolve) => {
+    try {
+      execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: 15000 }, (err) => {
+        if (!err) return resolve({ status: 0, error: null });
+        if (typeof err.code === 'number') return resolve({ status: err.code, error: null });
+        resolve({ status: null, error: String(err.killed ? 'ETIMEDOUT' : (err.code ?? err.message)) });
+      });
+    } catch (e) { resolve({ status: null, error: String(e?.code ?? e?.message ?? e) }); }
+  }),
+  /** Which of `members` ([{pid, created|null}]) are still the SAME process (pid AND creation time; created:null = pid only). null = could not be read. */
+  survivors: async (members) => {
+    const all = await snapshotAll();
     if (!all) return null;
-    return members.filter((m) => all.some((p) => p.pid === m.pid && p.created === m.created));
+    return members.filter((m) => all.some((p) => p.pid === m.pid && (m.created == null || p.created === m.created)));
   },
 };
 
@@ -91,8 +112,10 @@ function classifyEnd({ windows, code, signal, stop }) {
   if (stop.root === 'not-found' || stop.root === 'exited-before-request') {
     return { state: natural, stop: { ...stop, verdict: 'ended-before-stop-took-effect' } };
   }
-  // the request failed or was never confirmed: report the process's own end, never a stop
-  return { state: natural, stop: { ...stop, verdict: 'stop-unconfirmed' } };
+  /* The request failed or was never confirmed and the process has ended anyway. WHY it ended is not shown: not by
+   * our kill (no proof), and not "by itself" either (taskkill did not say it was gone). So it is neither `failed`
+   * nor `stopped` -- the exit code is kept as an observation, the state is `unknown`. */
+  return { state: 'unknown', stop: { ...stop, verdict: 'stop-unconfirmed', observedExit: { code, signal } } };
 }
 
 /**
@@ -106,8 +129,29 @@ function classifyEnd({ windows, code, signal, stop }) {
 function createStopper({ child, windows, tools = windowsTools, now = () => new Date().toISOString() }) {
   const stop = { requested: false, requestedAt: null, attempts: 0, root: null, taskkill: null, fallback: null, snapshot: null, descendants: null, platform: windows ? 'win32' : 'posix' };
   let tree = null;
+  let inflight = null;                    // the Windows attempt that is reading the snapshot / waiting for taskkill
   const exited = () => child.exitCode !== null || child.signalCode !== null;
 
+  async function attempt() {
+    try { tree = await tools.tree(child.pid); } catch { tree = null; }
+    stop.snapshot = tree ? { root: tree.root, descendants: tree.descendants.length } : null;
+    /* The handle may have closed while the snapshot was read. Its pid could be reused from now on, so a process
+     * that ended is never addressed: its own result stands. No await sits between this check and the spawn. */
+    if (exited()) { stop.root = 'exited-before-request'; return; }
+    let r;
+    try { r = await tools.taskkill(child.pid); } catch (e) { r = { status: null, error: String(e?.message ?? e) }; }
+    stop.taskkill = r;
+    if (r.status === 0) stop.root = 'terminated-by-taskkill';
+    else if (r.status === 128) stop.root = 'not-found';
+    else {
+      let sent = false;
+      if (!exited()) { try { sent = child.kill(); } catch { sent = false; } }
+      stop.fallback = { used: true, sent };
+      stop.root = sent ? 'terminated-by-kill' : 'not-terminated';
+    }
+  }
+
+  /** @returns {boolean} whether a NEW attempt started (a duplicate while one is in flight, or after a proven stop, is not) */
   function request(posixStop) {
     if (['terminated-by-taskkill', 'terminated-by-kill', 'signalled'].includes(stop.root)) return false;   // duplicate Stop: nothing new to say
     if (stop.requested && stop.root === 'in-flight') return false;
@@ -117,38 +161,40 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
     if (!windows) { stop.root = 'signalled'; posixStop(child); return true; }
 
     stop.root = 'in-flight';
-    try { tree = tools.tree(child.pid); } catch { tree = null; }
-    stop.snapshot = tree ? { root: tree.root, descendants: tree.descendants.length } : null;
-    let r;
-    try { r = tools.taskkill(child.pid); } catch (e) { r = { status: null, error: String(e?.message ?? e) }; }
-    stop.taskkill = r;
-    if (r.status === 0) stop.root = 'terminated-by-taskkill';
-    else if (r.status === 128) stop.root = 'not-found';
-    else {
-      let sent = false;
-      try { sent = child.kill(); } catch { sent = false; }
-      stop.fallback = { used: true, sent };
-      stop.root = sent ? 'terminated-by-kill' : 'not-terminated';
-    }
+    inflight = attempt().catch(() => { stop.root = 'not-terminated'; });
     return true;
   }
 
-  /** Called once the run has ended: look at the descendants, then classify. */
-  function finalize({ code, signal }) {
-    if (windows && stop.requested && (stop.root === 'terminated-by-taskkill' || stop.root === 'terminated-by-kill')) {
-      if (!tree) stop.descendants = 'unverified';
-      else if (tree.descendants.length === 0) stop.descendants = 'none';
+  /** Called once the run has ended: wait for an attempt still in flight, look at what may be alive, then classify. */
+  async function finalize({ code, signal }) {
+    if (inflight) await inflight;
+    const proven = stop.root === 'terminated-by-taskkill' || stop.root === 'terminated-by-kill';
+    if (windows && stop.requested && (proven || stop.root === 'not-terminated')) {
+      /* After a proven kill the root is gone and only its descendants are checked. When nothing proved the kill, the
+       * root itself is also a process that might still be there. A tree that was never read leaves the members
+       * unknown: only the root pid (without a creation time) is known, and the answer is "unverified". */
+      const members = tree ? (proven ? tree.descendants : [tree.root, ...tree.descendants])
+                           : (proven ? null : [{ pid: child.pid, created: null }]);
+      if (!members) stop.descendants = 'unverified';
+      else if (members.length === 0) stop.descendants = 'none';
       else {
         let alive = null;
-        try { alive = tools.survivors(tree.descendants); } catch { alive = null; }
+        try { alive = await tools.survivors(members); } catch { alive = null; }
         stop.descendants = alive === null ? 'unverified' : (alive.length ? 'survivors' : 'none');
         if (alive && alive.length) stop.survivorPids = alive.map((p) => p.pid);
+        stop.members = alive === null ? members : alive;
       }
     }
-    return classifyEnd({ windows, code, signal, stop });
+    const end = classifyEnd({ windows, code, signal, stop });
+    /* The Writer gate holds while this is true: something this Stop touched might still be running. */
+    if (end.state === 'unknown' && windows && stop.requested) {
+      end.stop.uncertain = stop.descendants !== 'none';
+      end.stop.members = end.stop.uncertain ? (stop.members ?? null) : [];
+    }
+    return end;
   }
 
-  return { request, finalize, evidence: () => ({ ...stop }) };
+  return { request, finalize, whenIdle: () => inflight ?? Promise.resolve(), evidence: () => ({ ...stop }) };
 }
 
-module.exports = { createStopper, classifyEnd, treeOf, windowsTools };
+module.exports = { createStopper, classifyEnd, treeOf, windowsTools, parseSnapshot };

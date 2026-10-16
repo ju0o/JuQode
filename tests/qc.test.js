@@ -740,14 +740,16 @@ const repo = require(path.join(R, 'app/main/db/repo.js'));
 const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
 const { unknownTaskRunWithLiveRunner } = require(path.join(R, 'app/main/work/runner-liveness.js'));
 
-function qcBench(files = { 'package.json': pkg({ test: 'node -e "console.log(1)"', build: 'node -e "process.exit(2)"' }) }) {
+function qcBench(files = { 'package.json': pkg({ test: 'node -e "console.log(1)"', build: 'node -e "process.exit(2)"' }) }, extra = {}) {
   const dir = project(files);
   const db = openDb(':memory:');
   const proj = repo.openProject(db, dir, path.basename(dir));
   const pushed = [];
-  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x',
-                           push: () => {}, pushQc: (u) => pushed.push(u) });
-  return { dir, db, project: proj, h, pushed };
+  /* the evidence store the handlers write the Stop proof into -- a real directory of this bench, read back by stopEvidenceOf */
+  const evidence = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qc-evidence-'));
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => evidence,
+                           push: () => {}, pushQc: (u) => pushed.push(u), ...extra });
+  return { dir, db, project: proj, h, pushed, evidence };
 }
 
 test('routing explains and runs NOTHING', () => {
@@ -838,8 +840,8 @@ test('a run that fails says so, with the code — never as success', async () =>
  * qc-stop.test.js for the deterministic mechanism. */
 /* what the Stop proved for this row, read back from the evidence store the bench was given -- so a failing assertion
  * says WHY (taskkill status, snapshot, descendants), not just the final status. */
-function stopEvidenceOf(row) {
-  try { return JSON.parse(fs.readFileSync(path.join('/tmp/x', String(row.output_ref).replace(/^evidence:/, '')), 'utf8')).stop; } catch { return null; }
+function stopEvidenceOf(row, bench) {
+  try { return JSON.parse(fs.readFileSync(path.join(bench.evidence, String(row.output_ref).replace(/^evidence:/, '')), 'utf8')).stop; } catch { return null; }
 }
 
 test('a running dev server does not block a different Quick Command', async () => {
@@ -895,7 +897,7 @@ test('a running dev server makes 켜기 사용 불가 and 끄기 가능 — from
     const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
-  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: stopEvidenceOf(row) })}`);
+  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: stopEvidenceOf(row, b) })}`);
 });
 
 test('the discoverability list names every rule and why each cannot run', () => {
@@ -990,7 +992,7 @@ test('개발 서버 꺼줘 signals the server JuQode started', async () => {
     const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
-  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: stopEvidenceOf(row) })}`);
+  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: stopEvidenceOf(row, b) })}`);
   assert.ok(row.stopped_at, '`20` keeps stopped_at for a run that was signalled');
 });
 
@@ -1504,4 +1506,55 @@ test('a package.json whose `scripts` is not an object is 사용 불가, never a 
   const ok = availability('qc.build', { root: real });
   assert.strictEqual(ok.available, true, 'a real build script was refused');
   assert.deepStrictEqual(ok.data.argv, ['npm', 'run', 'build']);
+});
+
+/* ── a Stop whose outcome is `unknown` must not let a new Writer in while something may still be running ── */
+const { createUncertain } = require(path.join(R, 'app/main/qc/uncertain.js'));
+
+test('Writer gate: an uncertain QC Stop refuses a new Work and file-changing Quick Commands; read-only ones and Stop still work; only a later snapshot showing it gone opens it', async () => {
+  let alive = [{ pid: 4242, created: 'T0' }];
+  const probes = [];
+  const uncertain = createUncertain({ probe: async (m) => { probes.push(m.map((x) => x.pid)); return alive; }, retryMs: 5, maxTries: 3 });
+  const b = qcBench(undefined, { qcUncertain: uncertain });
+  uncertain.add('qc-run-1', b.project.id, [{ pid: 4242, created: 'T0' }]);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(uncertain.blocks(b.project.id), 'the probe saw it alive, but the gate opened');
+
+  // a new Work (task or not) is refused before anything is spawned
+  const work = await b.h['juqode:work-start'](null, b.project.id, '버튼 고쳐줘');
+  assert.deepStrictEqual([work.ok, work.reason], [false, 'prior-process-may-still-live']);
+  // file-changing Quick Commands are refused with the approved sentence's key; the list says so too
+  const build = await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드');
+  assert.deepStrictEqual([build.ok, build.reason], [false, 'prior-run-unknown']);
+  assert.strictEqual(b.h['juqode:qc-list'](null, b.project.id).rules.find((r) => r.id === 'qc.build').reason, 'prior-run-unknown');
+  assert.deepStrictEqual(repo.qcRunsFor(b.db, b.project.id), [], 'a refused command became history');
+  // read-only commands stay possible, and so does Stopping what JuQode started
+  const status = b.h['juqode:qc-route'](null, b.project.id, '깃 상태');
+  assert.notStrictEqual(status.reason, 'prior-run-unknown');
+
+  // a snapshot that cannot be read does not open the gate; another project is unaffected
+  alive = null;
+  uncertain.refresh(b.project.id);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(uncertain.blocks(b.project.id), 'an unreadable snapshot opened the gate');
+  assert.strictEqual(uncertain.blocks('another-project'), null);
+
+  // gone in a later snapshot -> open (the run itself stays `unknown`; nothing rewrote it)
+  alive = [];
+  uncertain.refresh(b.project.id);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.strictEqual(uncertain.blocks(b.project.id), null);
+  const ran = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
+  assert.strictEqual(ran.ok, true, `${ran.reason}/${ran.detail}`);
+  await waitFor(8000, () => b.pushed.some((u) => u.runId === ran.runId && u.ended));
+});
+
+test('Writer gate: an uncertain Stop with NO recorded members (nothing to look for) stays shut', async () => {
+  const uncertain = createUncertain({ probe: async () => [], retryMs: 5, maxTries: 2 });
+  uncertain.add('qc-run-2', 'p1', null);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.strictEqual(uncertain.blocks('p1'), 'qc-run-2', 'with no pid to check, the gate cannot honestly open');
+  uncertain.add('qc-run-3', 'p2', []);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.strictEqual(uncertain.blocks('p2'), 'qc-run-3');
 });

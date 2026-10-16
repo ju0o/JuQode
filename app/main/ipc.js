@@ -20,6 +20,8 @@ const narrate = require('./interpret/narrate');
 const qcRules = require('./qc/rules');
 const qcAvail = require('./qc/availability');
 const qcRun = require('./qc/run');
+const { createUncertain } = require('./qc/uncertain');
+const { windowsTools } = require('./qc/stopper');
 const term = require('./term/session');
 const { classify } = require('./router/intent');
 const { scan } = require('./interpret/scan');
@@ -115,6 +117,9 @@ function makeHandlers(deps) {
   const termCloseIfOther = (projectId) => {
     if (termLive && termLive.projectId !== projectId) termClose();
   };
+  /* Quick Command runs whose Stop left something that might still be writing. The run stays `unknown`; this only
+   * holds the Writer gate (a new Work, a file-changing Quick Command) until a later snapshot shows them gone. */
+  const qcUncertain = deps.qcUncertain ?? createUncertain({ probe: windowsTools.survivors });
   const liveFor = (projectId) => [...qcLive.values()].filter((e) => e.projectId === projectId);
   /* Re-read at the moment of use. A card built earlier is a snapshot and must not be the
    * gate: a Work can start, or an ended attempt can become unresolved, after the list
@@ -124,6 +129,7 @@ function makeHandlers(deps) {
     if (!qcRules.mutatesProjectFiles(ruleId)) return null;
     if (repo.activeWork(db(), projectId)) return 'active-run';
     if (unknownTaskRunWithLiveRunner(db(), projectId)) return 'prior-run-unknown';
+    if (qcUncertain.blocks(projectId)) return 'prior-run-unknown';
     return null;
   };
   const withFileQcBlock = (projectId, ruleId, avail) => {
@@ -291,6 +297,7 @@ function makeHandlers(deps) {
       if (gate) return gate;
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
+      qcUncertain.refresh(projectId);                  // opening the list is a reason to look again
       const dev = devServerOf(projectId);
       return { ok: true, rules: qcRules.RULES.map((r) => {
         const a = withFileQcBlock(projectId, r.id,
@@ -374,6 +381,7 @@ function makeHandlers(deps) {
           endedAt: res.endedAt, stoppedAt: res.state === 'stopped' ? res.endedAt : null,
           outputRef: saveStopEvidence(projectId, runId, res.stop),
         });
+        if (res.state === 'unknown' && res.stop?.uncertain) qcUncertain.add(runId, projectId, res.stop.members);
         deps.pushQc?.({ runId, projectId, ruleId, ...res, ended: true });
       /* The store can be closed before a child settles (quit races the last exit), and an
        * unhandled rejection in the main process is a crash. The row is left un-ended, which
@@ -552,6 +560,8 @@ function makeHandlers(deps) {
         const acknowledged = repo.acknowledgeUnknownProcessStopped(db(), task.project_id, prior.id);
         if (!acknowledged.ok) return acknowledged;
       }
+      const qcHeld = qcUncertain.blocks(task.project_id);
+      if (qcHeld) return { ok: false, reason: 'prior-process-may-still-live', detail: { qcRunId: qcHeld } };
       const latest = repo.worksForTask(db(), task.id, 1)[0];
       if (!latest || latest.id !== prior.id) return { ok: false, reason: 'retry-source-not-latest' };
       const taskRefusal = repo.taskRunRefusal(db(), task.project_id, task.id, { retryOfWorkId: prior.id });
@@ -592,6 +602,9 @@ function makeHandlers(deps) {
           ? { ok: true, work: supervisor.snapshot(db(), existing.id), existing: true }
           : { ok: false, reason: 'idempotency-key-conflict' };
       }
+      /* a Quick Command Stop that left something possibly alive: no new Writer, task or not */
+      const qcHeld = qcUncertain.blocks(projectId);
+      if (qcHeld) return { ok: false, reason: 'prior-process-may-still-live', detail: { qcRunId: qcHeld } };
       if (taskId != null) {
         const uncertain = unknownTaskRunWithLiveRunner(db(), projectId);
         if (uncertain) return { ok: false, reason: 'prior-process-may-still-live', detail: { workId: uncertain.id } };
@@ -757,7 +770,8 @@ function makeHandlers(deps) {
     value: () => {
       const n = qcLive.size;
       for (const entry of qcLive.values()) {
-        try { entry.handle.stop(); } catch { /* already gone */ }
+        /* quitting: `stopNow` is the synchronous path (an awaited process snapshot would never finish) */
+        try { (entry.handle.stopNow ?? entry.handle.stop)(); } catch { /* already gone */ }
       }
       return n;
     },
