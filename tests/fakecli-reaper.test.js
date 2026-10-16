@@ -101,3 +101,46 @@ test('every signal the reaper sends is SIGKILL to one positive pid; the source h
   const src = fs.readFileSync(path.join(__dirname, 'fakecli.js'), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
   assert.ok(!/pkill|killall|taskkill|kill\(\s*-/.test(src), 'a pattern or group kill crept into the reaper');
 });
+
+test('a command line that only STARTS with our directory name (a longer name) is not ours', async () => {
+  const d = tmp('juqode-reap-prefix-');
+  const longer = idle(`${d}X/fixture`);                 // same prefix, different directory
+  const ours = idle(path.join(d, 'fixture'));
+  await ready();
+  const sent = [];
+  const found = [longer, ours].map((c) => ({ pid: c.pid, ...fake.processIdentity(c.pid) }));
+  const r = fake.reapProcessesUnder([d], { discover: () => found, kill: (pid) => { sent.push(pid); return process.kill(pid, 'SIGKILL'); }, since: null });
+  assert.deepStrictEqual(sent, [ours.pid], 'the longer-named directory was treated as ours');
+  assert.deepStrictEqual(r.pids, [ours.pid]);
+  assert.ok(alive(longer.pid), 'a process of a different directory was killed');
+  assert.ok(await until(() => !alive(ours.pid)));
+});
+
+test('our own `-cli` sibling directory counts as ours', async () => {
+  const d = tmp('juqode-reap-cli-');
+  const c = idle(`${d}-cli/w-fake/fake.cmd`);
+  await ready();
+  const r = fake.reapProcessesUnder([d], { since: null });
+  assert.deepStrictEqual(r.pids, [c.pid]);
+});
+
+test('a process that STARTED BEFORE this test process is never ours, whatever its command line says', async () => {
+  const d = tmp('juqode-reap-older-');
+  const older = idle(path.join(d, 'looks-ours'));
+  await ready();
+  await new Promise((r) => setTimeout(r, 1100));        // POSIX ticks are 10 ms, Windows stamps have sub-second digits: this is plenty
+  const later = idle(path.join(d, 'started-later'));
+  await ready();
+  const floor = fake.processIdentity(later.pid).start;  // pretend "this test process" started when `later` did
+  const sent = [];
+  const found = [older, later].map((c) => ({ pid: c.pid, ...fake.processIdentity(c.pid) }));
+  fake.reapProcessesUnder([d], { discover: () => found, kill: (pid) => { sent.push(pid); return process.kill(pid, 'SIGKILL'); }, since: floor });
+  assert.deepStrictEqual(sent, [later.pid], 'a process older than the floor was signalled');
+  assert.ok(alive(older.pid), 'a pre-existing process was killed');
+});
+
+test('the reaper documents that read-then-signal is narrowed, not atomic', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'fakecli.js'), 'utf8');
+  assert.match(src, /narrowed,\s*\n?\s*\*?\s*not atomic/);
+  assert.match(src, /handles\s*\n?\s*\*?\s*come first/);
+});

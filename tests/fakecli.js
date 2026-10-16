@@ -96,7 +96,7 @@ function discoverUnder(roots) {
     try { names = fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)); } catch { return out; }
     for (const n of names) {
       const id = processIdentity(Number(n));
-      if (id && roots.some((d) => id.cmd.includes(d))) out.push({ pid: Number(n), ...id });
+      if (id && roots.some((d) => namesDir(id.cmd, d))) out.push({ pid: Number(n), ...id });
     }
     return out;
   }
@@ -110,8 +110,28 @@ function discoverUnder(roots) {
   return out;
 }
 
-/** Stop what this file's tests left running. Returns `{ handles: n, pids: [..] }` -- what it actually signalled. */
-function reapProcessesUnder(dirs, { handles = [], kill = process.kill, discover = discoverUnder, identityOf = processIdentity } = {}) {
+/* Is `d` named in `cmd` as a path (followed by end, a separator, whitespace, quote or our own `-cli` suffix)
+ * rather than as the prefix of a longer name? */
+function namesDir(cmd, d) {
+  const esc = d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${esc}(?:-cli)?(?![A-Za-z0-9])`).test(cmd);
+}
+
+/* Identities are comparable only within one format: /proc ticks since boot on POSIX (numbers), ISO-8601
+ * timestamps on Windows (strings of one zone). */
+const olderThan = (a, b) => (/^\d+$/.test(a) && /^\d+$/.test(b) ? Number(a) < Number(b) : a < b);
+
+let selfStart;                                                           // this test process's own start, read once on first use
+const ownStart = () => (selfStart ??= (processIdentity(process.pid)?.start ?? null));
+
+/** Stop what this file's tests left running. Returns `{ handles: n, pids: [..] }` -- what it actually signalled.
+ *
+ * A candidate must pass EVERY test: it names one of OUR directories as a path; it was STARTED AFTER this
+ * test process (a pre-existing process cannot be one of our fixtures); its identity read just now equals
+ * the one at discovery. The commandline is only a discovery filter, and the read-then-signal is narrowed,
+ * not atomic: there is no portable way to signal "this exact process" by number, which is why handles
+ * come first and why anything uncertain is left alone. */
+function reapProcessesUnder(dirs, { handles = [], kill = process.kill, discover = discoverUnder, identityOf = processIdentity, since = undefined } = {}) {
   const roots = [...new Set((dirs || []).filter((d) => typeof d === 'string' && d.length > 8))];
   const result = { handles: 0, pids: [] };
   for (const h of handles) {
@@ -120,12 +140,14 @@ function reapProcessesUnder(dirs, { handles = [], kill = process.kill, discover 
     }
   }
   if (!roots.length) return result;
+  const floor = since === undefined ? ownStart() : since;
   const self = new Set([process.pid, process.ppid]);
   for (const found of discover(roots)) {
     if (self.has(found.pid) || !(found.pid > 4)) continue;
+    if (floor !== null && floor !== undefined && olderThan(found.start, floor)) continue;   // started before this test process: not ours
     const now = identityOf(found.pid);                                    // re-read at the moment of the signal
     if (!now || now.start !== found.start) continue;                       // exited, or the number belongs to someone else now
-    if (!roots.some((d) => now.cmd.includes(d))) continue;                 // no longer a process of ours
+    if (!roots.some((d) => namesDir(now.cmd, d))) continue;               // no longer (or never, as a path) a process of ours
     try { kill(found.pid, 'SIGKILL'); result.pids.push(found.pid); } catch { /* gone */ }
   }
   return result;
