@@ -1627,8 +1627,11 @@ test('restart: a run nobody saw finish keeps the Writer gate shut across restart
 test('restart: a Stop that proved nothing is left alive is NOT held; one with recorded members is held until a later snapshot shows them gone (no confirmation needed)', async (t) => {
   const restoreEnv = noClaude(); t.after(restoreEnv);
   const b = qcBench();
+  const T1 = '2026-10-16T10:00:01.000Z';
+  const STARTED = new Date().toISOString();
   const mk = (stop, status = 'unknown') => {
     const id = repo.beginQcRun(b.db, b.project.id, { phrase: 'x', ruleId: 'qc.dev.start', command: 'npm run dev', status: 'long_running' });
+    repo.setQcRunner(b.db, id, { sessionId: 's', pid: 1, startedAt: STARTED });
     const rel = path.join('qc-stop', `${id}.json`);
     fs.mkdirSync(path.join(b.evidence, 'qc-stop'), { recursive: true });
     fs.writeFileSync(path.join(b.evidence, rel), JSON.stringify({ runId: id, recordedAt: new Date(Date.now() + 1000).toISOString(), stop }));
@@ -1636,12 +1639,12 @@ test('restart: a Stop that proved nothing is left alive is NOT held; one with re
     return id;
   };
   const complete = (id) => ({ requested: true, requestedAt: new Date().toISOString(), attempts: 1, root: 'not-terminated', taskkill: { status: 255, error: null }, fallback: { used: true, sent: false },
-    snapshot: { root: { pid: 1, created: 'T' }, descendants: 0 }, descendants: 'none', platform: 'win32', members: [], uncertain: false, verdict: 'stop-unconfirmed',
+    snapshot: { root: { pid: 1, created: STARTED }, descendants: 0 }, descendants: 'none', platform: 'win32', members: [], uncertain: false, verdict: 'stop-unconfirmed',
     observedExit: { code: 1, signal: null }, timings: { snapshotMs: 1, taskkillMs: 1, survivorsMs: 1 } });
   const clear = mk(complete());
   const stopped = mk({ requested: true, verdict: 'stopped-tree-observed', uncertain: undefined }, 'stopped');
-  const withMembers = mk({ requested: true, verdict: 'root-stopped-descendants-alive', uncertain: true, members: [{ pid: 777, created: 'T1' }], platform: 'win32', attempts: 1, requestedAt: new Date().toISOString() });
-  let alive = [{ pid: 777, created: 'T1' }];
+  const withMembers = mk({ requested: true, verdict: 'root-stopped-descendants-alive', uncertain: true, members: [{ pid: 777, created: T1 }], platform: 'win32', attempts: 1, requestedAt: new Date().toISOString() });
+  let alive = [{ pid: 777, created: T1 }];
   const reg = createUncertain({ probe: async () => alive, retryMs: 5, maxTries: 3 });
   const h = restartOf(b, { qcUncertain: reg });
   assert.deepStrictEqual(h['juqode:qc-list'](null, b.project.id).held.map((x) => x.runId), [withMembers], 'only the run with a possibly-alive member is held');
@@ -1655,7 +1658,7 @@ test('restart: a Stop that proved nothing is left alive is NOT held; one with re
   assert.notStrictEqual(work.reason, 'prior-process-may-still-live');
 
   // the same evidence after another restart: still alive -> held again (a restart is not a release)
-  alive = [{ pid: 777, created: 'T1' }];
+  alive = [{ pid: 777, created: T1 }];
   const reg2 = createUncertain({ probe: async () => alive, retryMs: 5, maxTries: 3 });
   const h2 = restartOf(b, { qcUncertain: reg2 });
   h2['juqode:qc-list'](null, b.project.id);

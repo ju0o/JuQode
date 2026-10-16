@@ -14,8 +14,10 @@
  * a later snapshot may be trusted to make that call, or whether the user must.
  * @returns {{kind:'clear'}|{kind:'members', members:object[]}|{kind:'untrusted', why:string}} */
 const isoOk = (t) => typeof t === 'string' && !Number.isNaN(Date.parse(t));
+const SKEW_MS = 5000;                           // clock/ordering slack between the app's clock and the OS creation time
 const posInt = (n) => Number.isInteger(n) && n > 0;
 
+const KILL_KEY = 'task' + 'kill';                                       // the stopper's field holding the kill tool's answer
 const KILL_TOOL_ROOT = ['terminated-by', 'task' + 'kill'].join('-');     // the stopper's own root state name
 const CLEAR_VERDICT_ROOT = {
   'stop-unconfirmed': ['not-terminated'],
@@ -37,24 +39,49 @@ function validate(rec, row) {
   if (!isoOk(stop.requestedAt) || !Number.isInteger(stop.attempts) || stop.attempts < 1) return no('no-request');
   if (typeof stop.uncertain !== 'boolean') return no('no-verdict-on-survivors');
   if (!UNCERTAIN_VERDICTS.has(stop.verdict)) return no('unexpected-verdict');
-  const snapRoot = stop.snapshot?.root?.pid;
-  if (snapRoot != null && posInt(row.runner_pid) && snapRoot !== row.runner_pid) return no('root-is-not-this-runs-process');
   if (stop.observedExit && row.exit_code != null && stop.observedExit.code !== row.exit_code) return no('exit-code-differs');
 
   if (stop.uncertain === false) {
+    /* ownership: the process the Stop read and killed is the one this row started -- same pid, a creation time that fits the recorded start */
+    if (!posInt(row.runner_pid) || !isoOk(row.runner_started_at)) return no('row-has-no-runner-identity');
+    const root = stop.snapshot?.root;
+    if (!root || root.pid !== row.runner_pid) return no(root ? 'root-is-not-this-runs-process' : 'no-root-snapshot');
+    if (!isoOk(root.created)) return no('root-has-no-creation-time');
+    const born = Date.parse(root.created) - Date.parse(row.runner_started_at);
+    if (born < -SKEW_MS || born > SKEW_MS * 6) return no('root-created-at-another-time-pid-reused');
+    /* the kill tool's own answer must exist and agree with how the root is said to have ended */
+    const tk = stop[KILL_KEY];
+    if (!tk || typeof tk !== 'object' || !(Number.isInteger(tk.status) || (tk.status == null && typeof tk.error === 'string' && tk.error))) return no('no-kill-tool-result');
+    const failed = !(tk.status === 0 || tk.status === 128);
+    if (stop.root === KILL_TOOL_ROOT && tk.status !== 0) return no('kill-result-contradicts-root');
+    if ((stop.root === 'not-terminated' || stop.root === 'kill-requested') && !failed) return no('kill-result-contradicts-root');
+    if (stop.root === 'not-terminated' && stop.fallback?.sent !== false) return no('fallback-result-contradicts-root');
+    if (stop.root === 'kill-requested' && stop.fallback?.sent !== true) return no('fallback-result-contradicts-root');
+    if (stop.root === 'terminated-by-kill' && !(stop.fallback?.sent === true && stop.fallback.signalObserved != null)) return no('fallback-result-contradicts-root');
+    /* the exit the run ended with was OBSERVED (a null code is a signal, not an exit), and it is the row's */
+    const ox = stop.observedExit;
+    if (!ox || !Number.isInteger(ox.code)) return no('no-observed-exit');
+    if (!Number.isInteger(row.exit_code) || ox.code !== row.exit_code) return no('exit-code-differs');
+    if (stop.verdict === 'contradiction-exit-0' && ox.code !== 0) return no('contradiction-without-exit-0');
+    /* order in time: run began <= Stop requested <= the re-check finished (recordedAt), and the re-check had time to run after the request */
+    const t = (x) => Date.parse(x);
+    if (t(stop.requestedAt) < t(row.started_at) - SKEW_MS) return no('requested-before-run');
+    if (t(stop.requestedAt) > t(rec.recordedAt)) return no('requested-after-recorded');
+    const tm = stop.timings;
+    if (!tm || ![tm.snapshotMs, tm[KILL_KEY + 'Ms'], tm.survivorsMs].every((n) => Number.isFinite(n) && n >= 0)) return no('timings-incomplete');
+    if (t(rec.recordedAt) - t(stop.requestedAt) + SKEW_MS < tm.snapshotMs + tm[KILL_KEY + 'Ms'] + tm.survivorsMs) return no('recheck-does-not-fit-in-time');
+    if (row.ended_at && t(rec.recordedAt) < t(row.ended_at) - SKEW_MS) return no('recorded-before-the-run-ended');
     const roots = CLEAR_VERDICT_ROOT[stop.verdict];
     if (!roots) return no('verdict-cannot-be-clear');
     if (!roots.includes(stop.root)) return no('root-contradicts-verdict');
     if (stop.descendants !== 'none') return no('descendants-not-observed-gone');
     if (!Array.isArray(stop.members) || stop.members.length) return no('members-not-empty');
     if (Array.isArray(stop.survivorPids) && stop.survivorPids.length) return no('survivors-listed');
-    if (!(Number.isFinite(stop.timings?.survivorsMs) && stop.timings.survivorsMs >= 0)) return no('survivor-recheck-not-recorded');
-    if (stop.verdict !== 'contradiction-exit-0' && !(stop.observedExit && 'code' in stop.observedExit)) return no('no-observed-exit');
     return { kind: 'clear' };
   }
   if (Array.isArray(stop.members) && stop.members.length
-      && stop.members.every((m) => m && posInt(m.pid) && (m.created == null || isoOk(m.created) || typeof m.created === 'string'))) {
-    return { kind: 'members', members: stop.members.map((m) => ({ pid: m.pid, created: m.created ?? null })) };
+      && stop.members.every((m) => m && posInt(m.pid) && isoOk(m.created))) {
+    return { kind: 'members', members: stop.members.map((m) => ({ pid: m.pid, created: m.created })), parents: isoOk(stop.snapshot?.root?.created) && posInt(stop.snapshot.root.pid) ? [{ pid: stop.snapshot.root.pid, created: stop.snapshot.root.created }] : [] };
   }
   return no('members-missing');
 }

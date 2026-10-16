@@ -30,7 +30,7 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
     if (!Array.isArray(e.members) || !e.members.length || !probe) return;
     e.checking = true;
     let alive = null;
-    try { alive = await probe(e.members); } catch { alive = null; }
+    try { alive = await probe(e.members, e.parents); } catch { alive = null; }
     e.checking = false;
     if (!held.has(runId)) return;
     if (Array.isArray(alive) && alive.length === 0) { held.delete(runId); done.add(runId); return; }
@@ -42,7 +42,10 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
   const api = {
     add(runId, projectId, members, info = {}) {
       if (held.has(runId) || done.has(runId)) return;
-      held.set(runId, { runId, projectId, members: Array.isArray(members) ? members : null, needsAck: Boolean(info.needsAck),
+      /* a member with no creation time is a bare pid: "that pid is gone" proves nothing about its tree (or a reused pid), so only the user lifts it */
+      const identified = Array.isArray(members) && members.length > 0 && members.every((m) => m && Number.isInteger(m.pid) && typeof m.created === 'string' && m.created);
+      held.set(runId, { runId, projectId, members: Array.isArray(members) ? members : null, needsAck: Boolean(info.needsAck) || !identified,
+                        parents: Array.isArray(info.parents) ? info.parents : [],
                         command: info.command ?? null, startedAt: info.startedAt ?? null, why: info.why ?? null, tries: 0, checking: false });
       const t = schedule(() => recheck(runId), 0); t?.unref?.();
     },
@@ -100,7 +103,7 @@ function restore({ rows, root, registry }) {
     /* The Stop looked again after the kill and found nothing alive -- and the record is complete and agrees with the row. Only then. */
     if (proof.kind === 'clear' && r.status === 'unknown') continue;
     if (proof.kind === 'members') {
-      registry.add(r.id, r.project_id, proof.members, { ...info, why: 'stop-uncertain' });
+      registry.add(r.id, r.project_id, proof.members, { ...info, parents: proof.parents, why: 'stop-uncertain' });
     } else {
       /* never finished, no record, or a record that is incomplete/contradictory: nothing may be inferred; only the user lifts it */
       registry.add(r.id, r.project_id, [{ pid: r.runner_pid ?? null, created: null }].filter((m) => m.pid), {

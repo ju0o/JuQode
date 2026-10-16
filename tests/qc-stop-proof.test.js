@@ -14,22 +14,23 @@ const { openDb } = require(path.join(R, 'app/main/db/db.js'));
 const repo = require(path.join(R, 'app/main/db/repo.js'));
 const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
 
-const ROW = { id: 'run-1', project_id: 'p1', started_at: '2026-10-16T10:00:00.000Z', runner_pid: 4242, exit_code: 1, status: 'unknown', command: 'npm run dev' };
+const ROW = { id: 'run-1', project_id: 'p1', started_at: '2026-10-16T10:00:00.000Z', runner_started_at: '2026-10-16T10:00:00.100Z', ended_at: '2026-10-16T10:00:04.000Z', runner_pid: 4242, exit_code: 1, status: 'unknown', command: 'npm run dev' };
 const good = () => ({ runId: 'run-1', recordedAt: '2026-10-16T10:00:05.000Z', stop: {
   requested: true, requestedAt: '2026-10-16T10:00:02.000Z', attempts: 1, root: 'not-terminated', taskkill: { status: 255, error: null }, fallback: { used: true, sent: false },
-  snapshot: { root: { pid: 4242, created: 'T' }, descendants: 0 }, descendants: 'none', platform: 'win32', members: [], uncertain: false,
+  snapshot: { root: { pid: 4242, created: '2026-10-16T10:00:00.2000000+00:00' }, descendants: 0 }, descendants: 'none', platform: 'win32', members: [], uncertain: false,
   verdict: 'stop-unconfirmed', observedExit: { code: 1, signal: null }, timings: { snapshotMs: 5, taskkillMs: 5, survivorsMs: 5 } } });
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const mut = (fn) => { const r = clone(good()); fn(r); return r; };
 
 test('a complete record that agrees with the row is the only thing that clears', () => {
   assert.deepStrictEqual(validate(good(), ROW), { kind: 'clear' });
-  for (const [verdict, root] of [['kill-unconfirmed', 'kill-requested'], ['contradiction-exit-0', 'terminated-by-taskkill']]) {
-    assert.strictEqual(validate(mut((r) => { r.stop.verdict = verdict; r.stop.root = root; }), ROW).kind, 'clear', verdict);
-  }
+  assert.strictEqual(validate(mut((r) => { r.stop.verdict = 'kill-unconfirmed'; r.stop.root = 'kill-requested'; r.stop.fallback = { used: true, sent: true }; }), ROW).kind, 'clear');
+  const c0 = (r) => { r.stop.verdict = 'contradiction-exit-0'; r.stop.root = 'terminated-by-taskkill'; r.stop.taskkill = { status: 0, error: null }; r.stop.observedExit = { code: 0, signal: null }; };
+  assert.strictEqual(validate(mut(c0), { ...ROW, exit_code: 0 }).kind, 'clear');
 });
 
 test('incomplete, contradictory or foreign records never clear (the bare {"stop":{"uncertain":false}} included)', () => {
+  const c0 = (r) => { r.stop.verdict = 'contradiction-exit-0'; r.stop.root = 'terminated-by-taskkill'; r.stop.taskkill = { status: 0, error: null }; r.stop.observedExit = { code: 0, signal: null }; };
   const bad = {
     'bare': { stop: { uncertain: false } },
     'no runId': mut((r) => { delete r.runId; }), 'other run': mut((r) => { r.runId = 'run-2'; }),
@@ -47,8 +48,26 @@ test('incomplete, contradictory or foreign records never clear (the bare {"stop"
     'another process was the root': mut((r) => { r.stop.snapshot.root.pid = 1; }),
     'exit code differs from the row': mut((r) => { r.stop.observedExit.code = 0; }), 'no observed exit': mut((r) => { delete r.stop.observedExit; }),
     'array': [], 'null': null, 'string': 'x',
+    'no root snapshot': mut((r) => { r.stop.snapshot = null; }), 'snapshot without root': mut((r) => { r.stop.snapshot = { descendants: 0 }; }),
+    'root without creation time': mut((r) => { delete r.stop.snapshot.root.created; }),
+    'root created hours before the run (reused pid)': mut((r) => { r.stop.snapshot.root.created = '2026-10-16T05:00:00.000Z'; }),
+    'root created after the run (reused pid)': mut((r) => { r.stop.snapshot.root.created = '2026-10-16T10:30:00.000Z'; }),
+    'no kill tool result': mut((r) => { delete r.stop.taskkill; }), 'kill tool result null': mut((r) => { r.stop.taskkill = { status: null, error: null }; }),
+    'kill tool said gone but root not terminated': mut((r) => { r.stop.taskkill = { status: 0, error: null }; }),
+    'kill-unconfirmed without a fallback send': mut((r) => { r.stop.verdict = 'kill-unconfirmed'; r.stop.root = 'kill-requested'; }),
+    'not-terminated but fallback says sent': mut((r) => { r.stop.fallback = { used: true, sent: true }; }),
+    'observed exit null': mut((r) => { r.stop.observedExit.code = null; }), 'observed exit a string': mut((r) => { r.stop.observedExit.code = '1'; }),
+    'contradiction-exit-0 without any observed exit': mut((r) => { c0(r); delete r.stop.observedExit; }),
+    'contradiction-exit-0 with a nonzero exit': mut((r) => { c0(r); r.stop.observedExit.code = 1; }),
+    'requested before the run began': mut((r) => { r.stop.requestedAt = '2026-10-16T09:00:00.000Z'; }),
+    'requested after the record was written': mut((r) => { r.stop.requestedAt = '2026-10-16T10:01:00.000Z'; }),
+    're-check cannot fit between request and record': mut((r) => { r.stop.timings.survivorsMs = 60000; }),
+    'a timing missing': mut((r) => { delete r.stop.timings.taskkillMs; }),
+    'recorded before the run ended': mut((r) => { r.recordedAt = '2026-10-16T10:00:02.500Z'; r.stop.requestedAt = '2026-10-16T10:00:02.000Z'; r.stop.timings = { snapshotMs: 1, taskkillMs: 1, survivorsMs: 1 }; }),
   };
-  for (const [label, rec] of Object.entries(bad)) assert.strictEqual(validate(rec, ROW).kind, 'untrusted', `${label}: released the hold`);
+  for (const [label, row] of Object.entries({ 'row has no runner pid': { ...ROW, runner_pid: null }, 'row has no runner start': { ...ROW, runner_started_at: null },
+    'row exit code unknown': { ...ROW, exit_code: null } })) assert.strictEqual(validate(good(), row).kind, 'untrusted', `${label}: released the hold`);
+  for (const [label, rec] of Object.entries(bad)) assert.strictEqual(validate(rec, /exit-0/.test(label) ? { ...ROW, exit_code: 0 } : /before the run ended/.test(label) ? { ...ROW, ended_at: '2026-10-16T10:01:00.000Z' } : ROW).kind, 'untrusted', `${label}: released the hold`);
   // a record from before the survivor re-check existed
   const legacy = { runId: 'run-1', recordedAt: '2026-10-16T10:00:05.000Z', stop: { requested: true, attempts: 1, root: 'not-terminated', verdict: 'stop-unconfirmed', descendants: 'none', platform: 'win32' } };
   assert.strictEqual(validate(legacy, ROW).kind, 'untrusted', 'a pre-recheck record cleared a hold');
@@ -56,8 +75,8 @@ test('incomplete, contradictory or foreign records never clear (the bare {"stop"
 
 test('records saying something is (or may be) alive need well-formed members, otherwise the user decides', () => {
   const alive = (members) => mut((r) => { r.stop.uncertain = true; r.stop.verdict = 'root-stopped-descendants-alive'; r.stop.members = members; r.stop.descendants = 'survivors'; });
-  assert.deepStrictEqual(validate(alive([{ pid: 7, created: 'T1' }, { pid: 8, created: null }]), ROW), { kind: 'members', members: [{ pid: 7, created: 'T1' }, { pid: 8, created: null }] });
-  for (const members of [[], null, [{ pid: 'x', created: 'T' }], [{ pid: -1, created: 'T' }], [{ created: 'T' }], 'nope']) {
+  assert.deepStrictEqual(validate(alive([{ pid: 7, created: '2026-10-16T10:00:01.000Z' }, { pid: 8, created: '2026-10-16T10:00:01.500Z' }]), ROW), { kind: 'members', members: [{ pid: 7, created: '2026-10-16T10:00:01.000Z' }, { pid: 8, created: '2026-10-16T10:00:01.500Z' }], parents: [{ pid: 4242, created: '2026-10-16T10:00:00.2000000+00:00' }] });
+  for (const members of [[], null, [{ pid: 'x', created: 'T' }], [{ pid: -1, created: 'T' }], [{ created: 'T' }], 'nope', [{ pid: 7, created: null }], [{ pid: 7 }], [{ pid: 7, created: 'not a time' }]]) {
     assert.strictEqual(validate(alive(members), ROW).kind, 'untrusted', JSON.stringify(members));
   }
 });
@@ -130,7 +149,7 @@ test('tampered or contradictory Stop evidence keeps the hold; a complete, agreei
   x.db.prepare('update quick_command_run set exit_code = 1 where id = ?').run(id);
   const row = () => repo.qcRun(x.db, id);
   const put = (rec) => { fs.mkdirSync(path.join(x.evidence, 'qc-stop'), { recursive: true }); fs.writeFileSync(path.join(x.evidence, 'qc-stop', `${id}.json`), JSON.stringify(rec)); x.db.prepare('update quick_command_run set output_ref = ? where id = ?').run(`evidence:qc-stop/${id}.json`, id); };
-  const base = { runId: id, recordedAt: new Date(Date.now() + 1000).toISOString(), stop: { ...good().stop } };
+  const base = { runId: id, recordedAt: new Date(Date.now() + 1000).toISOString(), stop: { ...good().stop, requestedAt: row().started_at, snapshot: { root: { pid: 4242, created: row().runner_started_at }, descendants: 0 } } };
   const held = async () => (await build(x.boot(), x.a.id)) === 'prior-run-unknown';
   put({ stop: { uncertain: false } });                                    assert.ok(await held(), 'bare evidence released');
   put({ ...base, runId: 'someone-else' });                               assert.ok(await held(), 'another run\'s evidence released');

@@ -129,7 +129,7 @@ function classifyEnd({ windows, code, signal, stop }) {
   if (rootConfirmed) {
     if (code === 0 && signal == null) {
       // taskkill says it terminated the process, the process says it finished cleanly: both cannot be the whole story
-      return { state: 'unknown', stop: { ...stop, verdict: 'contradiction-exit-0' } };
+      return { state: 'unknown', stop: { ...stop, verdict: 'contradiction-exit-0', observedExit: { code, signal } } };
     }
     if (stop.descendants === 'none') return { state: 'stopped', stop: { ...stop, verdict: 'stopped-tree-observed' } };
     return { state: 'unknown', stop: { ...stop, verdict: stop.descendants === 'survivors' ? 'root-stopped-descendants-alive' : 'root-stopped-descendants-unverified' } };
