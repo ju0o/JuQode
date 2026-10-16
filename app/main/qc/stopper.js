@@ -33,6 +33,9 @@ const { execFile } = require('node:child_process');
 
 const PS_SNAPSHOT = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToString('o') }";
 const SNAPSHOT_TIMEOUT_MS = 15000;
+const TASKKILL_TIMEOUT_MS = 15000;
+/** The longest a Windows Stop can take before it has said what it knows: snapshot + taskkill + the survivors snapshot, each bounded. */
+const STOP_WORST_CASE_MS = 2 * SNAPSHOT_TIMEOUT_MS + TASKKILL_TIMEOUT_MS;
 
 function parseSnapshot(stdout) {
   const rows = [];
@@ -78,7 +81,7 @@ const windowsTools = {
   /** `{status, error}` -- 0 terminated, 128 not found, other = failed (255 and a timeout are "failed", not "gone") */
   taskkill: (pid) => new Promise((resolve) => {
     try {
-      execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: 15000 }, (err) => {
+      execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: TASKKILL_TIMEOUT_MS }, (err) => {
         if (!err) return resolve({ status: 0, error: null });
         if (typeof err.code === 'number') return resolve({ status: err.code, error: null });
         resolve({ status: null, error: String(err.killed ? 'ETIMEDOUT' : (err.code ?? err.message)) });
@@ -132,14 +135,20 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
   let inflight = null;                    // the Windows attempt that is reading the snapshot / waiting for taskkill
   const exited = () => child.exitCode !== null || child.signalCode !== null;
 
+  const timings = {};
+  stop.timings = timings;
   async function attempt() {
+    let t0 = Date.now();
     try { tree = await tools.tree(child.pid); } catch { tree = null; }
+    timings.snapshotMs = Date.now() - t0;
     stop.snapshot = tree ? { root: tree.root, descendants: tree.descendants.length } : null;
     /* The handle may have closed while the snapshot was read. Its pid could be reused from now on, so a process
      * that ended is never addressed: its own result stands. No await sits between this check and the spawn. */
     if (exited()) { stop.root = 'exited-before-request'; return; }
     let r;
+    t0 = Date.now();
     try { r = await tools.taskkill(child.pid); } catch (e) { r = { status: null, error: String(e?.message ?? e) }; }
+    timings.taskkillMs = Date.now() - t0;
     stop.taskkill = r;
     if (r.status === 0) stop.root = 'terminated-by-taskkill';
     else if (r.status === 128) stop.root = 'not-found';
@@ -179,7 +188,9 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
       else if (members.length === 0) stop.descendants = 'none';
       else {
         let alive = null;
+        const t1 = Date.now();
         try { alive = await tools.survivors(members); } catch { alive = null; }
+        timings.survivorsMs = Date.now() - t1;
         stop.descendants = alive === null ? 'unverified' : (alive.length ? 'survivors' : 'none');
         if (alive && alive.length) stop.survivorPids = alive.map((p) => p.pid);
         stop.members = alive === null ? members : alive;
@@ -197,4 +208,4 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
   return { request, finalize, whenIdle: () => inflight ?? Promise.resolve(), evidence: () => ({ ...stop }) };
 }
 
-module.exports = { createStopper, classifyEnd, treeOf, windowsTools, parseSnapshot };
+module.exports = { STOP_WORST_CASE_MS, createStopper, classifyEnd, treeOf, windowsTools, parseSnapshot };

@@ -897,7 +897,13 @@ test('a running dev server makes 켜기 사용 불가 and 끄기 가능 — from
     const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
-  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: stopEvidenceOf(row, b) })}`);
+  const ev = stopEvidenceOf(row, b);
+  /* `stopped` is the proof case. Under CPU load on Windows taskkill itself can answer 255 although the tree is then gone; PM policy
+   * (D2): that is `unknown` -- never `stopped`, never `failed` -- and only acceptable here when the evidence says exactly that
+   * and the re-checked tree is gone (so nothing is left to hold the Writer gate). */
+  const honestUnknown = row.status === 'unknown' && ev?.verdict === 'stop-unconfirmed' && ev.descendants === 'none' && ev.uncertain === false;
+  assert.ok(row.status === 'stopped' || honestUnknown, `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: ev })}`);
+  assert.strictEqual(row.stopped_at === null, row.status !== 'stopped', 'stopped_at is set only for a proven stop');
 });
 
 test('the discoverability list names every rule and why each cannot run', () => {
@@ -992,8 +998,11 @@ test('개발 서버 꺼줘 signals the server JuQode started', async () => {
     const t = setInterval(() => { if (b.pushed.some((u) => u.ended)) { clearInterval(t); res(); } }, 20);
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
-  assert.strictEqual(row.status, 'stopped', `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: stopEvidenceOf(row, b) })}`);
-  assert.ok(row.stopped_at, '`20` keeps stopped_at for a run that was signalled');
+  const ev = stopEvidenceOf(row, b);
+  const honestUnknown = row.status === 'unknown' && ev?.verdict === 'stop-unconfirmed' && ev.descendants === 'none' && ev.uncertain === false;   // PM D2: taskkill 255 under load is unknown, never stopped/failed
+  assert.ok(row.status === 'stopped' || honestUnknown, `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: ev })}`);
+  if (row.status === 'stopped') assert.ok(row.stopped_at, '`20` keeps stopped_at for a run that was signalled');
+  else assert.strictEqual(row.stopped_at, null, 'an unconfirmed Stop must not carry stopped_at');
 });
 
 test('every refusal the run handler can give has a sentence', () => {
@@ -1174,7 +1183,9 @@ test('an unacknowledged ended_unknown Work refuses a file-changing Quick Command
   const stop = await b.h['juqode:qc-run'](null, b.project.id, 'qc.dev.stop', '서버 꺼줘');
   assert.strictEqual(stop.ok, true, `${stop.reason}/${stop.detail}`);
   assert.strictEqual(stop.action, 'stop');
-  await waitFor(5000, () => b.pushed.some((u) => u.runId === started.runId && u.ended));
+  /* a Windows Stop reads the process tree twice (0.5 s idle, ~2-3 s each at 2x CPU load on H1): the bound is the Stop's own
+   * documented worst case, and the wait ends the moment the run does */
+  await waitFor(STOP_WORST_CASE_MS, () => b.pushed.some((u) => u.runId === started.runId && u.ended));
 
   const runsBefore = repo.qcRunsFor(b.db, b.project.id).map((r) => r.id);
   for (const id of ['qc.build', 'qc.test', 'qc.dev.start', 'qc.deploy', 'qc.git.commit']) {
@@ -1509,6 +1520,7 @@ test('a package.json whose `scripts` is not an object is 사용 불가, never a 
 });
 
 /* ── a Stop whose outcome is `unknown` must not let a new Writer in while something may still be running ── */
+const { STOP_WORST_CASE_MS } = require(path.join(R, 'app/main/qc/stopper.js'));
 const { createUncertain } = require(path.join(R, 'app/main/qc/uncertain.js'));
 
 test('Writer gate: an uncertain QC Stop refuses a new Work and file-changing Quick Commands; read-only ones and Stop still work; only a later snapshot showing it gone opens it', async () => {
