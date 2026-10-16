@@ -25,6 +25,7 @@ import { el, btn } from '../dom.js';
 import { proposeDraft, compareRuns } from '../draft.mjs';
 import { columnFor, tileTone } from '../board-column.mjs';
 import { contextFacts } from '../human-read.mjs';
+import { presentFiles, maskForDisplay } from '../path-view.mjs';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
@@ -290,7 +291,6 @@ export function renderSC02(root, api, nav, state) {
   createTask.append(el('label', 'xs mut2', C.gap.task.goal), taskGoal,
     el('label', 'xs mut2', C.gap.task.acceptance), taskAcceptance,
     dependencies, createNote, createButton);
-  colInspect.appendChild(createTask);
 
   const selectedTask = el('section', 'task-selected');
   selectedTask.setAttribute('data-el', 'selected-task');
@@ -304,6 +304,7 @@ export function renderSC02(root, api, nav, state) {
   }));
   colInspect.appendChild(detailHead);
   colInspect.appendChild(selectedTask);
+  colInspect.appendChild(createTask);        // the selected Task comes first; writing another one is last
   const requestLabel = el('div', 'sm task-request-label', C.gap.stage.ask);
   intent.appendChild(requestLabel);
   intent.appendChild(el('div', 'xs mut2 task-intro', C.gap.task.intro));
@@ -508,7 +509,11 @@ export function renderSC02(root, api, nav, state) {
     const status = el('div', `inspect-status tone-${tileTone(task, face)}`);
     if (bits.mark) status.appendChild(el('span', 'tile-mark', bits.mark));
     status.appendChild(el('span', '', bits.status));
-    selectedTask.append(title, status);
+    /* The first thing in the Inspector: what this task is, where it stands, and the one thing to do
+     * about it. Everything below is detail the person opens when they want it. */
+    const head = el('div', 'inspect-head');
+    head.append(title, status);
+    selectedTask.appendChild(head);
     const lifecycleLabel = task.status === 'complete' ? C.gap.task.completeState
       : task.status === 'blocked' ? C.gap.task.blocked
         : task.status === 'in_progress' ? C.gap.task.inProgress : C.gap.task.open;
@@ -519,6 +524,17 @@ export function renderSC02(root, api, nav, state) {
     meta.append(el('div', 'xs mut2', C.gap.task.selected),
       el('div', 'xs mut2', `${C.gap.task.stateLabel}: ${lifecycleLabel}`),
       el('div', `xs mut2 task-verdict ${task.verdict}`, `${C.gap.task.status}: ${verdictLabel}`));
+    if (latest) {
+      const waiting = latest.status === 'permission_waiting' || latest.status === 'input_waiting';
+      const files = changedFilesOf(latest);
+      if (!waiting) {
+        const primary = files.length
+          ? btn('btn sm pri inspect-primary', C.work.readChanges, () => nav.toReader(latest))
+          : btn('btn sm pri inspect-primary inspect-deep', C.gap.board.deepRun, () => nav.toWork(latest));
+        primary.setAttribute('data-act', 'inspect-primary');
+        head.appendChild(primary);
+      }
+    }
     if (latest) selectedTask.appendChild(attemptLineCompact(latest, bits));
     if (latest?.permission && latest.status === 'permission_waiting') {
       selectedTask.appendChild(inspectPermission(latest, api, refreshTasks));
@@ -531,7 +547,10 @@ export function renderSC02(root, api, nav, state) {
       if (task.acceptance_criteria.length) {
         const acceptance = el('ul', 'task-criteria');
         for (const criterion of task.acceptance_criteria) acceptance.appendChild(el('li', 'sm', criterion.text));
-        selectedTask.append(el('div', 'xs mut2', C.gap.task.acceptance), acceptance);
+        const criteria = el('details', 'inspect-sec inspect-criteria');
+        criteria.open = true;                      // nothing has run yet, so the condition IS the content
+        criteria.append(el('summary', 'inspect-sec-sum', C.gap.task.acceptance), acceptance);
+        selectedTask.appendChild(criteria);
       }
       if (task.dependencies.length) {
         selectedTask.appendChild(el('div', 'xs mut2 task-dep-line',
@@ -556,7 +575,9 @@ export function renderSC02(root, api, nav, state) {
         { id: 'context', label: C.gap.board.tabContext, panel: context, on: false },
         { id: 'prior', label: C.gap.board.tabPrior, panel: null, on: false },
       ], selectedTask));
-      selectedTask.appendChild(btn('btn sm ghost inspect-deep', C.gap.board.deepRun, () => nav.toWork(latest)));
+      if (latest.status === 'permission_waiting' || latest.status === 'input_waiting') {
+        selectedTask.appendChild(btn('btn sm ghost inspect-deep', C.gap.board.deepRun, () => nav.toWork(latest)));
+      }
     }
     submit.disabled = task.verdict === 'pass';
   };
@@ -718,9 +739,19 @@ export function renderSC02(root, api, nav, state) {
    * F-C2-04 — it never disappears, and a failed or cancelled Work stays in it.
    * D-138 §5: findable, compact until the user expands it, never competing with the subject. */
   const hist = card('m', 'history');
-  hist.appendChild(head(C.history.title));
+  /* The rail is for finding your way: projects first. The record of past Works is a disclosure that
+   * stays CLOSED until asked for -- a permanent stack of result cards in the navigation made the rail
+   * the loudest thing on the screen. The summary carries only how many there are. */
+  const histBox = el('details', 'rail-history');
+  histBox.open = state.historyOpen === true;
+  histBox.addEventListener('toggle', () => { state.historyOpen = histBox.open; });
+  const histSum = el('summary', 'rail-history-sum');
+  histSum.appendChild(el('span', 'rail-history-title', C.history.title));
+  histSum.appendChild(el('span', 'rail-hist-count', ''));
+  histBox.appendChild(histSum);
   const rows = el('div', 'histrows');
-  hist.appendChild(rows);
+  histBox.appendChild(rows);
+  hist.appendChild(histBox);
   hist.appendChild(el('div', 'xs mut2 foot', C.history.note));
   colRail.appendChild(hist);
 
@@ -975,13 +1006,7 @@ function inspectResult(snap, nav) {
   const said = typeof report?.data?.text === 'string' ? report.data.text.trim() : '';
   box.appendChild(el('div', 'xs mut2', C.gap.task.humanAgent));
   box.appendChild(el('div', 'sm', said || C.gap.task.humanAgentNone));
-  if (files?.length) {
-    const list = el('div', 'inspect-files');
-    list.appendChild(el('div', 'xs mut2', C.gap.task.changedFiles));
-    for (const file of files) list.appendChild(el('div', 'sm', file));
-    box.appendChild(list);
-    box.appendChild(btn('btn sm', C.work.readChanges, () => nav.toReader(snap)));
-  }
+  if (files?.length) box.appendChild(fileSummary(files));
   const tools = (snap.result?.claims ?? []).find((claim) => claim.kind === 'tools-observed');
   const sources = (snap.result?.claims ?? []).filter((claim) => claim.sourceRef);
   if (sources.length || (Number.isInteger(tools?.data?.count) && tools.data.count > 0)) {
@@ -997,6 +1022,47 @@ function inspectResult(snap, nav) {
     box.appendChild(fold);
   }
   return box;
+}
+
+/* The changed files of a Run, exactly as stored (empty when the evidence did not answer). */
+function changedFilesOf(snap) {
+  const changed = (snap?.runEvidence ?? []).find((item) => item.kind === 'changed_files');
+  return changed?.details?.known === true ? (changed.details.files ?? []) : [];
+}
+
+/* Human summary of the changed files: the NAMES first (a folder hint only where two names collide),
+ * a "외 n개" instead of a long list, and the exact stored paths one click away. Nothing here says what
+ * a file is for -- a name is not evidence of meaning. The Raw Diff stays behind `변경 읽기`. */
+function fileSummary(files) {
+  const view = presentFiles(files);
+  const wrap = el('div', 'inspect-files');
+  wrap.setAttribute('data-el', 'inspect-files');
+  wrap.appendChild(el('div', 'xs mut2', C.gap.task.changedFiles));
+  const chips = el('div', 'file-chips');
+  const LIMIT = 4;
+  for (const item of view.items.slice(0, LIMIT)) {
+    const chip = el('span', 'file-chip', item.shown);
+    chip.title = maskForDisplay(item.raw);
+    chips.appendChild(chip);
+  }
+  if (view.count > LIMIT) chips.appendChild(el('span', 'file-more', C.gap.paths.more(view.count - LIMIT)));
+  wrap.appendChild(chips);
+  const all = el('details', 'file-all');
+  all.appendChild(el('summary', 'xs mut', C.gap.paths.showAll));
+  const list = el('div', 'file-paths');
+  for (const item of view.items) {
+    const row = el('div', 'file-path-row');
+    row.appendChild(el('span', 'file-path', maskForDisplay(item.raw)));
+    const copy = btn('btn sm ghost file-copy', C.gap.paths.copy, async () => {
+      try { await navigator.clipboard.writeText(item.raw); copy.textContent = C.gap.paths.copied; } catch { /* clipboard unavailable */ }
+    });
+    row.appendChild(copy);
+    list.appendChild(row);
+  }
+  list.appendChild(el('div', 'xs mut2', C.gap.paths.exactNote));
+  all.appendChild(list);
+  wrap.appendChild(all);
+  return wrap;
 }
 
 function inspectActivity(snap) {
@@ -1543,6 +1609,8 @@ async function fillHistory(rows, api, nav, state) {
   const r = await api.history(state.project.id);
   rows.innerHTML = '';
   if (!r?.ok) return;
+  const countEl = rows.closest?.('details')?.querySelector('.rail-hist-count');
+  if (countEl) countEl.textContent = r.works?.length ? String(r.works.length) : '';
 
   /* `18` orient.* — where the user is, in one sentence. `확인 불가` is reserved for a Work whose
    * process could not be found; it is never a stand-in for "we have not looked". */
@@ -1567,7 +1635,7 @@ async function fillHistory(rows, api, nav, state) {
     row.setAttribute('data-el', 'history-row');
 
     const top = el('div', 'histtop');
-    top.appendChild(el('span', 'sm histname', w.intent));
+    { const nm = el('span', 'sm histname', w.intent); nm.title = w.intent; top.appendChild(nm); }
     const o = HIST_OUTCOME[w.outcome];
     if (w.status !== 'ended') {
       top.appendChild(el('span', 'chip wait', C.gap.historyRunning));

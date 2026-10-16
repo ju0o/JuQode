@@ -354,6 +354,14 @@ export const C = {
    *                        supplies only the 로그인 필요 sentence.
    */
   gap: {
+    /* How a file path is shown (path-view.mjs): the name first; the exact path on request. */
+    paths: {
+      showAll:  '전체 경로 보기',
+      more:     (n) => `외 ${n}개`,
+      copy:     '경로 복사',
+      copied:   '복사했어요',
+      exactNote: '저장된 경로 그대로예요.',
+    },
     stage: {
       where: '어디에서 작업할까요?',
       whereLead: '폴더를 고르면, 그 안에서 하고 싶은 일을 말로 적을 수 있어요.',
