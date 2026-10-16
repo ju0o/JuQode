@@ -329,6 +329,9 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
             small, rawKeyVisible: /signals:|claude:result/.test(text),
             pathRepeats: (text.match(/index\\.js/g) ?? []).length,
             cardHeight: card ? Math.round(card.getBoundingClientRect().height) : null,
+            sideOverflowX: (() => { const n = root.querySelector('.sc03-side'); return n ? n.scrollWidth - n.clientWidth : 0; })(),
+            stageOverflowX: (() => { const n = root.querySelector('.sc03-stage'); return n ? n.scrollWidth - n.clientWidth : 0; })(),
+            pastEdge: [...root.querySelectorAll('*')].filter((n) => n.children.length === 0 && n.textContent.trim() && visible(n) && n.getBoundingClientRect().right > innerWidth + 1).length,
             primary: [...root.querySelectorAll('.btn.pri')].filter(visible).length,
             buttons: [...root.querySelectorAll('button')].filter(visible).map((b) => b.textContent.trim()).filter(Boolean),
             visibleLines: text.split('\\n').filter(Boolean).length });
@@ -336,6 +339,28 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
         rows.push({ w, theme, ...m });
         const shot = await send('Page.captureScreenshot', { format: 'png' });
         fs.writeFileSync(path.join(OUT, `sc03-d2-${tag}-${w}-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
+        if (theme === 'light') {
+          /* 150% page zoom: the same panels, a narrower effective width */
+          await evalJs(`document.documentElement.style.zoom = '1.5'`);
+          await sleep(150);
+          rows[rows.length - 1].zoom150 = JSON.parse(await evalJs(`JSON.stringify({ pageX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            sideX: (() => { const n = document.querySelector('.sc03-side'); return n ? n.scrollWidth - n.clientWidth : 0; })() })`));
+          if (w === 1200) fs.writeFileSync(path.join(OUT, `sc03-d2-${tag}-${w}-light-zoom150.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+          await evalJs(`document.documentElement.style.zoom = ''`);
+          /* real Tab presses: every focus stop is on screen and has a visible indicator */
+          await evalJs(`document.activeElement?.blur?.(); window.scrollTo(0, 0)`);
+          const stops = [];
+          for (let i = 0; i < 14; i += 1) {
+            await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+            await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+            stops.push(JSON.parse(await evalJs(`(() => { const a = document.activeElement; if (!a || a === document.body) return JSON.stringify(null);
+              const r = a.getBoundingClientRect(); const cs = getComputedStyle(a);
+              return JSON.stringify({ tag: a.tagName, text: (a.textContent || '').trim().slice(0, 24),
+                onScreen: r.width > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight,
+                indicator: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 || (cs.boxShadow && cs.boxShadow !== 'none') }); })()`)));
+          }
+          rows[rows.length - 1].focus = stops.filter(Boolean);
+        }
       }
     }
     await send('Emulation.setDeviceMetricsOverride', { width: w0, height: h0, deviceScaleFactor: 1, mobile: false });
@@ -4186,6 +4211,14 @@ for (const [tag, rows] of Object.entries(results.sc03d2)) {
     assert.strictEqual(r.clipped, 0, `${at}: a card clips its content`);
     assert.strictEqual(r.small, 0, `${at}: visible text under 12px`);
     assert.strictEqual(r.rawKeyVisible, false, `${at}: a raw provider key (signals:/claude:result) is visible without opening anything`);
+    assert.strictEqual(r.sideOverflowX, 0, `${at}: the right panel scrolls sideways (${r.sideOverflowX}px)`);
+    assert.strictEqual(r.stageOverflowX, 0, `${at}: the result column scrolls sideways (${r.stageOverflowX}px)`);
+    assert.strictEqual(r.pastEdge, 0, `${at}: ${r.pastEdge} visible text element(s) run past the window edge`);
+    if (r.zoom150) assert.ok(r.zoom150.pageX <= 0 && r.zoom150.sideX <= 0, `${at}: at 150% zoom the page/panel scrolls sideways ${JSON.stringify(r.zoom150)}`);
+    if (r.focus) {
+      assert.ok(r.focus.length >= 1, `${at}: Tab reached nothing`);
+      for (const f of r.focus) assert.ok(f.onScreen && f.indicator, `${at}: focus stop ${JSON.stringify(f)} is off screen or has no visible indicator`);
+    }
     assert.ok(r.primary <= 1, `${at}: ${r.primary} primary buttons -- one next action is emphasised`);
   }
 }

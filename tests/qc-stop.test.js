@@ -335,3 +335,34 @@ test('duplicate Stop after a kill was requested does nothing; a NEW run of the s
   const outB = await b.done;
   assert.deepStrictEqual([outA.stop.attempts, outB.stop.attempts], [1, 1], 'the second run inherited the first one\'s Stop record');
 });
+
+/* ───────────── real Windows scratch processes: the hold follows pid + creation time, not a guess ───────────── */
+const { windowsTools } = require(path.join(R, 'app/main/qc/stopper.js'));
+const { createUncertain } = require(path.join(R, 'app/main/qc/uncertain.js'));
+
+test('real Windows: a recorded scratch tree holds the gate while alive, a reused pid (wrong creation time) does not, and it opens once the tree is gone', { skip: !WIN && 'needs the Windows process snapshot' }, async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qcstop-'))); dirs.push(dir);
+  const grand = "setInterval(()=>{},1000)";
+  const root = "const {spawn}=require('child_process'); spawn(process.execPath,['-e'," + JSON.stringify(grand) + "],{stdio:'ignore'}); setInterval(()=>{},1000)";
+  const scratch = spawn(process.execPath, ['-e', root], { stdio: 'ignore', cwd: dir });
+  try {
+    let tree = null;
+    assert.ok(await until(async () => { tree = await windowsTools.tree(scratch.pid); return tree && tree.descendants.length >= 1; }, 15000), 'the scratch tree never came up');
+    const members = [tree.root, ...tree.descendants];
+
+    // identity: the same pid with another creation time is NOT the recorded process
+    const wrong = await windowsTools.survivors([{ pid: scratch.pid, created: '1999-01-01T00:00:00.0000000+00:00' }]);
+    assert.deepStrictEqual(wrong, [], 'a pid with a different creation time was taken for the recorded process');
+
+    const reg = createUncertain({ probe: windowsTools.survivors, retryMs: 200, maxTries: 40 });
+    reg.add('real-run', 'p1', members, { why: 'stop-uncertain' });
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.strictEqual(reg.blocks('p1'), 'real-run', 'the gate opened while the recorded tree was alive');
+
+    // end exactly this tree (its own pid, /T), nothing by pattern
+    const k = require('node:child_process').spawnSync('taskkill', ['/PID', String(scratch.pid), '/T', '/F'], { stdio: 'ignore' });
+    assert.strictEqual(k.status, 0);
+    assert.ok(await until(() => { reg.refresh('p1'); return reg.blocks('p1') === null; }, 20000), 'the gate stayed shut after the whole tree was gone');
+    assert.ok(members.every((m) => !alive(m.pid)), 'a member survived');
+  } finally { try { scratch.kill(); } catch { /* gone */ } }
+});

@@ -222,3 +222,17 @@
 /* an ended Work's "last seen" line is history, not status */
 .sc03 .liveness.is-past { padding: 2px 0; border-top: none; }
 .sc03 .liveness.is-past * { font-size: var(--fs-caption); color: var(--mut2); }
+
+/* a changed-files measurement that could not be made: dashed like every other 확인 못함, never the "no changes" line */
+.sc03 .result-unknown, .sc02 .result-unknown { border-left: 1px dashed var(--unk); padding-left: 8px; color: var(--ink2); }
+
+/* D2.1 · a long state label wraps instead of running out of the panel; nothing in the right column scrolls sideways */
+.sc03 .chead { flex-wrap: wrap; min-width: 0; row-gap: 4px; }
+.sc03 .chead .actor { white-space: nowrap; }
+.sc03 .chip { white-space: normal; max-width: 100%; height: auto; min-height: 20px; line-height: 1.35; padding-top: 2px; padding-bottom: 2px; overflow-wrap: anywhere; text-align: left; border-radius: 12px; }
+.sc03 .chead .chip { flex: 0 1 auto; min-width: 0; }
+.sc03-side, .sc03-stage { overflow-x: hidden; }
+.sc03-side > *, .sc03-stage > * { min-width: 0; max-width: 100%; }
+.sc03 .card, .sc03 .panel { overflow-wrap: anywhere; }
+.sc03 .wname { min-width: 0; }
+@media (max-width: 1023px) { .sc03-stage, .sc03-side { overflow-x: visible; } }

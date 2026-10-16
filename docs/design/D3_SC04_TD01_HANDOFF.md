@@ -44,3 +44,30 @@ Acceptance: drawer at 880 / 1024 / 1440 (light/dark) — result visible without 
 
 ## Suggested order
 1. SC-04 (reuses `file-summary.js` and the fold CSS directly) → 2. TD-01 → 3. SC-01/brief density pass. Each as its own Batch with a Before/After from the same matrix helper (`sc03Matrix` in `tests/e2e/visual.mjs`, generalise to `screenMatrix(tag, selector)`).
+
+---
+
+# Addendum (D2.1) — SC-04 implementation scope, confirmed against the current code
+
+Status: **proposal for PM; nothing below is implemented.** TD-01 stays a separate later Batch.
+
+## What exists (`app/renderer/screens/sc04.js`, 438 lines; `sc04.css`, 131)
+Header (Work name + outcome chip) → orientation line → **three equal columns** `groupColumn` (one card per Change Group: title, confidence chip, 왜/무엇/… fields, `Raw Diff 보기`, a `파일 N · a · b · c` mono line) | `blockColumn` (per file: mono path, Code Blocks as buttons, `Raw Diff 보기`) | `rawColumn` (patches in `<pre>`, copy, scope note) → evidence-gap card (`.sc04-gap`, mono `a · b · c`) → next actions (`이해했어요`, `원하던 결과가 아니에요` → `unwantedPanel`, which owns 되돌리기).
+Empty/unknown/refused states: `reader.none`, `readerUnknown` (+ `readerUnknownFiles(join(' · '))`), `readerUnavailable`.
+
+## Scope for the SC-04 Batch (in this order)
+1. **관측된 변경 요약** (new top card, no new data): counts from `reader` (files, groups) + the outcome already in the header; `changedFilesState()` semantics apply (zero / unknown / missing stay different sentences; the unknown-remainder card stays unfolded and dashed). No sentence derived from file names.
+2. **변경된 파일 목록**: `presentFiles()` chips (same-name folder hint, masked display, exact stored path on "전체 경로 보기" + copy) replace the three `join(' · ')` mono lines (group card, `readerUnknownFiles`, evidence-gap `paths`). The group list becomes the selector; selection state `state.readerGroup` is kept.
+3. **선택한 변경의 코드**: `blockColumn` for the selected group only, as the main column. D-118 stays true: a group/file with no Code Block (단위화 불가, 설명 불가, binary) must still reach Raw in one step — when a file has no blocks its Raw is shown directly (existing behaviour, keep + test).
+4. **Raw Diff, on request**: `rawColumn` becomes a fold (`details.result-fold` pattern) closed by default; `Raw Diff 보기` on a group/block opens it and scrolls it into view (existing `state.readerRaw` flag). Patch text, truncation notice (`readerTruncated`), copy-of-stored-text and the `scoped` note unchanged.
+Layout: ≥ 1200 summary + list left, code right, Raw below the code (full width); < 1200 one column in that order. Fonts ≥ 12 px; chips wrap (D2.1 rule).
+
+## Must be preserved (acceptance, not options)
+- Original evidence: `raw_diff`, change groups, `sourceRef`s are read-only inputs; **no migration, no rewrite**; no data is dropped from the Raw view.
+- Unmeasured remainder (`changes-unknown`, evidence gap, `reader.unknown`): never folded, never green, never "변경 없음".
+- 되돌리기/`원하던 결과가 아니에요`: `unwantedPanel(..., {readMore:false})` stays on the page without scrolling past Raw; its two-step confirm and `revertLimits` text untouched.
+- Exit/Back: `작업으로 돌아가기`, `이해했어요` (focus returns to the request field), terminal toggle.
+
+## Tests the Batch must bring
+Unit: source scan that SC-04 prints files via `presentFiles` only; a Raw-only path exists for each of 단위화 불가 / 설명 불가 / binary.
+Real screen (`screenMatrix`, generalised from `sc03Matrix`): 880/1024/1200/1440 × light/dark × {explained group, 단위화 불가, binary, unknown remainder, evidence gap}: overflow 0, text ≥ 12 px, Raw text absent from the visible text until opened, selected group keeps focus after fold toggle, Tab order summary → list → code → Raw → actions; H3 WSLg visible run + ASUS Xvfb; Before/After in a new Private evidence directory.

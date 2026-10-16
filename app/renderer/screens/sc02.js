@@ -24,7 +24,7 @@ import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { proposeDraft, compareRuns } from '../draft.mjs';
 import { columnFor, tileTone } from '../board-column.mjs';
-import { contextFacts } from '../human-read.mjs';
+import { contextFacts, changedFilesState } from '../human-read.mjs';
 import { maskForDisplay } from '../path-view.mjs';
 import { fileSummary } from '../file-summary.js';
 import { holdPanel } from '../qc-hold.js';
@@ -1055,13 +1055,15 @@ function inspectResult(snap, nav) {
   box.setAttribute('data-el', 'inspect-result');
   box.appendChild(el('div', 'inspect-result-title', outcomeKorean(snap.work?.outcome) ?? C.work.unknownTitle));
   const evidence = snap.runEvidence ?? [];
-  const changed = evidence.find((item) => item.kind === 'changed_files');
-  const files = changed?.details?.known === true ? (changed.details.files ?? []) : null;
-  if (files?.length) {
-    box.appendChild(el('div', 'sm', C.gap.board.filesChanged(files.length)));
-    box.appendChild(fileSummary(files));
+  const answer = changedFilesState(evidence);
+  if (answer.state === 'files') {
+    box.appendChild(el('div', 'sm', C.gap.board.filesChanged(answer.files.length)));
+    box.appendChild(fileSummary(answer.files));
   } else {
-    box.appendChild(el('div', 'sm', changed ? C.gap.task.noChanges : C.gap.task.humanObservedMissing));
+    const text = { zero: C.gap.task.noChanges, unknown: C.gap.claimUnknown, missing: C.gap.task.humanObservedMissing }[answer.state];
+    const line = el('div', answer.state === 'unknown' ? 'sm result-unknown' : 'sm', text);
+    if (answer.state === 'unknown') line.setAttribute('data-el', 'changes-unknown');
+    box.appendChild(line);
   }
   box.appendChild(el('div', 'xs mut2 inspect-next', C.gap.task.nextStep));
 
@@ -1184,13 +1186,10 @@ function renderHumanRead(task, latest) {
   const report = latest.result?.claims?.find((claim) => claim.kind === 'agent-report');
   if (report?.data?.text) block.appendChild(voice(C.gap.task.humanAgent, report.data.text));
   else block.appendChild(voice(C.gap.task.humanAgent, ended ? C.gap.task.humanAgentNone : C.gap.task.humanAgentPending));
-  const changed = (latest.runEvidence ?? []).find((item) => item.kind === 'changed_files');
-  if (changed) {
-    const files = changed.details.files ?? [];
-    block.appendChild(voice(C.gap.task.humanObserved, files.length ? files.join('\n') : C.gap.task.noChanges));
-  } else {
-    block.appendChild(voice(C.gap.task.humanObserved, ended ? C.gap.task.humanObservedMissing : C.gap.task.humanObservedPending));
-  }
+  const answer = changedFilesState(latest.runEvidence);
+  block.appendChild(voice(C.gap.task.humanObserved, {
+    files: answer.files.join('\n'), zero: C.gap.task.noChanges, unknown: C.gap.claimUnknown,
+    missing: ended ? C.gap.task.humanObservedMissing : C.gap.task.humanObservedPending }[answer.state]));
   const tests = (latest.runEvidence ?? []).filter((item) => item.kind === 'test_command');
   if (tests.length) {
     const lines = tests.map((item) => `${item.summary} · ${testStateLabel(item)}`);
@@ -1346,8 +1345,8 @@ function renderRunReview(task, detail, refresh, nav) {
             text.appendChild(el('span', 'mut2', C.gap.task.redactedContent));
           }
         } else {
-          const files = item.details.files ?? [];
-          text.appendChild(el('span', 'mut2', files.length ? files.join(' · ') : C.gap.task.noChanges));
+          const answer = changedFilesState([item]);
+          text.appendChild(el('span', 'mut2', { files: answer.files.join(' · '), zero: C.gap.task.noChanges, unknown: C.gap.claimUnknown, missing: '' }[answer.state]));
         }
         label.append(check, text);
         review.appendChild(label);
@@ -1452,9 +1451,9 @@ function renderRunReview(task, detail, refresh, nav) {
     }
     const changed = (snap.runEvidence ?? []).find((item) => item.kind === 'changed_files');
     if (changed) {
-      const files = changed.details.files ?? [];
+      const answer = changedFilesState([changed]);
       const changedLabel = factBlock(`${C.gap.task.changedFiles} · Evidence ${changed.id.slice(0, 8)}`,
-        files.length ? files.join('\n') : C.gap.task.noChanges);
+        { files: answer.files.join('\n'), zero: C.gap.task.noChanges, unknown: C.gap.claimUnknown, missing: '' }[answer.state]);
       changedLabel.title = changed.id;
       run.appendChild(changedLabel);
     }

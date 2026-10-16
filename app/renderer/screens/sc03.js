@@ -14,7 +14,7 @@ import { el, btn } from '../dom.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceCard, modeFor } from '../presence.js';
 import { nextActions } from '../nextaction.js';
-import { contextFacts } from '../human-read.mjs';
+import { contextFacts, changedFilesState } from '../human-read.mjs';
 import { fileSummary } from '../file-summary.js';
 
 /* The schema's outcome codes → the class that paints them and `18`'s own title key.
@@ -487,9 +487,15 @@ function humanResult(snap) {
     /* A Task Run's truth is run_evidence. A Work that is not a Task Run has no such rows;
        its changed-file claim is a different record, and "0개" would deny that claim. */
     const evidence = snap.runEvidence ?? [];
-    const changed = evidence.find((item) => item.kind === 'changed_files');
-    files = changed?.details?.known === true ? (changed.details.files ?? []) : null;
-    if (!files) block.appendChild(el('div', 'sm', changed ? C.gap.task.noChanges : C.gap.task.humanObservedMissing));
+    const answer = changedFilesState(evidence);
+    files = answer.state === 'files' || answer.state === 'zero' ? answer.files : null;
+    if (answer.state === 'missing') block.appendChild(el('div', 'sm', C.gap.task.humanObservedMissing));
+    else if (answer.state === 'unknown') {
+      /* the row exists but the measurement could not be made: dashed, never "no changes" */
+      const u = el('div', 'sm result-unknown', C.gap.claimUnknown);
+      u.setAttribute('data-el', 'changes-unknown');
+      block.appendChild(u);
+    }
     const tests = evidence.filter((item) => item.kind === 'test_command');
     const seen = tests.filter((item) => item.details?.result_state === 'returned' && item.details.exit_code != null).length;
     block.appendChild(el('div', 'xs mut2 result-tests', tests.length ? C.gap.result.testsLead(tests.length, seen) : C.gap.task.humanTestNone));
