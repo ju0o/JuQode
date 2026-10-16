@@ -24,7 +24,7 @@ body {
 /* `16` §2.1: red is for failure and for nothing else. A partial restore that could not finish
  * is a failure, and it is the one sentence on that card that must not read like a footnote. */
 .bad { color: var(--fail); }
-.mono { font-family: var(--font-mono); font-size: .92em; }
+.mono { font-family: var(--font-mono); font-size: inherit; }
 
 /* ---------- surface primitives ---------- */
 .card {

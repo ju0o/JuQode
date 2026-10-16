@@ -69,6 +69,19 @@
   --ease-in: cubic-bezier(.4,0,.6,1);
   --ease-spring: cubic-bezier(.3,1.25,.4,1);
 
+  /* type scale -- one small set, Korean-first. Five sizes, two weights, no positive tracking:
+   * positive letter-spacing is for Latin capitals; on Hangul it pulls syllables apart. Monospace is
+   * for code and file paths only, never for prose, times or counts. */
+  --fs-caption: 12px;  --lh-caption: 16px;     /* captions, counts, secondary facts */
+  --fs-label:   13px;  --lh-label:   18px;     /* controls, tile titles, field labels */
+  --fs-body:    15px;  --lh-body:    22px;     /* reading text */
+  --fs-title:   18px;  --lh-title:   26px;     /* a screen/panel subject */
+  --fs-display: 28px;  --lh-display: 36px;     /* page heading */
+  --fw-regular: 400;   --fw-strong:  600;
+  --ls-ko: 0;          --ls-title:  -.01em;
+  /* SC-02 shell widths (adaptive, see sc02.css) */
+  --rail-w: 224px;     --inspect-w: 340px;
+
   /* type */
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR",
                "Malgun Gothic", Roboto, sans-serif;
