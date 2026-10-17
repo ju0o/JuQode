@@ -9,8 +9,11 @@ const crypto = require('node:crypto');
 
 const STATES = ['SUPPORTED', 'LIMITED', 'UNSUPPORTED', 'UNKNOWN'];
 /** flags/values that make a provider write or run without asking: never passed, whatever the caller says */
-const PERMISSIVE = [/^--auto$/, /^--dangerously-skip-permissions$/, /^--dangerously-bypass-approvals-and-sandbox$/, /^--yolo$/,
-  /^--ask-for-approval=never$/, /^--sandbox=danger-full-access$/, /^approval_policy\s*=\s*"?never"?$/, /^sandbox_mode\s*=\s*"?danger-full-access"?$/];
+const PERMISSIVE = [/^--auto$/, /^--yolo$/, /^--(allow-)?dangerously-/, /^--ask-for-approval=never$/, /^--sandbox=danger-full-access$/,
+  /^--permission-mode=(bypassPermissions|acceptEdits|auto)$/, /^approval_policy\s*=\s*"?never"?$/, /^sandbox_mode\s*=\s*"?danger-full-access"?$/];
+/** option and value as SEPARATE arguments (`--sandbox danger-full-access`, `-a never`, `-c approval_policy=never`) */
+const PERMISSIVE_PAIRS = [[/^(--sandbox|-s)$/, /^danger-full-access$/], [/^(--ask-for-approval|-a)$/, /^never$/],
+  [/^--permission-mode$/, /^(bypassPermissions|acceptEdits|auto)$/], [/^(-c|--config)$/, /^(approval_policy|sandbox_mode)\s*=\s*"?(never|danger-full-access)"?$/]];
 
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
@@ -37,8 +40,17 @@ function guardLaunch(recorded, run) {
   return { ok: true };
 }
 
-/** argv/config values that remove the provider's own permission checks. */
-const permissiveArgs = (args) => (Array.isArray(args) ? args : []).filter((a) => PERMISSIVE.some((re) => re.test(String(a).trim())));
+/** argv/config values that remove the provider's own permission checks, joined with their option when the value is a separate argument. */
+function permissiveArgs(args) {
+  const list = (Array.isArray(args) ? args : []).map((a) => String(a).trim());
+  const out = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const a = list[i];
+    if (PERMISSIVE_PAIRS.some(([opt, val]) => opt.test(a) && i + 1 < list.length && val.test(list[i + 1]))) { out.push(`${a} ${list[i + 1]}`); i += 1; }
+    else if (PERMISSIVE.some((re) => re.test(a))) out.push(a);
+  }
+  return out;
+}
 
 /** A capability record. Anything not measured is UNKNOWN; the state set is closed. */
 function capability(provider, host, state, evidence) {

@@ -15,6 +15,7 @@
  *     `--allowedTools Edit` was measured changing a second, unapproved file.
  */
 const { spawn, spawnSync } = require('node:child_process');
+const { buildArgs } = require('../provider/claude-contract');
 const path = require('node:path');
 const fs = require('node:fs');
 const { resolveBin, launchArgv } = require('../claude-detect');
@@ -207,25 +208,13 @@ function allowSpec(denial, cwd) {
  *                    startFailed:boolean, unparsed:number}>}
  */
 function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume = false, onSignal, onChild, bin, timeoutMs = 0 }) {
-  const args = resume
-    ? ['--resume', sessionId, '-p', '--output-format', 'stream-json', '--verbose']
-    : baseArgs(sessionId);
-  /* `--allowedTools <tools...>` is VARIADIC. A prompt passed as a positional argument after it
-   * is swallowed as a second tool grant — measured: the retry never ran and the CLI reported a
-   * missing deferred-tool marker. The prompt goes on stdin, which also handles a multi-line
-   * request without any quoting question. */
-  if (allowedTools.length) args.push('--allowedTools', ...allowedTools);
-
-  /* `--tools` selects from the BUILT-IN set, and `--tools ""` disables all of them. It is not
-   * the same knob as `--allowedTools`, which only pre-grants permission for tools the session
-   * already has — passing an empty ALLOW list adds no flag at all and leaves the default set
-   * intact, which is how a pass documented as "no tools" ran with all of them.
-   *
-   * MEASURED (Claude Code 2.1.266, disposable scratch dir, never a real project): asked to edit
-   * a file with `--tools ""`, the CLI produced a text-only turn — "Read (No such file or
-   * directory)" — `permission_denials: []`, one turn, and the target file was byte-identical
-   * afterwards. That is the containment claim, and it is the only one made. */
-  if (tools !== null) args.push('--tools', tools);
+  /* The argv comes from ONE place (provider/claude-contract.js): unscoped grants, a bad id or a permission-removing option are refused BEFORE a process exists,
+   * and a run that restricts built-in tools also gets `--strict-mcp-config` (H3 measured: `--tools ""` alone left 19 connector tools exposed).
+   * `--allowedTools <tools...>` is VARIADIC, so the prompt goes on stdin, never as a positional argument (a positional prompt was swallowed as a grant).
+   * `--tools ""` disables every built-in tool; it is not `--allowedTools`, which only pre-grants tools the session already has. */
+  const built = buildArgs({ sessionId, resume, allowedTools, tools });
+  if (!built.ok) return Promise.resolve({ code: null, signal: null, sawEvent: false, stderr: `preflight-refused:${built.reason}`, startFailed: true, unparsed: 0, seq: 0, preflight: built.reason });
+  const { args, containment } = built;
 
   const env = { ...process.env };
   /* Nested invocation: Claude Code refuses to run inside its own session unless these go. */
@@ -311,6 +300,8 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
          * start. It gets a card and no `work` row. Note the exit code is not consulted for
          * anything else — a denied run exits 0. */
         startFailed: !sawEvent, mismatch,
+        /* what this launch may CLAIM; hooks and effective permissions are UNKNOWN before launch, `attested` is false */
+        containment,
       });
     };
 

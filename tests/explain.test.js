@@ -663,6 +663,8 @@ test('the explanation pass really is launched with the built-in tool set EMPTIED
   assert.strictEqual(args[at + 1], '', '`--tools ""` is what empties the set; anything else grants tools');
   assert.ok(!args.includes('--allowedTools'),
     'an ALLOW list grants tools — it is the opposite of the restriction this pass needs');
+  /* H3 Live Probe: `--tools ""` left 19 claude.ai connector (MCP) tools exposed; `--strict-mcp-config` removed them. */
+  assert.strictEqual(args[at + 2], '--strict-mcp-config', `a tool-restricted pass still exposes MCP tools: ${JSON.stringify(args)}`);
 });
 
 test('a Work turn is NOT tool-restricted — the flag belongs only to the read-only pass', async () => {
@@ -672,6 +674,7 @@ test('a Work turn is NOT tool-restricted — the flag belongs only to the read-o
   const { bin, argv } = argvCli();
   await session.run({ cwd: tempDir('juqode-run-'), bin, sessionId: 'sid', prompt: 'x', onSignal: () => {} });
   assert.ok(!argv().includes('--tools'), `a Work turn carried a tool restriction: ${JSON.stringify(argv())}`);
+  assert.ok(!argv().includes('--strict-mcp-config'), 'a Work turn changed MCP exposure (compatibility: only restricted-tool passes do)');
 });
 
 test('한 작업의 그룹은 다른 작업의 diff 를 인용하지 못한다', () => {

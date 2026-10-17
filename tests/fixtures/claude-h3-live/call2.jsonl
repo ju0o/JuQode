@@ -1,0 +1,9 @@
+{"type": "system", "subtype": "hook_started", "hook_id": "d000b080-9402-44c9-b6f9-6189b4230f18", "hook_name": "SessionStart:resume", "hook_event": "SessionStart", "session_id": "190fd6a6-aed7-4112-84c2-cf743eb78760"}
+{"type": "system", "subtype": "hook_started", "hook_id": "f65f33eb-a506-4782-a4b0-1c8a3e3295f8", "hook_name": "SessionStart:resume", "hook_event": "SessionStart", "session_id": "190fd6a6-aed7-4112-84c2-cf743eb78760"}
+{"type": "system", "subtype": "hook_started", "hook_id": "f891b7cc-ba21-413a-95b6-9d2fe81e4a75", "hook_name": "SessionStart:resume", "hook_event": "SessionStart", "session_id": "190fd6a6-aed7-4112-84c2-cf743eb78760"}
+{"type": "system", "subtype": "hook_response", "hook_id": "f891b7cc-ba21-413a-95b6-9d2fe81e4a75", "hook_name": "SessionStart:resume", "hook_event": "SessionStart", "session_id": "190fd6a6-aed7-4112-84c2-cf743eb78760"}
+{"type": "system", "subtype": "hook_response", "hook_id": "f65f33eb-a506-4782-a4b0-1c8a3e3295f8", "hook_name": "SessionStart:resume", "hook_event": "SessionStart", "session_id": "190fd6a6-aed7-4112-84c2-cf743eb78760"}
+{"type": "system", "subtype": "hook_response", "hook_id": "d000b080-9402-44c9-b6f9-6189b4230f18", "hook_name": "SessionStart:resume", "hook_event": "SessionStart", "session_id": "190fd6a6-aed7-4112-84c2-cf743eb78760"}
+{"type": "system", "subtype": "init", "session_id": "190fd6a6-aed7-4112-84c2-cf743eb78760", "cwd": "/scratch/dirB", "tools": [], "mcp_servers": [], "model": "claude-sonnet-5", "permissionMode": "default", "apiKeySource": "none"}
+{"type": "assistant", "session_id": "190fd6a6-aed7-4112-84c2-cf743eb78760", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok2"}]}}
+{"type": "result", "subtype": "success", "is_error": false, "terminal_reason": "completed", "session_id": "190fd6a6-aed7-4112-84c2-cf743eb78760", "total_cost_usd": 0.1014422, "num_turns": 1, "result": "ok2", "permission_denials": [], "modelUsage_models": ["claude-sonnet-5"]}
