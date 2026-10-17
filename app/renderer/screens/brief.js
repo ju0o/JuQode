@@ -88,7 +88,9 @@ export function renderBrief(card, interp, opts = {}) {
     card.appendChild(el('p', 'sm', C.gap.briefEmptyBody));
     if (opts.onStart) {
       const acts = el('div', 'row-acts');
-      acts.appendChild(btn('btn sm pri', C.gap.briefEmptyStart, opts.onStart));
+      /* Not primary: SC-02's empty board already carries the one primary 새 작업. Two of them told a person with an
+       * empty folder to start in two places; this one stays as the way to start from a sentence already begun. */
+      acts.appendChild(btn('btn sm', C.gap.briefEmptyStart, opts.onStart));
       card.appendChild(acts);
     }
     return;

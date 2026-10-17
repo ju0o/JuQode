@@ -37,11 +37,12 @@ if (!host) die('--host H1|H3 is required');
 const out = path.resolve(arg('out') ?? '');
 if (!arg('out')) die('--out <dir> is required');
 fs.mkdirSync(out, { recursive: true });
-const only = (arg('only') ?? 'boot,visual,offline').split(',');
+const only = (arg('only') ?? 'boot,visual,journey,offline').split(',');
 
 const TESTS = {
   boot: { file: 'tests/e2e/boot.test.mjs', timeoutMs: 180_000 },
   visual: { file: 'tests/e2e/visual.mjs', timeoutMs: 1_200_000 },
+  journey: { file: 'tests/e2e/journey.mjs', timeoutMs: 300_000 },
   offline: { file: 'tests/e2e/offline-shutdown.mjs', timeoutMs: 360_000 },
 };
 

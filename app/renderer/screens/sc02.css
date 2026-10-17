@@ -651,3 +651,12 @@
 .sc02 .inspect-sec-sum::-webkit-details-marker { display: none; }
 .sc02 .inspect-sec-sum::before { content: "▸"; margin-right: 6px; color: var(--mut); }
 .sc02 .inspect-sec[open] > .inspect-sec-sum::before { content: "▾"; }
+
+/* The empty Board's one invitation: what to do, and the single primary action. It leaves when the request field
+   opens (that field IS the next step) and when any Task or live attempt exists (the board then speaks for itself). */
+.sc02 .board-start { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: 520px; padding: 4px 2px 0; }
+.sc02 .board-start-title { font-size: var(--fs-title, 18px); font-weight: 700; color: var(--ink); }
+.sc02 .board-start p { margin: 0; }
+.sc02.composer-open .board-start { display: none; }
+/* Once the field is open the next step is 보내기; a second primary button here would only compete with it. */
+.sc02.composer-open [data-act="task-write-request"], .sc02.composer-open .write-request-note { display: none; }

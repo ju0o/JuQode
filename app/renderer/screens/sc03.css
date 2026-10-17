@@ -110,6 +110,8 @@
   display: flex; flex-direction: column; gap: 2px;
 }
 .sc03 .nextslot .nlabel { color: var(--claude); font-weight: 600; letter-spacing: 0; font-size: var(--fs-caption); }
+.sc03 .nextslot.is-quiet { border-top-color: transparent; margin-top: 0; }
+.sc03 .nextslot.is-quiet .nlabel { font-weight: 400; }
 .sc03 .unknownline { border-left: 1px dashed var(--unk); padding-left: 8px; }
 
 .sc03 .rawout {

@@ -14,6 +14,7 @@ import { el, btn } from '../dom.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceCard, modeFor } from '../presence.js';
 import { nextActions } from '../nextaction.js';
+import { rememberFocus, restoreFocus } from '../focus.js';
 import { contextFacts, changedFilesState } from '../human-read.mjs';
 import { fileSummary } from '../file-summary.js';
 
@@ -29,28 +30,6 @@ const OUTCOME = {
   ended_unknown:      { cls: 'unk',  key: null },
 };
 const outcomeTitle = (outcome) => C.work.resultTitle[OUTCOME[outcome]?.key] ?? C.work.unknownTitle;
-
-/* Every pushed snapshot redraws this screen from scratch (`root.innerHTML = ''`), and a redraw
- * destroys the element that has keyboard focus — measured on H3: Tab to 허용하고 다시 해 보기,
- * a push arrives, focus falls to the page and the next Tab starts again at the top bar. A
- * mouse user never notices; a keyboard user is thrown out of the one card that needs them. So the
- * focused control is remembered by its place and its words and given focus again on the new one. */
-const FOCUSABLE = 'button:not([disabled]), summary, a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-function rememberFocus(root) {
-  const a = document.activeElement;
-  if (!a || a === document.body || !root.contains(a)) return null;
-  const all = [...root.querySelectorAll(FOCUSABLE)];
-  return { at: all.indexOf(a), text: (a.textContent || '').trim().slice(0, 60) };
-}
-function restoreFocus(root, mem) {
-  if (!mem) return;
-  const all = [...root.querySelectorAll(FOCUSABLE)];
-  const same = (n) => (n.textContent || '').trim().slice(0, 60) === mem.text;
-  /* Same place and same words first; same words anywhere next; otherwise leave focus alone — a
-   * guess would put it on a control the reader never chose. */
-  const next = (all[mem.at] && same(all[mem.at]) ? all[mem.at] : null) ?? all.find(same);
-  next?.focus({ preventScroll: true });
-}
 
 export function renderSC03(root, api, nav, state) {
   const mem = rememberFocus(root);
@@ -423,8 +402,13 @@ function stepsCard(snap) {
   const next = el('div', 'nextslot');
   next.setAttribute('data-el', 'next');
   const declared = snap.steps.find((s) => s.state === 'declared_next');
+  /* While the person is the one being waited on, an EMPTY NEXT is the least useful thing on the screen: the card
+   * on the left asks them something. It stays — the fact it states is required — but it is written small and
+   * low. A NEXT Claude Code really declared keeps its full size. */
+  const quiet = !declared && (snap.status === 'permission_waiting' || snap.status === 'input_waiting');
+  if (quiet) next.classList.add('is-quiet');
   next.appendChild(el('span', 'xs nlabel', C.next.stepLabel));
-  next.appendChild(el('div', 'sm' + (declared ? '' : ' mut'), declared ? declared.title : C.work.nextEmpty));
+  next.appendChild(el('div', declared ? 'sm' : (quiet ? 'xs mut2' : 'sm mut'), declared ? declared.title : C.work.nextEmpty));
   card.appendChild(next);
   return card;
 }
@@ -641,7 +625,14 @@ function resultCard(snap, api, nav, state) {
     box.setAttribute('data-el', 'not-done');
     box.appendChild(el('div', 'xs mut2', C.work.notDone));
     for (const i of notDone) {
-      box.appendChild(el('div', 'sm', `${C.gap.claimNotDone}: ${i.data?.tool ?? ''}${i.data?.target ? ` · ${i.data.target}` : ''}`));
+      /* `Edit · README.md` is the CLI's word for it. A file-changing tool is said the way the permission card says it
+       * (`README.md 수정`); any other tool keeps its own name. The CLI's exact words stay on the row's title. */
+      const raw = `${i.data?.tool ?? ''}${i.data?.target ? ` · ${i.data.target}` : ''}`;
+      const plain = /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(i.data?.tool ?? '') && i.data?.target
+        ? C.gap.board.fileEdit(String(i.data.target).split(/[\\/]/).filter(Boolean).pop() || i.data.target) : raw;
+      const row = el('div', 'sm', `${C.gap.claimNotDone}: ${plain}`);
+      row.title = raw;
+      box.appendChild(row);
     }
     card.appendChild(box);
   }

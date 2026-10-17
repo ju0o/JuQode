@@ -779,15 +779,17 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     }
     return seq;
   })();
-  /* A redraw (what every pushed snapshot does) must not take focus away from the control the reader
-   * is on. Focus is put there with the keyboard's own element, then the screen is redrawn. */
-  out.permFocusRedraw = await evalJs(`(() => {
+  /* A redraw must not take focus away from the control the reader is on. The redraw here is the REAL one: the
+   * fixture's 2.5 s silence threshold makes the supervisor push a snapshot about every 1.25 s while the permission
+   * is open, and the screen rebuilds on each. Nothing in the product is exposed to cause it; this focuses the
+   * button and waits for that push to replace it. */
+  out.permFocusRedraw = await evalJs(`(async () => {
     const b = [...document.querySelectorAll('.sc03 button')].find(n => n.textContent.includes('허용하고 다시 해 보기'));
     b.focus();
     const before = document.activeElement.textContent.trim();
-    window.__redrawWork();
+    for (let i = 0; i < 100 && b.isConnected; i++) await new Promise(r => setTimeout(r, 100));
     const a = document.activeElement;
-    return JSON.stringify({ before, after: a === document.body ? 'BODY' : a.textContent.trim(), fresh: a !== b });
+    return JSON.stringify({ before, redrawn: !b.isConnected, after: a === document.body ? 'BODY' : a.textContent.trim(), fresh: a !== b });
   })()`);
   out.permPositiveTabindex = await evalJs(`[...document.querySelectorAll('.sc03 [tabindex]')].filter(n => Number(n.getAttribute('tabindex')) > 0).length`);
   out.permLastSeenCount = await evalJs(`(document.querySelector('.sc03 [data-card="work"]')?.innerText.match(/마지막 활동/g) ?? []).length`);
@@ -4087,7 +4089,7 @@ assert.strictEqual(results.permLiveness, 'quiet',
   assert.strictEqual(results.permPositiveTabindex, 0, 'a positive tabindex reorders the keyboard path'); }
 { const f = JSON.parse(results.permFocusRedraw);
   assert.strictEqual(f.after, '허용하고 다시 해 보기', `a redraw dropped keyboard focus: ${results.permFocusRedraw}`);
-  assert.ok(f.fresh, 'the probe is only meaningful if the redraw replaced the element'); }
+  assert.ok(f.redrawn && f.fresh, `the probe is only meaningful if a real pushed snapshot replaced the element: ${results.permFocusRedraw}`); }
 assert.strictEqual(results.permQuiet, 'absent',
   'a permission wait is silent on purpose; 새 신호 없음 under it contradicts the card that explains the silence');
 assert.strictEqual(results.permLastSeenCount, 1, `마지막 활동 is said ${results.permLastSeenCount} times on one card`);
@@ -4826,6 +4828,8 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
   assert.ok(results.partialNotDone, '부분 완료 drew no 못 한 것 list');
   assert.ok(results.partialNotDone.includes('허용되지 않아서 하지 못한 것'),
     `the 못 한 것 list does not name the refusal: ${results.partialNotDone}`);
+  assert.ok(!/\bEdit\b/.test(results.partialNotDone) && /\S+ 수정/.test(results.partialNotDone),
+    `the 못 한 것 list still speaks the CLI's tool name instead of the action: ${results.partialNotDone}`);
   assert.ok(results.partialCard.includes('JuQode가 지켜본 도구 실행 1'),
     'the Result lost its independently observed tool result when the process tree became unknown');
   assert.strictEqual(results.partialUnknownGateAfterAck, 0,

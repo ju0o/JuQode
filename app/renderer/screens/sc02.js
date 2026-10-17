@@ -22,6 +22,7 @@
  */
 import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
+import { rememberFocus, restoreFocus } from '../focus.js';
 import { proposeDraft, compareRuns } from '../draft.mjs';
 import { columnFor, tileTone } from '../board-column.mjs';
 import { contextFacts, changedFilesState } from '../human-read.mjs';
@@ -90,13 +91,19 @@ export function renderSC02(root, api, nav, state) {
   colRail.setAttribute('data-region', 'rail');
   colMain.setAttribute('data-region', 'stage');
   colInspect.setAttribute('data-region', 'inspector');
-  const navHead = el('div', 'nav-head');
-  navHead.appendChild(el('div', 'nav-brand', C.app.name));
-  navHead.appendChild(btn('nav-new', C.gap.board.newWork, () => {
+  /* Opens the request field and puts the cursor in it. A function declaration, hoisted, because the rail's
+   * button, the empty board's button and the Inspector's button do exactly this and nothing more. */
+  function openComposer(text = null) {
     state.composerOpen = true;
     syncShell();
-    document.querySelector('[data-el="intent"]')?.focus();
-  }));
+    if (typeof text === 'string') { draftSuppressed = true; field.value = text; paintDraft(); }
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+  }
+  let draftSuppressed = false;
+  const navHead = el('div', 'nav-head');
+  navHead.appendChild(el('div', 'nav-brand', C.app.name));
+  navHead.appendChild(btn('nav-new', C.gap.board.newWork, () => openComposer()));
   navHead.appendChild(el('div', 'nav-label', C.gap.board.projects));
   const projList = el('div', 'nav-projects');
   for (const item of (state.recent ?? []).slice(0, 6)) {
@@ -350,7 +357,7 @@ export function renderSC02(root, api, nav, state) {
   );
   intent.appendChild(draft);
   const paintDraft = () => {
-    const proposal = proposeDraft(field.value);
+    const proposal = draftSuppressed ? null : proposeDraft(field.value);
     if (!proposal) {
       draft.hidden = true;
       criteriaDirty = false;
@@ -413,7 +420,7 @@ export function renderSC02(root, api, nav, state) {
   new MutationObserver(syncShell).observe(consequence, { childList: true });
   const onWidth = () => { if (!board.isConnected) narrowQuery.removeEventListener('change', onWidth); else syncShell(); };
   narrowQuery.addEventListener('change', onWidth);
-  field.addEventListener('input', () => { paintDraft(); syncShell(); });
+  field.addEventListener('input', () => { draftSuppressed = false; paintDraft(); syncShell(); });
   syncShell();
 
   const submit = btn('btn pri', C.intent.submit, () => send());
@@ -454,12 +461,22 @@ export function renderSC02(root, api, nav, state) {
     panel.append(label, note, acknowledge);
     legacyUnknownNotice.appendChild(panel);
   };
-  const paintTaskList = () => {
+  const drawTaskList = () => {
     taskRows.innerHTML = '';
     viewBoard.classList.toggle('is-current', state.boardView !== 'list');
     viewList.classList.toggle('is-current', state.boardView === 'list');
     if (!currentTasks.length && !state.unlinkedLive) {
       taskRows.appendChild(el('div', 'sm mut board-empty', C.gap.task.noTasks));
+      /* The board used to be five blank columns here: the sentence above is hidden by CSS and the only way in
+       * was the small `+ 새 작업` in the rail. This says what to do and puts the one primary action where the
+       * eye already is. It opens the request field — it does not send anything. */
+      const start = el('section', 'board-start');
+      start.setAttribute('data-el', 'board-start');
+      start.append(el('div', 'board-start-title', C.gap.task.emptyBoardTitle), el('p', 'sm mut', C.gap.task.emptyBoardBody));
+      const go = btn('btn pri', C.gap.task.emptyBoardCta, () => openComposer());
+      go.setAttribute('data-act', 'board-start');
+      start.appendChild(go);
+      taskRows.appendChild(start);
     }
 
     const columns = [
@@ -512,6 +529,14 @@ export function renderSC02(root, api, nav, state) {
     }
   };
 
+  /* The board is rebuilt on every selection and every pushed snapshot; the tile under a keyboard user's focus goes
+   * with it. Same remedy as SC-03 (`focus.js`): the tile comes back by its Task id. */
+  const paintTaskList = () => {
+    const mem = rememberFocus(taskRows);
+    drawTaskList();
+    restoreFocus(taskRows, mem);
+  };
+
   const taskTile = (task, executing) => {
     const tone = tileTone(task, task._run);
     const selected = task.id === state.selectedTaskId;
@@ -542,7 +567,7 @@ export function renderSC02(root, api, nav, state) {
     return row;
   };
 
-  const paintSelectedTask = async () => {
+  const drawSelectedTask = async () => {
     const sequence = ++taskLoadSequence;
     const taskId = state.selectedTaskId;
     selectedTask.innerHTML = '';
@@ -611,6 +636,12 @@ export function renderSC02(root, api, nav, state) {
           `${C.gap.task.dependencies}: ${task.dependencies.map((id) => currentTasks.find((item) => item.id === id)?.goal ?? id).join(' · ')}`));
       }
       selectedTask.appendChild(el('div', 'xs mut2', C.gap.task.noRuns));
+      /* A saved Task with no attempt had NO way forward on screen: the request field is hidden until
+       * `+ 새 작업`, and 보내기 with an empty field does nothing. This opens the field with the Task's
+       * own goal; the Work still starts only when the person presses 보내기. */
+      const write = btn('btn sm pri inspect-primary', C.gap.task.writeRequest, () => openComposer(task.goal));
+      write.setAttribute('data-act', 'task-write-request');
+      selectedTask.append(write, el('div', 'xs mut2 write-request-note', C.gap.task.writeRequestNote));
       selectedTask.appendChild(meta);
     } else {
       const ended = latest.work.status === 'ended';
@@ -641,6 +672,12 @@ export function renderSC02(root, api, nav, state) {
       }
     }
     submit.disabled = task.verdict === 'pass';
+  };
+  /* The Inspector is emptied and refilled after an await; whatever had focus in it is put back when it is full. */
+  const paintSelectedTask = async () => {
+    const mem = rememberFocus(selectedTask);
+    await drawSelectedTask();
+    restoreFocus(selectedTask, mem);
   };
 
   async function refreshTasks() {

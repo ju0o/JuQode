@@ -481,6 +481,14 @@ export const C = {
       acceptancePlaceholder: '한 줄에 하나씩 적어요. 조건이 없으면 PASS를 확인할 수 없어요.',
       dependencies: '먼저 끝낼 작업',
       noTasks: '아직 맡은 일이 없어요.',
+      /* NOT in `18`/`15`: the empty Board's entry and the un-run Task's way forward. Both only OPEN the
+       * request field; neither starts anything. Submitted to the PM as wording, so they live here with
+       * the other `gap` keys and not above where they would look approved. */
+      emptyBoardTitle: '무엇을 맡길까요?',
+      emptyBoardBody: '아직 맡은 일이 없어요. 하고 싶은 일을 한 문장으로 적어 주세요. 적는 동안에는 아무것도 바뀌지 않고, 보내면 Claude가 시작해요.',
+      emptyBoardCta: '새 작업',
+      writeRequest: '이 작업으로 요청 쓰기',
+      writeRequestNote: '요청 칸을 열어요. 쓰기만 해서는 시작하지 않고, 보내기를 눌러야 시작해요.',
       createSubmit: '작업 저장',
       selected: '지금 맡은 일',
       runRequest: '이 일을 이어서 부탁할 말',

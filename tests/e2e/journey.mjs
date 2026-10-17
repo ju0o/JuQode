@@ -1,0 +1,281 @@
+/* The FIRST journey, on the real Electron renderer, against the fixture CLI (no model, no login):
+ *
+ *   empty Board → 새 작업 → request written → 보내기 (the person's consent) → Work in progress
+ *
+ * and the keyboard behaviour of the screens it crosses. Two things the older suite never asked:
+ *   - what an EMPTY board tells a person who has never used it (it used to be five blank columns, with the way in
+ *     a small `+ 새 작업` in the rail and the request field hidden until it was pressed), and
+ *   - what a SAVED Task with no attempt offers (it offered nothing: the field was hidden and 보내기 on an empty
+ *     field does nothing).
+ * Nothing here starts an Agent except the one explicit 보내기 at the end, and that is the fixture CLI.
+ *
+ * Screenshots go to JUQODE_E2E_SHOT_DIR (default tmp-journey/) — never into the tracked goldens. */
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import fs from 'node:fs';
+import assert from 'node:assert';
+import { findFreePortBlock } from './port-block.mjs';
+import { sweepDisplays } from './xvfb.mjs';
+import { launchArgs, killTree, WIN } from './launch.mjs';
+sweepDisplays();
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const { DB, USER_DATA, SEED, SEED3, FAKE_CLI } = await import('./fixture.mjs');
+
+const OUT = path.resolve(process.env.JUQODE_E2E_SHOT_DIR || path.join(ROOT, 'tmp-journey'));
+fs.mkdirSync(OUT, { recursive: true });
+const PORT = await findFreePortBlock(Number(process.env.JUQODE_E2E_PORT || 9323), 3);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const step = (m) => process.stderr.write(`  · ${m}\n`);
+
+const [file, argv] = launchArgs(['.', '--no-sandbox', `--remote-debugging-port=${PORT}`]);
+const app = spawn(file, argv, { cwd: ROOT, detached: !WIN, env: { ...process.env, JUQODE_DB: DB, JUQODE_USER_DATA: USER_DATA,
+  JUQODE_QUIET_MS: '2500', JUQODE_CLAUDE_BIN: FAKE_CLI } });
+process.on('exit', () => killTree(app));
+await sleep(4000);
+
+let page = null;
+for (let i = 0; i < 20 && !page; i++) {
+  try { page = (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()).find((t) => t.type === 'page'); } catch { /* not up yet */ }
+  if (!page) await sleep(750);
+}
+assert.ok(page, 'no page target');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+let nextId = 0; const pending = new Map();
+ws.onmessage = (m) => { const g = JSON.parse(m.data); if (g.id && pending.has(g.id)) { pending.get(g.id)(g); pending.delete(g.id); } };
+const send = (method, params = {}) => new Promise((res, rej) => {
+  const n = ++nextId;
+  const t = setTimeout(() => { pending.delete(n); rej(new Error(`CDP timeout: ${method}`)); }, 20000);
+  pending.set(n, (g) => { clearTimeout(t); res(g); });
+  ws.send(JSON.stringify({ id: n, method, params }));
+});
+const ev = async (expr) => {
+  const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
+  if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails));
+  return r.result?.result?.value;
+};
+const shot = async (name) => fs.writeFileSync(path.join(OUT, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+const key = async (k, code, vk) => {
+  /* Enter needs a 'keyDown' carrying text, or Chromium never turns it into a click on a button. */
+  await send('Input.dispatchKeyEvent', k === 'Enter' ? { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, text: '\r' }
+    : { type: 'rawKeyDown', key: k, code, windowsVirtualKeyCode: vk });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk });
+  await sleep(120);
+};
+const VIS = `const vis = (n) => n && n.offsetParent !== null;`;
+const priButtons = `(() => { ${VIS} return [...document.querySelectorAll('.btn.pri')].filter(vis).map((b) => b.innerText.trim()); })()`;
+const theme = (t) => ev(`document.documentElement.setAttribute('data-theme','${t}')`);
+
+const out = {};
+try {
+  for (let i = 0; i < 100 && !(await ev(`typeof window.__screen === 'function'`)); i++) await sleep(50);
+  await send('Page.enable');
+  await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 773, deviceScaleFactor: 1, mobile: false });
+  await theme('light');
+  const openRow = (dir) => ev(`[...document.querySelectorAll('[data-el="recent-row"]')].find((r) => r.innerText.includes(${JSON.stringify(path.basename(dir))}))?.click()`);
+  /* An EMPTY folder first: its Brief says so and has its own way to start, and the board must still have exactly
+   * one primary action — a second one would tell the person to begin in two places. */
+  await openRow(SEED3);
+  for (let i = 0; i < 60 && !(await ev(`!!document.querySelector('[data-el="board-start"]')`)); i++) await sleep(250);
+  out.emptyFolder = JSON.parse(await ev(`(() => { ${VIS} return JSON.stringify({ pri: [...document.querySelectorAll('.btn.pri')].filter(vis).map((b) => b.innerText.trim()),
+    brief: document.querySelector('[data-card="brief"]')?.innerText ?? '', briefStart: !!document.querySelector('[data-card="brief"] .row-acts .btn') }); })()`));
+  await shot('empty-folder-1200-light');
+  assert.deepStrictEqual(out.emptyFolder.pri, ['새 작업'], `an empty folder shows more than one primary action: ${JSON.stringify(out.emptyFolder.pri)}`);
+  assert.ok(out.emptyFolder.brief.includes('이 폴더는 아직 비어 있어요') && out.emptyFolder.briefStart, 'the empty-folder explanation or its own start went missing');
+  await ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('다른 프로젝트'))?.click()`);
+  for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-01'; i++) await sleep(250);
+  await openRow(SEED);
+  step('opened the seeded project');
+  for (let i = 0; i < 60 && !(await ev(`!!document.querySelector('[data-el="board-start"]')`)); i++) await sleep(250);
+
+  /* ── ① the empty Board ─────────────────────────────────────────────────────────────── */
+  out.empty = JSON.parse(await ev(`(() => { ${VIS}
+    const s = document.querySelector('[data-el="board-start"]');
+    return JSON.stringify({ visible: vis(s), text: s?.innerText ?? '',
+      cols: document.querySelectorAll('[data-column]').length, pri: [...document.querySelectorAll('.btn.pri')].filter(vis).map((b) => b.innerText.trim()),
+      intentVisible: vis(document.querySelector('[data-card="intent"]')), rail: vis(document.querySelector('.nav-new')),
+      inspector: document.querySelector('[data-region="inspector"]') ? true : false });
+  })()`));
+  for (const w of [880, 1024, 1200, 1440]) {
+    await send('Emulation.setDeviceMetricsOverride', { width: w, height: w === 880 ? 600 : w === 1024 ? 700 : w === 1200 ? 773 : 900, deviceScaleFactor: 1, mobile: false });
+    for (const t of ['light', 'dark']) { await theme(t); await sleep(200); await shot(`empty-${w}-${t}`);
+      const m = JSON.parse(await ev(`JSON.stringify({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ctaInView: (() => { const b = document.querySelector('[data-act="board-start"]').getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; })() })`));
+      assert.strictEqual(m.overflow, 0, `empty board overflows at ${w} ${t}`);
+      assert.ok(m.ctaInView, `the empty board's CTA is below the fold at ${w} ${t}`);
+    }
+  }
+  await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 773, deviceScaleFactor: 1, mobile: false });
+  await theme('light'); await ev(`document.documentElement.style.zoom = '1.5'`); await sleep(200); await shot('empty-1200-light-zoom150');
+  out.emptyZoomCtaInView = await ev(`(() => { const b = document.querySelector('[data-act="board-start"]').getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight && document.documentElement.scrollWidth <= document.documentElement.clientWidth; })()`);
+  await ev(`document.documentElement.style.zoom = ''`);
+
+  /* the keyboard reaches it: Tab from the page top until the CTA, counting the stops */
+  out.emptyTabStops = await (async () => {
+    await ev(`document.activeElement?.blur?.(); window.scrollTo(0, 0)`);
+    for (let i = 1; i <= 25; i++) {
+      await key('Tab', 'Tab', 9);
+      if (await ev(`document.activeElement?.getAttribute('data-act') === 'board-start'`)) return i;
+    }
+    return null;
+  })();
+  assert.ok(out.empty.visible, 'the empty board shows no invitation');
+  assert.ok(out.empty.text.includes('무엇을 맡길까요?') && out.empty.text.includes('아직 맡은 일이 없어요'), `the empty board does not ask, or does not say it is empty: ${out.empty.text}`);
+  assert.ok(out.empty.text.includes('보내면'), 'the invitation does not say that sending is what starts Claude');
+  assert.deepStrictEqual(out.empty.pri, ['새 작업'], `the empty board must have exactly one primary action: ${JSON.stringify(out.empty.pri)}`);
+  assert.strictEqual(out.empty.cols, 5, 'the five-column board is gone');
+  assert.strictEqual(out.empty.intentVisible, false, 'the request field was already open on an empty board');
+  assert.ok(out.empty.rail, 'the rail\'s 새 작업 was removed');
+  assert.ok(out.emptyTabStops, 'the keyboard never reaches 새 작업 in 25 Tabs');
+  out.worksBefore = JSON.parse(await ev(`(async () => JSON.stringify(await window.juqode.history(window.__project().id)))()`)).works.length;
+
+  /* ── ② clicking it opens the field and NOTHING else ───────────────────────────────── */
+  await key('Enter', 'Enter', 13); await sleep(300);
+  out.afterCta = JSON.parse(await ev(`(() => { ${VIS} return JSON.stringify({ focus: document.activeElement?.getAttribute('data-el'),
+    intentVisible: vis(document.querySelector('[data-card="intent"]')), startVisible: vis(document.querySelector('[data-el="board-start"]')),
+    pri: [...document.querySelectorAll('.btn.pri')].filter(vis).map((b) => b.innerText.trim()), screen: window.__screen() }); })()`));
+  out.worksAfterCta = JSON.parse(await ev(`(async () => JSON.stringify(await window.juqode.history(window.__project().id)))()`)).works.length;
+  assert.strictEqual(out.afterCta.focus, 'intent', 'focus did not move to the request field');
+  assert.strictEqual(out.afterCta.intentVisible, true);
+  assert.strictEqual(out.afterCta.startVisible, false, 'the invitation stayed on screen beside the field it opened');
+  assert.deepStrictEqual(out.afterCta.pri, ['보내기'], `after opening the field the one primary is 보내기: ${JSON.stringify(out.afterCta.pri)}`);
+  assert.strictEqual(out.worksAfterCta, out.worksBefore, 'pressing 새 작업 started a Work');
+  await shot('after-cta-1200-light');
+
+  /* ── ③ a saved Task with no attempt has a way forward ─────────────────────────────── */
+  await ev(`window.juqode.taskCreate(window.__project().id, { goal: '로그인 버튼 고치기', acceptanceCriteria: [{ text: '버튼을 누르면 로그인된다' }] })`);
+  const other = (re) => ev(`[...document.querySelectorAll('.nav-item')].find((b) => ${re})?.click()`);
+  await other(`b.innerText.includes('seed2')`); await sleep(2500);
+  await other(`b.innerText.includes('seed-') && !b.innerText.includes('seed2') && !b.innerText.includes('seed3')`); await sleep(2500);
+  await ev(`document.querySelector('.task-pick')?.click()`); await sleep(600);
+  out.unrun = JSON.parse(await ev(`(() => { ${VIS} const b = document.querySelector('[data-act="task-write-request"]');
+    return JSON.stringify({ btn: b ? b.innerText : null, vis: vis(b), intentVisible: vis(document.querySelector('[data-card="intent"]')),
+      pri: [...document.querySelectorAll('.btn.pri')].filter(vis).map((x) => x.innerText.trim()) }); })()`));
+  await shot('unrun-task-1200-light');
+  assert.ok(out.unrun.vis, 'a saved Task with no attempt offers no way to write its request');
+  assert.strictEqual(out.unrun.intentVisible, false);
+  assert.deepStrictEqual(out.unrun.pri, ['이 작업으로 요청 쓰기'], JSON.stringify(out.unrun.pri));
+  /* READ-ONLY measurement, SC-02: a keyboard user presses Enter on a Task tile. Selecting it repaints the whole
+   * board; the key must still have a home afterwards, and it must be the same Task's tile. */
+  out.sc02TileEnter = JSON.parse(await ev(`(async () => {
+    const t = document.querySelector('.task-pick'); t.focus(); const before = t;
+    return JSON.stringify({ focusedFirst: document.activeElement === t });
+  })()`));
+  await key('Enter', 'Enter', 13); await sleep(500);
+  out.sc02TileEnter.after = await ev(`(() => { const a = document.activeElement; return a === document.body ? 'BODY' : (a.getAttribute('data-task-id') ? 'tile' : a.tagName + ':' + (a.textContent || '').trim().slice(0, 20)); })()`);
+  assert.strictEqual(out.sc02TileEnter.after, 'tile', `Enter on a Task tile dropped keyboard focus to ${out.sc02TileEnter.after}`);
+  await ev(`document.querySelector('[data-act="task-write-request"]').click()`); await sleep(300);
+  out.written = JSON.parse(await ev(`(() => { ${VIS} return JSON.stringify({ value: document.querySelector('[data-el="intent"]').value,
+    focus: document.activeElement?.getAttribute('data-el'), draftHidden: document.querySelector('[data-el="composer-draft"]').hidden,
+    again: vis(document.querySelector('[data-act="task-write-request"]')),
+    pri: [...document.querySelectorAll('.btn.pri')].filter(vis).map((x) => x.innerText.trim()) }); })()`));
+  out.worksAfterWrite = JSON.parse(await ev(`(async () => JSON.stringify(await window.juqode.history(window.__project().id)))()`)).works.length;
+  assert.strictEqual(out.written.value, '로그인 버튼 고치기');
+  assert.strictEqual(out.written.focus, 'intent');
+  assert.strictEqual(out.written.draftHidden, true, '새 일로 맡기기 would save a SECOND Task for a sentence that already is one');
+  assert.strictEqual(out.written.again, false, 'the write-request button stayed beside the open field');
+  assert.deepStrictEqual(out.written.pri, ['보내기']);
+  assert.strictEqual(out.worksAfterWrite, out.worksBefore, 'writing the request started a Work');
+  await ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value += ' 그리고 오류 문구도'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  assert.strictEqual(await ev(`document.querySelector('[data-el="composer-draft"]').hidden`), false, 'editing the sentence did not bring the proposal back');
+  await ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 버튼 고치기'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+
+  /* ── ④ 보내기 is the consent: the Work starts, bound to THAT Task ─────────────────── */
+  await ev(`document.querySelector('[data-act="submit-intent"]').click()`);
+  for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-03'; i++) await sleep(250);
+  out.started = JSON.parse(await ev(`JSON.stringify({ screen: window.__screen(), work: window.__work() })`));
+  assert.strictEqual(out.started.screen, 'SC-03', 'pressing 보내기 did not reach the Run');
+  const taskId = JSON.parse(await ev(`(async () => JSON.stringify((await window.juqode.taskList(window.__project().id)).tasks[0].id))()`));
+  const detail = JSON.parse(await ev(`(async () => JSON.stringify(await window.juqode.workGet(window.__work().id)))()`));
+  out.boundTask = detail?.work?.work?.task_id ?? null;
+  assert.strictEqual(out.boundTask, taskId, `the Work is not bound to the Task the request was written for: ${JSON.stringify(detail).slice(0, 200)}`);
+  /* the permission wait is the next state; 허용 is still the person's choice */
+  for (let i = 0; i < 40 && !(await ev(`!!document.querySelector('.sc03 [data-el="permission"]')`)); i++) await sleep(250);
+  out.permission = await ev(`document.querySelector('.sc03 [data-el="permission"]')?.innerText ?? null`);
+  assert.ok(out.permission, 'the fixture Work did not reach a permission wait');
+
+  /* ── ⑤ the NEXT block under a permission wait is quiet, and still there ───────────── */
+  out.next = JSON.parse(await ev(`(() => { const n = document.querySelector('[data-el="next"]');
+    const b = document.querySelector('[data-el="permission"] button, .sc03 [data-card="work"] .btn.pri');
+    const px = (x) => x ? parseFloat(getComputedStyle(x).fontSize) : 0;
+    return JSON.stringify({ text: n?.innerText ?? null, quiet: n?.classList.contains('is-quiet') ?? false,
+      valueSize: px(n?.querySelector('div')), buttonSize: px(b) }); })()`));
+  assert.ok(out.next.text?.includes('Claude Code가 아직 다음 단계를 보내지 않았어요'), 'the No-Step sentence is gone from the permission screen');
+  assert.strictEqual(out.next.quiet, true, 'an empty NEXT under a permission wait is drawn at full weight');
+  assert.ok(out.next.valueSize < 14, `the empty NEXT is still ${out.next.valueSize}px`);
+  await shot('permission-1200-light');
+
+  /* ── ⑥ focus survives the REAL pushed redraw, wherever it is ─────────────────────── */
+  await ev(`document.documentElement.setAttribute('data-theme','light')`);
+  out.pushFocus = JSON.parse(await ev(`(async () => {
+    const find = () => [...document.querySelectorAll('.sc03 button')].find((n) => n.textContent.includes('허용하고 다시 해 보기'));
+    const b = find(); b.focus();
+    for (let i = 0; i < 100 && b.isConnected; i++) await new Promise((r) => setTimeout(r, 100));
+    const a = document.activeElement;
+    return JSON.stringify({ redrawn: !b.isConnected, after: a === document.body ? 'BODY' : a.textContent.trim() });
+  })()`));
+  assert.ok(out.pushFocus.redrawn, 'no real snapshot push replaced the button within 10 s — the probe measured nothing');
+  assert.strictEqual(out.pushFocus.after, '허용하고 다시 해 보기', `a real push dropped focus: ${JSON.stringify(out.pushFocus)}`);
+
+  /* The shared module, on the cases the one real button cannot make: two identical buttons, a control that goes
+   * away, one that becomes disabled, and a text field with a caret, a selection and an unsent answer. A scratch
+   * container inside the live document, driven through the SAME functions the screen calls. */
+  out.focusCases = JSON.parse(await ev(`(async () => {
+    const { rememberFocus, restoreFocus } = await import('./focus.js');
+    const host = document.createElement('div'); document.body.appendChild(host);
+    const card = (inner) => '<div data-card="work">' + inner + '</div>';
+    const redraw = (html) => { const mem = rememberFocus(host); host.innerHTML = html; restoreFocus(host, mem); };
+    const res = {};
+    /* same words, twice: the SECOND one had focus */
+    host.innerHTML = card('<button>확인</button><button>확인</button>');
+    host.querySelectorAll('button')[1].focus();
+    redraw(card('<button>확인</button><button>확인</button>'));
+    res.duplicate = [...host.querySelectorAll('button')].indexOf(document.activeElement);
+    /* two Tasks with the same words, and the one that had focus moved to the top of the board */
+    host.innerHTML = '<button data-task-id="a">고치기</button><button data-task-id="b">고치기</button>';
+    host.querySelector('[data-task-id="b"]').focus();
+    redraw('<button data-task-id="b">고치기</button><button data-task-id="a">고치기</button>');
+    res.reordered = document.activeElement?.getAttribute?.('data-task-id');
+    /* the focused control is gone: focus must not fall to the page, and must not land on a different button */
+    host.innerHTML = card('<button data-act="allow">허용</button><button data-act="stop">취소</button>');
+    host.querySelector('[data-act="allow"]').focus();
+    redraw(card('<button data-act="stop">취소</button>'));
+    res.vanishedOnButton = document.activeElement?.tagName === 'BUTTON';
+    res.vanishedOnCard = document.activeElement === host.querySelector('[data-card="work"]');
+    /* the focused control is now disabled */
+    host.innerHTML = card('<button data-act="allow">허용</button><button data-act="stop">취소</button>');
+    host.querySelector('[data-act="allow"]').focus();
+    redraw(card('<button data-act="allow" disabled>허용</button><button data-act="stop">취소</button>'));
+    res.disabledOnCard = document.activeElement === host.querySelector('[data-card="work"]');
+    res.disabledOnOther = document.activeElement?.tagName === 'BUTTON';
+    /* a field: unsent answer, caret and a selection */
+    host.innerHTML = card('<textarea class="answerfield" aria-label="답"></textarea>');
+    let t = host.querySelector('textarea'); t.value = '네, 로그인 버튼이에요'; t.focus(); t.setSelectionRange(3, 7);
+    redraw(card('<textarea class="answerfield" aria-label="답"></textarea>'));
+    t = host.querySelector('textarea');
+    res.field = { value: t.value, focused: document.activeElement === t, start: t.selectionStart, end: t.selectionEnd };
+    /* a field that is NOT focused still keeps what was typed, and a newer value is never overwritten */
+    host.innerHTML = card('<textarea aria-label="답"></textarea><button>보내기</button>');
+    host.querySelector('textarea').value = '쓰던 답'; host.querySelector('button').focus();
+    redraw(card('<textarea aria-label="답"></textarea><button>보내기</button>'));
+    res.unfocusedValue = host.querySelector('textarea').value;
+    const mem = rememberFocus(host); host.innerHTML = card('<textarea aria-label="답">새 값</textarea>'); restoreFocus(host, mem);
+    res.notOverwritten = host.querySelector('textarea').value;
+    host.remove(); document.body.focus();
+    return JSON.stringify(res);
+  })()`));
+  const fc = out.focusCases;
+  assert.strictEqual(fc.duplicate, 1, `two identical buttons: focus went to #${fc.duplicate}, not the second`);
+  assert.strictEqual(fc.reordered, 'b', `a Task tile that moved lost its focus to ${fc.reordered}`);
+assert.ok(fc.vanishedOnCard && !fc.vanishedOnButton, `the focused control vanished: focus ${fc.vanishedOnCard ? 'is on the card' : 'is elsewhere'}${fc.vanishedOnButton ? ' (on another button — a guess)' : ''}`);
+  assert.ok(fc.disabledOnCard && !fc.disabledOnOther, `a control that became disabled: focus is ${fc.disabledOnCard ? 'on the card' : 'not on the card'}${fc.disabledOnOther ? ', on another button' : ''}`);
+  assert.deepStrictEqual(fc.field, { value: '네, 로그인 버튼이에요', focused: true, start: 3, end: 7 }, `a field lost its text, caret or selection: ${JSON.stringify(fc.field)}`);
+  assert.strictEqual(fc.unfocusedValue, '쓰던 답', 'an unfocused unsent answer was lost in a redraw');
+  assert.strictEqual(fc.notOverwritten, '새 값', 'a restored draft overwrote a newer value');
+
+  console.log(JSON.stringify(out, null, 2));
+} finally {
+  ws.close();
+  killTree(app);
+}
