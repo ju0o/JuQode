@@ -118,6 +118,7 @@ async function start(db, project, intent, opts = {}) {
     idempotencyKey = null, attempt = 1, retryOfWorkId = null, retryReason = null, appSessionId = null,
     allowUnknownWorkId = null, executionMode,
   } = opts;
+  void session.prewarmIdentity(bin);      // background hash only: not awaited, so start()'s synchronous reservation order is untouched
 
   if (retryOfWorkId) {
     const prior = repo.getWork(db, retryOfWorkId);
@@ -850,8 +851,11 @@ function auditRetry(events, { entry, spec, tools, exitCode, launch, runResult })
   const claimed = String(tools ?? '').split(',').filter(Boolean);
   const sum = summarizeRun(events, { requestedSessionId: entry.sessionId, resume: true, callCwd: entry.cwd, claimsRestrictedTools: true, claimedTools: claimed, grants: [spec], exitCode, realpath: fs.realpathSync });
   const binaryChanged = Boolean(entry.launchIdentity?.version && runResult?.initVersion && entry.launchIdentity.version !== runResult.initVersion);
+  /* the version the process reports is the only post-hoc evidence of WHICH build ran: absent -> UNKNOWN, never "unchanged" */
+  const versionUnknown = !runResult?.initVersion || !entry.launchIdentity?.version;
+  if (versionUnknown) sum.notes.push('binary-version-unverified');
   const problems = [...sum.problems, ...(binaryChanged ? ['binary-version-changed-since-start'] : [])];
-  const violation = problems.find((p) => VIOLATIONS.includes(p) || p.startsWith('write-ran-without-grant') || p === 'binary-version-changed-since-start') ?? null;
+  const violation = problems.find((p) => VIOLATIONS.includes(p) || p.startsWith('write-ran-without-grant') || p.startsWith('bash-ran-outside-grant') || p === 'binary-version-changed-since-start') ?? null;
   return { violation, record: {
     mode: launch?.mode ?? null, safety: launch?.safety ?? null, containment: launch?.containment ?? null, tools: claimed, grant: spec,
     problems, notes: sum.notes, hooksBeforeInit: sum.hooksBeforeInit, exposedTools: sum.tools.exposed, outcome: sum.outcome,

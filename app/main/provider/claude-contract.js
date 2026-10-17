@@ -114,10 +114,26 @@ const WRITE_TOOLS = new Set([...FILE_WRITERS, 'Bash']);
 /** A launch that can change files: a granted rule, or a built-in set that contains a writing tool (or the whole default set). */
 const isPrivileged = ({ allowedTools = [], tools = null } = {}) =>
   allowedTools.length > 0 || tools === null || String(tools).split(',').some((t) => WRITE_TOOLS.has(t.trim()));
-/** Tool surface of a ONE-action retry: the denied tool plus Read (Claude must read a file before it edits it). Anything else cannot be scoped -> null. */
+/** Tool surface of a ONE-action retry: the denied tool plus Read (Claude must read a file before it edits it). Anything else cannot be scoped -> null.
+ *  MEASURED (H3 live, 44ca8a4): an `Edit(file)` rule let the `Write` tool run on that file -- the rule is "Edit" for every file writer. A file-write denial
+ *  therefore needs Edit AND Write on the surface, or a model that picks Write is told the tool does not exist. The GRANT stays one file; the surface is wider. */
+const FILE_WRITE_SURFACE = 'Read,Edit,Write';
 function scopedRetryTools(denial) {
   const t = denial?.tool;
-  return typeof t === 'string' && WRITE_TOOLS.has(t) ? `Read,${t}` : null;
+  if (typeof t !== 'string' || !WRITE_TOOLS.has(t)) return null;
+  return t === 'Edit' || t === 'Write' || t === 'MultiEdit' ? FILE_WRITE_SURFACE : `Read,${t}`;
+}
+/** Does `Bash(prefix:*)` / `Bash(exact)` pre-approve this command? Only a plain prefix match with no shell chaining; anything else is not "covered". */
+const SHELL_META = /[;&|`$()<>\n\r\\]/;
+function bashCovered(grants, command) {
+  if (typeof command !== 'string' || !command.trim() || SHELL_META.test(command)) return false;
+  return (grants ?? []).some((g) => {
+    const m = GRANT.exec(String(g));
+    if (!m || m[1] !== 'Bash') return false;
+    const spec = m[2].trim();
+    if (spec.endsWith(':*')) { const pre = spec.slice(0, -2); return pre !== '' && (command === pre || command.startsWith(`${pre} `)); }
+    return spec === command;
+  });
 }
 
 /* ── binary identity, cached by file fingerprint ───────────────────────────────────────────────────────────────────────────
@@ -132,7 +148,34 @@ function sha256Sync(file) {
 function createIdentityCache({ run = null } = {}) {
   const known = new Map();
   return {
+    /* ponytail: the sha256 of a ~280 MB binary blocks the event loop ~0.2 s when cold (measured); `prewarm` does the same hash in the background so the
+     * adjacent-sync check in `get` is a cache hit. Without a prewarm the first launch pays the block once; the cache key changes only when the file does. */
+    async prewarm(bin) {
+      const loc = locate(bin);
+      if (!loc.ok || known.has(loc.key)) return { ok: loc.ok, cached: loc.ok };
+      const h = crypto.createHash('sha256');
+      try { for await (const chunk of fs.createReadStream(loc.real)) h.update(chunk); } catch { return { ok: false, reason: 'binary-unreadable' }; }
+      let after; try { after = fs.statSync(loc.real); } catch { return { ok: false, reason: 'binary-not-found' }; }
+      if (fingerprint(loc.real, after) !== loc.key) return { ok: false, reason: 'changed-while-hashing' };   // never cache bytes of a file that moved under us
+      known.set(loc.key, Object.freeze({ path: loc.real, sha256: h.digest('hex'), version: run ? versionOf(loc.real) : null }));
+      return { ok: true, cached: false };
+    },
     get(bin) {
+      const loc = locate(bin);
+      if (!loc.ok) return loc;
+      const { real, key } = loc;
+      const hit = known.get(key);
+      if (hit) return { ok: true, id: hit, cached: true };
+      let sha; try { sha = sha256Sync(real); } catch { return { ok: false, reason: 'binary-unreadable' }; }
+      const id = Object.freeze({ path: real, sha256: sha, version: run ? versionOf(real) : null });
+      known.set(key, id);
+      return { ok: true, id, cached: false };
+    },
+  };
+  function fingerprint(real, st) { return [real, st.dev, st.ino, st.size, st.mtimeMs, st.ctimeMs].join('|'); }
+  function versionOf(real) { try { return String(run(real, ['--version']) ?? '').trim().split(/\r?\n/)[0] || null; } catch { return null; } }
+  function locate(bin) {
+    {
       let real; let st;
       try { real = fs.realpathSync(bin); st = fs.statSync(real); if (!st.isFile()) return { ok: false, reason: 'not-a-file' }; } catch { return { ok: false, reason: 'binary-not-found' }; }
       /* An npm shim (`.cmd`) is a launcher, not the program: its identity is the package target next to it (same lookup the stat binding uses). Without a
@@ -143,17 +186,9 @@ function createIdentityCache({ run = null } = {}) {
         if (!target) return { ok: false, reason: 'script-shim-not-a-binary' };
         try { real = fs.realpathSync(target); st = fs.statSync(real); } catch { return { ok: false, reason: 'binary-not-found' }; }
       }
-      const key = [real, st.dev, st.ino, st.size, st.mtimeMs, st.ctimeMs].join('|');
-      const hit = known.get(key);
-      if (hit) return { ok: true, id: hit, cached: true };
-      let sha; try { sha = sha256Sync(real); } catch { return { ok: false, reason: 'binary-unreadable' }; }
-      let version = null;
-      if (run) { try { version = String(run(real, ['--version']) ?? '').trim().split(/\r?\n/)[0] || null; } catch { version = null; } }
-      const id = Object.freeze({ path: real, sha256: sha, version });
-      known.set(key, id);
-      return { ok: true, id, cached: false };
-    },
-  };
+      return { ok: true, real, key: fingerprint(real, st) };
+    }
+  }
 }
 
 /**
@@ -230,6 +265,11 @@ function summarizeRun(events, ctx = {}) {
     return { id: t.id, tool: t.name, path: t.input.file_path ?? null, ran: Boolean(r) && !r.isError && !denied, denied,
       grant: coveredByGrant(ctx.grants, t, cwd, { realpath: ctx.realpath }) };
   });
+  /* Bash: what the grant pre-approved is a command PREFIX; what the tool can run is anything the effective rules (unknown) allow */
+  const bash = toolUses.filter((t) => t.name === 'Bash').map((t) => {
+    const r = results.get(t.id); const denied = denials.some((d) => d.toolUseId === t.id);
+    return { id: t.id, command: t.input.command ?? null, ran: Boolean(r) && !r.isError && !denied, denied, covered: bashCovered(ctx.grants, t.input.command) };
+  });
   const model = { requestedAlias: ctx.requestedModelAlias ?? null, actual: init?.model ?? null };
   const isError = result ? result.is_error === true : null;
   const outcome = denials.length ? 'denied' : (!result ? 'unknown' : (isError || ctx.exitCode > 0 ? 'failed' : 'completed'));
@@ -238,7 +278,7 @@ function summarizeRun(events, ctx = {}) {
     cwd: { call: ctx.callCwd ?? null, init: init?.cwd ?? null },
     model: { ...model, aliasIsNotActual: Boolean(model.requestedAlias && model.actual && model.requestedAlias !== model.actual) },
     tools: { exposed: tools, builtin: tools.filter((t) => !t.startsWith('mcp__')), mcp: mcpTools },
-    hooksBeforeInit, toolUses, writes, denials,
+    hooksBeforeInit, toolUses, writes, bash, denials,
     result: result ? { subtype: result.subtype, isError, terminalReason: result.terminal_reason ?? null, cost: result.total_cost_usd ?? null } : null,
     exitCode: ctx.exitCode ?? null, outcome, fileEffect: fileEffect(ctx.files?.before, ctx.files?.after),
   };
@@ -248,6 +288,7 @@ function summarizeRun(events, ctx = {}) {
   s.problems = problems(s, ctx);
   s.notes = [];                      // facts a reader must not mistake for success/failure
   if (s.outcome === 'denied' && s.exitCode === 0 && s.result?.subtype === 'success') s.notes.push('denied-despite-success-exit');
+  if (s.tools.builtin.includes('Bash')) s.notes.push('bash-effect-unbounded');
   if (s.fileEffect.state === 'unobservable') s.notes.push('file-effect-unobservable');
   return s;
 }
@@ -262,8 +303,9 @@ function problems(s, ctx) {
     if (ctx.claimedTools && s.tools.builtin.some((t) => !ctx.claimedTools.includes(t))) p.push('builtin-tools-beyond-claim');
   }
   for (const w of s.writes) if (w.ran && !w.grant.covered) p.push(`write-ran-without-grant:${w.path}`);
+  for (const b of s.bash) if (b.ran && !b.covered) p.push(`bash-ran-outside-grant:${b.command}`);
   for (const d of s.denials) if (!d.linked) p.push(`denial-not-linked:${d.toolUseId}`);
   return p;
 }
 
-module.exports = { EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
+module.exports = { EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };

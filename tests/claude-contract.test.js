@@ -194,6 +194,32 @@ test('preflightLaunch: modes, privilege, identity cache; an unknown mode is prot
     // argv problems come first, whatever the mode
     assert.strictEqual(pl({ build: { sessionId: U1, allowedTools: ['Edit'] }, mode: 'dev-compat' }).reason, 'unscoped-grant');
     assert.deepStrictEqual([C.scopedRetryTools({ tool: 'Edit' }), C.scopedRetryTools({ tool: 'Write' }), C.scopedRetryTools({ tool: 'Bash' }), C.scopedRetryTools({ tool: 'WebFetch' }), C.scopedRetryTools({ tool: 'mcp__a__b' }), C.scopedRetryTools(null)],
-      ['Read,Edit', 'Read,Write', 'Read,Bash', null, null, null]);
+      ['Read,Edit,Write', 'Read,Edit,Write', 'Read,Bash', null, null, null]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('bashCovered: only a plain prefix/exact match of the granted rule; chaining, substitution and look-alike prefixes are not covered', () => {
+  const g = ['Bash(ls:*)'];
+  for (const c of ['ls', 'ls -la', 'ls a/b']) assert.strictEqual(C.bashCovered(g, c), true, c);
+  for (const c of ['lsof', 'ls; id', 'ls && id', 'ls | sh', 'ls $(id)', 'ls `id`', 'ls > f', 'ls\nid', '', null, 'cat x']) assert.strictEqual(C.bashCovered(g, c), false, String(c));
+  assert.strictEqual(C.bashCovered(['Bash(git status)'], 'git status'), true);
+  assert.strictEqual(C.bashCovered(['Bash(git status)'], 'git status -s'), false);
+  assert.strictEqual(C.bashCovered(['Edit(ls)'], 'ls'), false, 'an Edit rule is not a Bash rule');
+});
+
+test('identity cache: prewarm hashes in the background and the later sync check is a hit; a file that changed gets a NEW identity; an unreadable one is never cached', async () => {
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-pw-')); const bin = path.join(dir, 'claude');
+  fs.writeFileSync(bin, 'bytes-one');
+  try {
+    const cache = C.createIdentityCache();
+    assert.deepStrictEqual(await cache.prewarm(bin), { ok: true, cached: false });
+    const a = cache.get(bin);
+    assert.deepStrictEqual([a.ok, a.cached], [true, true]);
+    assert.deepStrictEqual(await cache.prewarm(bin), { ok: true, cached: true });
+    fs.writeFileSync(bin, 'bytes-two-longer');
+    const b = cache.get(bin);
+    assert.deepStrictEqual([b.cached, b.id.sha256 === a.id.sha256], [false, false]);
+    assert.strictEqual((await cache.prewarm(path.join(dir, 'nope'))).ok, false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -398,5 +398,8 @@ const grantedSignal = (denial, spec) => ({
 const preflightRun = ({ sessionId, resume = false, allowedTools = [], tools = null, bin, mode, recorded = null }) =>
   preflightLaunch({ bin: bin || resolveBin(), recorded, build: { sessionId, resume, allowedTools, tools }, mode: mode ?? envMode(), cache: identityCache });
 
-module.exports = { preflightRun, run, stop, sameDir, canonicalDir, binaryIdentity, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
+/** Hash the binary off the hot path so the adjacent-sync check in run() is a cache hit. Best effort: a failure here only means run() hashes itself. */
+const prewarmIdentity = (bin) => identityCache.prewarm(bin || resolveBin()).catch(() => ({ ok: false }));
+
+module.exports = { prewarmIdentity, preflightRun, run, stop, sameDir, canonicalDir, binaryIdentity, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
   windowsRunnerTreeMayBeAlive, processTreeMayBeAlive };

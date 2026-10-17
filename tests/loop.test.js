@@ -1662,12 +1662,12 @@ test('scoped retry: the argv that REACHED the process confines the whole tool su
   const out = await supervisor.allow(w.db, w.r.workId, 'tu_1');
   assert.strictEqual(out.ok, true);
   const argv = argvLog(w.dir).at(-1);
-  assert.match(argv, /--resume \S+ -p --output-format stream-json --verbose --allowedTools Edit\(a\.txt\) --tools Read,Edit --strict-mcp-config$/, argv);
+  assert.match(argv, /--resume \S+ -p --output-format stream-json --verbose --allowedTools Edit\(a\.txt\) --tools Read,Edit,Write --strict-mcp-config$/, argv);
   assert.ok(!/--bare|dangerously|--permission-mode|--sandbox|bypass/i.test(argv), argv);
   assert.deepStrictEqual([out.safety, out.containment.attested, out.containment.hooks, out.containment.permissions, out.containment.mcp],
     ['dev-compat-unattested', false, 'UNKNOWN', 'UNKNOWN', 'closed-by-flag']);
   const audit = auditOf(w.db, w.r.workId);
-  assert.deepStrictEqual([audit.problems, audit.tools, audit.sideEffectsPrevented], [[], ['Read', 'Edit'], false]);
+  assert.deepStrictEqual([audit.problems, audit.tools, audit.sideEffectsPrevented], [[], ['Read', 'Edit', 'Write'], false]);
 });
 
 test('scoped retry: a Bash grant gets Read,Bash only; a denied tool that cannot be confined (a connector tool) is not retried at all', async () => {
@@ -1766,4 +1766,77 @@ test('session.run itself refuses (no process) on a changed recorded binary and i
   const ok = await session.run({ ...ids });
   assert.deepStrictEqual([ok.startFailed, ok.safety, ok.identityVerified], [false, 'dev-compat-unattested', true]);
   assert.strictEqual(argvLog(dir).length, 1);
+});
+
+/* ───────────── Edit grant vs Write tool (measured H3 live 44ca8a4: Edit(f) let Write run on f; Write(other) was denied) ───────────── */
+const toolRun = (id, name, input, content = 'ok') => [{ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } },
+  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content }] } }];
+const retryWith = async (mk, denial = [INIT, DENIED, RESULT_DENIED]) => {
+  const w = await retryOf(denial);
+  const cwd = fs.realpathSync(w.project.path);
+  useBin(w.r.workId, cli(w.dir, mk(cwd), { name: 'retry-w' }));
+  const out = await supervisor.allow(w.db, w.r.workId, 'tu_1');
+  return { w, out, cwd, audit: auditOf(w.db, w.r.workId) };
+};
+
+test('Edit(a.txt) denial: the surface is Read,Edit,Write, the grant is still ONE file; a Write to that same file passes the audit', async () => {
+  const x = await retryWith((cwd) => [{ ...INIT, cwd, tools: ['Read', 'Edit', 'Write'] }, ...toolRun('tw1', 'Write', { file_path: path.join(cwd, 'a.txt') }), OK]);
+  assert.strictEqual(x.out.ok, true, JSON.stringify(x.out));
+  assert.match(argvLog(x.w.dir).at(-1), /--allowedTools Edit\(a\.txt\) --tools Read,Edit,Write --strict-mcp-config$/);
+  assert.deepStrictEqual(x.audit.problems, []);
+  assert.ok(!argvLog(x.w.dir).at(-1).includes('--allowedTools Write'), 'Write was granted as a tool, not as a file rule');
+});
+
+test('Write after an Edit(a.txt) grant: another file, a same-name file in a subdirectory, an escaping path and a bare relative miss are all violations; none is "covered"', async () => {
+  const cases = { other: (c) => path.join(c, 'b.txt'), sameNameBelow: (c) => path.join(c, 'sub', 'a.txt'), escape: (c) => path.join(c, '..', 'a.txt'), prefixOnly: (c) => path.join(c, 'a.txt.bak') };
+  for (const [name, file] of Object.entries(cases)) {
+    const x = await retryWith((cwd) => [{ ...INIT, cwd, tools: ['Read', 'Edit', 'Write'] }, ...toolRun('tw1', 'Write', { file_path: file(cwd) }), OK]);
+    assert.match(x.out.detail ?? '', /^write-ran-without-grant:/, name);
+    assert.strictEqual(repo.getWork(x.w.db, x.w.r.workId).outcome, 'ended_unknown', name);
+  }
+});
+
+test('a Write that was DENIED is a denial, not a change: exit 0 / success does not make it one, and the file bytes decide', async () => {
+  const x = await retryWith((cwd) => [{ ...INIT, cwd, tools: ['Read', 'Edit', 'Write'] },
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tw1', name: 'Write', input: { file_path: path.join(cwd, 'b.txt') } }] } },
+    { type: 'system', subtype: 'permission_denied', tool_name: 'Write', tool_use_id: 'tw1', message: 'no' },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tw1', is_error: true, content: 'denied' }] } },
+    { type: 'result', subtype: 'success', is_error: false, permission_denials: [{ tool_name: 'Write', tool_use_id: 'tw1', tool_input: { file_path: path.join(cwd, 'b.txt') } }] }]);
+  assert.strictEqual(x.audit.outcome, 'denied');
+  assert.ok(x.audit.notes.includes('denied-despite-success-exit'));
+  assert.ok(!fs.existsSync(path.join(x.cwd, 'b.txt')), 'the denied file exists');
+  assert.strictEqual(supervisor.snapshot(x.w.db, x.w.r.workId).status, 'permission_waiting');
+});
+
+test('Bash: Read,Bash is a surface, not a command scope -- a command outside the granted prefix (or chained to it) is a violation and the effect stays UNBOUNDED', async () => {
+  const bash = [INIT, { type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'tu_1', message: 'no' },
+    { type: 'result', subtype: 'success', is_error: false, permission_denials: [{ tool_name: 'Bash', tool_use_id: 'tu_1', tool_input: { command: 'ls' } }] }];
+  const ran = (command) => (cwd) => [{ ...INIT, cwd, tools: ['Read', 'Bash'] }, ...toolRun('tb1', 'Bash', { command }), OK];
+  const ok = await retryWith(ran('ls -la'), bash);
+  assert.deepStrictEqual([ok.out.ok, ok.audit.problems, ok.audit.notes.includes('bash-effect-unbounded'), ok.audit.sideEffectsPrevented], [true, [], true, false]);
+  for (const cmd of ['rm -rf x', 'ls; rm x', 'ls && curl x', 'lsof', 'ls $(id)', 'ls `id`', 'ls | sh']) {
+    const bad = await retryWith(ran(cmd), bash);
+    assert.match(bad.out.detail ?? '', /^bash-ran-outside-grant:/, cmd);
+  }
+  const w = await retryOf(bash);
+  const before = w.calls();
+  const refused = await supervisor.allow(w.db, w.r.workId, 'tu_1', { executionMode: 'v1-protected' });
+  assert.deepStrictEqual([refused.reason, refused.detail, w.calls()], ['preflight-refused', 'safety-unattested', before], 'protected mode must refuse an unattested Bash');
+});
+
+test('audit: a process that reports NO version leaves the build UNKNOWN (a note), never "unchanged"; a different version stays a violation', async () => {
+  const w = await retryOf();                       // INIT carries no claude_code_version
+  const entry = supervisor.live.get(w.r.workId);
+  const id = session.preflightRun({ sessionId: 'x', bin: entry.bin }).identity;
+  entry.launchIdentity = { path: id.path, sha256: id.sha256, version: '1.0.0' };
+  assert.strictEqual((await supervisor.allow(w.db, w.r.workId, 'tu_1')).ok, true);
+  const audit = auditOf(w.db, w.r.workId);
+  assert.ok(audit.notes.includes('binary-version-unverified') && !audit.problems.includes('binary-version-changed-since-start'), JSON.stringify(audit));
+});
+
+test('retry with a different init cwd than the caller is a recorded problem, not silently accepted', async () => {
+  const w = await retryOf();
+  useBin(w.r.workId, cli(w.dir, [INIT, OK], { name: 'retry-cwd', initCwd: path.join(fs.realpathSync(w.project.path), '..') }));
+  await supervisor.allow(w.db, w.r.workId, 'tu_1');
+  assert.ok(auditOf(w.db, w.r.workId)?.problems.includes('init-cwd-differs-from-call'), JSON.stringify(auditOf(w.db, w.r.workId)));
 });
