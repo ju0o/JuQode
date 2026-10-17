@@ -3041,8 +3041,10 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
         const b = [...root.querySelectorAll('button')].find((n) => n.textContent.includes('다시 실행')); if (!b) return null;
         const g = getComputedStyle(b);
         const lum = (c) => { const [r, gr, bl] = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map((v) => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * gr + .0722 * bl; };
-        const l1 = lum(g.color), l2 = lum(g.backgroundColor);
-        return { ratio: Math.round(((Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05)) * 100) / 100, color: g.color, background: g.backgroundColor, border: g.borderTopColor };
+        /* the colour actually BEHIND the label: a ghost button has a transparent fill, and reading that as black is not a measurement */
+        let bg = null; for (let n = b; n && !bg; n = n.parentElement) { const c = getComputedStyle(n).backgroundColor; if (c && !/rgba\\(.*, 0\\)$|transparent/.test(c)) bg = c; }
+        const l1 = lum(g.color), l2 = lum(bg ?? 'rgb(255,255,255)');
+        return { ratio: Math.round(((Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05)) * 100) / 100, color: g.color, background: bg, border: g.borderTopColor, ghost: g.backgroundColor !== bg };
       })() });
   })()`;
   for (const kind of Object.keys(TD)) {
