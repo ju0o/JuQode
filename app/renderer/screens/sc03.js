@@ -116,7 +116,9 @@ function workCard(snap, api, nav, state) {
    * a Work cannot exist without it, which is what makes the 확인됨 chip true. */
   const route = el('div', 'routeline');
   route.appendChild(el('span', 'sm', C.work.route));
-  route.appendChild(el('span', 'chip ok', C.brief.chips.ok));
+  /* P3: `확인됨` is D-114's word for a MEASURED claim; here the sentence only says the before-state was recorded, and a green
+   * 확인됨 beside it read as "the task was checked". Canon `work.route` names the chip 확인됨 — see PROPOSALS-P3-P8.md. */
+  route.appendChild(el('span', 'chip ok', C.gap.routeChip));
   card.appendChild(route);
 
   card.appendChild(liveness(snap));
@@ -303,6 +305,7 @@ function inputPanel(snap, api) {
   const box = el('textarea', 'answerfield');
   box.setAttribute('data-el', 'answer');
   box.placeholder = C.work.inputPh;
+  box.setAttribute('aria-label', C.work.inputTitle);
   box.rows = 2;
   panel.appendChild(box);
   const acts = el('div', 'row-acts');
@@ -523,6 +526,14 @@ function humanResult(snap) {
   }
   if (files?.length) {
     block.prepend(el('div', 'sm result-count', C.gap.result.filesCount(files.length)), fileSummary(files));
+  } else if (files && snap.outcome === 'ended_unknown') {
+    /* P4: `files` is an empty list only when the before→after comparison itself succeeded (otherwise it is null and the
+     * unknown sentence above is the answer). That is one fact; whether the process ended is another. */
+    const zero = el('div', 'sm result-count', C.gap.result.zeroMeasured);
+    zero.setAttribute('data-el', 'zero-measured');
+    const unknownEnd = el('div', 'sm result-count', C.gap.result.endUnknown);
+    unknownEnd.setAttribute('data-el', 'end-unknown');
+    block.prepend(zero, unknownEnd);
   } else if (files) {
     block.prepend(el('div', 'sm result-count', snap.work?.task_id ? C.gap.task.noChanges : C.work.noChanges));
   }

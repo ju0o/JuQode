@@ -706,6 +706,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   out.permPanel = await evalJs(`document.querySelector('[data-el="permission"]')?.innerText ?? null`);
   out.workReds = await evalJs(RED_COUNT('.sc03 *'));
   out.nextSlot = await evalJs(`document.querySelector('[data-el="next"]')?.innerText ?? null`);
+  out.routeLine = await evalJs(`document.querySelector('.sc03 .routeline')?.innerText ?? null`);
   out.liveness = await evalJs(`document.querySelector('[data-el="liveness"]')?.innerText ?? null`);
   out.compSC03  = await evalJs(COMPOSITION('.sc03'));
   out.sc03Cards = await evalJs(`JSON.stringify([...document.querySelectorAll('.sc03 [data-card]')].map(n => n.getAttribute('data-card')))`);
@@ -3034,7 +3035,15 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
       hasUnknownSentence: !!root.querySelector('[data-el="qc-unknown"]'), holdShown: !!root.querySelector('[data-el="qc-hold"]'),
       banner: !!root.querySelector('[data-el="banner"]'), limits: !!root.querySelector('[data-el="term-limits"]'),
       qcAuth: root.querySelector('[data-el="qc-authority"]')?.innerText ?? null, shellAuth: root.querySelector('[data-el="shell-authority"]')?.innerText ?? null,
-      reds: ${RED_COUNT('[data-el="drawer-syn"] *')}, text: root.innerText });
+      reds: ${RED_COUNT('[data-el="drawer-syn"] *')}, text: root.innerText,
+      /* ▸ 다시 실행 is a primary AND a recovery: its text was recovery green on the ink fill (2.28:1 light, 1.74:1 dark). Measured on the real node. */
+      rerun: (() => {
+        const b = [...root.querySelectorAll('button')].find((n) => n.textContent.includes('다시 실행')); if (!b) return null;
+        const g = getComputedStyle(b);
+        const lum = (c) => { const [r, gr, bl] = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map((v) => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * gr + .0722 * bl; };
+        const l1 = lum(g.color), l2 = lum(g.backgroundColor);
+        return { ratio: Math.round(((Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05)) * 100) / 100, color: g.color, background: g.backgroundColor, border: g.borderTopColor };
+      })() });
   })()`;
   for (const kind of Object.keys(TD)) {
     await tdMount(kind);
@@ -3047,6 +3056,18 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
         const m = JSON.parse(await evalJs(TD_METRICS));
         fs.writeFileSync(path.join(OUT, `td01-d4-${kind}-${w}-${theme}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
         const row = { w, theme, m };
+        /* the keyboard indicator on that button: a real focus-visible ring, and its contrast against what is behind it */
+        if (kind === 'failed' && w === 1200) {
+          row.rerunFocus = JSON.parse(await evalJs(`(() => {
+            const b = [...document.querySelectorAll('[data-el="drawer-syn"] button')].find((n) => n.textContent.includes('다시 실행'));
+            b.focus({ focusVisible: true });
+            const g = getComputedStyle(b);
+            const lum = (c) => { const [r, gr, bl] = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map((v) => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * gr + .0722 * bl; };
+            let bg = null; for (let n = b.parentElement; n && !bg; n = n.parentElement) { const c = getComputedStyle(n).backgroundColor; if (c && !/rgba\\(.*, 0\\)$|transparent/.test(c)) bg = c; }
+            const l1 = lum(g.outlineColor), l2 = lum(bg ?? 'rgb(255,255,255)');
+            const out = { visible: b.matches(':focus-visible'), style: g.outlineStyle, width: g.outlineWidth, color: g.outlineColor, behind: bg, ratio: Math.round(((Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05)) * 100) / 100 };
+            b.blur(); return JSON.stringify(out); })()`));
+        }
         if (kind === 'failed' || kind === 'unknown') {
           await evalJs(`window.__td.state.qcDetailOpen = true; window.__td.paint()`);
           await sleep(150);
@@ -4511,6 +4532,8 @@ assert.ok(results.sc02CardCount >= 3, `the overlap check saw ${results.sc02CardC
 assert.strictEqual(results.sc02Overlaps, 0, 'SC-02 draws cards on top of each other');
 assert.strictEqual(results.sc02Clipped2, 0, 'an SC-02 card clips its own content');
 /* The NEXT slot is always rendered, and empty is the right answer here (D-107). */
+assert.ok(results.routeLine && results.routeLine.includes('시작 전 상태를 기록해 두었어요') && results.routeLine.includes('기록됨') && !results.routeLine.includes('확인됨'),
+  `P3: the before-state line must say 기록됨, not 확인됨: ${results.routeLine}`);
 assert.ok(results.nextSlot && results.nextSlot.includes('Claude Code가 아직 다음 단계를 보내지 않았어요'),
   `NEXT slot: ${results.nextSlot}`);
 assert.ok(results.liveness && !/\d+\s*%/.test(results.liveness), 'the liveness line shows a percentage');
@@ -4530,6 +4553,11 @@ fs.writeFileSync(path.join(OUT, 'sc04-d3-metrics.json'), JSON.stringify({ matrix
 /* TD-01 D4 on the real drawer renderer in the real window */
 for (const [kind, rows] of Object.entries(results.td01d4)) {
   assert.strictEqual(rows.length, 8, `TD-01 ${kind}: expected 4 widths x 2 themes`);
+  for (const r of rows.filter((x) => x.rerunFocus)) {
+    const f = r.rerunFocus;
+    assert.ok(f.visible && f.style !== 'none' && parseFloat(f.width) >= 2, `TD-01 다시 실행 ${r.theme}: no visible focus ring ${JSON.stringify(f)}`);
+    assert.ok(f.ratio >= 3, `TD-01 다시 실행 ${r.theme}: the focus ring is ${f.ratio}:1 against what is behind it (3:1 needed)`);
+  }
   for (const r of rows) {
     const at = `TD-01 ${kind} @${r.w} ${r.theme}`;
     for (const [label, m] of [['closed', r.m], ['details open', r.open]].filter(([, m]) => m)) {
@@ -4540,6 +4568,8 @@ for (const [kind, rows] of Object.entries(results.td01d4)) {
       assert.strictEqual(m.outBoxPastEdge, 0, `${at} (${label}): an output box runs past the window edge`);
       assert.strictEqual(m.clipped, 0, `${at} (${label}): ${m.clipped} card/field(s) clip their text`);
       assert.ok(m.banner, `${at} (${label}): the standing safety banner is gone`);
+      if (kind === 'failed') assert.ok(m.rerun, `${at} (${label}): the failed card has no 다시 실행`);
+      if (m.rerun) assert.ok(m.rerun.ratio >= 4.5, `${at} (${label}): 다시 실행 text is ${m.rerun.ratio}:1 on its fill (AA needs 4.5:1)`);
       assert.ok(m.qcAuth && m.shellAuth, `${at} (${label}): the two execution authorities are not both stated`);
       assert.ok(m.primary <= 1, `${at} (${label}): ${m.primary} emphasised next steps`);
       if (kind !== 'failed') assert.strictEqual(m.reds, 0, `${at} (${label}): red where nothing failed`);
@@ -4828,6 +4858,9 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
   assert.ok(results.partialNotDone, '부분 완료 drew no 못 한 것 list');
   assert.ok(results.partialNotDone.includes('허용되지 않아서 하지 못한 것'),
     `the 못 한 것 list does not name the refusal: ${results.partialNotDone}`);
+  assert.ok(results.partialCard.includes('시작 전과 비교하면 바뀐 파일은 없어요') && results.partialCard.includes('끝났는지는 확인하지 못했어요'),
+    `ended_unknown must say the measured zero and the unknown end as two facts: ${results.partialCard}`);
+  assert.ok(!results.partialCard.includes('바뀐 파일이 없어요'), 'ended_unknown still says the bare 바뀐 파일이 없어요 as if it were the whole story');
   assert.ok(!/\bEdit\b/.test(results.partialNotDone) && /\S+ 수정/.test(results.partialNotDone),
     `the 못 한 것 list still speaks the CLI's tool name instead of the action: ${results.partialNotDone}`);
   assert.ok(results.partialCard.includes('JuQode가 지켜본 도구 실행 1'),

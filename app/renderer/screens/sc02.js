@@ -345,7 +345,12 @@ export function renderSC02(root, api, nav, state) {
   const draftNote = el('div', 'xs mut2');
   let criteriaDirty = false;
   criteriaBox.addEventListener('input', () => { criteriaDirty = true; });
-  const commit = btn('btn pri', C.gap.task.commitNew, () => commitNewTask());
+  /* ONE user decision starts at most one Work: both start buttons and Enter go through this, so a second click or
+   * a click on the other button while the first is still being routed does nothing. */
+  let starting = false;
+  const once = (fn) => async () => { if (starting) return; starting = true; try { await fn(); } finally { starting = false; } };
+  let primaryReady = false;
+  const commit = btn('btn pri', C.gap.task.commitNew, once(() => commitNewTask()));
   commit.setAttribute('data-act', 'commit-task');
   draft.title = `${C.gap.task.draftHandoff}\n${C.gap.task.contextScope}`;
   draft.append(
@@ -354,6 +359,7 @@ export function renderSC02(root, api, nav, state) {
     criteriaBox,
     draftNote,
     commit,
+    el('div', 'xs mut start-note', C.gap.task.startNoteNew),
   );
   intent.appendChild(draft);
   const paintDraft = () => {
@@ -363,11 +369,27 @@ export function renderSC02(root, api, nav, state) {
       criteriaDirty = false;
       criteriaBox.value = '';
       draftNote.textContent = '';
+      syncPrimary();
       return;
     }
     draft.hidden = false;
     if (!criteriaDirty) criteriaBox.value = proposal.criteria.join('\n');
+    syncPrimary();
   };
+  /* One situation, one emphasised start. The proposal is not an approval; what starts Claude is exactly one of:
+   *   - a sentence with no Task selected   -> 새 일로 맡기기 (saves the Task AND starts: D-116 4번, the MVP's 실행 승인)
+   *   - a Task is selected                 -> 보내기 (continues THAT Task)
+   * The other stays available as a plain button with its own words, so no path is removed. */
+  function syncPrimary() {
+    if (!primaryReady) return;
+    const draftOn = !draft.hidden;
+    const linked = Boolean(state.selectedTaskId) && !state.inspectDismissed;
+    const newTaskPrimary = draftOn && !linked;
+    commit.classList.toggle('pri', newTaskPrimary);
+    submit.classList.toggle('pri', !newTaskPrimary);
+    submit.textContent = newTaskPrimary ? C.gap.task.sendOnce : (draftOn && linked ? C.gap.task.sendToTask : C.intent.submit);
+    submitNote.textContent = newTaskPrimary ? C.gap.task.startNoteOnce : (linked ? C.gap.task.startNoteTask : C.gap.task.startNoteNew);
+  }
   paintDraft();
 
   const consequence = el('div', 'consequence');
@@ -416,6 +438,7 @@ export function renderSC02(root, api, nav, state) {
     if (sheet && !sheetOpen) setTimeout(() => closeBtn.focus(), 0);
     sheetOpen = sheet;
     board.classList.toggle('composer-open', Boolean(state.composerOpen) || consequence.childNodes.length > 0 || draft.hidden === false);
+    syncPrimary();
   };
   new MutationObserver(syncShell).observe(consequence, { childList: true });
   const onWidth = () => { if (!board.isConnected) narrowQuery.removeEventListener('change', onWidth); else syncShell(); };
@@ -423,12 +446,16 @@ export function renderSC02(root, api, nav, state) {
   field.addEventListener('input', () => { draftSuppressed = false; paintDraft(); syncShell(); });
   syncShell();
 
-  const submit = btn('btn pri', C.intent.submit, () => send());
+  const submit = btn('btn pri', C.intent.submit, once(() => send()));
   submit.setAttribute('data-act', 'submit-intent');
+  const submitNote = el('div', 'xs mut start-note', C.gap.task.startNoteNew);
   const row = el('div', 'row-acts');
   row.appendChild(submit);
   row.appendChild(el('span', 'xs mut', C.intent.helper));
   intent.appendChild(row);
+  intent.appendChild(submitNote);
+  primaryReady = true;
+  syncPrimary();
   intent.appendChild(el('div', 'xs mut2 task-request-note', C.intent.examples));
   intent.appendChild(el('div', 'xs mut2 task-request-note', C.intent.approvalNote));
   colMain.appendChild(intent);
@@ -707,7 +734,7 @@ export function renderSC02(root, api, nav, state) {
 
   /* Enter submits, Shift+Enter is a newline (`15` SC-02 Inputs). */
   field.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); once(() => send())(); }
   });
 
   async function commitNewTask() {

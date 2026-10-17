@@ -469,7 +469,13 @@ export const C = {
       evidenceFold: '근거와 원본 기록',
       testsLead: (n, seen) => `테스트 명령 ${n}개 · 종료 코드를 관측한 것 ${seen}개`,
       filesCount: (n) => `바뀐 파일 ${n}개`,
+      /* P4 · NOT in `18` (which has only `work.noChanges`). When the end of the process is unknown, "no changed file"
+       * and "we do not know it ended" are two facts and are said as two sentences of the same weight. */
+      zeroMeasured: '시작 전과 비교하면 바뀐 파일은 없어요.',
+      endUnknown: '끝났는지는 확인하지 못했어요. 아직 실행 중이라면 이후에 파일이 바뀔 수 있어요.',
     },
+    /* P3 · NOT in `18`: the chip beside `work.route`. Canon says 확인됨 here; the sentence only says a record exists. */
+    routeChip: '기록됨',
     /* DG-11 · PM approved the WBS workflow before Canon 18 was updated. Keep its visible copy
      * explicitly marked as a Canon gap until the source dictionary adopts these strings. */
     task: {
@@ -487,6 +493,12 @@ export const C = {
       emptyBoardTitle: '무엇을 맡길까요?',
       emptyBoardBody: '아직 맡은 일이 없어요. 하고 싶은 일을 한 문장으로 적어 주세요. 적는 동안에는 아무것도 바뀌지 않고, 보내면 Claude가 시작해요.',
       emptyBoardCta: '새 작업',
+      /* P8 · NOT in `18`: the one emphasised start says what it does. D-116 4번 = 실행 승인. */
+      startNoteNew: '누르면 Claude가 바로 시작해요.',
+      startNoteOnce: '저장하지 않고 이 요청만 한 번 보내요. 누르면 Claude가 바로 시작해요.',
+      startNoteTask: '선택한 작업에 이어서 보내요. 누르면 Claude가 바로 시작해요.',
+      sendOnce: '저장 없이 한 번만 보내기',
+      sendToTask: '이 작업에 보내기',
       writeRequest: '이 작업으로 요청 쓰기',
       writeRequestNote: '요청 칸을 열어요. 쓰기만 해서는 시작하지 않고, 보내기를 눌러야 시작해요.',
       createSubmit: '작업 저장',

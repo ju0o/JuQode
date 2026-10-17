@@ -660,3 +660,5 @@
 .sc02.composer-open .board-start { display: none; }
 /* Once the field is open the next step is 보내기; a second primary button here would only compete with it. */
 .sc02.composer-open [data-act="task-write-request"], .sc02.composer-open .write-request-note { display: none; }
+/* Says that the emphasised button starts Claude (D-116 4번); the essay notes above stay hidden. */
+.sc02 .start-note { display: block; }

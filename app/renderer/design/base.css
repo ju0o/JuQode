@@ -189,6 +189,11 @@ body {
    Colour only — these are ghost buttons, and a fill would make a recovery read as a primary. */
 .btn.rec { color: var(--rec); }
 .btn.rec:hover { color: var(--rec); background: var(--recbg); border-color: var(--recline); }
+/* `다시 실행` is BOTH the primary (a fill of --ink) and a recovery (--rec text). Recovery green on the ink fill measured
+   2.28:1 light and 1.74:1 dark (WCAG AA wants 4.5:1). The fill's own text colour is what is readable on it; the recovery
+   meaning is kept by the green border here and by the ▸ it already carries. Hover turns it into the ordinary recovery look. */
+.btn.pri.rec { color: var(--board); border-color: var(--rec); }
+.btn.pri.rec:hover { color: var(--rec); }
 
 details > summary { cursor: pointer; }
 details > summary:hover { color: var(--ink); }

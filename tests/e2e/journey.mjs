@@ -20,7 +20,7 @@ import { sweepDisplays } from './xvfb.mjs';
 import { launchArgs, killTree, WIN } from './launch.mjs';
 sweepDisplays();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const { DB, USER_DATA, SEED, SEED3, FAKE_CLI } = await import('./fixture.mjs');
+const { DB, USER_DATA, SEED, SEED2, SEED3, FAKE_CLI } = await import('./fixture.mjs');
 
 const OUT = path.resolve(process.env.JUQODE_E2E_SHOT_DIR || path.join(ROOT, 'tmp-journey'));
 fs.mkdirSync(OUT, { recursive: true });
@@ -83,6 +83,54 @@ try {
   await shot('empty-folder-1200-light');
   assert.deepStrictEqual(out.emptyFolder.pri, ['새 작업'], `an empty folder shows more than one primary action: ${JSON.stringify(out.emptyFolder.pri)}`);
   assert.ok(out.emptyFolder.brief.includes('이 폴더는 아직 비어 있어요') && out.emptyFolder.briefStart, 'the empty-folder explanation or its own start went missing');
+  /* ── P8: ONE emphasised start per situation, and one decision starts at most one Work ───────────── */
+  const works = async () => JSON.parse(await ev(`(async () => JSON.stringify((await window.juqode.history(window.__project().id)).works.length))()`));
+  const priNow = () => ev(`(() => { ${VIS} return JSON.stringify({ pri: [...document.querySelectorAll('.btn.pri')].filter(vis).map((b) => b.innerText.trim()),
+    submit: document.querySelector('[data-act="submit-intent"]').innerText.trim(), draftShown: !document.querySelector('[data-el="composer-draft"]').hidden,
+    notes: [...document.querySelectorAll('.start-note')].filter(vis).map((n) => n.innerText.trim()) }); })()`).then(JSON.parse);
+  const type = (t) => ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = ${JSON.stringify(t)}; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  /* (a) no Task selected, a sentence: 새 일로 맡기기 is THE start; 보내기 is the plain, differently-worded one */
+  await ev(`document.querySelector('[data-act="board-start"]').click()`); await sleep(200);
+  const n3 = await works();
+  await type('회원가입 화면에 이메일 칸을 추가해 주세요'); await sleep(200);
+  out.p8a = await priNow();
+  out.p8aWorksTyped = await works();
+  await shot('p8-typed-no-task-1200-light');
+  assert.deepStrictEqual(out.p8a.pri, ['새 일로 맡기기'], `a typed sentence has more than one emphasised start: ${JSON.stringify(out.p8a)}`);
+  assert.strictEqual(out.p8a.submit, '저장 없이 한 번만 보내기');
+  assert.ok(out.p8a.notes.some((t) => t.includes('Claude가 바로 시작해요')), `nothing says that pressing starts Claude: ${JSON.stringify(out.p8a.notes)}`);
+  assert.strictEqual(out.p8aWorksTyped, n3, 'typing a sentence / seeing the proposal started a Work');
+  /* a double click is ONE decision */
+  await ev(`(() => { const b = document.querySelector('[data-act="commit-task"]'); b.click(); b.click(); })()`);
+  for (let i = 0; i < 40 && (await works()) === n3; i++) await sleep(250);
+  await sleep(1500);
+  out.p8aWorksAfterDouble = await works();
+  assert.strictEqual(out.p8aWorksAfterDouble, n3 + 1, `a double click on 새 일로 맡기기 made ${out.p8aWorksAfterDouble - n3} Works`);
+  out.p8aLinked = JSON.parse(await ev(`(async () => { const h = await window.juqode.history(window.__project().id); const w = h.works.find((x) => x.status !== 'ended') ?? h.works[0];
+    const d = await window.juqode.workGet(w.id); return JSON.stringify({ task: d?.work?.work?.task_id ?? null, intent: d?.work?.work?.intent }); })()`));
+  assert.ok(out.p8aLinked.task, '새 일로 맡기기 started a Work that is not attached to the Task it just saved');
+  await ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('다른 프로젝트'))?.click()`);
+  for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-01'; i++) await sleep(250);
+  /* (b) the single-shot path, SEED2: 보내기 still starts ONE Work with NO Task */
+  await openRow(SEED2);
+  for (let i = 0; i < 60 && !(await ev(`!!document.querySelector('[data-el="board-start"]')`)); i++) await sleep(250);
+  await ev(`document.querySelector('[data-act="board-start"]').click()`); await sleep(200);
+  const n2 = await works();
+  await type('로그인 오류 고쳐줘'); await sleep(200);
+  out.p8bWorksTyped = await works();
+  assert.strictEqual(out.p8bWorksTyped, n2, 'typing a sentence started a Work');
+  /* the two buttons are one decision too: 보내기, and in the same instant 새 일로 맡기기 */
+  await ev(`(() => { const b = document.querySelector('[data-act="submit-intent"]'); b.click(); b.click(); document.querySelector('[data-act="commit-task"]').click(); })()`);
+  for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-03'; i++) await sleep(250);
+  await sleep(1500);
+  out.p8bWorksAfterDouble = await works();
+  out.p8bTask = await ev(`(async () => { const d = await window.juqode.workGet(window.__work().id); return d?.work?.work?.task_id ?? null; })()`);
+  assert.strictEqual(out.p8bWorksAfterDouble, n2 + 1, `a double click on 한 번만 보내기 made ${out.p8bWorksAfterDouble - n2} Works`);
+  assert.strictEqual(out.p8bTask, null, 'the no-Task path attached the Work to a Task');
+  out.p8bTasks = JSON.parse(await ev(`(async () => JSON.stringify((await window.juqode.taskList(window.__project().id)).tasks.length))()`));
+  assert.strictEqual(out.p8bTasks, 0, `the second button saved a Task nobody asked for (${out.p8bTasks})`);
+  await ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('작업대로'))?.click()`);
+  for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-02'; i++) await sleep(250);
   await ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('다른 프로젝트'))?.click()`);
   for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-01'; i++) await sleep(250);
   await openRow(SEED);
@@ -179,6 +227,9 @@ try {
   assert.strictEqual(out.worksAfterWrite, out.worksBefore, 'writing the request started a Work');
   await ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value += ' 그리고 오류 문구도'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   assert.strictEqual(await ev(`document.querySelector('[data-el="composer-draft"]').hidden`), false, 'editing the sentence did not bring the proposal back');
+  out.p8c = await priNow();
+  assert.deepStrictEqual(out.p8c.pri, ['이 작업에 보내기'], `with a Task selected the one emphasised start continues THAT Task: ${JSON.stringify(out.p8c)}`);
+  assert.ok(out.p8c.notes.some((t) => t.includes('선택한 작업에 이어서')), JSON.stringify(out.p8c.notes));
   await ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 버튼 고치기'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
 
   /* ── ④ 보내기 is the consent: the Work starts, bound to THAT Task ─────────────────── */
@@ -205,6 +256,30 @@ try {
   assert.strictEqual(out.next.quiet, true, 'an empty NEXT under a permission wait is drawn at full weight');
   assert.ok(out.next.valueSize < 14, `the empty NEXT is still ${out.next.valueSize}px`);
   await shot('permission-1200-light');
+
+  /* ── input_waiting, SYNTHETIC: no CLI path produces it today (headless Claude never asks; reducer.js is the only
+   * producer of the status), so a real snapshot of this Work is turned into one and drawn by the REAL SC-03 into a
+   * scratch container, then drawn AGAIN the way a push does. This is the real renderer on a made-up state — said so. */
+  out.inputWaitSynthetic = JSON.parse(await ev(`(async () => {
+    const { renderSC03 } = await import('./screens/sc03.js');
+    const d = await window.juqode.workGet(window.__work().id);
+    const snap = structuredClone(d.work); snap.status = 'input_waiting'; snap.permission = null; snap.inputRequest = { text: '어느 파일을 고칠까요?' };
+    const host = document.createElement('div'); document.body.appendChild(host);
+    const state = { project: window.__project(), workSnapshot: snap };
+    const nav = { toWork() {}, toWorkbench() {}, toReader() {} };
+    renderSC03(host, window.juqode, nav, state);
+    const first = host.querySelector('[data-el="answer"]');
+    const had = !!first && !!host.querySelector('[data-el="input"]');
+    first.value = '로그인 버튼이에요'; first.focus(); first.setSelectionRange(2, 5);
+    renderSC03(host, window.juqode, nav, state);           // what a pushed snapshot does
+    const again = host.querySelector('[data-el="answer"]');
+    const r = { had, fresh: again !== first, value: again.value, focused: document.activeElement === again, start: again.selectionStart, end: again.selectionEnd,
+      labelled: again.getAttribute('aria-label') };
+    host.remove(); document.body.focus(); return JSON.stringify(r); })()`));
+  assert.ok(out.inputWaitSynthetic.had && out.inputWaitSynthetic.fresh, `the synthetic input_waiting did not draw / redraw: ${JSON.stringify(out.inputWaitSynthetic)}`);
+  assert.deepStrictEqual([out.inputWaitSynthetic.value, out.inputWaitSynthetic.focused, out.inputWaitSynthetic.start, out.inputWaitSynthetic.end],
+    ['로그인 버튼이에요', true, 2, 5], `the typed answer / caret / selection did not survive a redraw: ${JSON.stringify(out.inputWaitSynthetic)}`);
+  assert.ok(out.inputWaitSynthetic.labelled, 'the answer box has no accessible name');
 
   /* ── ⑥ focus survives the REAL pushed redraw, wherever it is ─────────────────────── */
   await ev(`document.documentElement.setAttribute('data-theme','light')`);
