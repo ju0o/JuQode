@@ -77,14 +77,15 @@ test('file effect: nothing observed is not "no change"; a created or removed fil
 
 test('grant paths are compared canonically: ./x, x, //abs, case on Windows; globs, lists and bare tools are not grants', () => {
   const g = (spec, o) => C.grantPath(spec, '/scratch/work', o);
-  assert.strictEqual(g('Edit(hello.txt)').file, '/scratch/work/hello.txt');
-  assert.strictEqual(g('Edit(./sub/../hello.txt)').file, '/scratch/work/hello.txt');
-  assert.strictEqual(g('Edit(//scratch/work/hello.txt)').file, '/scratch/work/hello.txt');
-  assert.strictEqual(g('Edit(HELLO.txt)', { caseInsensitive: true }).file, '/scratch/work/hello.txt');
-  assert.notStrictEqual(g('Edit(HELLO.txt)').file, '/scratch/work/hello.txt');
+  const H = path.resolve('/scratch/work/hello.txt');
+  assert.strictEqual(g('Edit(hello.txt)').file, H);
+  assert.strictEqual(g('Edit(./sub/../hello.txt)').file, H);
+  assert.strictEqual(g('Edit(//scratch/work/hello.txt)').file, H);
+  assert.strictEqual(g('Edit(HELLO.txt)', { caseInsensitive: true }).file, H.toLowerCase());
+  assert.notStrictEqual(g('Edit(HELLO.txt)').file, H);
   for (const bad of ['Edit', 'Edit(*)', 'Edit(src/**)', 'Edit(a),Bash(b)', '']) assert.strictEqual(C.grantPath(bad, '/scratch/work'), null, bad);
   // a symlink or realpath mapping is applied to BOTH sides
-  const real = (p) => p.replace('/link', '/real');
+  const real = (p) => path.resolve(p.split(path.sep).join('/').replace(/\/link\//, '/real/'));
   assert.strictEqual(C.coveredByGrant(['Edit(//link/f.txt)'], { name: 'Write', input: { file_path: '/real/f.txt' } }, '/x', { realpath: real }).covered, true);
 });
 
