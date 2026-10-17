@@ -4864,7 +4864,8 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
     `ended_unknown must say the unknown end and, subordinate, the measured zero: ${results.partialCard}`);
   assert.ok(results.partialCard.indexOf('작업이 끝났는지 확인할 수 없어요') < results.partialCard.indexOf('시작 전과 비교한 파일 변경은 관측되지 않았어요'),
     'the unknown end must lead, the measured zero must follow');
-  assert.ok(!results.partialCard.includes('바뀐 파일이 없어요'), 'ended_unknown still says the bare 바뀐 파일이 없어요 as if it were the whole story');
+  /* above the folded record: the sourced claim list inside 근거와 원본 기록 keeps Canon's bare sentence next to its evidence:before→after source */
+  assert.ok(!results.partialCard.split('근거와 원본 기록')[0].includes('바뀐 파일이 없어요'), 'ended_unknown still says the bare 바뀐 파일이 없어요 as if it were the whole story');
   assert.ok(!/\bEdit\b/.test(results.partialNotDone) && /\S+ 수정/.test(results.partialNotDone),
     `the 못 한 것 list still speaks the CLI's tool name instead of the action: ${results.partialNotDone}`);
   assert.ok(results.partialCard.includes('JuQode가 지켜본 도구 실행 1'),
