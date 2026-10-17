@@ -30,7 +30,36 @@ const OUTCOME = {
 };
 const outcomeTitle = (outcome) => C.work.resultTitle[OUTCOME[outcome]?.key] ?? C.work.unknownTitle;
 
+/* Every pushed snapshot redraws this screen from scratch (`root.innerHTML = ''`), and a redraw
+ * destroys the element that has keyboard focus — measured on H3: Tab to 허용하고 다시 해 보기,
+ * a push arrives, focus falls to the page and the next Tab starts again at the top bar. A
+ * mouse user never notices; a keyboard user is thrown out of the one card that needs them. So the
+ * focused control is remembered by its place and its words and given focus again on the new one. */
+const FOCUSABLE = 'button:not([disabled]), summary, a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function rememberFocus(root) {
+  const a = document.activeElement;
+  if (!a || a === document.body || !root.contains(a)) return null;
+  const all = [...root.querySelectorAll(FOCUSABLE)];
+  return { at: all.indexOf(a), text: (a.textContent || '').trim().slice(0, 60) };
+}
+function restoreFocus(root, mem) {
+  if (!mem) return;
+  const all = [...root.querySelectorAll(FOCUSABLE)];
+  const same = (n) => (n.textContent || '').trim().slice(0, 60) === mem.text;
+  /* Same place and same words first; same words anywhere next; otherwise leave focus alone — a
+   * guess would put it on a control the reader never chose. */
+  const next = (all[mem.at] && same(all[mem.at]) ? all[mem.at] : null) ?? all.find(same);
+  next?.focus({ preventScroll: true });
+}
+
 export function renderSC03(root, api, nav, state) {
+  const mem = rememberFocus(root);
+  const out = drawSC03(root, api, nav, state);
+  restoreFocus(root, mem);
+  return out;
+}
+
+function drawSC03(root, api, nav, state) {
   root.innerHTML = '';
   const snap = state.workSnapshot;
   const p = state.project;

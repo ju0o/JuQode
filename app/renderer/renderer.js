@@ -267,6 +267,12 @@ api.onWorkUpdate?.((snapshot) => {
   renderSC03(root, api, nav, state);
 });
 
+/* The redraw a pushed snapshot makes, on the snapshot the screen already holds. A test cannot
+ * otherwise cause a push at a chosen moment, and focus surviving one is the thing to measure. */
+window.__redrawWork = () => {
+  if (state.screen === 'SC-03' && state.workSnapshot) renderSC03(root, api, nav, state);
+};
+
 /* Test hooks. Read-only: they expose state, they never mutate it. */
 window.__screen  = () => document.querySelector('[data-screen]')?.getAttribute('data-screen') ?? null;
 window.__theme   = () => document.documentElement.getAttribute('data-theme');

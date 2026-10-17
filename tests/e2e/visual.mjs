@@ -779,6 +779,16 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     }
     return seq;
   })();
+  /* A redraw (what every pushed snapshot does) must not take focus away from the control the reader
+   * is on. Focus is put there with the keyboard's own element, then the screen is redrawn. */
+  out.permFocusRedraw = await evalJs(`(() => {
+    const b = [...document.querySelectorAll('.sc03 button')].find(n => n.textContent.includes('허용하고 다시 해 보기'));
+    b.focus();
+    const before = document.activeElement.textContent.trim();
+    window.__redrawWork();
+    const a = document.activeElement;
+    return JSON.stringify({ before, after: a === document.body ? 'BODY' : a.textContent.trim(), fresh: a !== b });
+  })()`);
   out.permPositiveTabindex = await evalJs(`[...document.querySelectorAll('.sc03 [tabindex]')].filter(n => Number(n.getAttribute('tabindex')) > 0).length`);
   out.permLastSeenCount = await evalJs(`(document.querySelector('.sc03 [data-card="work"]')?.innerText.match(/마지막 활동/g) ?? []).length`);
 
@@ -4075,6 +4085,9 @@ assert.strictEqual(results.permLiveness, 'quiet',
   assert.ok(allow >= 0 && cancel >= 0 && allow < cancel,
     `keyboard order on the permission card: the action must come before the cancel — ${JSON.stringify(t)}`);
   assert.strictEqual(results.permPositiveTabindex, 0, 'a positive tabindex reorders the keyboard path'); }
+{ const f = JSON.parse(results.permFocusRedraw);
+  assert.strictEqual(f.after, '허용하고 다시 해 보기', `a redraw dropped keyboard focus: ${results.permFocusRedraw}`);
+  assert.ok(f.fresh, 'the probe is only meaningful if the redraw replaced the element'); }
 assert.strictEqual(results.permQuiet, 'absent',
   'a permission wait is silent on purpose; 새 신호 없음 under it contradicts the card that explains the silence');
 assert.strictEqual(results.permLastSeenCount, 1, `마지막 활동 is said ${results.permLastSeenCount} times on one card`);
