@@ -1840,3 +1840,42 @@ test('retry with a different init cwd than the caller is a recorded problem, not
   await supervisor.allow(w.db, w.r.workId, 'tu_1');
   assert.ok(auditOf(w.db, w.r.workId)?.problems.includes('init-cwd-differs-from-call'), JSON.stringify(auditOf(w.db, w.r.workId)));
 });
+
+/* ───────────── resume cwd / session id: the four cases through the real supervisor.allow() ───────────── */
+test('resume cwd and session id through supervisor.allow(): same cwd passes; a violation ends the Work unknown, keeps the raw evidence, and does NOT free the writer slot', async () => {
+  // 1. normal: the fake CLI inits in the cwd it was spawned in, which is the Work's cwd
+  const ok = await deniedWork();
+  assert.strictEqual((await supervisor.allow(ok.db, ok.r.workId, 'tu_1')).ok, true);
+  const sumOk = auditOf(ok.db, ok.r.workId);
+  assert.ok(!sumOk.problems.includes('init-cwd-differs-from-call'), JSON.stringify(sumOk.problems));
+
+  // 2./3. an init that reports another cwd, and 4. another session id: both violations
+  for (const [name, opts, reason, signal] of [
+    ['cwd', (d) => ({ initCwd: tempDir('juqode-other-') }), 'cwd-mismatch', /juqodeCwdMismatch/],
+    ['session', () => ({ initSessionId: 'someone-else' }), 'session-mismatch', /juqodeSessionMismatch/],
+  ]) {
+    const v = await deniedWork();
+    useBin(v.r.workId, cli(v.dir, [INIT, OK], { name: `retry-${name}`, ...opts(v.dir) }));
+    const res = await supervisor.allow(v.db, v.r.workId, 'tu_1');
+    assert.deepStrictEqual([res.ok, res.reason], [false, reason], name);
+    const w = repo.getWork(v.db, v.r.workId);
+    assert.deepStrictEqual([w.status, w.outcome, w.failure_reason], ['ended', 'ended_unknown', reason], name);
+    const raw = repo.signalsFor(v.db, v.r.workId).find((x) => signal.test(String(x.payload)));
+    assert.ok(raw, `${name}: the raw mismatch record was not kept`);
+    const rec = JSON.parse(raw.payload); const body = rec.juqodeCwdMismatch ?? rec.juqodeSessionMismatch;
+    assert.ok(body.expected && body.actual !== undefined && rec.sideEffectsPrevented === false, name);
+    // the user never acknowledged: another Work in the same project must not start on top of an unknown one
+    const next = await supervisor.start(v.db, v.project, 'again', { evidenceStore: v.store, bin: cli(v.dir, [INIT, OK], { name: `again-${name}` }), detect: AVAILABLE });
+    assert.strictEqual(next.ok, false, `${name}: a new Work started after an unacknowledged ended_unknown`);
+  }
+});
+
+test('session.run: a caller that asks for ANOTHER cwd and an init that follows it is not a mismatch; one that does not is', async () => {
+  const dir = tempDir('juqode-rs-'); const other = tempDir('juqode-rs-other-');
+  const follow = cli(dir, [INIT, OK], { name: 'follow', initCwd: fs.realpathSync(other) });
+  const base = { sessionId: 's', resume: true, prompt: 'x', onSignal: () => {}, bin: follow };
+  assert.strictEqual((await session.run({ ...base, cwd: other })).mismatch, null);
+  const ignore = cli(dir, [INIT, OK], { name: 'ignore', initCwd: fs.realpathSync(dir) });
+  const bad = await session.run({ ...base, bin: ignore, cwd: other });
+  assert.deepStrictEqual([bad.mismatch?.kind], ['cwd']);
+});
