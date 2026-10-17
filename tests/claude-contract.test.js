@@ -25,6 +25,15 @@ test('call 1: a new explicit session id is echoed by init and result; hooks ran 
   assert.ok(s.notes.includes('file-effect-unobservable'));
 });
 
+test('session id: a result naming another session, or an init naming another id than requested, is a mismatch; a result without an id is silent', () => {
+  const ev = load(1).map((l) => JSON.parse(l));
+  const withResult = (id) => ev.map((e) => (e.type === 'result' ? { ...e, session_id: id } : e));
+  assert.ok(C.summarizeRun(withResult('other'), { requestedSessionId: U1, callCwd: '/scratch/dirA' }).problems.includes('session-id-mismatch'));
+  assert.ok(C.summarizeRun(ev, { requestedSessionId: 'someone-else', callCwd: '/scratch/dirA' }).problems.includes('session-id-mismatch'));
+  assert.ok(!C.summarizeRun(withResult(undefined), { requestedSessionId: U1, callCwd: '/scratch/dirA' }).problems.includes('session-id-mismatch'));
+  assert.ok(C.summarizeRun(ev.filter((e) => e.subtype !== 'init'), { requestedSessionId: U1 }).problems.includes('no-init'));
+});
+
 test('call 2: resume from another cwd keeps the id, init cwd follows the CALLER, and with strict MCP the exposed list is empty', () => {
   const s = C.summarizeRun(load(2), { requestedSessionId: U1, resume: true, callCwd: '/scratch/dirB', claimsRestrictedTools: true, claimedTools: [], exitCode: 0 });
   assert.strictEqual(s.session.match, true);
@@ -84,9 +93,15 @@ test('grant paths are compared canonically: ./x, x, //abs, case on Windows; glob
   assert.strictEqual(g('Edit(HELLO.txt)', { caseInsensitive: true }).file, H.toLowerCase());
   assert.notStrictEqual(g('Edit(HELLO.txt)').file, H);
   for (const bad of ['Edit', 'Edit(*)', 'Edit(src/**)', 'Edit(a),Bash(b)', '']) assert.strictEqual(C.grantPath(bad, '/scratch/work'), null, bad);
-  // a symlink or realpath mapping is applied to BOTH sides
-  const real = (p) => path.resolve(p.split(path.sep).join('/').replace(/\/link\//, '/real/'));
-  assert.strictEqual(C.coveredByGrant(['Edit(//link/f.txt)'], { name: 'Write', input: { file_path: '/real/f.txt' } }, '/x', { realpath: real }).covered, true);
+  // with a realpath function: a plain file is covered; a symlink between name and bytes, or a path that cannot be resolved, is NOT
+  const plain = (p) => path.resolve(p);
+  const via = { realpath: (p) => path.resolve(p).replace(path.resolve('/x/link'), path.resolve('/x/real')) };
+  assert.strictEqual(C.coveredByGrant(['Edit(//x/plain.txt)'], { name: 'Write', input: { file_path: '/x/plain.txt' } }, '/x', { realpath: plain }).covered, true);
+  assert.strictEqual(C.coveredByGrant(['Edit(//x/link/f.txt)'], { name: 'Write', input: { file_path: '/x/link/f.txt' } }, '/x', via).why, 'symlink-redirect');
+  assert.strictEqual(C.coveredByGrant(['Edit(//x/f.txt)'], { name: 'Write', input: { file_path: '/x/f.txt' } }, '/x', { realpath: () => { throw new Error('ENOENT'); } }).why, 'path-unverifiable');
+  // a not-yet-existing file is resolved through its directory
+  const dirOnly = { realpath: (p) => { if (path.basename(p) === 'new.txt') throw new Error('ENOENT'); return path.resolve(p); } };
+  assert.strictEqual(C.coveredByGrant(['Edit(//x/new.txt)'], { name: 'Write', input: { file_path: '/x/new.txt' } }, '/x', dirOnly).covered, true);
 });
 
 test('buildArgs: same argv shape as before; restricted tools always carry --strict-mcp-config; unscoped grants, bad ids and permissive values are refused', () => {
@@ -141,5 +156,44 @@ test('preflight: the path to be executed must be the recorded binary with the re
     assert.strictEqual(C.preflight({ recorded, bin, run, build, requireAttestation: true, privileged: true }).reason, 'safety-unattested');
     fs.writeFileSync(bin, 'v2-other-bytes');
     assert.strictEqual(C.preflight({ recorded, bin, run, build }).reason, 'binary-changed');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('preflightLaunch: modes, privilege, identity cache; an unknown mode is protected; an unreadable recorded binary is a change', () => {
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-pl-')); const bin = path.join(dir, 'claude'); const shim = path.join(dir, 'claude.cmd');
+  fs.writeFileSync(bin, 'v1'); fs.writeFileSync(shim, '@echo off');
+  try {
+    const cache = C.createIdentityCache();
+    const pl = (o) => C.preflightLaunch({ bin, cache, build: { sessionId: U1 }, ...o });
+    const grant = { sessionId: U1, resume: true, allowedTools: ['Edit(a.txt)'], tools: 'Read,Edit' };
+    const a = pl({ build: grant, mode: 'dev-compat' });
+    assert.deepStrictEqual([a.ok, a.safety, a.identityVerified, a.privileged], [true, 'dev-compat-unattested', true, true]);
+    for (const mode of ['v1-protected', 'banana', undefined, '']) assert.strictEqual(pl({ build: grant, mode }).reason, 'safety-unattested', String(mode));
+    assert.strictEqual(pl({ build: { sessionId: U1, tools: null }, mode: 'v1-protected' }).reason, 'safety-unattested', 'the default tool set can write');
+    const ro = pl({ build: { sessionId: U1, tools: 'Read' }, mode: 'v1-protected' });
+    assert.deepStrictEqual([ro.ok, ro.safety, ro.privileged], [true, 'v1-protected-unprivileged', false]);
+    // identity cache: same fingerprint -> cached; changed bytes -> new sha
+    assert.strictEqual(cache.get(bin).cached, true);
+    const sha1 = cache.get(bin).id.sha256;
+    fs.writeFileSync(bin, 'v2-longer-bytes');
+    const again = cache.get(bin);
+    assert.deepStrictEqual([again.cached, again.id.sha256 !== sha1], [false, true]);
+    // recorded identity
+    const rec = { path: fs.realpathSync(bin), sha256: again.id.sha256, version: null };
+    assert.strictEqual(pl({ recorded: rec, mode: 'dev-compat' }).ok, true);
+    assert.strictEqual(pl({ recorded: { ...rec, sha256: '0'.repeat(64) }, mode: 'dev-compat' }).reason, 'binary-changed');
+    assert.strictEqual(pl({ recorded: { ...rec, path: '/elsewhere' }, mode: 'dev-compat' }).reason, 'not-the-recorded-binary');
+    assert.strictEqual(C.preflightLaunch({ bin, cache: C.createIdentityCache({ run: () => '2.2.2' }), build: { sessionId: U1 }, recorded: { ...rec, version: '1.1.1' }, mode: 'dev-compat' }).reason, 'version-changed');
+    // a shim / missing file: tolerated once in dev-compat, never in protected, never when an identity was recorded
+    const unreadable = (o) => C.preflightLaunch({ bin: shim, cache, build: { sessionId: U1 }, ...o });
+    assert.deepStrictEqual([unreadable({ mode: 'dev-compat' }).ok, unreadable({ mode: 'dev-compat' }).identityVerified], [true, false]);
+    assert.strictEqual(unreadable({ mode: 'v1-protected' }).reason, 'identity-unverifiable:script-shim-not-a-binary');
+    assert.strictEqual(unreadable({ mode: 'dev-compat', recorded: rec }).reason, 'binary-changed');
+    assert.strictEqual(C.preflightLaunch({ bin: path.join(dir, 'nope'), cache, build: { sessionId: U1 }, recorded: rec, mode: 'dev-compat' }).reason, 'binary-changed');
+    // argv problems come first, whatever the mode
+    assert.strictEqual(pl({ build: { sessionId: U1, allowedTools: ['Edit'] }, mode: 'dev-compat' }).reason, 'unscoped-grant');
+    assert.deepStrictEqual([C.scopedRetryTools({ tool: 'Edit' }), C.scopedRetryTools({ tool: 'Write' }), C.scopedRetryTools({ tool: 'Bash' }), C.scopedRetryTools({ tool: 'WebFetch' }), C.scopedRetryTools({ tool: 'mcp__a__b' }), C.scopedRetryTools(null)],
+      ['Read,Edit', 'Read,Write', 'Read,Bash', null, null, null]);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

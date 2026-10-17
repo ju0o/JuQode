@@ -15,7 +15,11 @@
  *     `--allowedTools Edit` was measured changing a second, unapproved file.
  */
 const { spawn, spawnSync } = require('node:child_process');
-const { buildArgs } = require('../provider/claude-contract');
+const { preflightLaunch, createIdentityCache, EXECUTION_MODES } = require('../provider/claude-contract');
+
+/* sha256 per file fingerprint; the version is taken from the process's own `init` event (a `--version` spawn per launch would also pollute fixtures and cost time) */
+const identityCache = createIdentityCache();
+const envMode = () => process.env.JUQODE_EXECUTION_MODE ?? EXECUTION_MODES.DEV_COMPAT;
 const path = require('node:path');
 const fs = require('node:fs');
 const { resolveBin, launchArgv } = require('../claude-detect');
@@ -207,14 +211,15 @@ function allowSpec(denial, cwd) {
  * @returns {Promise<{code:number|null, signal:string|null, sawEvent:boolean, stderr:string,
  *                    startFailed:boolean, unparsed:number}>}
  */
-function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume = false, onSignal, onChild, bin, timeoutMs = 0 }) {
-  /* The argv comes from ONE place (provider/claude-contract.js): unscoped grants, a bad id or a permission-removing option are refused BEFORE a process exists,
-   * and a run that restricts built-in tools also gets `--strict-mcp-config` (H3 measured: `--tools ""` alone left 19 connector tools exposed).
-   * `--allowedTools <tools...>` is VARIADIC, so the prompt goes on stdin, never as a positional argument (a positional prompt was swallowed as a grant).
-   * `--tools ""` disables every built-in tool; it is not `--allowedTools`, which only pre-grants tools the session already has. */
-  const built = buildArgs({ sessionId, resume, allowedTools, tools });
-  if (!built.ok) return Promise.resolve({ code: null, signal: null, sawEvent: false, stderr: `preflight-refused:${built.reason}`, startFailed: true, unparsed: 0, seq: 0, preflight: built.reason });
-  const { args, containment } = built;
+function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume = false, onSignal, onChild, onLaunch, bin, timeoutMs = 0, mode, recorded = null }) {
+  /* Everything knowable before the process exists is judged in ONE place (provider/claude-contract.js): the argv (unscoped grants, a bad id or a
+   * permission-removing option are refused), the binary (absolute path, sha256 against the recorded identity), and -- in `v1-protected` mode -- the
+   * attestation a privileged launch would need and this CLI cannot give. A run that restricts built-in tools always carries `--strict-mcp-config`
+   * (H3 measured: `--tools ""` alone left 19 connector tools exposed). The prompt goes on stdin: `--allowedTools <tools...>` is variadic. */
+  const exe = bin || resolveBin();
+  const pf = preflightLaunch({ bin: exe, recorded, build: { sessionId, resume, allowedTools, tools }, mode: mode ?? envMode(), cache: identityCache });
+  if (!pf.ok) return Promise.resolve({ code: null, signal: null, sawEvent: false, stderr: `preflight-refused:${pf.reason}`, startFailed: true, unparsed: 0, seq: 0, preflight: pf.reason });
+  const { args, containment } = pf;
 
   const env = { ...process.env };
   /* Nested invocation: Claude Code refuses to run inside its own session unless these go. */
@@ -228,20 +233,22 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
        * and Node cannot spawn one directly since the CVE-2024-27980 mitigation — detection
        * wrapped it through cmd.exe and this did not, so on a real Windows machine the app
        * reported Claude Code as available and then failed to start every single Work. */
-      const launch = launchArgv(bin || resolveBin(), args);
+      /* no await between the preflight above and this spawn: the check and the exec are adjacent (a swap in between cannot be excluded by Node) */
+      const launch = launchArgv(exe, args);
       child = spawn(launch.file, launch.argv,
                     { cwd, env, detached: !WINDOWS, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       /* The user's words, unmodified, and nothing else. A child that exits without reading
        * makes this EPIPE, which is its choice and not an error on our side. */
       child.stdin.on('error', () => {});
       child.stdin.end(prompt ?? '');
+      onLaunch?.({ identity: pf.identity, identityVerified: pf.identityVerified, containment, safety: pf.safety, mode: pf.mode, privileged: pf.privileged });
       onChild?.(child);
     } catch (e) {
       return resolve({ code: null, signal: null, sawEvent: false, stderr: String(e?.message ?? e), startFailed: true, unparsed: 0, seq: 0 });
     }
 
     let seq = 0, unparsed = 0, sawEvent = false, stderr = '', buf = '';
-    let killer = null, settled = false, mismatch = null;
+    let killer = null, settled = false, mismatch = null, initVersion = null;
 
     /* A multi-byte character split across chunk boundaries becomes U+FFFD if each Buffer is
      * stringified on its own — measured on 7-byte chunks, Korean text came back as replacement
@@ -264,6 +271,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
       onSignal?.({ ...sig, seq: seq++ }, raw, text);
       /* DETECTION, not prevention: the child is already running and may have written before
        * this line. The init line is recorded as emitted, then the child is stopped. */
+      if (raw?.type === 'system' && raw.subtype === 'init' && initVersion === null) initVersion = raw.claude_code_version ?? '';
       if (resume && raw?.type === 'system' && raw.subtype === 'init') {
         if (!sameDir(raw.cwd, cwd)) mismatch = { kind: 'cwd', expected: cwd, actual: raw.cwd ?? null };
         else if (raw.session_id !== sessionId) mismatch = { kind: 'session', expected: sessionId, actual: raw.session_id ?? null };
@@ -301,7 +309,7 @@ function run({ cwd, sessionId, prompt, allowedTools = [], tools = null, resume =
          * anything else — a denied run exits 0. */
         startFailed: !sawEvent, mismatch,
         /* what this launch may CLAIM; hooks and effective permissions are UNKNOWN before launch, `attested` is false */
-        containment,
+        containment, identity: pf.identity, identityVerified: pf.identityVerified, safety: pf.safety, initVersion,
       });
     };
 
@@ -386,5 +394,9 @@ const grantedSignal = (denial, spec) => ({
   payload: { tool: denial?.tool ?? null, toolUseId: denial?.toolUseId ?? null, scope: spec },
 });
 
-module.exports = { run, stop, sameDir, canonicalDir, binaryIdentity, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
+/** Dry run of the launch checks: no process, no side effect. Callers use it to refuse BEFORE they record anything. */
+const preflightRun = ({ sessionId, resume = false, allowedTools = [], tools = null, bin, mode, recorded = null }) =>
+  preflightLaunch({ bin: bin || resolveBin(), recorded, build: { sessionId, resume, allowedTools, tools }, mode: mode ?? envMode(), cache: identityCache });
+
+module.exports = { preflightRun, run, stop, sameDir, canonicalDir, binaryIdentity, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
   windowsRunnerTreeMayBeAlive, processTreeMayBeAlive };

@@ -1353,6 +1353,9 @@ function useBin(workId, bin) {
   const e = supervisor.live.get(workId);
   e.bin = bin;
   e.binding = session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, reportedSessionId: e.sessionId, bin });
+  /* the harness RE-PINS the entry to a different fixture CLI; the launch identity recorded for the original binary no longer describes it
+   * (production never changes `entry.bin`: a changed binary is refused, see the 'recorded binary' tests in claude-launch.test.js) */
+  e.launchIdentity = null;
 }
 
 const sha = (f) => require('node:crypto').createHash('sha256').update(fs.readFileSync(f)).digest('hex');
@@ -1639,4 +1642,126 @@ test('a Windows-style shim pinned by its launcher alone is not a full binary att
   assert.deepStrictEqual([v.ok, v.reason], [false, 'target-unresolved']);
   const full = Object.freeze({ sessionId: 's', canonicalCwd: session.canonicalDir(dir), identity: id });
   assert.strictEqual(session.verifyResume(full, { cwd: dir, sessionId: 's', bin: exe, projectPath: dir }).ok, true);
+});
+
+/* ───────────── scoped retry: the tool surface that REACHED the process, the launch checks, and the audit ───────────── */
+const retryOf = async (denialEvents = [INIT, DENIED, RESULT_DENIED], retryEvents = [INIT, OK], retryOpts = {}) => {
+  const b = bench();
+  const bin = cli(b.dir, denialEvents);
+  const r = await supervisor.start(b.db, b.project, 'a.txt 바꿔줘', { evidenceStore: b.store, bin, detect: AVAILABLE });
+  await r.done;
+  const retryBin = cli(b.dir, retryEvents, { name: 'retry-claude', ...retryOpts });
+  useBin(r.workId, retryBin);
+  return { ...b, r, calls: () => argvLog(b.dir).length };
+};
+const grantsOf = (db, workId) => repo.signalsFor(db, workId).filter((s) => s.kind === 'permission_granted');
+const auditOf = (db, workId) => repo.signalsFor(db, workId).map((s) => { try { return JSON.parse(s.payload).juqodeRetryAudit; } catch { return null; } }).filter(Boolean).at(-1);
+
+test('scoped retry: the argv that REACHED the process confines the whole tool surface, not only the grant', async () => {
+  const w = await retryOf();
+  const out = await supervisor.allow(w.db, w.r.workId, 'tu_1');
+  assert.strictEqual(out.ok, true);
+  const argv = argvLog(w.dir).at(-1);
+  assert.match(argv, /--resume \S+ -p --output-format stream-json --verbose --allowedTools Edit\(a\.txt\) --tools Read,Edit --strict-mcp-config$/, argv);
+  assert.ok(!/--bare|dangerously|--permission-mode|--sandbox|bypass/i.test(argv), argv);
+  assert.deepStrictEqual([out.safety, out.containment.attested, out.containment.hooks, out.containment.permissions, out.containment.mcp],
+    ['dev-compat-unattested', false, 'UNKNOWN', 'UNKNOWN', 'closed-by-flag']);
+  const audit = auditOf(w.db, w.r.workId);
+  assert.deepStrictEqual([audit.problems, audit.tools, audit.sideEffectsPrevented], [[], ['Read', 'Edit'], false]);
+});
+
+test('scoped retry: a Bash grant gets Read,Bash only; a denied tool that cannot be confined (a connector tool) is not retried at all', async () => {
+  const bash = [INIT, { type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'tu_1', message: 'no' },
+    { type: 'result', subtype: 'success', is_error: false, permission_denials: [{ tool_name: 'Bash', tool_use_id: 'tu_1', tool_input: { command: 'ls' } }] }];
+  const w = await retryOf(bash);
+  assert.strictEqual((await supervisor.allow(w.db, w.r.workId, 'tu_1')).ok, true);
+  assert.match(argvLog(w.dir).at(-1), /--allowedTools Bash\(ls:\*\) --tools Read,Bash --strict-mcp-config$/);
+
+  const mcp = [INIT, { type: 'system', subtype: 'permission_denied', tool_name: 'mcp__claude_ai_Google_Drive__share_file', tool_use_id: 'tu_1', message: 'no' },
+    { type: 'result', subtype: 'success', is_error: false, permission_denials: [{ tool_name: 'mcp__claude_ai_Google_Drive__share_file', tool_use_id: 'tu_1', tool_input: { file_path: 'a.txt' } }] }];
+  const m = await retryOf(mcp);
+  const before = m.calls();
+  const out = await supervisor.allow(m.db, m.r.workId, 'tu_1');
+  assert.deepStrictEqual([out.ok, out.reason], [false, 'cannot-scope-tool-surface']);
+  assert.strictEqual(m.calls(), before, 'a process was started for a tool that cannot be confined');
+  assert.strictEqual(grantsOf(m.db, m.r.workId).length, 0, 'a grant was recorded that was never used');
+});
+
+test('v1-protected (and any unknown mode): a privileged retry is refused BEFORE a grant is recorded or a process exists; dev-compat still works afterwards', async () => {
+  const w = await retryOf();
+  const before = w.calls();
+  for (const mode of ['v1-protected', 'banana', '']) {
+    const out = await supervisor.allow(w.db, w.r.workId, 'tu_1', { executionMode: mode });
+    assert.deepStrictEqual([out.ok, out.reason, out.detail], [false, 'preflight-refused', 'safety-unattested'], mode);
+  }
+  assert.strictEqual(w.calls(), before, 'a refused launch created a process');
+  assert.strictEqual(grantsOf(w.db, w.r.workId).length, 0);
+  assert.strictEqual(repo.getWork(w.db, w.r.workId).status, 'permission_waiting', 'a refused launch moved the Work');
+  assert.strictEqual((await supervisor.allow(w.db, w.r.workId, 'tu_1', { executionMode: 'dev-compat' })).ok, true);
+});
+
+test('recorded binary: other bytes or another path refuse before anything is recorded; the version the process reports must match the start', async () => {
+  const w = await retryOf();
+  const entry = supervisor.live.get(w.r.workId);
+  entry.launchIdentity = { path: entry.bin, sha256: '0'.repeat(64), version: null };
+  const before = w.calls();
+  const out = await supervisor.allow(w.db, w.r.workId, 'tu_1');
+  assert.deepStrictEqual([out.ok, out.reason, out.detail], [false, 'preflight-refused', 'binary-changed']);
+  entry.launchIdentity = { path: path.join(w.dir, 'elsewhere'), sha256: '0'.repeat(64), version: null };
+  assert.strictEqual((await supervisor.allow(w.db, w.r.workId, 'tu_1')).detail, 'not-the-recorded-binary');
+  assert.strictEqual(w.calls(), before);
+  assert.strictEqual(grantsOf(w.db, w.r.workId).length, 0);
+
+  const v = await retryOf([INIT, DENIED, RESULT_DENIED], [{ ...INIT, claude_code_version: '2.0.0' }, OK]);
+  supervisor.live.get(v.r.workId).launchIdentity = null;     // the harness re-pinned; give it back a start version
+  supervisor.live.get(v.r.workId).launchIdentity = { path: supervisor.live.get(v.r.workId).bin, sha256: require('node:crypto').createHash('sha256').update(fs.readFileSync(supervisor.live.get(v.r.workId).bin)).digest('hex'), version: '1.0.0' };
+  const out2 = await supervisor.allow(v.db, v.r.workId, 'tu_1');
+  assert.deepStrictEqual([out2.ok, out2.reason, out2.detail], [false, 'retry-surface-violation', 'binary-version-changed-since-start']);
+  assert.strictEqual(repo.getWork(v.db, v.r.workId).status, 'ended');
+});
+
+test('audit: an exposed connector tool, a built-in beyond the retry surface, or a write outside the granted file ends the Work unknown, with the facts recorded', async () => {
+  const run = async (events, retryOpts) => { const w = await retryOf([INIT, DENIED, RESULT_DENIED], events, retryOpts); const out = await supervisor.allow(w.db, w.r.workId, 'tu_1'); return { w, out, audit: auditOf(w.db, w.r.workId) }; };
+  const mcp = await run([{ ...INIT, tools: ['Read', 'Edit', 'mcp__claude_ai_Google_Drive__share_file'] }, OK]);
+  assert.deepStrictEqual([mcp.out.ok, mcp.out.detail], [false, 'mcp-exposed']);
+  assert.ok(mcp.audit.problems.includes('mcp-exposed'));
+  const beyond = await run([{ ...INIT, tools: ['Read', 'Edit', 'Bash'] }, OK]);
+  assert.strictEqual(beyond.out.detail, 'builtin-tools-beyond-claim');
+  const other = path.join(bench().dir, 'b.txt');
+  const wrote = (file) => [INIT, { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tw1', name: 'Write', input: { file_path: file } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tw1', content: 'updated' }] } }, OK];
+  const outside = await run(wrote(other));
+  assert.match(outside.out.detail, /^write-ran-without-grant:/);
+  assert.strictEqual(repo.getWork(outside.w.db, outside.w.r.workId).outcome, 'ended_unknown');
+  assert.strictEqual(supervisor.snapshot(outside.w.db, outside.w.r.workId).status, 'ended');
+});
+
+test('audit: Hooks before init are recorded as a fact (not a violation); a denial with exit 0 is still a denial; the stream, not the exit code, decides', async () => {
+  const hook = { type: 'system', subtype: 'hook_started', hook_name: 'SessionStart:startup', hook_event: 'SessionStart' };
+  const w = await retryOf([INIT, DENIED, RESULT_DENIED], [hook, hook, INIT, OK]);
+  const out = await supervisor.allow(w.db, w.r.workId, 'tu_1');
+  assert.strictEqual(out.ok, true);
+  const audit = auditOf(w.db, w.r.workId);
+  assert.deepStrictEqual([audit.hooksBeforeInit, audit.problems, audit.sideEffectsPrevented], [true, [], false]);
+  const d = await retryOf([INIT, DENIED, RESULT_DENIED], [INIT, DENIED, RESULT_DENIED]);
+  await supervisor.allow(d.db, d.r.workId, 'tu_1');
+  assert.strictEqual(auditOf(d.db, d.r.workId).outcome, 'denied');
+  assert.strictEqual(supervisor.snapshot(d.db, d.r.workId).status, 'permission_waiting');
+});
+
+test('session.run itself refuses (no process) on a changed recorded binary and in protected mode; the argv check also holds there', async () => {
+  const dir = tempDir('juqode-run-');
+  const { bin } = (() => { const b = cli(dir, [INIT, OK]); return { bin: b }; })();
+  const rec = { path: fs.realpathSync(bin), sha256: '1'.repeat(64), version: null };
+  const ids = { sessionId: 'sid', prompt: 'x', onSignal: () => {}, bin };
+  const r1 = await session.run({ ...ids, recorded: rec });
+  assert.deepStrictEqual([r1.startFailed, r1.preflight, r1.sawEvent], [true, 'binary-changed', false]);
+  const r2 = await session.run({ ...ids, resume: true, allowedTools: ['Edit(a.txt)'], mode: 'v1-protected' });
+  assert.deepStrictEqual([r2.startFailed, r2.preflight], [true, 'safety-unattested']);
+  const r3 = await session.run({ ...ids, allowedTools: ['Edit'] });
+  assert.strictEqual(r3.preflight, 'unscoped-grant');
+  assert.deepStrictEqual(argvLog(dir), [], 'a refused launch created a process');
+  const ok = await session.run({ ...ids });
+  assert.deepStrictEqual([ok.startFailed, ok.safety, ok.identityVerified], [false, 'dev-compat-unattested', true]);
+  assert.strictEqual(argvLog(dir).length, 1);
 });

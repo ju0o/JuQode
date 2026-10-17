@@ -9,6 +9,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { permissiveArgs, guardLaunch } = require('./identity');
+const crypto = require('node:crypto');
 
 /* the CLI itself requires a UUID for --session-id; here only what could be read as ANOTHER option or split into several arguments is refused */
 const SESSION_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -50,26 +51,37 @@ function containment({ tools = null } = {}) {
 /** Refuse a privileged (write-capable) launch when the caller demands attestation -- which this build can never give. */
 const privilegedAllowed = (c, { requireAttestation = false, privileged = false } = {}) => !(privileged && requireAttestation && !c.attested);
 
-const canon = (p, cwd, realpath, ci) => {
-  let abs = path.resolve(cwd, String(p));
-  if (realpath) { try { abs = realpath(abs); } catch { /* not there yet: keep the lexical path */ } }
-  return ci ? abs.toLowerCase() : abs;
-};
-/** Does a grant like `Edit(hello.txt)` / `Edit(//abs/path)` name exactly this file? Tool-name equality is NOT assumed: the caller decides what a Write under an Edit rule means. */
+/* A path as the filesystem sees it. Without a `realpath` function only the lexical path is known (`verified:false`, nothing is claimed). With one, a file that does not
+ * exist yet is resolved through its directory; if even that fails the path is UNVERIFIABLE. `moved` = a symlink took the write somewhere other than the named path. */
+function canonInfo(p, cwd, realpath, ci) {
+  const lexical = path.resolve(cwd, String(p));
+  const fold = (x) => (ci ? x.toLowerCase() : x);
+  if (!realpath) return { file: fold(lexical), lexical, verified: false, moved: false };
+  let real = null;
+  try { real = realpath(lexical); } catch { try { real = path.join(realpath(path.dirname(lexical)), path.basename(lexical)); } catch { real = null; } }
+  if (real === null) return { file: fold(lexical), lexical, verified: false, moved: false };
+  return { file: fold(real), lexical, verified: true, moved: real !== lexical };
+}
+/** Does a grant like `Edit(hello.txt)` / `Edit(//abs/path)` name exactly one file? Tool-name equality is NOT assumed: the caller decides what a Write under an Edit rule means. */
 function grantPath(grant, cwd, { realpath = null, caseInsensitive = false } = {}) {
   const m = GRANT.exec(String(grant));
   if (!m) return null;
   const spec = m[2].trim();
   if (/[*?[\]{}(),]/.test(spec)) return null;
-  return { rule: m[1], file: canon(spec.startsWith('//') ? spec.slice(1) : spec, cwd, realpath, caseInsensitive) };
+  const info = canonInfo(spec.startsWith('//') ? spec.slice(1) : spec, cwd, realpath, caseInsensitive);
+  return { rule: m[1], ...info };
 }
 function coveredByGrant(grants, toolUse, cwd, opts = {}) {
   const file = toolUse?.input?.file_path ?? toolUse?.input?.path;
   if (!FILE_WRITERS.has(toolUse?.name) || typeof file !== 'string') return { covered: false, why: 'not-a-file-write' };
-  const target = canon(file, cwd, opts.realpath, opts.caseInsensitive);
+  const target = canonInfo(file, cwd, opts.realpath, opts.caseInsensitive);
   for (const g of grants ?? []) {
     const gp = grantPath(g, cwd, opts);
-    if (gp && gp.rule === 'Edit' && gp.file === target) return { covered: true, why: 'same-file', rule: g, toolName: toolUse.name };
+    if (!gp || gp.rule !== 'Edit' || gp.file !== target.file) continue;
+    /* a symlink between the name and the bytes: the write did not land where the grant says */
+    if (opts.realpath && (target.moved || gp.moved)) return { covered: false, why: 'symlink-redirect', rule: g };
+    if (opts.realpath && (!target.verified || !gp.verified)) return { covered: false, why: 'path-unverifiable', rule: g };
+    return { covered: true, why: 'same-file', rule: g, toolName: toolUse.name };
   }
   return { covered: false, why: 'no-grant-for-this-file' };
 }
@@ -89,6 +101,81 @@ function preflight({ recorded, bin, run, build, requireAttestation = false, priv
   if (!g.ok) return { ok: false, reason: g.reason };
   if (!privilegedAllowed(built.containment, { requireAttestation, privileged })) return { ok: false, reason: 'safety-unattested' };
   return { ok: true, args: built.args, containment: built.containment };
+}
+
+/* ── execution modes ───────────────────────────────────────────────────────────────────────────────────────────────────────
+ * dev-compat   : today's behaviour. A privileged (granted-write) launch is allowed, but it is only ever labelled `dev-compat-unattested`.
+ * v1-protected : a launch that claims protected file writes must be ATTESTED beforehand. No Claude CLI flag lets us attest hooks or the
+ *                effective permission rules before the process starts, so every privileged launch in this mode is refused (`safety-unattested`).
+ *                Any value that is not exactly 'dev-compat' is treated as protected: an unknown mode never opens a door. */
+const EXECUTION_MODES = Object.freeze({ DEV_COMPAT: 'dev-compat', V1_PROTECTED: 'v1-protected' });
+const normaliseMode = (m) => (m === EXECUTION_MODES.DEV_COMPAT ? m : EXECUTION_MODES.V1_PROTECTED);
+const WRITE_TOOLS = new Set([...FILE_WRITERS, 'Bash']);
+/** A launch that can change files: a granted rule, or a built-in set that contains a writing tool (or the whole default set). */
+const isPrivileged = ({ allowedTools = [], tools = null } = {}) =>
+  allowedTools.length > 0 || tools === null || String(tools).split(',').some((t) => WRITE_TOOLS.has(t.trim()));
+/** Tool surface of a ONE-action retry: the denied tool plus Read (Claude must read a file before it edits it). Anything else cannot be scoped -> null. */
+function scopedRetryTools(denial) {
+  const t = denial?.tool;
+  return typeof t === 'string' && WRITE_TOOLS.has(t) ? `Read,${t}` : null;
+}
+
+/* ── binary identity, cached by file fingerprint ───────────────────────────────────────────────────────────────────────────
+ * Hashing a ~200 MB binary on every resume is wasteful, so the sha256 is reused while (realpath, dev, ino, size, mtime, ctime) are unchanged and
+ * recomputed otherwise. LIMIT: Node cannot exec by file descriptor, so a swap between this check and the exec cannot be excluded; the check and the
+ * spawn are adjacent synchronous statements (no await), and the version the process reports in `init` is compared afterwards. */
+function sha256Sync(file) {
+  const h = crypto.createHash('sha256'); const fd = fs.openSync(file, 'r'); const buf = Buffer.allocUnsafe(1 << 20);
+  try { for (let n; (n = fs.readSync(fd, buf, 0, buf.length, null)) > 0;) h.update(buf.subarray(0, n)); } finally { fs.closeSync(fd); }
+  return h.digest('hex');
+}
+function createIdentityCache({ run = null } = {}) {
+  const known = new Map();
+  return {
+    get(bin) {
+      let real; let st;
+      try { real = fs.realpathSync(bin); st = fs.statSync(real); if (!st.isFile()) return { ok: false, reason: 'not-a-file' }; } catch { return { ok: false, reason: 'binary-not-found' }; }
+      if (/\.(cmd|bat|ps1)$/i.test(real)) return { ok: false, reason: 'script-shim-not-a-binary' };
+      const key = [real, st.dev, st.ino, st.size, st.mtimeMs, st.ctimeMs].join('|');
+      const hit = known.get(key);
+      if (hit) return { ok: true, id: hit, cached: true };
+      let sha; try { sha = sha256Sync(real); } catch { return { ok: false, reason: 'binary-unreadable' }; }
+      let version = null;
+      if (run) { try { version = String(run(real, ['--version']) ?? '').trim().split(/\r?\n/)[0] || null; } catch { version = null; } }
+      const id = Object.freeze({ path: real, sha256: sha, version });
+      known.set(key, id);
+      return { ok: true, id, cached: false };
+    },
+  };
+}
+
+/**
+ * Everything knowable before THIS launch, as one verdict, with no process created. Used by `session.run` (authoritative) and by callers that
+ * must refuse before they write anything (a dry run).
+ * @param {object} o { bin, recorded:{path,sha256,version|null}|null, build:{sessionId,resume,allowedTools,tools}, mode, cache }
+ * @returns {{ok:true,args,containment,identity,identityVerified:boolean,mode,safety}|{ok:false,reason}}
+ */
+function preflightLaunch({ bin, recorded = null, build, mode, cache } = {}) {
+  const m = normaliseMode(mode);
+  const built = buildArgs(build);
+  if (!built.ok) return { ok: false, reason: built.reason };
+  const idr = (cache ?? createIdentityCache()).get(bin);
+  let identityVerified = false; let identity = null;
+  if (idr.ok) {
+    identity = idr.id; identityVerified = true;
+    if (recorded) {
+      if (recorded.path !== identity.path) return { ok: false, reason: 'not-the-recorded-binary' };
+      if (recorded.sha256 !== identity.sha256) return { ok: false, reason: 'binary-changed' };
+      if (recorded.version && identity.version && recorded.version !== identity.version) return { ok: false, reason: 'version-changed' };
+    }
+  } else {
+    /* an identity that cannot be read is tolerated only for a first launch in dev-compat; a recorded identity that can no longer be read is a change */
+    if (recorded || m === EXECUTION_MODES.V1_PROTECTED) return { ok: false, reason: recorded ? 'binary-changed' : `identity-unverifiable:${idr.reason}` };
+  }
+  const privileged = isPrivileged(build);
+  if (privileged && m === EXECUTION_MODES.V1_PROTECTED && !privilegedAllowed(built.containment, { requireAttestation: true, privileged })) return { ok: false, reason: 'safety-unattested' };
+  return { ok: true, args: built.args, containment: built.containment, identity, identityVerified, mode: m, privileged,
+    safety: m === EXECUTION_MODES.V1_PROTECTED ? 'v1-protected-unprivileged' : 'dev-compat-unattested' };
 }
 
 const parse = (lines) => lines.map((l) => (typeof l === 'string' ? (() => { try { return JSON.parse(l); } catch { return null; } })() : l)).filter(Boolean);
@@ -148,7 +235,8 @@ function summarizeRun(events, ctx = {}) {
     result: result ? { subtype: result.subtype, isError, terminalReason: result.terminal_reason ?? null, cost: result.total_cost_usd ?? null } : null,
     exitCode: ctx.exitCode ?? null, outcome, fileEffect: fileEffect(ctx.files?.before, ctx.files?.after),
   };
-  s.session.match = s.session.init !== null && s.session.init === s.session.result && (s.session.requested === null || s.session.requested === s.session.init);
+  /* a result that names no session says nothing (not a mismatch); one that names ANOTHER session is */
+  s.session.match = s.session.init !== null && (s.session.result === null || s.session.init === s.session.result) && (s.session.requested === null || s.session.requested === s.session.init);
   s.cwd.followsCaller = s.cwd.init !== null && s.cwd.call !== null && path.resolve(s.cwd.init) === path.resolve(s.cwd.call);
   s.problems = problems(s, ctx);
   s.notes = [];                      // facts a reader must not mistake for success/failure
@@ -171,4 +259,4 @@ function problems(s, ctx) {
   return p;
 }
 
-module.exports = { preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
+module.exports = { EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };

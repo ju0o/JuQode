@@ -13,9 +13,11 @@
  * signal, and every signal is persisted before it is interpreted.
  */
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const repo = require('../db/repo');
 const claude = require('../claude-detect');
 const session = require('../claude/session');
+const { scopedRetryTools, summarizeRun } = require('../provider/claude-contract');
 const gitEvidence = require('../evidence/git');
 const manifest = require('../evidence/manifest');
 const { toSignal, reduce, initial, openPermission, openPermissions, KIND } = require('./reducer');
@@ -114,7 +116,7 @@ async function start(db, project, intent, opts = {}) {
   const {
     evidenceStore, onUpdate = () => {}, bin, detect, taskId = null,
     idempotencyKey = null, attempt = 1, retryOfWorkId = null, retryReason = null, appSessionId = null,
-    allowUnknownWorkId = null,
+    allowUnknownWorkId = null, executionMode,
   } = opts;
 
   if (retryOfWorkId) {
@@ -138,7 +140,7 @@ async function start(db, project, intent, opts = {}) {
   try {
     return await startGuarded(db, project, intent, {
       evidenceStore, onUpdate, bin, detect, taskId, idempotencyKey, attempt, retryOfWorkId, retryReason,
-      appSessionId, allowUnknownWorkId,
+      appSessionId, allowUnknownWorkId, executionMode,
     });
   } finally {
     starting.delete(project.id);
@@ -147,7 +149,7 @@ async function start(db, project, intent, opts = {}) {
 
 async function startGuarded(db, project, intent, {
   evidenceStore, onUpdate, bin, detect, taskId, idempotencyKey, attempt, retryOfWorkId, retryReason,
-  appSessionId, allowUnknownWorkId,
+  appSessionId, allowUnknownWorkId, executionMode,
 }) {
   const pre = await preflight(db, project, { evidenceStore, detect, taskId, retryOfWorkId, allowUnknownWorkId });
   if (!pre.ok) return pre;
@@ -177,7 +179,11 @@ async function startGuarded(db, project, intent, {
    * persisted verbatim by `persist`, so the anomaly is on the record. */
   let reportedSessionId = null;      // what the FIRST init event said
   let initCount = 0, initVerdict = null, initAnomaly = false;
+  /* what the launch preflight established (binary sha256 per fingerprint; version from the process's own init). A later resume must find the same binary. */
+  let launchFacts = null; let launchVersion = null;
   const bindEntry = (e) => {
+    e.mode = launchFacts?.mode ?? executionMode ?? null;
+    e.launchIdentity = launchFacts?.identityVerified ? { path: launchFacts.identity.path, sha256: launchFacts.identity.sha256, version: launchVersion } : null;
     e.initAnomaly = initAnomaly;
     e.binding = initVerdict === 'ok' && !initAnomaly
       ? session.bindSession({ cwd: e.cwd, sessionId: e.sessionId, reportedSessionId, bin: e.bin })
@@ -232,7 +238,8 @@ async function startGuarded(db, project, intent, {
     const settle = (v) => { if (!settled) { settled = true; resolve(v); } };
 
     const runP = session.run({
-      cwd: project.path, sessionId, prompt: agentPrompt, bin,
+      cwd: project.path, sessionId, prompt: agentPrompt, bin, mode: executionMode,
+      onLaunch: (f) => { launchFacts = f; },
       onChild: (c) => {
         pendingChild.child = c;
         if (!workId) return;
@@ -255,6 +262,7 @@ async function startGuarded(db, project, intent, {
           initCount += 1;
           const said = typeof sig.payload?.sessionId === 'string' ? sig.payload.sessionId : null;
           if (initCount === 1) {
+            launchVersion = typeof raw?.claude_code_version === 'string' && raw.claude_code_version ? raw.claude_code_version : null;
             reportedSessionId = said;
             initVerdict = said !== null && said === sessionId ? 'ok' : 'bad';
           } else {
@@ -817,12 +825,47 @@ async function allow(db, workId, toolUseId, opts = {}) {
   const refused = resumeRefusal(db, entry);
   if (refused) return refused;
 
+  /* THE WHOLE TOOL SURFACE of the retry, not just the grant: `--allowedTools` only pre-approves, it does not remove tools. The retry may use the
+   * denied tool and Read; every other built-in tool and every connector (MCP) tool is off (`--tools` + `--strict-mcp-config`). A denied tool that
+   * cannot be confined this way is not retried at all. */
+  const tools = scopedRetryTools(denial);
+  if (tools === null) return { ok: false, reason: 'cannot-scope-tool-surface' };
+  const mode = opts.executionMode ?? entry.mode ?? undefined;
+  /* Dry run of the launch checks BEFORE the grant is recorded or the state moves: a refused launch leaves the Work exactly as it was. */
+  const pf = session.preflightRun({ sessionId: entry.sessionId, resume: true, allowedTools: [spec], tools, bin: entry.bin, mode, recorded: entry.launchIdentity ?? null });
+  if (!pf.ok) return { ok: false, reason: 'preflight-refused', detail: pf.reason };
+
   retrying.add(workId);
   try {
-    return await runRetry(db, workId, entry, denial, spec, opts);
+    return await runRetry(db, workId, entry, denial, spec, { ...opts, tools, mode });
   } finally {
     retrying.delete(workId);
   }
+}
+
+/* The retry's audit record. `violation` = something the stream shows that the grant did not allow: an exposed connector tool, a built-in tool beyond
+ * the retry's surface, or a file write that ran outside the granted file. It is DETECTION: the process already ran (Hooks start before `init`). */
+const VIOLATIONS = ['mcp-exposed', 'builtin-tools-beyond-claim'];
+function auditRetry(events, { entry, spec, tools, exitCode, launch, runResult }) {
+  const claimed = String(tools ?? '').split(',').filter(Boolean);
+  const sum = summarizeRun(events, { requestedSessionId: entry.sessionId, resume: true, callCwd: entry.cwd, claimsRestrictedTools: true, claimedTools: claimed, grants: [spec], exitCode, realpath: fs.realpathSync });
+  const binaryChanged = Boolean(entry.launchIdentity?.version && runResult?.initVersion && entry.launchIdentity.version !== runResult.initVersion);
+  const problems = [...sum.problems, ...(binaryChanged ? ['binary-version-changed-since-start'] : [])];
+  const violation = problems.find((p) => VIOLATIONS.includes(p) || p.startsWith('write-ran-without-grant') || p === 'binary-version-changed-since-start') ?? null;
+  return { violation, record: {
+    mode: launch?.mode ?? null, safety: launch?.safety ?? null, containment: launch?.containment ?? null, tools: claimed, grant: spec,
+    problems, notes: sum.notes, hooksBeforeInit: sum.hooksBeforeInit, exposedTools: sum.tools.exposed, outcome: sum.outcome,
+    sideEffectsPrevented: false } };
+}
+function endRetryViolation(db, workId, entry, audit, onUpdate) {
+  repo.setWorkState(db, workId, { status: 'ended', outcome: 'ended_unknown' });
+  repo.setRunFailureReason(db, workId, 'retry-surface-violation');
+  const project = entry.cwd ? { path: entry.cwd } : db.prepare('select path from project where id = ?').get(entry.projectId);
+  captureAfter(db, workId, project, entry.useGit ?? false, entry.store ?? null, { replace: true });
+  finishResult(db, workId, project, entry.store ?? null);
+  release(db, workId);
+  onUpdate(snapshot(db, workId));
+  return { ok: false, reason: 'retry-surface-violation', detail: audit.violation };
 }
 
 async function runRetry(db, workId, entry, denial, spec, opts) {
@@ -833,16 +876,24 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
   /* Same Work, same session. Restating the whole request made Claude repeat completed writes
    * after each one-action grant; the existing conversation already contains the original task
    * and denied tool call. This fixed continuation keeps that context without replaying the task. */
+  const seen = []; let launch = null;
   const retryRun = await session.run({
-    cwd: entry.cwd, sessionId: entry.sessionId, resume: true, allowedTools: [spec],
+    cwd: entry.cwd, sessionId: entry.sessionId, resume: true, allowedTools: [spec], tools: opts.tools, mode: opts.mode, recorded: entry.launchIdentity ?? null,
     prompt: 'Continue the original request from this session. Retry the one action that was just allowed, then finish without repeating completed work.',
     bin: entry.bin,
+    onLaunch: (f) => { launch = f; },
     onChild: (c) => { entry.child = c; },
     onSignal: (sig, raw, line) => {
+      if (raw) seen.push(raw);
       writeSignal(db, workId, { source: 'claude', kind: sig.kind, payload: line });
       apply(db, workId, sig, opts.onUpdate ?? (() => {}));
     },
   });
+
+  /* What this launch could and could NOT claim, and what the stream then showed -- from events and the granted path, never from the exit code. */
+  const audit = auditRetry(seen, { entry, spec, tools: opts.tools, exitCode: retryRun.code, launch, runResult: retryRun });
+  writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW, payload: JSON.stringify({ juqodeRetryAudit: audit.record }) });
+  if (audit.violation) return endRetryViolation(db, workId, entry, audit, opts.onUpdate ?? (() => {}));
 
   if (retryRun.mismatch) return endResumeMismatch(db, workId, entry, retryRun, opts.onUpdate ?? (() => {}));
 
@@ -854,7 +905,7 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
   finishResult(db, workId, opts.project ?? { path: entry.cwd }, entry.store);
   release(db, workId);
   (opts.onUpdate ?? (() => {}))(snapshot(db, workId));
-  return { ok: true, scope: spec };
+  return { ok: true, scope: spec, safety: launch?.safety ?? 'dev-compat-unattested', containment: launch?.containment ?? null };
 }
 
 /**
@@ -879,6 +930,7 @@ async function answer(db, workId, text, opts = {}) {
 
   const answerRun = await session.run({
     cwd: entry.cwd, sessionId: entry.sessionId, resume: true, prompt: text, bin: entry.bin,
+    mode: opts.executionMode ?? entry.mode ?? undefined, recorded: entry.launchIdentity ?? null,
     onChild: (c) => { entry.child = c; },
     onSignal: (sig, raw, line) => {
       writeSignal(db, workId, { source: 'claude', kind: sig.kind, payload: line });

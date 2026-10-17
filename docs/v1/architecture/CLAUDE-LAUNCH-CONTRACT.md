@@ -17,3 +17,19 @@ Status: pre-launch checks and fixtures only. This is **not** V1-207 (Adapter) an
 | cwd | `init.cwd` follows the **caller's** cwd on `--resume`; the session's creation dir is not assumed | call 2 |
 | model | requested alias (`sonnet`) is not the actual model (`init.model`) | init |
 Fixtures: `tests/fixtures/claude-h3-live/` (reduced, redacted). Tests: `tests/claude-contract.test.js`.
+
+## Update (scoped retry + launch preflight wired)
+**Scoped retry (`work/supervisor.js::allow/runRetry`)** — the argv that reaches the process, e.g. `--resume <id> -p --output-format stream-json --verbose --allowedTools Edit(a.txt) --tools Read,Edit --strict-mcp-config`.
+`--allowedTools` only pre-approves; it does not remove tools. The retry's whole surface is the denied tool plus `Read`; all other built-ins and all connector (MCP) tools are off. A denied tool that cannot be confined (a connector tool, `WebFetch`, …) is not retried (`cannot-scope-tool-surface`).
+**Launch checks (`session.run` → `preflightLaunch`)**, no process on refusal, adjacent to the spawn: argv rules · absolute real binary · sha256 against the identity recorded when the Work started (cached per file fingerprint) · version the process reports in `init` against the start (checked after the fact) · mode.
+Callers that record state (`allow`) run `session.preflightRun` first, so a refused launch records no grant and does not move the Work.
+**Recorded identity**: kept in the live Work entry (like the existing stat binding) and the per-retry `juqodeRetryAudit` signal. The Work table has no binary columns; a durable identity needs schema 15 — not done.
+**Audit after the run** (`juqodeRetryAudit` signal; detection, never prevention): exposed connector tool · built-in tool beyond the retry surface · file write that ran outside the granted canonical file (symlink redirection and unresolvable paths do not count as covered) · init version differing from the start → the Work ends `ended_unknown` (`retry-surface-violation`).
+
+| Mode | Privileged launch (granted write, or the default tool set) | Label |
+| --- | --- | --- |
+| `dev-compat` (default; env `JUQODE_EXECUTION_MODE` or `executionMode`) | allowed | `dev-compat-unattested` — never shown as safe |
+| `v1-protected`, and any other value | **refused** `safety-unattested`; read-only tool sets (`--tools Read`) pass | `v1-protected-unprivileged` |
+
+**Why attestation cannot be satisfied with this CLI (2.1.283)**: (1) hooks come from user/project/local/managed settings and plugins and start before `init`; `claude --help` offers no way to list the effective set before launch; (2) effective allow/deny/ask rules merge from the same sources — no query command; (3) `--setting-sources` narrows user/project/local only, cannot cover managed policy or plugin hooks, and its effect on hooks is unmeasured (needs a model call); (4) `--bare` skips hooks but never reads OAuth/keychain — it breaks the subscription login path (API key only).
+Limits that remain: Node cannot exec by file descriptor, so a swap between the hash check and the exec is not excluded (checked immediately before, adjacent statements; the reported version is compared afterwards). `answer()` (user text, default tool set) is a resume with no tool restriction: it is `dev-compat` only.
