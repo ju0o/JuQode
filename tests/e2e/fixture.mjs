@@ -110,7 +110,9 @@ const sid = process.argv[Math.max(process.argv.indexOf('--session-id'), process.
  * carries: \`--tools ""\` empties the built-in tool set. Answering it with real groups is what
  * gives SC-04's explained state — the JUQODE chip, 무엇/왜/어떤 동작에, the confidence chip and
  * \`readerFor\`'s persisted-groups branch — its first execution anywhere in the suite. */
-const restricted = process.argv.includes('--tools');
+/* only an EMPTY tool set (--tools followed by an empty argument) marks a read-only pass; a scoped retry now carries --tools Read,Edit and must still behave as a Work turn */
+const toolsAt = process.argv.indexOf('--tools');
+const restricted = toolsAt !== -1 && process.argv[toolsAt + 1] === '';
 /* TWO read-only passes now carry that flag — WBS-26's change explanation and WBS-04's Brief
  * narrative — so the fixture tells them apart by what they ASK, which is the only thing that
  * actually differs. Reading the prompt is also how a real CLI would decide. */
@@ -242,7 +244,9 @@ const out = resumed ? [
    * cross-check below cannot tell the bug from the fix. */
   { type: 'assistant', message: { content: [
     { type: 'tool_use', id: 'tu_2', name: 'Edit', input: { file_path: 'README.md' } },
-    { type: 'tool_use', id: 'tu_3', name: 'Edit', input: { file_path: 'src/index.js' } }] } },
+    /* both parallel calls name the GRANTED file: the retry audit ends a Work as ended_unknown when a write ran outside the one-file grant
+     * (it used to name src/index.js here; this block's purpose is the two-calls-in-one-message COUNT, which is unchanged) */
+    { type: 'tool_use', id: 'tu_3', name: 'Edit', input: { file_path: 'README.md' } }] } },
   { type: 'user', message: { content: [
     { type: 'tool_result', tool_use_id: 'tu_2', is_error: false },
     { type: 'tool_result', tool_use_id: 'tu_3', is_error: false }] } },
