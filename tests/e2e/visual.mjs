@@ -760,6 +760,12 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     fs.writeFileSync(path.join(OUT, `sc03-permission-${theme}.png`), Buffer.from(shot.result.data, 'base64'));
   }
   await sc03Matrix('permission');
+  /* Measured HERE, after the matrix: the fixture's silence threshold is 2.5 s and the card was
+   * first read before it had passed — a probe at that point is true with or without the fix
+   * (found by reverting the fix: the first version of this assertion still passed). */
+  out.permLiveness = await evalJs(`window.__work()?.liveness ?? null`);
+  out.permQuiet = await evalJs(`document.querySelector('.sc03 [data-el="quiet"]') ? 'shown' : 'absent'`);
+  out.permLastSeenCount = await evalJs(`(document.querySelector('.sc03 [data-card="work"]')?.innerText.match(/마지막 활동/g) ?? []).length`);
 
   /* the guard: a second submit while this Work is open must be refused, not queued */
   step('guard');
@@ -4048,6 +4054,11 @@ assert.strictEqual(results.animating, 0,
 /* ── WBS-35 · Agent Presence, measured ─────────────────────────────────────────────────────
  * SC-02 with no Work open. `21` WBS-35: no mode is reachable by a timer alone, so after all
  * this session's waiting the mode is still the one no signal has moved. */
+assert.strictEqual(results.permLiveness, 'quiet',
+  `the probe is only meaningful once the Work's silence threshold has passed (liveness=${results.permLiveness})`);
+assert.strictEqual(results.permQuiet, 'absent',
+  'a permission wait is silent on purpose; 새 신호 없음 under it contradicts the card that explains the silence');
+assert.strictEqual(results.permLastSeenCount, 1, `마지막 활동 is said ${results.permLastSeenCount} times on one card`);
 assert.strictEqual(results.sc02PresenceLive, 'permission',
   `SC-02 showed ${results.sc02PresenceLive} for a Work that is waiting on a permission — a History `
   + 'row only says `running`, so this is what proves SC-02 asks for the snapshot');

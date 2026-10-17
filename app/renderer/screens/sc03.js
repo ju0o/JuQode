@@ -120,7 +120,12 @@ function workCard(snap, api, nav, state) {
     card.appendChild(permissionPanel(snap, api, state));
   }
   if (snap.status === 'input_waiting') card.appendChild(inputPanel(snap, api));
-  if (snap.status !== 'ended' && snap.liveness === 'quiet') card.appendChild(quietPanel(snap));
+  /* A Work waiting on the USER is supposed to be silent, and JuQode knows why — the card above
+   * says so. `presence.modeFor` already reads the waiting states before silence; this panel
+   * did not, so two minutes into a permission wait it added 멈춘 건지 … 판단하지 않아요 and a
+   * second 마지막 활동 under a card that had just answered the question. */
+  const userTurn = snap.status === 'permission_waiting' || snap.status === 'input_waiting';
+  if (snap.status !== 'ended' && snap.liveness === 'quiet' && !userTurn) card.appendChild(quietPanel(snap));
   if (snap.status !== 'ended' && snap.liveness === 'unknown') card.appendChild(unknownPanel(snap));
   if (snap.cancelUnconfirmed) card.appendChild(cancelUnconfirmedPanel(snap));
 
