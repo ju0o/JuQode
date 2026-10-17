@@ -1703,7 +1703,8 @@ test('v1-protected (and any unknown mode): a privileged retry is refused BEFORE 
 test('recorded binary: other bytes or another path refuse before anything is recorded; the version the process reports must match the start', async () => {
   const w = await retryOf();
   const entry = supervisor.live.get(w.r.workId);
-  entry.launchIdentity = { path: entry.bin, sha256: '0'.repeat(64), version: null };
+  const idPath = session.preflightRun({ sessionId: 'x', bin: entry.bin }).identity.path;        // the binary itself (the package target behind a Windows shim)
+  entry.launchIdentity = { path: idPath, sha256: '0'.repeat(64), version: null };
   const before = w.calls();
   const out = await supervisor.allow(w.db, w.r.workId, 'tu_1');
   assert.deepStrictEqual([out.ok, out.reason, out.detail], [false, 'preflight-refused', 'binary-changed']);
@@ -1714,7 +1715,8 @@ test('recorded binary: other bytes or another path refuse before anything is rec
 
   const v = await retryOf([INIT, DENIED, RESULT_DENIED], [{ ...INIT, claude_code_version: '2.0.0' }, OK]);
   supervisor.live.get(v.r.workId).launchIdentity = null;     // the harness re-pinned; give it back a start version
-  supervisor.live.get(v.r.workId).launchIdentity = { path: supervisor.live.get(v.r.workId).bin, sha256: require('node:crypto').createHash('sha256').update(fs.readFileSync(supervisor.live.get(v.r.workId).bin)).digest('hex'), version: '1.0.0' };
+  const vid = session.preflightRun({ sessionId: 'x', bin: supervisor.live.get(v.r.workId).bin }).identity;
+  supervisor.live.get(v.r.workId).launchIdentity = { path: vid.path, sha256: vid.sha256, version: '1.0.0' };
   const out2 = await supervisor.allow(v.db, v.r.workId, 'tu_1');
   assert.deepStrictEqual([out2.ok, out2.reason, out2.detail], [false, 'retry-surface-violation', 'binary-version-changed-since-start']);
   assert.strictEqual(repo.getWork(v.db, v.r.workId).status, 'ended');
@@ -1752,7 +1754,7 @@ test('audit: Hooks before init are recorded as a fact (not a violation); a denia
 test('session.run itself refuses (no process) on a changed recorded binary and in protected mode; the argv check also holds there', async () => {
   const dir = tempDir('juqode-run-');
   const { bin } = (() => { const b = cli(dir, [INIT, OK]); return { bin: b }; })();
-  const rec = { path: fs.realpathSync(bin), sha256: '1'.repeat(64), version: null };
+  const rec = { path: session.preflightRun({ sessionId: 'x', bin }).identity.path, sha256: '1'.repeat(64), version: null };
   const ids = { sessionId: 'sid', prompt: 'x', onSignal: () => {}, bin };
   const r1 = await session.run({ ...ids, recorded: rec });
   assert.deepStrictEqual([r1.startFailed, r1.preflight, r1.sawEvent], [true, 'binary-changed', false]);

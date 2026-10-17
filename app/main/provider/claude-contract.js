@@ -135,7 +135,14 @@ function createIdentityCache({ run = null } = {}) {
     get(bin) {
       let real; let st;
       try { real = fs.realpathSync(bin); st = fs.statSync(real); if (!st.isFile()) return { ok: false, reason: 'not-a-file' }; } catch { return { ok: false, reason: 'binary-not-found' }; }
-      if (/\.(cmd|bat|ps1)$/i.test(real)) return { ok: false, reason: 'script-shim-not-a-binary' };
+      /* An npm shim (`.cmd`) is a launcher, not the program: its identity is the package target next to it (same lookup the stat binding uses). Without a
+       * resolvable target there is nothing to identify. LIMIT: the interpreter that runs a `cli.js` target (node) is not covered by this hash. */
+      if (/\.(cmd|bat|ps1)$/i.test(real)) {
+        const pkg = path.join(path.dirname(real), 'node_modules', '@anthropic-ai', 'claude-code');
+        const target = ['bin/claude.exe', 'claude.exe', 'cli.js'].map((f) => path.join(pkg, f)).find((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } });
+        if (!target) return { ok: false, reason: 'script-shim-not-a-binary' };
+        try { real = fs.realpathSync(target); st = fs.statSync(real); } catch { return { ok: false, reason: 'binary-not-found' }; }
+      }
       const key = [real, st.dev, st.ino, st.size, st.mtimeMs, st.ctimeMs].join('|');
       const hit = known.get(key);
       if (hit) return { ok: true, id: hit, cached: true };
