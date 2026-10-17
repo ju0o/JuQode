@@ -529,11 +529,9 @@ function humanResult(snap) {
   } else if (files && snap.outcome === 'ended_unknown') {
     /* P4: `files` is an empty list only when the before→after comparison itself succeeded (otherwise it is null and the
      * unknown sentence above is the answer). That is one fact; whether the process ended is another. */
-    const unknownEnd = el('div', 'sm result-count', C.gap.result.endUnknown);
-    unknownEnd.setAttribute('data-el', 'end-unknown');
     const zero = el('div', 'xs mut', C.gap.result.zeroMeasured);
     zero.setAttribute('data-el', 'zero-measured');
-    block.prepend(unknownEnd, zero);
+    block.prepend(zero);
   } else if (files) {
     block.prepend(el('div', 'sm result-count', snap.work?.task_id ? C.gap.task.noChanges : C.work.noChanges));
   }

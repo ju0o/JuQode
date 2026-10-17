@@ -380,6 +380,13 @@ export function renderSC02(root, api, nav, state) {
    *   - a sentence with no Task selected   -> 새 일로 맡기기 (saves the Task AND starts: D-116 4번, the MVP's 실행 승인)
    *   - a Task is selected                 -> 보내기 (continues THAT Task)
    * The other stays available as a plain button with its own words, so no path is removed. */
+  /* The key does what the emphasised button does — nothing else. New sentence, no Task: 새 일로 맡기기 (its own
+   * validation, never a silent fall back to the single-shot send). Task selected, or no proposal: 보내기. */
+  function primaryStart() {
+    const draftOn = !draft.hidden;
+    const linked = Boolean(state.selectedTaskId) && !state.inspectDismissed;
+    return draftOn && !linked ? commitNewTask() : send();
+  }
   function syncPrimary() {
     if (!primaryReady) return;
     const draftOn = !draft.hidden;
@@ -734,7 +741,7 @@ export function renderSC02(root, api, nav, state) {
 
   /* Enter submits, Shift+Enter is a newline (`15` SC-02 Inputs). */
   field.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); once(() => send())(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); once(() => primaryStart())(); }
   });
 
   async function commitNewTask() {

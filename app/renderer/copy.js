@@ -391,7 +391,8 @@ export const C = {
       detail: '이 작업',
       projectInfo: '프로젝트 정보',
       working: 'Claude 작업 중',
-      unlinked: '맡은 일로 저장되지 않은 시도예요',
+      /* P5 · PM-approved (Issue #15 6237269144) — says the run is not linked to a saved Task, not that it was not recorded. */
+      unlinked: '저장된 작업과 연결되지 않은 시도예요',
       agoJust: '방금',
       agoMin: (n) => `${n}분 전`,
       agoHour: (n) => `${n}시간 전`,
@@ -471,8 +472,8 @@ export const C = {
       filesCount: (n) => `바뀐 파일 ${n}개`,
       /* P4 · NOT in `18` (which has only `work.noChanges`). When the end of the process is unknown, "no changed file"
        * and "we do not know it ended" are two facts and are said as two sentences of the same weight. */
-      /* PM-approved wording (Issue #15 comment 6236258988): the unknown end leads, the measured zero is subordinate. */
-      endUnknown: '작업이 끝났는지 확인할 수 없어요',
+      /* PM-approved wording (Issue #15 6236258988, refined in 6237269144): the card already carries ONE core status
+       * message (Canon `work.unknownTitle`); only this scope sentence is added, and only when the comparison succeeded. */
       zeroMeasured: '시작 전과 비교한 파일 변경은 관측되지 않았어요. 아직 실행 중이면 이후 파일이 바뀔 수 있어요.',
     },
     /* P3 · NOT in `18`: the chip beside `work.route`. Canon says 확인됨 here; the sentence only says a record exists. */

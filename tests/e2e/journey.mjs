@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import assert from 'node:assert';
 import { findFreePortBlock } from './port-block.mjs';
 import { sweepDisplays } from './xvfb.mjs';
@@ -21,6 +22,20 @@ import { launchArgs, killTree, WIN } from './launch.mjs';
 sweepDisplays();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const { DB, USER_DATA, SEED, SEED2, SEED3, FAKE_CLI } = await import('./fixture.mjs');
+
+/* Projects can only be opened if the product OFFERED them (openPath answers `not-offered` otherwise — a security rule, not a
+ * bug), so the cases that each need a project of their own are registered in the store BEFORE the app starts, the way
+ * fixture.mjs seeds its own. Folders live under os.tmpdir() (this run's scratch). */
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const EXTRA = [0, 1, 2].map((n) => { const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `juqode-journey${n}-`))); fs.writeFileSync(path.join(d, 'README.md'), '# journey fixture\n'); return d; });
+{
+  const { openDb } = require(path.join(ROOT, 'app/main/db/db.js'));
+  const repo = require(path.join(ROOT, 'app/main/db/repo.js'));
+  const db = openDb(DB);
+  for (const d of EXTRA) { repo.openProject(db, d, path.basename(d)); const t = Date.now(); while (Date.now() === t) { /* distinct ms */ } }
+  db.close();
+}
 
 const OUT = path.resolve(process.env.JUQODE_E2E_SHOT_DIR || path.join(ROOT, 'tmp-journey'));
 fs.mkdirSync(OUT, { recursive: true });
@@ -55,7 +70,21 @@ const ev = async (expr) => {
   if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails));
   return r.result?.result?.value;
 };
-const shot = async (name) => fs.writeFileSync(path.join(OUT, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+/* A screenshot named -light or -dark must BE that theme: the attribute is set first, then the page's real background is
+ * measured and the file is only written if it agrees (an earlier "light" capture was a dark page — the OS preference won). */
+const shotThemes = {};
+const shot = async (name) => {
+  const m = name.match(/-(light|dark)(?:-|$)/);
+  if (m) {
+    await ev(`document.documentElement.setAttribute('data-theme','${m[1]}')`); await sleep(180);
+    const probe = JSON.parse(await ev(`(() => { const bg = getComputedStyle(document.body).backgroundColor; const [r, g, b] = bg.match(/[\\d.]+/g).map(Number);
+      return JSON.stringify({ attr: document.documentElement.getAttribute('data-theme'), bg, lum: (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 }); })()`));
+    shotThemes[name] = probe;
+    assert.strictEqual(probe.attr, m[1], `${name}: data-theme is ${probe.attr}`);
+    assert.ok(m[1] === 'light' ? probe.lum > 0.6 : probe.lum < 0.25, `${name}: the page background ${probe.bg} is not a ${m[1]} theme`);
+  }
+  fs.writeFileSync(path.join(OUT, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
+};
 const key = async (k, code, vk) => {
   /* Enter needs a 'keyDown' carrying text, or Chromium never turns it into a click on a button. */
   await send('Input.dispatchKeyEvent', k === 'Enter' ? { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, text: '\r' }
@@ -83,57 +112,95 @@ try {
   await shot('empty-folder-1200-light');
   assert.deepStrictEqual(out.emptyFolder.pri, ['새 작업'], `an empty folder shows more than one primary action: ${JSON.stringify(out.emptyFolder.pri)}`);
   assert.ok(out.emptyFolder.brief.includes('이 폴더는 아직 비어 있어요') && out.emptyFolder.briefStart, 'the empty-folder explanation or its own start went missing');
-  /* ── P8: ONE emphasised start per situation, and one decision starts at most one Work ───────────── */
+  /* ── P8: ONE emphasised start per situation; the KEY does what the emphasised button does; one decision = one Work ── */
   const works = async () => JSON.parse(await ev(`(async () => JSON.stringify((await window.juqode.history(window.__project().id)).works.length))()`));
+  const tasks = async () => JSON.parse(await ev(`(async () => JSON.stringify((await window.juqode.taskList(window.__project().id)).tasks.length))()`));
   const priNow = () => ev(`(() => { ${VIS} return JSON.stringify({ pri: [...document.querySelectorAll('.btn.pri')].filter(vis).map((b) => b.innerText.trim()),
     submit: document.querySelector('[data-act="submit-intent"]').innerText.trim(), draftShown: !document.querySelector('[data-el="composer-draft"]').hidden,
     notes: [...document.querySelectorAll('.start-note')].filter(vis).map((n) => n.innerText.trim()) }); })()`).then(JSON.parse);
-  const type = (t) => ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = ${JSON.stringify(t)}; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  /* (a) no Task selected, a sentence: 새 일로 맡기기 is THE start; 보내기 is the plain, differently-worded one */
+  const type = (t) => ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = ${JSON.stringify(t)}; f.dispatchEvent(new Event('input', { bubbles: true })); f.focus(); })()`);
+  const enterFast = async () => { /* no pause: two of these are two key presses in the same instant */
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }); };
+  const settle = async (n, ms = 10000) => { for (let i = 0; i < ms / 250 && (await works()) === n; i++) await sleep(250); await sleep(1500); };
+  /* One active Work per project (D-117), and a cancelled Work holds the writer slot until its end is confirmed — so each case
+   * that must START a Work gets its own fresh project, registered through the product's own openPath. The folders are made
+   * under os.tmpdir() (this run's scratch) and are never touched by anything but this test. */
+  const goToPicker = async () => { await backToBoard(); await ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('다른 프로젝트'))?.click()`);
+    for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-01'; i++) await sleep(250); };
+  let extraUsed = 0;
+  const freshProject = async () => {
+    const dir = EXTRA[extraUsed++];
+    await goToPicker(); await openRow(dir);
+    for (let i = 0; i < 60 && !(await ev(`!!document.querySelector('[data-act="board-start"]')`)); i++) await sleep(250);
+    if (!(await ev(`!!document.querySelector('[data-act="board-start"]')`))) throw new Error(`fresh project ${dir}: no board-start; screen=${await ev('window.__screen()')}`);
+    await ev(`document.querySelector('[data-act="board-start"]').click()`); await sleep(250);
+  };
+  const backToBoard = async () => { if ((await ev('window.__screen()')) !== 'SC-02') { await ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('작업대로'))?.click()`); for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-02'; i++) await sleep(250); } };
+  const newWork = async () => { await ev(`document.querySelector('.nav-new').click()`); await sleep(250); };
   await ev(`document.querySelector('[data-act="board-start"]').click()`); await sleep(200);
-  const n3 = await works();
+  const n0 = await works();
   await type('회원가입 화면에 이메일 칸을 추가해 주세요'); await sleep(200);
-  out.p8a = await priNow();
-  out.p8aWorksTyped = await works();
+  out.p8a = await priNow(); out.p8aWorksTyped = await works(); out.p8aTheme = await ev(`document.documentElement.getAttribute('data-theme')`);
   await shot('p8-typed-no-task-1200-light');
   assert.deepStrictEqual(out.p8a.pri, ['새 일로 맡기기'], `a typed sentence has more than one emphasised start: ${JSON.stringify(out.p8a)}`);
   assert.strictEqual(out.p8a.submit, '저장 없이 한 번만 보내기');
   assert.ok(out.p8a.notes.some((t) => t.includes('Claude가 바로 시작해요')), `nothing says that pressing starts Claude: ${JSON.stringify(out.p8a.notes)}`);
-  assert.strictEqual(out.p8aWorksTyped, n3, 'typing a sentence / seeing the proposal started a Work');
-  /* a double click is ONE decision */
-  await ev(`(() => { const b = document.querySelector('[data-act="commit-task"]'); b.click(); b.click(); })()`);
-  for (let i = 0; i < 40 && (await works()) === n3; i++) await sleep(250);
-  await sleep(1500);
-  out.p8aWorksAfterDouble = await works();
-  assert.strictEqual(out.p8aWorksAfterDouble, n3 + 1, `a double click on 새 일로 맡기기 made ${out.p8aWorksAfterDouble - n3} Works`);
-  out.p8aLinked = JSON.parse(await ev(`(async () => { const h = await window.juqode.history(window.__project().id); const w = h.works.find((x) => x.status !== 'ended') ?? h.works[0];
-    const d = await window.juqode.workGet(w.id); return JSON.stringify({ task: d?.work?.work?.task_id ?? null, intent: d?.work?.work?.intent }); })()`));
-  assert.ok(out.p8aLinked.task, '새 일로 맡기기 started a Work that is not attached to the Task it just saved');
-  await ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('다른 프로젝트'))?.click()`);
-  for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-01'; i++) await sleep(250);
-  /* (b) the single-shot path, SEED2: 보내기 still starts ONE Work with NO Task */
-  await openRow(SEED2);
-  for (let i = 0; i < 60 && !(await ev(`!!document.querySelector('[data-el="board-start"]')`)); i++) await sleep(250);
-  await ev(`document.querySelector('[data-act="board-start"]').click()`); await sleep(200);
-  const n2 = await works();
+  assert.strictEqual(out.p8aWorksTyped, n0, 'typing a sentence / seeing the proposal started a Work');
+  /* (1) Enter with an INVALID condition: the same validation as the button, no Work, no single-shot fallback */
+  await ev(`(() => { const c = document.querySelector('[data-el="composer-draft"] textarea'); c.value = ''; c.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await ev(`document.querySelector('[data-el="intent"]').focus()`);
+  await enterFast(); await sleep(1500);
+  out.p8InvalidEnter = { works: await works(), tasks: await tasks(), note: await ev(`document.querySelector('[data-el="composer-draft"]').innerText`) };
+  assert.strictEqual(out.p8InvalidEnter.works, n0, 'Enter with no completion condition started a Work (it must show the validation message, not run another way)');
+  assert.strictEqual(out.p8InvalidEnter.tasks, 0);
+  assert.ok(out.p8InvalidEnter.note.includes('조건') , `Enter did not show the condition validation: ${out.p8InvalidEnter.note}`);
+  /* (2) Enter = 새 일로 맡기기, pressed twice in the same instant: Work +1, linked to the saved Task */
+  await type('회원가입 화면에 이메일 칸을 추가해 주세요'); await sleep(200);
+  /* the person cleared the condition box above, so it stays theirs: write a condition back, as a person would */
+  await ev(`(() => { const c = document.querySelector('[data-el="composer-draft"] textarea'); c.value = '이메일 칸이 보여요'; c.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await ev(`document.querySelector('[data-el="intent"]').focus()`);
+  await enterFast(); await enterFast();
+  await settle(n0);
+  out.p8EnterDouble = { works: await works(), tasks: await tasks() };
+  assert.strictEqual(out.p8EnterDouble.works, n0 + 1, `Enter twice made ${out.p8EnterDouble.works - n0} Works`);
+  assert.strictEqual(out.p8EnterDouble.tasks, 1, 'Enter (= 새 일로 맡기기) must save exactly one Task');
+  out.p8aLinked = JSON.parse(await ev(`(async () => { const h = await window.juqode.history(window.__project().id); const w = h.works.find((x) => x.status !== 'ended');
+    const d = await window.juqode.workGet(w.id); return JSON.stringify({ task: d?.work?.work?.task_id ?? null }); })()`));
+  assert.ok(out.p8aLinked.task, 'Enter started a Work that is not attached to the Task it just saved');
+  /* (3) a click and an Enter in the same instant are one decision */
+  await freshProject(); const n1 = await works(), t1 = await tasks();
   await type('로그인 오류 고쳐줘'); await sleep(200);
-  out.p8bWorksTyped = await works();
-  assert.strictEqual(out.p8bWorksTyped, n2, 'typing a sentence started a Work');
-  /* the two buttons are one decision too: 보내기, and in the same instant 새 일로 맡기기 */
+  /* the same tick, so the first decision cannot have finished before the second arrives */
+  await ev(`(() => { document.querySelector('[data-act="commit-task"]').click(); const f = document.querySelector('[data-el="intent"]'); f.focus();
+    f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); })()`);
+  await settle(n1);
+  out.p8Race = { works: (await works()) - n1, tasks: (await tasks()) - t1 };
+  out.p8RaceDom = await ev(`document.querySelector('[data-card="intent"]')?.innerText ?? null`);
+  assert.strictEqual(out.p8Race.works, 1, `a click plus Enter made ${out.p8Race.works} Works: ${out.p8RaceDom}`);
+  assert.strictEqual(out.p8Race.tasks, 1, `a click plus Enter saved ${out.p8Race.tasks} Tasks`);
+  /* (4) Enter on an EMPTY field does nothing */
+  await freshProject(); const n2 = await works();
+  await type(''); await ev(`document.querySelector('[data-el="intent"]').focus()`); await enterFast(); await sleep(1200);
+  assert.strictEqual(await works(), n2, 'Enter on an empty field started a Work');
+  /* (5) the single-shot route is still there, explicit, one Work, NO Task, and no stray Task from the other button */
+  const t2 = await tasks();
+  await type('로그인 오류 고쳐줘'); await sleep(200);
   await ev(`(() => { const b = document.querySelector('[data-act="submit-intent"]'); b.click(); b.click(); document.querySelector('[data-act="commit-task"]').click(); })()`);
   for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-03'; i++) await sleep(250);
   await sleep(1500);
-  out.p8bWorksAfterDouble = await works();
-  out.p8bTask = await ev(`(async () => { const d = await window.juqode.workGet(window.__work().id); return d?.work?.work?.task_id ?? null; })()`);
-  assert.strictEqual(out.p8bWorksAfterDouble, n2 + 1, `a double click on 한 번만 보내기 made ${out.p8bWorksAfterDouble - n2} Works`);
-  assert.strictEqual(out.p8bTask, null, 'the no-Task path attached the Work to a Task');
-  out.p8bTasks = JSON.parse(await ev(`(async () => JSON.stringify((await window.juqode.taskList(window.__project().id)).tasks.length))()`));
-  assert.strictEqual(out.p8bTasks, 0, `the second button saved a Task nobody asked for (${out.p8bTasks})`);
-  await ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('작업대로'))?.click()`);
-  for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-02'; i++) await sleep(250);
-  await ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('다른 프로젝트'))?.click()`);
-  for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-01'; i++) await sleep(250);
-  await openRow(SEED);
+  out.p8Single = { works: (await works()) - n2, tasks: (await tasks()) - t2,
+    task: await ev(`(async () => { const d = await window.juqode.workGet(window.__work().id); return d?.work?.work?.task_id ?? null; })()`) };
+  assert.strictEqual(out.p8Single.works, 1, `a double click on 한 번만 보내기 made ${out.p8Single.works} Works`);
+  assert.strictEqual(out.p8Single.task, null, 'the no-Task path attached the Work to a Task');
+  assert.strictEqual(out.p8Single.tasks, 0, `the second button saved a Task nobody asked for (${out.p8Single.tasks})`);
+  /* P5: the unlinked attempt says it is not linked to a saved Task — and is still a way into that attempt's record */
+  await backToBoard();
+  for (let i = 0; i < 40 && !(await ev(`!!document.querySelector('[data-el="unlinked-run"]')`)); i++) await sleep(250);
+  out.p5 = JSON.parse(await ev(`(() => { const t = document.querySelector('[data-el="unlinked-run"]'); return JSON.stringify({ text: t?.innerText ?? null, isButton: t?.tagName === 'BUTTON' }); })()`));
+  assert.ok(out.p5.text?.includes('저장된 작업과 연결되지 않은 시도예요') && !out.p5.text.includes('맡은 일로 저장되지'), `P5: ${JSON.stringify(out.p5)}`);
+  assert.ok(out.p5.isButton, 'the unlinked attempt is no longer a way into its record');
+  await goToPicker(); await openRow(SEED);
   step('opened the seeded project');
   for (let i = 0; i < 60 && !(await ev(`!!document.querySelector('[data-el="board-start"]')`)); i++) await sleep(250);
 
@@ -233,7 +300,10 @@ try {
   await ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '로그인 버튼 고치기'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
 
   /* ── ④ 보내기 is the consent: the Work starts, bound to THAT Task ─────────────────── */
-  await ev(`document.querySelector('[data-act="submit-intent"]').click()`);
+  /* with a Task selected the key is 이 작업에 보내기 — one Enter, one Work, bound to that Task */
+  await ev(`document.querySelector('[data-el="intent"]').focus()`);
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
   for (let i = 0; i < 40 && (await ev('window.__screen()')) !== 'SC-03'; i++) await sleep(250);
   out.started = JSON.parse(await ev(`JSON.stringify({ screen: window.__screen(), work: window.__work() })`));
   assert.strictEqual(out.started.screen, 'SC-03', 'pressing 보내기 did not reach the Run');
@@ -298,9 +368,10 @@ try {
       taskUnknown:  draw((s) => { s.work.task_id = 't'; s.runEvidence = [{ id: 'e1', kind: 'changed_files', details: { known: false, files: [] } }]; }),
       taskMissing:  draw((s) => { s.work.task_id = 't'; s.runEvidence = []; }),
     }); })()`));
-  const ZERO = '시작 전과 비교한 파일 변경은 관측되지 않았어요', LEAD = '작업이 끝났는지 확인할 수 없어요';
+  const ZERO = '시작 전과 비교한 파일 변경은 관측되지 않았어요', CORE = '지금은 작업 상태를 확인할 수 없어요';
   for (const k of ['measuredZero', 'taskKnownZero']) {
-    assert.ok(out.p4[k].includes(LEAD) && out.p4[k].includes(ZERO) && out.p4[k].indexOf(LEAD) < out.p4[k].indexOf(ZERO), `P4 ${k}: the unknown end must lead and the measured zero follow: ${out.p4[k]}`);
+    assert.ok(out.p4[k].includes(CORE) && out.p4[k].includes(ZERO) && out.p4[k].indexOf(CORE) < out.p4[k].indexOf(ZERO), `P4 ${k}: the core status leads and the measured scope follows: ${out.p4[k]}`);
+    assert.ok(!out.p4[k].includes('작업이 끝났는지 확인할 수 없어요'), `P4 ${k}: a second status headline repeats the first: ${out.p4[k]}`);
   }
   for (const k of ['unmeasured', 'taskUnknown', 'taskMissing']) {
     assert.ok(!out.p4[k].includes(ZERO) && !out.p4[k].includes('바뀐 파일이 없어요') && !out.p4[k].includes('변경 없음'), `P4 ${k}: an unmeasured comparison must never say zero: ${out.p4[k]}`);
@@ -374,6 +445,7 @@ assert.ok(fc.vanishedOnCard && !fc.vanishedOnButton, `the focused control vanish
   assert.strictEqual(fc.unfocusedValue, '쓰던 답', 'an unfocused unsent answer was lost in a redraw');
   assert.strictEqual(fc.notOverwritten, '새 값', 'a restored draft overwrote a newer value');
 
+  out.shotThemes = shotThemes;
   console.log(JSON.stringify(out, null, 2));
 } finally {
   ws.close();
