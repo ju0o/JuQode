@@ -16,6 +16,7 @@ const repo = require(path.join(R, 'app/main/db/repo.js'));
 const guard = require(path.join(R, 'app/main/ipc-guard.js'));
 const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
 const { tempDir } = require(path.join(__dirname, 'tmp.js'));
+const { code } = require(path.join(__dirname, 'src.js'));
 
 const L = guard.LIMITS;
 const TOO_LONG = (limit, unit) => ({ ok: false, reason: 'input-too-long', limit, unit });
@@ -274,7 +275,7 @@ test('a synthetic SQL / path / token / multi-line exception becomes `internal` a
 });
 
 test('every message the Task code throws for a renderer mistake has a code (a new message fails here, not in production)', () => {
-  const src = require('node:fs').readFileSync(path.join(R, 'app/main/db/repo.js'), 'utf8');
+  const src = code('app/main/db/repo.js');
   const thrown = [...src.matchAll(/throw new TypeError\('([^'`]+)'\)/g)].map((m) => m[1]);
   const known = new Set([...guard.TASK_ERRORS.keys(), ...guard.REVIEW_ERRORS.keys()]);
   // messages from paths no Task/review channel reaches (Run ContextBundle / evidence / app session)
@@ -310,6 +311,6 @@ test('every handler answer leaves through the same scrub of `detail`, except the
 });
 
 test('qc-ack: an unexpected write error is a short code, not the exception message', () => {
-  const src = require('node:fs').readFileSync(path.join(R, 'app/main/qc/ack.js'), 'utf8');
+  const src = code('app/main/qc/ack.js');
   assert.ok(!/detail: String\(e\?\.code \?\? e\?\.message/.test(src));
 });
