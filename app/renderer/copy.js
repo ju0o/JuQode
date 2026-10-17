@@ -471,8 +471,9 @@ export const C = {
       filesCount: (n) => `바뀐 파일 ${n}개`,
       /* P4 · NOT in `18` (which has only `work.noChanges`). When the end of the process is unknown, "no changed file"
        * and "we do not know it ended" are two facts and are said as two sentences of the same weight. */
-      zeroMeasured: '시작 전과 비교하면 바뀐 파일은 없어요.',
-      endUnknown: '끝났는지는 확인하지 못했어요. 아직 실행 중이라면 이후에 파일이 바뀔 수 있어요.',
+      /* PM-approved wording (Issue #15 comment 6236258988): the unknown end leads, the measured zero is subordinate. */
+      endUnknown: '작업이 끝났는지 확인할 수 없어요',
+      zeroMeasured: '시작 전과 비교한 파일 변경은 관측되지 않았어요. 아직 실행 중이면 이후 파일이 바뀔 수 있어요.',
     },
     /* P3 · NOT in `18`: the chip beside `work.route`. Canon says 확인됨 here; the sentence only says a record exists. */
     routeChip: '기록됨',

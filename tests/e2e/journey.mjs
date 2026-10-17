@@ -281,6 +281,31 @@ try {
     ['로그인 버튼이에요', true, 2, 5], `the typed answer / caret / selection did not survive a redraw: ${JSON.stringify(out.inputWaitSynthetic)}`);
   assert.ok(out.inputWaitSynthetic.labelled, 'the answer box has no accessible name');
 
+  /* ── P4 branches, SYNTHETIC (real SC-03 on a real snapshot with the result edited): ended_unknown must say a file
+   * change of zero ONLY when the comparison itself succeeded, and a Task Run only when its evidence row says known. */
+  out.p4 = JSON.parse(await ev(`(async () => {
+    const { renderSC03 } = await import('./screens/sc03.js');
+    const d = await window.juqode.workGet(window.__work().id);
+    const nav = { toWork() {}, toWorkbench() {}, toReader() {} };
+    const draw = (edit) => { const snap = structuredClone(d.work); snap.status = 'ended'; snap.work.status = 'ended'; snap.outcome = 'ended_unknown'; snap.work.outcome = 'ended_unknown';
+      snap.permission = null; snap.result = { summary: null, whatFailed: null, items: [], claims: [] }; snap.runEvidence = []; edit(snap);
+      const host = document.createElement('div'); document.body.appendChild(host); renderSC03(host, window.juqode, nav, { project: window.__project(), workSnapshot: snap });
+      const t = host.querySelector('[data-card="result"]')?.innerText ?? ''; host.remove(); document.body.focus(); return t; };
+    return JSON.stringify({
+      measuredZero: draw((s) => { s.work.task_id = null; s.result.claims = [{ kind: 'changed-files', data: { files: [] }, confidence: 'confirmed', sourceRef: 'evidence:before→after' }]; }),
+      unmeasured:   draw((s) => { s.work.task_id = null; s.result.claims = [{ kind: 'changes-unknown', data: null, confidence: 'unconfirmed', sourceRef: null }]; }),
+      taskKnownZero: draw((s) => { s.work.task_id = 't'; s.runEvidence = [{ id: 'e1', kind: 'changed_files', details: { known: true, files: [] } }]; }),
+      taskUnknown:  draw((s) => { s.work.task_id = 't'; s.runEvidence = [{ id: 'e1', kind: 'changed_files', details: { known: false, files: [] } }]; }),
+      taskMissing:  draw((s) => { s.work.task_id = 't'; s.runEvidence = []; }),
+    }); })()`));
+  const ZERO = '시작 전과 비교한 파일 변경은 관측되지 않았어요', LEAD = '작업이 끝났는지 확인할 수 없어요';
+  for (const k of ['measuredZero', 'taskKnownZero']) {
+    assert.ok(out.p4[k].includes(LEAD) && out.p4[k].includes(ZERO) && out.p4[k].indexOf(LEAD) < out.p4[k].indexOf(ZERO), `P4 ${k}: the unknown end must lead and the measured zero follow: ${out.p4[k]}`);
+  }
+  for (const k of ['unmeasured', 'taskUnknown', 'taskMissing']) {
+    assert.ok(!out.p4[k].includes(ZERO) && !out.p4[k].includes('바뀐 파일이 없어요') && !out.p4[k].includes('변경 없음'), `P4 ${k}: an unmeasured comparison must never say zero: ${out.p4[k]}`);
+  }
+
   /* ── ⑥ focus survives the REAL pushed redraw, wherever it is ─────────────────────── */
   await ev(`document.documentElement.setAttribute('data-theme','light')`);
   out.pushFocus = JSON.parse(await ev(`(async () => {
