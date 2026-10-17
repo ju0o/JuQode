@@ -765,6 +765,21 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
    * (found by reverting the fix: the first version of this assertion still passed). */
   out.permLiveness = await evalJs(`window.__work()?.liveness ?? null`);
   out.permQuiet = await evalJs(`document.querySelector('.sc03 [data-el="quiet"]') ? 'shown' : 'absent'`);
+  /* The keyboard path through the permission card, MEASURED: real Tab key events from the top of
+   * the page, recording what takes focus. The reader's one action must come before the cancel,
+   * and nothing may jump the order with a positive tabindex. */
+  out.permTabOrder = await (async () => {
+    await evalJs(`document.activeElement?.blur?.(); window.scrollTo(0, 0)`);
+    const seq = [];
+    for (let i = 0; i < 14; i++) {
+      await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+      await sleep(80);
+      seq.push(await evalJs(`(document.activeElement?.innerText || document.activeElement?.tagName || '').trim().split('\\n')[0].slice(0, 30)`));
+    }
+    return seq;
+  })();
+  out.permPositiveTabindex = await evalJs(`[...document.querySelectorAll('.sc03 [tabindex]')].filter(n => Number(n.getAttribute('tabindex')) > 0).length`);
   out.permLastSeenCount = await evalJs(`(document.querySelector('.sc03 [data-card="work"]')?.innerText.match(/마지막 활동/g) ?? []).length`);
 
   /* the guard: a second submit while this Work is open must be refused, not queued */
@@ -4056,6 +4071,10 @@ assert.strictEqual(results.animating, 0,
  * this session's waiting the mode is still the one no signal has moved. */
 assert.strictEqual(results.permLiveness, 'quiet',
   `the probe is only meaningful once the Work's silence threshold has passed (liveness=${results.permLiveness})`);
+{ const t = results.permTabOrder, allow = t.indexOf('허용하고 다시 해 보기'), cancel = t.indexOf('이 작업 취소');
+  assert.ok(allow >= 0 && cancel >= 0 && allow < cancel,
+    `keyboard order on the permission card: the action must come before the cancel — ${JSON.stringify(t)}`);
+  assert.strictEqual(results.permPositiveTabindex, 0, 'a positive tabindex reorders the keyboard path'); }
 assert.strictEqual(results.permQuiet, 'absent',
   'a permission wait is silent on purpose; 새 신호 없음 under it contradicts the card that explains the silence');
 assert.strictEqual(results.permLastSeenCount, 1, `마지막 활동 is said ${results.permLastSeenCount} times on one card`);
