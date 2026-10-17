@@ -31,6 +31,7 @@ import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { when } from './brief.js';
 import { holdPanel } from '../qc-hold.js';
+import { inputProblem } from '../input-problem.js';
 
 /* `15` TD-01: the drawer covers the bottom 40% of the current screen. */
 export function mountDrawer(api, state, onChange) {
@@ -163,7 +164,7 @@ function qcRegion(api, state, repaint) {
   if (hold) bodyBox.appendChild(hold);
 
   if (state.qcRun) bodyBox.appendChild(runCard(api, state, repaint));
-  else if (state.qcCard) bodyBox.appendChild(routeCard(api, state, repaint));
+  else if (state.qcCard) bodyBox.appendChild(inputProblem(state.qcCard) ? el('p', 'sm', inputProblem(state.qcCard)) : routeCard(api, state, repaint));
   /* `15` TD-01: nothing run yet is a STATE, and it says what to do — `18` `term.qcEmpty`.
    * An empty region says nothing, and a drawer that opens on nothing looks broken. */
   else bodyBox.appendChild(el('p', 'sm mut', C.term.qcEmpty));
@@ -306,10 +307,12 @@ function termRegion(api, state, repaint) {
       await api.termWrite(state.project.id, line);
     } else if (!r.ok) {
       state.termNote = r.reason;
+      state.termProblem = inputProblem(r);
       repaint();
       return;
     }
     state.termNote = null;
+    state.termProblem = null;
     /* WBS-25b · 이 줄이 답할 수 없는 질문을 할 수 있다면, 출력이 (안) 오기 전에 말한다.
      * 막지는 않는다 — 줄은 이미 셸에 들어갔고, `19` §C4 는 거르는 척하지 말라고 한다. */
     state.termWarn = r.warn ?? null;
@@ -326,6 +329,7 @@ function termRegion(api, state, repaint) {
   region.appendChild(row);
 
   if (state.termNote === 'busy') region.appendChild(el('p', 'xs mut', C.gap.termBusy));
+  if (state.termProblem && state.termNote !== 'busy') region.appendChild(el('p', 'xs mut', state.termProblem));
   /* 배너(`termNoTty`)는 늘 거기 있지만 명령을 치기 전에 읽히지 않는다. 이 줄은 방금 친 그
    * 명령에 대해, 출력을 기다리는 바로 그 순간에 나온다 — 조용한 실패에 이름을 붙이는 것이
    * 이 줄의 전부다. */

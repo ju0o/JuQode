@@ -114,7 +114,7 @@ function writeAck(root, run, { now = new Date().toISOString() } = {}) {
       return { ok: true, existing: false, ref: `evidence:${DIR}/${name}` };
     }
     return { ok: false, reason: 'ack-not-recorded', detail: 'no free name' };
-  } catch (e) { return { ok: false, reason: 'ack-not-recorded', detail: String(e?.code ?? e?.message ?? e) }; }
+  } catch (e) { return { ok: false, reason: 'ack-not-recorded', detail: typeof e?.code === 'string' ? e.code : 'io' }; }
 }
 
 module.exports = { hasAck, writeAck, verifyFile, safeDir, digestOf };

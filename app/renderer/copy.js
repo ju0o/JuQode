@@ -354,6 +354,25 @@ export const C = {
    *                        supplies only the 로그인 필요 sentence.
    */
   gap: {
+    /* V1-409 · an input main refused before running anything. The text stays where it is. */
+    input: {
+      tooLong: {
+        chars: (n) => `글이 너무 길어요. ${n.toLocaleString('ko-KR')}자까지 보낼 수 있어요. 나눠서 보내거나 줄여 주세요. 쓴 내용은 그대로 남아 있어요.`,
+        bytes: (n) => `한 줄이 너무 길어요. ${Math.round(n / 1024)}KB까지 입력할 수 있어요. 긴 내용은 파일에 두고 그 파일을 실행하는 한 줄로 바꿔 주세요.`,
+        items: (n) => `항목이 너무 많아요. ${n}개까지 넣을 수 있어요.`,
+      },
+      bad: '입력을 읽을 수 없어요. 내용을 다시 적어 주세요.',
+      task: {
+        'goal-empty': '한 문장을 적어 주세요.',
+        'criterion-empty': '완료 조건은 비어 있지 않은 문장이어야 해요.',
+        'criteria-invalid': '완료 조건을 읽을 수 없어요. 한 줄에 하나씩 다시 적어 주세요.',
+        'dependencies-invalid': '먼저 해야 할 일 선택이 맞지 않아요. 선택을 다시 확인해 주세요.',
+        'status-invalid': '이 상태로는 바꿀 수 없어요.',
+        'project-not-found': '이 프로젝트를 찾을 수 없어요. 프로젝트를 다시 열어 주세요.',
+        'task-not-found': '이 작업을 찾을 수 없어요. 목록을 새로 불러 주세요.',
+        internal: '일로 맡기지 못했어요. 잠시 뒤 다시 해 보세요.',
+      },
+    },
     /* How a file path is shown (path-view.mjs): the name first; the exact path on request. */
     paths: {
       showAll:  '전체 경로 보기',

@@ -183,6 +183,26 @@ try {
   await freshProject(); const n2 = await works();
   await type(''); await ev(`document.querySelector('[data-el="intent"]').focus()`); await enterFast(); await sleep(1200);
   assert.strictEqual(await works(), n2, 'Enter on an empty field started a Work');
+  /* V1-409: a request over 20,000 characters is refused in plain words BEFORE anything runs. Nothing is cut: the field keeps
+   * every character, and no Work or Task exists afterwards - by the emphasised button, by Enter, or by the single-shot button. */
+  const tA = await tasks();
+  await type('가'.repeat(20001)); await sleep(200);
+  await ev(`(() => { const c = document.querySelector('[data-el="composer-draft"] textarea'); c.value = '조건이 보여요'; c.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const tooLongState = async () => ({ works: (await works()) - n2, tasks: (await tasks()) - tA,
+    len: await ev(`[...document.querySelector('[data-el="intent"]').value].length`),
+    said: await ev(`document.querySelector('[data-card="intent"]').innerText.includes('20,000자')`) });
+  await ev(`document.querySelector('[data-act="commit-task"]').click()`); await sleep(1200);
+  out.p409Button = await tooLongState();
+  await ev(`document.querySelector('[data-el="intent"]').focus()`); await enterFast(); await sleep(1200);
+  out.p409Enter = await tooLongState();
+  await ev(`document.querySelector('[data-act="submit-intent"]').click()`); await sleep(1200);
+  out.p409Single = await tooLongState();
+  for (const [k, v] of Object.entries({ button: out.p409Button, Enter: out.p409Enter, single: out.p409Single })) {
+    assert.deepStrictEqual({ works: v.works, tasks: v.tasks, len: v.len, said: v.said }, { works: 0, tasks: 0, len: 20001, said: true },
+      `V1-409 ${k}: an over-limit request must start nothing, keep all its text and say why - ${JSON.stringify(v)}`);
+  }
+  await shot('p409-too-long-1200-light');
+  await type('');
   /* (5) the single-shot route is still there, explicit, one Work, NO Task, and no stray Task from the other button */
   const t2 = await tasks();
   await type('로그인 오류 고쳐줘'); await sleep(200);

@@ -17,6 +17,7 @@ import { nextActions } from '../nextaction.js';
 import { rememberFocus, restoreFocus } from '../focus.js';
 import { contextFacts, changedFilesState } from '../human-read.mjs';
 import { fileSummary } from '../file-summary.js';
+import { inputProblem } from '../input-problem.js';
 
 /* The schema's outcome codes → the class that paints them and `18`'s own title key.
  * `cancelled_nochange` is a NEUTRAL chip (`15`): the 사용 불가 grey means "지금 안 됨 · 실패
@@ -309,9 +310,13 @@ function inputPanel(snap, api) {
   box.rows = 2;
   panel.appendChild(box);
   const acts = el('div', 'row-acts');
-  acts.appendChild(btn('btn sm pri', C.work.answer, () => api.workAnswer(snap.work.id, box.value)));
+  const note = el('div', 'xs mut2');
+  acts.appendChild(btn('btn sm pri', C.work.answer, async () => {
+    note.textContent = inputProblem(await api.workAnswer(snap.work.id, box.value)) ?? '';
+  }));
   acts.appendChild(el('span', 'xs mut', C.work.inputHint));
   panel.appendChild(acts);
+  panel.appendChild(note);
   return panel;
 }
 

@@ -47,7 +47,9 @@ const TOKENISH = [
   /\bxox[abposr]-[A-Za-z0-9-]{8,}/g,
   /\bAKIA[0-9A-Z]{12,}/g,
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
-  /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{16,}/g,
+  /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z]+ )?PRIVATE KEY-----|$)/g,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/g,
+  /\bBasic\s+[A-Za-z0-9._~+/=-]{16,}/g,
   /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]+@/g,          // scheme://user:password@host
   /* An ENV-VAR-SHAPED name and its value, on ONE line.
    *

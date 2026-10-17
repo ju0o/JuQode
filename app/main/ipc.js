@@ -27,6 +27,7 @@ const term = require('./term/session');
 const { classify } = require('./router/intent');
 const { scan } = require('./interpret/scan');
 const { answers, statusOf } = require('./interpret/answers');
+const guard = require('./ipc-guard');
 const { unknownTaskRunWithLiveRunner, unresolvedLegacyUnknownWorks } = require('./work/runner-liveness');
 
 /**
@@ -304,6 +305,8 @@ function makeHandlers(deps) {
     'juqode:qc-route': (_e, projectId, phrase) => {
       const gate = needDb();
       if (gate) return gate;
+      const bad = guard.text(phrase, guard.LIMITS.qcPhrase, { allowEmpty: true });   // before the matcher runs
+      if (bad) return bad;
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
 
@@ -345,6 +348,8 @@ function makeHandlers(deps) {
     'juqode:qc-run': async (_e, projectId, ruleId, phrase) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(ruleId)) return { ok: false, reason: 'unknown-rule' };
+      if (phrase != null) { const bad = guard.text(phrase, guard.LIMITS.qcPhrase, { allowEmpty: true }); if (bad) return bad; }
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
       /* The id must be one of the SIX. A renderer that could name any string could ask for a
@@ -510,6 +515,9 @@ function makeHandlers(deps) {
       const gate = needDb();
       if (gate) return gate;
       if (!termLive || termLive.projectId !== projectId) return { ok: false, reason: 'not-open' };
+      /* A resource limit, not a command filter: `19` §C4 runs the line exactly as typed. */
+      const bad = guard.shellLine(line);
+      if (bad) return bad;
       return termLive.session.write(line);
     },
 
@@ -536,7 +544,10 @@ function makeHandlers(deps) {
       return detecting;
     },
 
-    'juqode:route-intent': (_e, text) => ({ ok: true, route: classify(String(text ?? '')) }),
+    'juqode:route-intent': (_e, text) => {
+      const bad = guard.text(text, guard.LIMITS.text, { allowEmpty: true });   // before the classifier runs
+      return bad ?? { ok: true, route: classify(text) };
+    },
 
     'juqode:task-list': (_e, projectId) => {
       const gate = needDb();
@@ -560,16 +571,21 @@ function makeHandlers(deps) {
     'juqode:task-create': (_e, projectId, input) => {
       const gate = needDb();
       if (gate) return gate;
+      const bad = guard.taskInput(input);
+      if (bad) return bad;
       if (!db().prepare('select id from project where id = ?').get(projectId)) return { ok: false, reason: 'no-project' };
       try { return { ok: true, task: repo.createTask(db(), projectId, input ?? {}) }; }
-      catch (error) { return { ok: false, reason: 'invalid-task', detail: error.message }; }
+      catch (error) { return { ok: false, reason: 'invalid-task', detail: guard.taskErrorCode(error) }; }
     },
 
     'juqode:task-update': (_e, taskId, patch) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(taskId)) return { ok: false, reason: 'no-task' };
+      const bad = guard.taskInput(patch ?? {}, { patch: true });
+      if (bad) return bad;
       try { return { ok: true, task: repo.updateTask(db(), taskId, patch) }; }
-      catch (error) { return { ok: false, reason: 'invalid-task', detail: error.message }; }
+      catch (error) { return { ok: false, reason: 'invalid-task', detail: guard.taskErrorCode(error) }; }
     },
 
     'juqode:task-detail': (_e, taskId) => {
@@ -587,9 +603,13 @@ function makeHandlers(deps) {
     'juqode:task-review-criterion': (_e, taskId, workId, criterionId, verdict, evidenceIds) => {
       const gate = needDb();
       if (gate) return gate;
+      if (![taskId, workId, criterionId].every(guard.shortId) || typeof verdict !== 'string' ||
+          !Array.isArray(evidenceIds) || evidenceIds.length > guard.LIMITS.criteria * 4 || !evidenceIds.every(guard.shortId)) {
+        return { ok: false, reason: 'bad-input' };
+      }
       try { return { ok: true, ...repo.reviewTaskCriterion(db(), taskId, workId, criterionId, verdict, evidenceIds) }; }
       catch (error) { return { ok: false, reason: error.code === 'unsupported-verification' ? error.code : 'invalid-review',
-        detail: error.code === 'unsupported-verification' ? null : error.message }; }
+        detail: error.code === 'unsupported-verification' ? null : guard.taskErrorCode(error, guard.REVIEW_ERRORS) }; }
     },
 
     'juqode:task-retry': async (_e, taskId, priorWorkId, retryReason, idempotencyKey, confirmPriorStopped = false) => {
@@ -599,7 +619,9 @@ function makeHandlers(deps) {
           typeof retryReason !== 'string' || !retryReason.trim()) {
         return { ok: false, reason: 'bad-retry-request' };
       }
-      if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
+      if (!guard.shortId(taskId) || !guard.shortId(priorWorkId)) return { ok: false, reason: 'bad-retry-request' };
+      { const bad = guard.text(retryReason); if (bad) return bad; }
+      if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || !guard.shortId(idempotencyKey)) {
         return { ok: false, reason: 'bad-idempotency-key' };
       }
       if (typeof confirmPriorStopped !== 'boolean') return { ok: false, reason: 'bad-retry-confirmation' };
@@ -656,6 +678,12 @@ function makeHandlers(deps) {
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
       if (typeof intent !== 'string' || !intent.trim()) return { ok: false, reason: 'empty-intent' };
+      { const bad = guard.text(intent); if (bad) return bad; }        // before any DB write or Work
+      /* size only: a wrong TYPE of taskId keeps its existing, more specific refusal below */
+      if ((typeof taskId === 'string' && taskId.length > guard.LIMITS.id) ||
+          (idempotencyKey != null && !guard.shortId(idempotencyKey))) {
+        return { ok: false, reason: 'bad-input' };
+      }
       if (taskId != null && (typeof idempotencyKey !== 'string' || !idempotencyKey.trim())) {
         return { ok: false, reason: 'bad-idempotency-key' };
       }
@@ -711,7 +739,9 @@ function makeHandlers(deps) {
       const gate = needDb();
       if (gate) return gate;
       if (!workOr(workId)) return { ok: false, reason: 'no-work' };
-      return supervisor.answer(db(), workId, String(text ?? ''), { onUpdate: deps.push });
+      const bad = guard.text(text, guard.LIMITS.text, { allowEmpty: true });
+      if (bad) return bad;
+      return supervisor.answer(db(), workId, text, { onUpdate: deps.push });
     },
 
     'juqode:work-cancel': (_e, workId) => {
@@ -834,6 +864,14 @@ function makeHandlers(deps) {
    * A Quick Command child is detached and MEASURABLY outlives its parent, so quitting without
    * this leaves a dev server holding a port the next launch cannot free — the handle goes with
    * the process that held it. */
+  /* Every answer leaves through the same scrub of `detail` (V1-409). Sync stays sync. */
+  for (const [channel, fn] of Object.entries(handlers)) {
+    handlers[channel] = (...args) => {
+      const r = fn(...args);
+      return r && typeof r.then === 'function' ? r.then((v) => guard.publicOut(channel, v)) : guard.publicOut(channel, r);
+    };
+  }
+
   Object.defineProperty(handlers, '__stopAllQc', {
     enumerable: false,
     value: () => {

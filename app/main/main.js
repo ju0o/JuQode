@@ -86,7 +86,7 @@ if (!app.requestSingleInstanceLock()) {
       return await fn(e, ...args);
     } catch (err) {
       trace('ipc.failed', { channel, code: err?.code || null });
-      return { ok: false, reason: 'internal', detail: err?.code || null };
+      return { ok: false, reason: 'internal', detail: require('./ipc-guard').safeCode(err?.code) };
     }
   });
 

@@ -12,6 +12,8 @@ const SECRET_RULES = [
   ['openai_key', /\bsk-[A-Za-z0-9_-]{20,}\b/g],
   ['aws_access_key', /\bAKIA[0-9A-Z]{16}\b/g],
   ['credential_assignment', /\b(?:[\w.-]*(?:api[\s_-]?key|access[\s_-]?token|refresh[\s_-]?token|auth(?:orization)?[\s_-]?(?:token)?|proxy[\s_-]?authorization|cookie|set[\s_-]?cookie|credential|token|password|passwd|secret(?:[\s_-]?access[\s_-]?key)?|private[\s_-]?key|client[\s_-]?secret))\b\s*[:=]\s*["']?[^\s"',;]{4,}["']?/gi],
+  ['jwt', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
+  ['basic_auth', /\bBasic\s+[A-Za-z0-9+/=]{16,}/g],
   ['url_credentials', /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/gi],
 ];
 const SECRET_FIELD_NAME = /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|proxy[_-]?authorization|set[_-]?cookie|cookie|credential|client[_-]?secret|token|password|passwd|secret|private[_-]?key)/i;

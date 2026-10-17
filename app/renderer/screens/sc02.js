@@ -29,6 +29,7 @@ import { contextFacts, changedFilesState } from '../human-read.mjs';
 import { maskForDisplay } from '../path-view.mjs';
 import { fileSummary } from '../file-summary.js';
 import { holdPanel } from '../qc-hold.js';
+import { inputProblem, taskProblem } from '../input-problem.js';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
@@ -289,7 +290,7 @@ export function renderSC02(root, api, nav, state) {
     });
     createButton.disabled = false;
     if (!created?.ok) {
-      createNote.textContent = created?.reason === 'invalid-task' ? C.gap.task.draftFailed : (created?.detail ?? C.gap.task.createNeedsCriterion);
+      createNote.textContent = taskProblem(created) ?? C.gap.task.createNeedsCriterion;
       return;
     }
     state.selectedTaskId = created.task.id;
@@ -754,10 +755,11 @@ export function renderSC02(root, api, nav, state) {
     draftNote.textContent = '';
     try {
       const routed = await api.routeIntent(text);
+      if (inputProblem(routed)) { draftNote.textContent = inputProblem(routed); return; }
       const route = routed?.route?.route ?? 'work';
       if (route !== 'work') { await send(); return; }
       const created = await api.taskCreate(p.id, { goal: text.trim(), acceptanceCriteria: criteria });
-      if (!created?.ok) { draftNote.textContent = C.gap.task.draftFailed; return; }
+      if (!created?.ok) { draftNote.textContent = taskProblem(created) ?? C.gap.task.draftFailed; return; }
       state.selectedTaskId = created.task.id;
     state.inspectDismissed = false;
       criteriaDirty = false;
@@ -780,6 +782,7 @@ export function renderSC02(root, api, nav, state) {
     submit.disabled = true;
     try {
       const routed = await api.routeIntent(text);
+      if (inputProblem(routed)) { consequence.appendChild(line(inputProblem(routed))); return; }
       const route = routed?.route?.route ?? 'work';
 
       /* Not a failure and not red — a place, not a refusal (D-134). */
@@ -802,6 +805,7 @@ export function renderSC02(root, api, nav, state) {
 
     const r = await api.workStart(p.id, text, taskId, idempotencyKey);
     pend.remove();
+    if (inputProblem(r)) { consequence.innerHTML = ''; consequence.appendChild(line(inputProblem(r))); return; }
     if (r?.ok) {
       field.value = '';
       /* 새 일로 맡기기 stays with the board. 보내기 still opens the Run screen: the suite
@@ -1115,7 +1119,11 @@ function inspectInput(snap, api) {
   box.rows = 2;
   box.placeholder = C.work.inputPh;
   panel.appendChild(box);
-  panel.appendChild(btn('btn sm pri', C.work.answer, () => api.workAnswer(snap.work.id, box.value)));
+  const note = el('div', 'xs mut2');
+  panel.appendChild(btn('btn sm pri', C.work.answer, async () => {
+    note.textContent = inputProblem(await api.workAnswer(snap.work.id, box.value)) ?? '';
+  }));
+  panel.appendChild(note);
   return panel;
 }
 
@@ -1475,7 +1483,7 @@ function renderRunReview(task, detail, refresh, nav) {
       if (result?.ok) nav.toWork(result.work);
       else {
         note.textContent = result?.reason === 'prior-process-may-still-live'
-          ? C.gap.task.retryProcessStillLive : result?.detail ?? C.gap.task.retryFailed;
+          ? C.gap.task.retryProcessStillLive : inputProblem(result) ?? C.gap.task.retryFailed;
         start.disabled = false;
       }
     });
