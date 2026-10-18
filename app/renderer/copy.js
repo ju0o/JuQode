@@ -499,6 +499,37 @@ export const C = {
     routeChip: '기록됨',
     /* DG-11 · PM approved the WBS workflow before Canon 18 was updated. Keep its visible copy
      * explicitly marked as a Canon gap until the source dictionary adopts these strings. */
+    /* V1-304 · Agent picker prototype. Wording submitted to the PM; not in `18`. */
+    agent: {
+      names: { claude: 'Claude Code', codex: 'Codex CLI', opencode: 'OpenCode' },
+      steps: '① 일 적기 → ② AI 고르기 → ③ 모델 확인 → ④ 실행 승인. 일을 시작하는 건 ④ 하나뿐이에요.',
+      pickTitle: '② 어떤 AI에게 맡길까요?',
+      tag: { checking: '확인하는 중', installed: '설치됨', signedIn: '로그인됨', missing: '미설치', auth: '인증 필요', versionUnknown: '버전 불명', versionChanged: '버전 변경', unmeasured: '미실측', blocked: '현재 실행 불가' },
+      reason: {
+        checking: '이 컴퓨터의 Claude Code를 확인하고 있어요.',
+        ready: '이 컴퓨터에서 쓸 수 있어요.',
+        missing: '이 컴퓨터에서 찾지 못했어요. 이 앱이 대신 설치하지 않아요.',
+        auth: 'Claude Code에 로그인이 필요해요. 이 앱이 대신 로그인하지 않아요.',
+        versionUnknown: '버전을 읽지 못해서 지금은 고를 수 없어요.',
+        versionChanged: '처음 확인했을 때와 버전이 달라요. 확인하기 전에는 고를 수 없어요.',
+        blocked: '응답을 확인하지 못해서 지금은 쓸 수 없어요. 다른 AI로 바꾸지 않았어요.',
+        unmeasured: '이 프로그램이 실제로 어떻게 동작하는지 아직 확인하지 못했어요. 설치 여부도 확인하지 않아요. 지금은 고를 수 없어요.',
+      },
+      limitedNote: '제한 모드(dev-compat)로 실행돼요. 안전 인증을 받은 모드가 아니에요.',
+      recheck: '다시 확인', rechecking: '확인하는 중…', acceptVersion: '이 버전으로 확인함', checked: '확인을 마쳤어요.',
+      modelTitle: '③ 모델과 프로필',
+      fact: { ai: 'AI', model: '모델', profile: '프로필', limited: '제한 모드',
+        modelValue: '확인하지 못함 — 이 앱은 모델 목록을 읽지 못해요. Claude Code가 정한 기본 모델을 쓰고, 이 앱은 다른 모델로 바꾸지 않아요.',
+        profileValue: '기본 (이 앱이 따로 지정하지 않아요)' },
+      ack: '위 내용을 확인했어요. (확인만으로는 일이 시작되지 않아요)',
+      approveTitle: '④ 실행 승인',
+      approveNotAcked: '아직 고르고 확인하는 중이에요. 일은 시작되지 않았어요.',
+      approveReady: (name) => `${name}에게 맡길 준비가 됐어요. 일은 아직 시작되지 않았어요.`,
+      approveNote: '일은 아래의 시작 버튼을 눌렀을 때만 시작해요. 고르기와 확인은 일을 시작하지 않아요. 시작하면 이 프로젝트의 파일이 바뀔 수 있어요.',
+      one: (name) => `AI: ${name} · 제한 모드 · 모델은 Claude Code가 정해요`,
+      oneBlocked: (name, why) => `AI: ${name} — ${why || '확인 필요'}. 지금은 쓸 수 없는 상태예요`,
+      show: '바꾸기·자세히',
+    },
     task: {
       intro: '한 문장으로 적으면 확인할 조건을 제안하고, 그 일로 맡겨요.',
       create: '목표와 조건을 직접 적기',

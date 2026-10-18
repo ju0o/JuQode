@@ -10,7 +10,7 @@
     "start": "electron .",
     "test": "npm run test:unit && npm run test:e2e",
     "test:all": "npm test",
-    "test:e2e": "node tests/e2e/boot.test.mjs && node tests/e2e/visual.mjs && node tests/e2e/journey.mjs && node tests/e2e/offline-shutdown.mjs",
+    "test:e2e": "node tests/e2e/boot.test.mjs && node tests/e2e/visual.mjs && node tests/e2e/journey.mjs && node tests/e2e/agent-picker.mjs && node tests/e2e/offline-shutdown.mjs",
     "pack:linux": "electron-builder --linux dir",
     "pack:win": "electron-builder --win dir zip --x64",
     "test:erd": "node docs/design/check-dbml.mjs",

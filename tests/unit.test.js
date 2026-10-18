@@ -439,7 +439,7 @@ test('every copy key is used by a screen — dead copy goes stale and then lies'
     for (const e of fs.readdirSync(path.join(R, dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
       if (e.isDirectory()) walk(rel);
-      else if (/\.js$/.test(e.name) && rel !== path.join('app', 'renderer', 'copy.js')) files.push(rel.split(path.sep).join("/"));
+      else if (/\.m?js$/.test(e.name) && rel !== path.join('app', 'renderer', 'copy.js')) files.push(rel.split(path.sep).join("/"));
     }
   })(path.join('app', 'renderer'));
   /* Comments stripped. A key NAMED in a comment is not a key a screen renders, and leaving them

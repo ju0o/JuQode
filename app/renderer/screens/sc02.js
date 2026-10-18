@@ -24,6 +24,7 @@ import { C } from '../copy.js';
 import { el, btn } from '../dom.js';
 import { rememberFocus, restoreFocus } from '../focus.js';
 import { proposeDraft, compareRuns } from '../draft.mjs';
+import { mountAgentPicker } from '../agent-picker.mjs';
 import { columnFor, tileTone } from '../board-column.mjs';
 import { contextFacts, changedFilesState } from '../human-read.mjs';
 import { maskForDisplay } from '../path-view.mjs';
@@ -363,6 +364,10 @@ export function renderSC02(root, api, nav, state) {
     el('div', 'xs mut start-note', C.gap.task.startNoteNew),
   );
   intent.appendChild(draft);
+  /* V1-304 · ② AI / ③ model: choices that create nothing. The start buttons below stay the only way a Work begins. */
+  const agentPicker = mountAgentPicker(api, state);
+  intent.appendChild(agentPicker.root);
+  agentPicker.refresh();
   const paintDraft = () => {
     const proposal = draftSuppressed ? null : proposeDraft(field.value);
     if (!proposal) {
