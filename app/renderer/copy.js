@@ -716,6 +716,8 @@ export const C = {
      *
      * The three limits are not softening. Each one is a fact about `restore()` that cannot be
      * fixed there, and a user who finds out afterwards was misled by the button. */
+    revertHoldTitle: '복원 안전 검증 대기',
+    revertHoldBody:  '이 작업 전으로 되돌리는 기능은 안전 검증이 끝날 때까지 쉬고 있어요. 지금은 파일을 바꾸지 않아요. 변경 내용은 그대로 볼 수 있고, 원하시면 대신 새 작업을 요청할 수 있어요.',
     revertTitle:   '이 작업 전으로 되돌릴 수 있어요',
     revertBody:    '이 작업이 바꾼 파일을 작업 전 내용으로 되돌려요. 원하시면 대신 새 작업을 요청할 수도 있어요.',
     revert:        '이 작업 전으로 되돌리기',
@@ -745,6 +747,7 @@ export const C = {
       'work-running':       '이 프로젝트에서 다른 작업이 돌고 있어요. 끝난 뒤에 되돌릴 수 있어요.',
       'already-explaining': '지금 이 변경을 설명하는 중이에요. 끝난 뒤에 되돌릴 수 있어요.',
       'restore-failed':     '파일을 되돌리는 중에 읽거나 쓰지 못했어요. 아무것도 바뀌지 않았을 수 있어요.',
+      'restore-safety-hold': '복원 안전 검증 대기 중이라 되돌리지 않았어요. 파일은 바뀌지 않았어요.',
       'no-work':            '이 작업을 찾지 못했어요.',
     },
 
@@ -1012,8 +1015,8 @@ export const C = {
     briefFailOther: '폴더를 읽는 중에 막혔어요.',
     /* SC-03 states `18` has no key for. Written in the `18` §0 voice; filed as CF-8. */
     workDenialTool: '하려던 동작',
-    workArgsHiddenRefused: '이번 허용과 재시도는 하지 않았어요. 허용할 동작의 일부가 가려져 있어서 허용 버튼을 드리지 않아요. 이전에 바뀐 파일은 변경 내역에서 확인하세요.',
-    workOutsideProject: '이 요청은 허용하지 않았어요. 이 프로젝트 밖의 파일을 바꾸려는 요청이었어요. 이전에 바뀐 파일은 변경 내역에서 확인하세요.',
+    workArgsHiddenRefused: '이번 허용과 재시도는 하지 않았어요. 허용할 동작의 일부가 가려져 있어서 허용 버튼을 드리지 않아요. 이전에 변경된 내용이 있는지는 변경 내역에서 확인할 수 있어요.',
+    workOutsideProject: '이 요청은 허용하지 않았어요. 이 프로젝트 밖의 파일을 바꾸려는 요청이었어요. 이전에 변경된 내용이 있는지는 변경 내역에서 확인할 수 있어요.',
     /* §8.3 · what is KNOWN about the user's last answer. Never says delivered. */
     answerSubmitted: '답을 적어 두었어요. Claude에게 전해졌는지는 아직 확인하지 못했어요.',
     answerPending:   '답을 Claude에게 보내는 중이에요. 전해졌는지는 아직 확인하지 못했어요.',

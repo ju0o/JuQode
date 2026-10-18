@@ -108,3 +108,37 @@ test('source pin: both the work screen and the Task Inspector show the delivery 
   assert.ok(/card\.appendChild\(al\)/.test(src.code('app/renderer/screens/sc03.js')));
   assert.ok(/answerLine\(latest\)/.test(src.code('app/renderer/screens/sc02.js')));
 });
+
+test('AFTER the Work ended (and after a restart: no live entry) the delivery state is still read from rows - failed-unknown is not lost, stored rows are untouched', async () => {
+  const w = await waitingForAnswer();
+  w.resume(`process.exit(3);`);
+  await supervisor.answer(w.db, w.id, 'hello');
+  assert.strictEqual(state(w), 'delivery_failed_unknown');
+  repo.setWorkState(w.db, w.id, { status: 'ended', outcome: 'ended_unknown' });
+  supervisor.live.delete(w.id);                                            // as after an app restart
+  const before = rows(w.db);
+  const snap = supervisor.snapshot(w.db, w.id);
+  assert.strictEqual(snap.status, 'ended');
+  assert.strictEqual(snap.answerDelivery, 'delivery_failed_unknown');
+  assert.strictEqual(rows(w.db), before, 'reading rewrote a row');
+});
+
+test('an ended Work whose answer ran fine still says submitted-locally (never delivered); one with no answer says nothing', async () => {
+  const a = await waitingForAnswer();
+  a.resume(`init(); result(); process.exit(0);`);
+  await supervisor.answer(a.db, a.id, 'ok');
+  repo.setWorkState(a.db, a.id, { status: 'ended', outcome: 'complete' });
+  supervisor.live.delete(a.id);
+  assert.strictEqual(supervisor.snapshot(a.db, a.id).answerDelivery, 'answer_submitted_locally');
+  const b = await waitingForAnswer();
+  repo.setWorkState(b.db, b.id, { status: 'ended', outcome: 'complete' });
+  supervisor.live.delete(b.id);
+  assert.strictEqual(supervisor.snapshot(b.db, b.id).answerDelivery, null);
+});
+
+test('source pin: the renderer line is no longer hidden for an ended Work (only a stale pending is)', () => {
+  const sc03 = require(path.join(__dirname, 'src.js')).code('app/renderer/screens/sc03.js');
+  const f = sc03.slice(sc03.indexOf('export function answerLine'), sc03.indexOf('export function stateChip'));
+  assert.ok(!/snap\.status === 'ended'\) return null/.test(f), 'an ended Work still hides the line');
+  assert.ok(/ended' && snap\.answerDelivery === 'delivery_pending'/.test(f));
+});

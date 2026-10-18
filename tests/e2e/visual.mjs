@@ -1197,16 +1197,20 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
    * is that the card is not it: a button that writes to the user's files must not sit among
    * 변경 읽기 and 작업대로 돌아가기, where it is one mis-click away. */
   out.sc03Rollback = await evalJs(`[...document.querySelectorAll('.sc03 button')].filter(b => !b.closest('[data-el="unwanted"]')).map(b => b.textContent).join(' | ')`);
-  /* WBS-19b (PM 판정 2026-09-12) · 되돌리기 must take TWO presses, and the second one is only
-   * reachable after the first has said what the restore cannot do. One press that writes to
-   * the user's files would be the thing D-115 was protecting against. */
-  await evalJs(`[...document.querySelectorAll('[data-el="unwanted"] button')].find(b => b.textContent.includes('이 작업 전으로 되돌리기'))?.click()`);
-  await sleep(400);
-  out.revertConfirm = await evalJs(`document.querySelector('[data-el="revert-confirm"]')?.innerText ?? null`);
-  /* …and 취소 puts the panel back, so opening the warning is not itself a commitment. */
-  await evalJs(`[...document.querySelectorAll('[data-el="revert-confirm"] button')].find(b => b.textContent.trim() === '취소')?.click()`);
-  await sleep(300);
-  out.revertCancelled = await evalJs(`document.querySelector('[data-el="revert-confirm"]') === null`);
+  /* RESTORE SAFETY HOLD (PM 2026-10-18): the panel carries no restore control at all. The
+   * label is looked up by text so a button that comes back under any name fails here. */
+  out.revertButtons = await evalJs(`[...document.querySelectorAll('[data-el="unwanted"] button')].map(b => b.textContent.trim())`);
+  out.revertHold = await evalJs(`document.querySelector('[data-el="unwanted"]')?.innerText ?? null`);
+  /* …and calling the channel DIRECTLY through the preload bridge (what a click would have called) changes no byte of the project. */
+  {
+    const { createHash } = await import('node:crypto');
+    const tree = () => { const o = {}; const walk = (d) => { for (const n of fs.readdirSync(d).sort()) { if (n === '.git') continue; const f = path.join(d, n); const st = fs.lstatSync(f);
+      if (st.isDirectory()) walk(f); else o[path.relative(SEED, f)] = st.isSymbolicLink() ? 'L' : createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } }; walk(SEED); return JSON.stringify(o); };
+    const before = tree();
+    out.revertDirect = await evalJs(`(async () => JSON.stringify(await window.juqode.workRevert(window.__work()?.id)))()`);
+    out.revertDirectBad = await evalJs(`(async () => JSON.stringify(await window.juqode.workRevert('no-such-work')))()`);
+    out.revertTreeUnchanged = before === tree();
+  }
   await evalJs(`[...document.querySelectorAll('[data-el="unwanted"] button')].find(b => b.textContent.includes('고치는 작업 요청'))?.click()`);
   await sleep(900);
   out.afterCorrection = await evalJs('window.__screen()');
@@ -4249,8 +4253,8 @@ assert.strictEqual(results.screenReader, 'SC-04', `변경 읽기 did not reach S
    * 버튼은 없어요 is no longer true of this panel and must not appear beside the button.
    * `18` is to be re-judged: CANON_FINDINGS CF-22. */
   assert.ok(results.readerUnwanted, '원하던 결과가 아니에요 opened nothing on SC-04');
-  assert.ok(results.readerUnwanted.includes('이 작업 전으로 되돌리기'),
-    'the SC-04 unwanted panel does not offer 되돌리기');
+  assert.ok(results.readerUnwanted.includes('복원 안전 검증 대기') && !results.readerUnwanted.includes('이 작업 전으로 되돌리기'),
+    'the SC-04 unwanted panel offers a restore during the safety hold');
   assert.ok(!results.readerUnwanted.includes('되돌리기 버튼은 없어요'),
     'the panel says there is no undo while showing an undo button');
   assert.ok(results.readerUnwanted.includes('고치는 작업 요청'),
@@ -4504,8 +4508,11 @@ assert.strictEqual(results.historyToWork, 'SC-03', `결과 보기 did not reach 
 
 /* ── WBS-19 · the correction path ─────────────────────────────────────────────────────── */
 assert.ok(results.unwantedText, '원하던 결과가 아니에요 opened no panel');
-assert.ok(results.unwantedText.includes('이 작업 전으로 되돌리기'),
-  `the panel does not offer 되돌리기: ${results.unwantedText}`);
+assert.ok(results.unwantedText.includes('복원 안전 검증 대기'), `the panel does not say the restore is on hold: ${results.unwantedText}`);
+assert.deepStrictEqual(JSON.parse(results.revertDirect), { ok: false, reason: 'restore-safety-hold' }, `direct work-revert was not held: ${results.revertDirect}`);
+assert.deepStrictEqual(JSON.parse(results.revertDirectBad), { ok: false, reason: 'restore-safety-hold' });
+assert.strictEqual(results.revertTreeUnchanged, true, 'a held work-revert call changed a project file');
+assert.ok(!results.revertButtons.some((t) => /되돌리기/.test(t)), `a restore button is offered during the hold: ${results.revertButtons}`);
 assert.ok(!results.unwantedText.includes('되돌리기 버튼은 없어요'),
   'the panel says there is no undo while showing an undo button');
 assert.strictEqual(results.unwantedReds, 0, 'the correction panel renders red — wanting something else is not a failure');
@@ -4514,15 +4521,6 @@ assert.strictEqual(results.unwantedReds, 0, 'the correction panel renders red �
  * button that writes to the user's files must not sit among 변경 읽기 and 작업대로. */
 assert.ok(!/되돌리기|롤백|undo|revert/i.test(results.sc03Rollback),
   `SC-03's own card offers a rollback control: ${results.sc03Rollback}`);
-/* …and the panel's button does not act on the first press. It opens the three limits — each
- * one a fact about `restore()` that cannot be fixed there — and 진행 is a separate press. */
-assert.ok(results.revertConfirm, '되돌리기 acted without showing what it cannot do');
-for (const must of ['.env', '설치된 패키지', '덮어써져요', '되돌리기 진행']) {
-  assert.ok(results.revertConfirm.includes(must),
-    `the 되돌리기 warning omits "${must}": ${results.revertConfirm}`);
-}
-assert.strictEqual(results.revertCancelled, true, '취소 did not close the 되돌리기 warning');
-
 assert.strictEqual(results.afterCorrection, 'SC-02', '고치는 작업 요청 did not return to the workbench');
 assert.ok(results.correctionIntent && results.correctionIntent.includes('README.md 의 첫 줄을 바꿔줘'),
   `the correction does not quote the user's own words: ${results.correctionIntent}`);

@@ -32,7 +32,7 @@ test('bad / over-long project, work, task, run and tool ids are refused with the
     ['qc-route', (v) => [v, 'x'], 'no-project'], ['work-start', (v) => [v, 'x'], 'no-project'], ['legacy-unknown-ack', (v) => [v, 'w', true], 'no-project'],
     ['task-detail', (v) => [v], 'no-task'], ['task-update', (v) => [v, { goal: 'g' }], 'no-task'],
     ['work-get', (v) => [v], 'no-work'], ['work-cancel', (v) => [v], 'no-work'], ['work-allow', (v) => [v, null], 'no-work'], ['work-answer', (v) => [v, 'x'], 'no-work'],
-    ['work-signals', (v) => [v], 'no-work'], ['work-changes', (v) => [v], 'no-work'], ['work-revert', (v) => [v], 'no-work'], ['work-reader', (v) => [v], 'no-work'],
+    ['work-signals', (v) => [v], 'no-work'], ['work-changes', (v) => [v], 'no-work'], ['work-revert', (v) => [v], 'restore-safety-hold'], ['work-reader', (v) => [v], 'no-work'],
     ['qc-stop', (v) => [a.id, v], 'not-running'],
   ];
   for (const [ch, args, reason] of table) {

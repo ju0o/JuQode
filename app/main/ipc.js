@@ -10,6 +10,8 @@
  * directory, a way to push updates, and the dialog's owning window.
  */
 const fs = require('node:fs');
+
+const RESTORE_SAFETY_HOLD = true;
 const path = require('node:path');
 const repo = require('./db/repo');
 const project = require('./project');
@@ -813,8 +815,13 @@ function makeHandlers(deps) {
      *   · no explanation pass may be in flight — it spawns a child in the same repository.
      */
     'juqode:work-revert': (_e, workId) => {
+      /* SAFETY HOLD (PM 2026-10-18). Refused (right after the store gate) before the Work, its evidence or any file is looked at:
+       * restore() has a residual TOCTOU window and D-115 (CF-22) has no ratified contract for it.
+       * No env var, flag or setting lifts this — only a code change after the PM's technical
+       * ruling and the Founder's D-115 decision. */
       const gate = needDb();
       if (gate) return gate;
+      if (RESTORE_SAFETY_HOLD) return { ok: false, reason: 'restore-safety-hold' };
       const w = workOr(workId);
       if (!w) return { ok: false, reason: 'no-work' };
       if (w.status !== 'ended') return { ok: false, reason: 'still-running' };

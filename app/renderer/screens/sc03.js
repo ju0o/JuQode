@@ -164,7 +164,9 @@ function workCard(snap, api, nav, state) {
  * "카드 제목"; repeating one in the chip says the same thing twice on one surface (§0.8). */
 /** §8.3: what is KNOWN about the user's last answer. Never says "delivered": `delivered_observed` has no evidence definition yet. */
 export function answerLine(snap) {
-  if (snap.status === 'ended') return null;
+  /* Shown AFTER the Work ended too: "we never learned whether it arrived" is exactly the fact a user reads a finished Work for.
+   * `delivery_pending` cannot be true once nothing is running, so a stale one is not shown. */
+  if (snap.status === 'ended' && snap.answerDelivery === 'delivery_pending') return null;
   const text = snap.answerDelivery === 'answer_submitted_locally' ? C.gap.answerSubmitted
     : snap.answerDelivery === 'delivery_pending' ? C.gap.answerPending
       : snap.answerDelivery === 'delivery_failed_unknown' ? C.gap.answerFailed : null;
@@ -776,6 +778,8 @@ function remainPanel(snap, nav, state) {
  * The prefilled sentence quotes the user's OWN words. JuQode does not paraphrase the request it
  * is about to resend, and it does not promise the change will be restored — nothing can.
  */
+const RESTORE_SAFETY_HOLD = true;
+
 export function unwantedPanel(snap, nav, state, { readMore = true, api = null } = {}) {
   const panel = el('div', 'card c-wide unwanted');
   panel.setAttribute('data-el', 'unwanted');
@@ -784,12 +788,13 @@ export function unwantedPanel(snap, nav, state, { readMore = true, api = null } 
    * nothing to put back, and a button that can only ever answer "안 돼요" is not an action
    * (`15` DS §1). Whether those bases are Git trees is not knowable here — the handler answers
    * that, and `revertWhy` says it in words. */
-  const canOffer = Boolean(api?.workRevert) && snap.evidence?.before && snap.evidence?.after;
+  /* SAFETY HOLD: no executable restore control while the hold is on (main refuses too). */
+  const canOffer = !RESTORE_SAFETY_HOLD && Boolean(api?.workRevert) && snap.evidence?.before && snap.evidence?.after;
 
   /* CF-22: a panel that shows a 되돌리기 button must not also carry `18`'s sentence saying
    * there is none. Canon still owns the no-revert case, which is the one D-115 was about. */
-  panel.appendChild(el('div', 'ct', canOffer ? C.gap.revertTitle : C.work.unwantedTitle));
-  panel.appendChild(el('p', 'sm', canOffer ? C.gap.revertBody : C.work.unwantedBody));
+  panel.appendChild(el('div', 'ct', RESTORE_SAFETY_HOLD ? C.gap.revertHoldTitle : canOffer ? C.gap.revertTitle : C.work.unwantedTitle));
+  panel.appendChild(el('p', 'sm', RESTORE_SAFETY_HOLD ? C.gap.revertHoldBody : canOffer ? C.gap.revertBody : C.work.unwantedBody));
 
   const body = el('div', 'unwanted-body');
   panel.appendChild(body);
