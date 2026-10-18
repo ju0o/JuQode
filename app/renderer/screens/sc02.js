@@ -637,6 +637,7 @@ export function renderSC02(root, api, nav, state) {
     if (!taskId) {
       requestLabel.textContent = C.gap.stage.ask;
       selectedTask.appendChild(el('p', 'sm mut', C.gap.stage.noTask));
+      agentPicker.setRelevant(true);
       return;
     }
     const result = await api.taskDetail(taskId);
@@ -644,6 +645,10 @@ export function renderSC02(root, api, nav, state) {
     if (!result?.ok) { selectedTask.appendChild(el('div', 'xs mut2', result?.detail ?? C.gap.task.noTasks)); return; }
     const task = result.task;
     const latest = result.runs[0] ?? null;
+    /* While an attempt is live (running, waiting for a permission or an answer, stopping) the one thing to do is the
+     * card for it; choosing an AI for a NEW attempt is not relevant yet and must not compete with it. It comes back
+     * when the attempt ends. Hidden, not disabled: nothing about the permission card or its buttons changes. */
+    agentPicker.setRelevant(!(latest && latest.work?.status !== 'ended'));
     const face = runFace(latest);
     requestLabel.textContent = latest ? C.gap.task.runRequest : C.gap.stage.ask;
     const bits = tileBits(task, face);

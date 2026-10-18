@@ -173,7 +173,9 @@ export function mountAgentPicker(api, state, { onOpen = () => {} } = {}) {
   }
   recheck.addEventListener('click', () => refresh({ force: true }));
   accept.addEventListener('click', () => { if (s.status?.version) { s.seen = s.status.version; paint(); } });
-  const inst = { summary, panel: root, refresh, usable, checking, repaint: paint, onPaint: (fn) => { painted = fn; } };
+  /* Not relevant while a live attempt of the selected Task needs the person's action (set by the Inspector). */
+  const setRelevant = (v) => { root.hidden = !v; root.setAttribute('data-relevant', String(Boolean(v))); };
+  const inst = { summary, panel: root, refresh, usable, checking, repaint: paint, setRelevant, onPaint: (fn) => { painted = fn; } };
   current = inst;
   paint();
   return inst;

@@ -681,3 +681,4 @@
 .sc02 .agent-model[hidden], .sc02 .agent-approve[hidden], .sc02 .agent-tools [hidden] { display: none; }
 .sc02 .agent-ack { display: flex; gap: 8px; align-items: flex-start; }
 .sc02 .agent-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }   /* announced, not drawn */
+.sc02 .agent-panel[hidden] { display: none; }

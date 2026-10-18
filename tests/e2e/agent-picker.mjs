@@ -246,10 +246,38 @@ await session('ready', FAKE_CLI, async (t) => {
   for (let i = 0; i < 40 && !(await t.ev(`!!document.querySelector('.task-pick')`)); i++) await t.sleep(250);
   await t.view(1200, 'light');
   await t.ev(`document.querySelector('.task-pick').click()`); await t.sleep(600);
-  ok('ready: a saved Task - its Inspector shows the Task AND the AI choice', await t.ev(`!!document.querySelector('[data-region="inspector"] [data-el="selected-task"]:not([hidden])') && !!document.querySelector('[data-region="inspector"] [data-el="agent-panel"]')`));
-  ok('ready: a saved Task - the panel and the composer summary agree', await t.ev(`document.querySelector('[data-el="agent-panel"]').dataset.usable === document.querySelector('[data-el="agent-summary"]').dataset.usable && document.querySelector('[data-agent="claude"] input').checked`));
-  await t.shot('ready-saved-task-inspector-1200-light');
-  await t.view(880, 'dark'); await t.shot('ready-saved-task-inspector-880-dark'); await t.view(1200, 'light');
+  /* the fixture CLI refuses the edit, so this Task's attempt is WAITING FOR A PERMISSION: that card is the one thing to do */
+  const live = await t.ev(`!!document.querySelector('[data-region="inspector"] [data-el="inspect-permission"]')`);
+  ok('ready: the saved Task has a live attempt waiting for a permission (fixture)', live);
+  ok('ready: permission wait - the AI choice panel is hidden, not competing', await t.ev(`document.querySelector('[data-el="agent-panel"]').hidden === true && document.querySelector('[data-el="agent-panel"]').offsetParent === null`));
+  ok('ready: permission wait - no agent control is focusable inside the Inspector', await t.ev(`![...document.querySelectorAll('[data-region="inspector"] [data-agent] input, [data-region="inspector"] [data-act^="agent-"]')].some((n) => n.offsetParent !== null)`));
+  for (const [w, th] of [[1200, 'light'], [880, 'dark'], [880, 'light'], [1200, 'dark']]) {
+    await t.view(w, th);
+    await t.ev(`document.querySelector('.task-pick').click()`); await t.sleep(500);
+    const g = JSON.parse(await t.ev(`(() => { const p = document.querySelector('[data-el="inspect-permission"]'); const a = [...p.querySelectorAll('button')].find((b) => b.classList.contains('pri')); const r = a.getBoundingClientRect();
+      const head = document.querySelector('.sc02-inspect .inspect-title').getBoundingClientRect();
+      return JSON.stringify({ allowLabel: a.innerText.trim(), inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, topOfAllow: Math.round(r.top), titleTop: Math.round(head.top), vh: innerHeight, panelDisplay: getComputedStyle(document.querySelector('[data-el="agent-panel"]')).display }); })()`));
+    ok(`ready: permission wait ${w} ${th}: 허용 button is inside the window without scrolling`, g.inView, JSON.stringify(g));
+    ok(`ready: permission wait ${w} ${th}: the AI panel takes no space`, g.panelDisplay === 'none');
+    await t.shot(`permission-wait-inspector-${w}-${th}`);
+  }
+  /* keyboard: from the Inspector's 닫기, Tab reaches 허용 and 중지 and never lands on an AI control */
+  await t.view(1200, 'light');
+  await t.ev(`document.querySelector('.sc02-inspect [data-act="inspect-close"]').focus()`);
+  const seen = [];
+  for (let i = 0; i < 14; i++) { await t.key('Tab', 'Tab', 9); seen.push(await t.ev(`(() => { const a = document.activeElement; return (a?.getAttribute('data-act') || a?.innerText || a?.tagName || '').toString().trim().slice(0, 30) + (a?.closest('[data-el="agent-panel"]') ? ' [AGENT]' : ''); })()`)); }
+  results.permissionKeyboardOrder = seen;
+  ok('ready: keyboard reaches 허용 and 중지 from the Inspector', seen.some((x) => /허용/.test(x)) && seen.some((x) => /그만두기/.test(x)), seen.join(' > '));
+  ok('ready: keyboard never lands on an AI control while the permission is open', !seen.some((x) => /\[AGENT\]/.test(x)), seen.join(' > '));
+  const wBefore = await t.works();
+  /* the permission buttons still work: stop the attempt through the card; when it has ended the choice comes back */
+  await t.ev(`document.querySelector('[data-el="inspect-permission"] .btn.cancel').click()`);
+  let back = false;
+  for (let i = 0; i < 60 && !back; i++) { await t.sleep(500); await t.ev(`document.querySelector('.task-pick')?.click()`); back = await t.ev(`document.querySelector('[data-el="agent-panel"]').hidden === false`); }
+  ok('ready: after the attempt ended, the AI choice for the next attempt is back in the Inspector', back);
+  ok('ready: stopping through the card created no Work', (await t.works()) === wBefore);
+  await t.view(1200, 'light'); await t.shot('ended-task-inspector-1200-light');
+  await t.view(880, 'dark'); await t.shot('ended-task-inspector-880-dark'); await t.view(1200, 'light');
 });
 
 fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 1));
