@@ -1012,8 +1012,12 @@ export const C = {
     briefFailOther: '폴더를 읽는 중에 막혔어요.',
     /* SC-03 states `18` has no key for. Written in the `18` §0 voice; filed as CF-8. */
     workDenialTool: '하려던 동작',
-    workArgsHiddenRefused: '허용할 동작의 일부가 가려져 있어서 허용 버튼을 드리지 않아요. 아무것도 실행되지 않았어요.',
-    workOutsideProject: '이 동작은 이 프로젝트 밖의 파일을 바꾸려는 거라서 허용 버튼을 드리지 않아요. 아무것도 바뀌지 않았어요.',
+    workArgsHiddenRefused: '이번 허용과 재시도는 하지 않았어요. 허용할 동작의 일부가 가려져 있어서 허용 버튼을 드리지 않아요. 이전에 바뀐 파일은 변경 내역에서 확인하세요.',
+    workOutsideProject: '이 요청은 허용하지 않았어요. 이 프로젝트 밖의 파일을 바꾸려는 요청이었어요. 이전에 바뀐 파일은 변경 내역에서 확인하세요.',
+    /* §8.3 · what is KNOWN about the user's last answer. Never says delivered. */
+    answerSubmitted: '답을 적어 두었어요. Claude에게 전해졌는지는 아직 확인하지 못했어요.',
+    answerPending:   '답을 Claude에게 보내는 중이에요. 전해졌는지는 아직 확인하지 못했어요.',
+    answerFailed:    '답이 전해졌는지 확인하지 못했어요. 이 작업의 상태를 확인해 주세요.',
     workNoScope:    '이 동작은 좁게 허용할 방법이 없어서 허용 버튼을 드리지 않아요.',
     /* Short labels for the header chip. `18`'s panel TITLES are sentences and belong in the
      * panel; a chip that repeats a 17-word sentence says the same thing twice (`18` §0.8). */

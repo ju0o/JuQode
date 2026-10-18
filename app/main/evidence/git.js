@@ -17,6 +17,7 @@
  */
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const { pathspec, isExcludedPath, ledger } = require('./exclude');
 
@@ -442,10 +443,15 @@ function treeModes(root, store, ref) {
   };
   const out = git(['ls-tree', '-r', '-z', ref], { cwd: root, env, raw: true });
   const modes = new Map();
+  /* entries a plain byte write cannot restore truthfully: a symlink (120000) or a submodule (160000). They are named so the
+   * restore REPORTS them as failed instead of writing a link's target text into a regular file. */
+  modes.special = new Set();
   for (const entry of out.split('\0')) {
     /* `<mode> SP <type> SP <object> TAB <path>` */
     const m = /^(\d{6}) \w+ [0-9a-f]+\t([\s\S]*)$/.exec(entry);
-    if (m) modes.set(m[2], parseInt(m[1].slice(-4), 8));
+    if (!m) continue;
+    modes.set(m[2], parseInt(m[1].slice(-4), 8));
+    if (m[1] === '120000' || m[1] === '160000') modes.special.add(m[2]);
   }
   return modes;
 }
@@ -465,6 +471,37 @@ function realParentInside(realRoot, abs) {
     const up = path.dirname(p);
     if (up === p) return false;
     p = up;
+  }
+}
+
+/**
+ * Put `bytes` at `abs` WITHOUT ever writing through a symlink: the content goes to a fresh temp file in the same directory
+ * (`wx` = must not exist), the directory is re-verified to be really inside the project, and the temp file is renamed over the
+ * name. `rename` replaces the NAME - a symlink sitting at `abs` (to a file outside the project, to a file inside, or dangling) is
+ * replaced by the regular file the before-basis recorded, and its target is never opened. An existing regular file keeps its mode;
+ * a recreated one gets the basis mode.
+ *
+ * Limit, stated plainly: Node has no `openat`, so the directory check and the rename are separate steps. A process that swaps a
+ * parent directory for a link in that window can still redirect the temp file; the check after the write makes the swap fail
+ * and removes the temp file, but the bytes were briefly there. This is a realpath guard, not an operating-system sandbox.
+ */
+function writeReplacing(realRoot, abs, bytes, basisMode) {
+  const dir = path.dirname(abs);
+  fs.mkdirSync(dir, { recursive: true });
+  if (!realParentInside(realRoot, abs)) throw new Error('escape');
+  let st = null;
+  try { st = fs.lstatSync(abs); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (st && st.isDirectory()) throw new Error('is-directory');
+  const tmp = path.join(dir, `.juqode-restore-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
+  try {
+    fs.writeFileSync(tmp, bytes, { flag: 'wx', mode: 0o666 });
+    const mode = st && st.isFile() ? (st.mode & 0o7777) : basisMode;
+    if (mode !== undefined) { try { fs.chmodSync(tmp, mode); } catch { /* best effort */ } }
+    if (!realParentInside(realRoot, abs)) throw new Error('escape');      // last look immediately before the swap
+    fs.renameSync(tmp, abs);
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* nothing more to do */ }
+    throw e;
   }
 }
 
@@ -493,7 +530,10 @@ function restore(root, store, beforeRef, afterRef) {
      * be a link we are about to remove (removing a link never follows it). Anything that cannot be resolved is `failed`. */
     if (!realParentInside(realRoot, abs)) { done.push({ path: rel, action: 'failed' }); continue; }
 
-    const bytes = bytesAt(root, store, beforeRef, rel);
+    if (modes.special.has(rel)) { done.push({ path: rel, action: 'failed' }); continue; }
+    /* Only a FILE of the before tree has bytes to put back. A path that was a directory there (and is a file now) used to get
+     * git's own tree listing written into it; "not a file before" means the Work created this name, so it is removed. */
+    const bytes = modes.has(rel) ? bytesAt(root, store, beforeRef, rel) : null;
     if (bytes === null) {
       /* Absent in the before tree: the Work created this file, so removing it IS the restore.
        * `force` so an already-deleted path is not an error — the end state is what matters. */
@@ -503,13 +543,7 @@ function restore(root, store, beforeRef, afterRef) {
     }
 
     try {
-      const existed = fs.existsSync(abs);
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.writeFileSync(abs, bytes);
-      /* A file the Work DELETED is being recreated, and a new file gets the umask's mode — an
-       * executable script would come back without its `+x` and fail at the next run with a
-       * permission error that names nothing. An existing file keeps the mode it has. */
-      if (!existed && modes.has(rel)) { try { fs.chmodSync(abs, modes.get(rel)); } catch { /* best effort */ } }
+      writeReplacing(realRoot, abs, bytes, modes.has(rel) ? modes.get(rel) : undefined);
       done.push({ path: rel, action: 'restored' });
     } catch { done.push({ path: rel, action: 'failed' }); }
   }

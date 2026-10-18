@@ -34,7 +34,7 @@ import { inputProblem, taskProblem } from '../input-problem.js';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
-import { stateChip, permissionAction } from './sc03.js';
+import { stateChip, permissionAction, answerLine } from './sc03.js';
 
 export function renderSC02(root, api, nav, state) {
   root.innerHTML = '';
@@ -683,6 +683,7 @@ export function renderSC02(root, api, nav, state) {
       }
     }
     if (latest && latest.work?.status !== 'ended') selectedTask.appendChild(attemptLineCompact(latest, bits));   // an ended Run is told by its result, not twice
+    if (latest) { const al = answerLine(latest); if (al) selectedTask.appendChild(al); }
     if (latest?.permission && latest.status === 'permission_waiting') {
       selectedTask.appendChild(inspectPermission(latest, api, refreshTasks));
     } else if (latest?.status === 'input_waiting') {

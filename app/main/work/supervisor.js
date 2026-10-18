@@ -778,6 +778,7 @@ function snapshot(db, workId) {
     /* WBS-16 · we asked it to stop and have not seen it stop. Red, because claiming the stop
      * would be the lie (`07` §8.1: a cancelled child exits 0). */
     cancelUnconfirmed: work.status === 'cancel_requested' && sinceMs(s.cancelRequestedAt) > CANCEL_CONFIRM_MS,
+    answerDelivery: answerDeliveryOf(db, workId, entryFor(db, workId)),
     signalCount: repo.nextSeq(db, workId),
     evidence: { before: Boolean(repo.basisFor(db, workId, 'before')), after: Boolean(repo.basisFor(db, workId, 'after')) },
     result: work.status === 'ended' ? masked(repo.resultFor(db, workId)) : null,
@@ -953,17 +954,45 @@ async function answer(db, workId, text, opts = {}) {
   writeSignal(db, workId, { source: 'user', kind: KIND.ANSWER, payload: text });
   apply(db, workId, { kind: KIND.ANSWER, payload: { text } }, opts.onUpdate ?? (() => {}));
 
-  const answerRun = await session.run({
-    cwd: entry.cwd, sessionId: entry.sessionId, resume: true, prompt: text, bin: entry.bin,
-    mode: opts.executionMode ?? entry.mode ?? undefined, recorded: entry.launchIdentity ?? null,
-    onChild: (c) => { entry.child = c; },
-    onSignal: (sig, raw, line) => {
-      writeSignal(db, workId, { source: 'claude', kind: sig.kind, payload: line });
-      apply(db, workId, sig, opts.onUpdate ?? (() => {}));
-    },
-  });
-  if (answerRun.mismatch) return endResumeMismatch(db, workId, entry, answerRun, opts.onUpdate ?? (() => {}));
+  /* §8.3: the answer is RECORDED here, locally. That is not the same fact as the provider having RECEIVED it, and nothing in this
+   * function can prove the second one - a started process, an init event or an exit code 0 are not receipt. So the only
+   * delivery states this code produces are `answer_submitted_locally` (default), `delivery_pending` (the resume is running) and
+   * `delivery_failed_unknown` (it did not start, said nothing, or was refused). `delivered_observed` is reserved: it needs an
+   * evidence definition from a real provider measurement (G1) and is never produced. */
+  entry.answerInFlight = true;
+  let answerRun;
+  try {
+    answerRun = await session.run({
+      cwd: entry.cwd, sessionId: entry.sessionId, resume: true, prompt: text, bin: entry.bin,
+      mode: opts.executionMode ?? entry.mode ?? undefined, recorded: entry.launchIdentity ?? null,
+      onChild: (c) => { entry.child = c; },
+      onSignal: (sig, raw, line) => {
+        writeSignal(db, workId, { source: 'claude', kind: sig.kind, payload: line });
+        apply(db, workId, sig, opts.onUpdate ?? (() => {}));
+      },
+    });
+  } catch (e) {
+    markAnswerFailed(db, workId, 'exception');
+    throw e;
+  } finally { entry.answerInFlight = false; }
+  if (answerRun.mismatch) { markAnswerFailed(db, workId, 'mismatch'); return endResumeMismatch(db, workId, entry, answerRun, opts.onUpdate ?? (() => {})); }
+  if (answerRun.startFailed || !answerRun.sawEvent) markAnswerFailed(db, workId, answerRun.startFailed ? 'start-failed' : 'no-event');
+  (opts.onUpdate ?? (() => {}))(snapshot(db, workId));
   return { ok: true };
+}
+
+const ANSWER_DELIVERY = Object.freeze({
+  SUBMITTED: 'answer_submitted_locally', PENDING: 'delivery_pending', OBSERVED: 'delivered_observed', FAILED: 'delivery_failed_unknown' });
+const markAnswerFailed = (db, workId, reason) => writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW,
+  payload: JSON.stringify({ juqodeAnswerDelivery: { state: ANSWER_DELIVERY.FAILED, reason } }) });
+/** What is KNOWN about the user's latest answer, read from rows (no schema change; an answer an older build stored reads as `answer_submitted_locally`).
+ * `delivered_observed` is never returned. */
+function answerDeliveryOf(db, workId, entry) {
+  const last = db.prepare("select seq from work_signal where work_id = ? and source = 'user' and kind = 'answer' order by seq desc limit 1").get(workId);
+  if (!last) return null;
+  if (entry?.answerInFlight) return ANSWER_DELIVERY.PENDING;
+  const failed = db.prepare("select 1 as x from work_signal where work_id = ? and source = 'juqode' and seq > ? and payload like '%juqodeAnswerDelivery%' limit 1").get(workId, last.seq);
+  return failed ? ANSWER_DELIVERY.FAILED : ANSWER_DELIVERY.SUBMITTED;
 }
 
 /**
@@ -1109,4 +1138,4 @@ function revert(db, workId, project, store) {
 
 module.exports = { start, allow, answer, cancel, snapshot, preflight, changes, captureAfter,
                    finishResult, saveDiffs, blocksFor, readerFor, revert, watchQuiet, live, starting,
-                   QUIET_MS, CANCEL_CONFIRM_MS, maskPayload };
+                   QUIET_MS, CANCEL_CONFIRM_MS, maskPayload, ANSWER_DELIVERY };

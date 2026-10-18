@@ -123,6 +123,7 @@ function workCard(snap, api, nav, state) {
   card.appendChild(route);
 
   card.appendChild(liveness(snap));
+  { const al = answerLine(snap); if (al) card.appendChild(al); }
 
   /* Only while the Work is actually waiting on the user. An ended Work kept a live
    * `허용하고 다시 해 보기` next to its own 취소했어요 result — pressing it edited files on a
@@ -161,6 +162,19 @@ function workCard(snap, api, nav, state) {
 
 /* A chip is a LABEL. `18` writes the panel titles as sentences and gives them a UI context of
  * "카드 제목"; repeating one in the chip says the same thing twice on one surface (§0.8). */
+/** §8.3: what is KNOWN about the user's last answer. Never says "delivered": `delivered_observed` has no evidence definition yet. */
+export function answerLine(snap) {
+  if (snap.status === 'ended') return null;
+  const text = snap.answerDelivery === 'answer_submitted_locally' ? C.gap.answerSubmitted
+    : snap.answerDelivery === 'delivery_pending' ? C.gap.answerPending
+      : snap.answerDelivery === 'delivery_failed_unknown' ? C.gap.answerFailed : null;
+  if (!text) return null;
+  const line = el('div', 'xs mut2', text);
+  line.setAttribute('data-el', 'answer-delivery');
+  line.setAttribute('data-state', snap.answerDelivery);
+  return line;
+}
+
 export function stateChip(snap) {
   if (snap.status === 'ended') {
     return el('span', `chip ${OUTCOME[snap.outcome]?.cls ?? 'unk'}`, outcomeTitle(snap.outcome));

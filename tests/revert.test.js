@@ -226,6 +226,8 @@ test('되돌리기: a directory the Work replaced with a symlink to OUTSIDE cann
   const after = gitEvidence.capture(root, store, 'after');
   const done = gitEvidence.restore(root, store, before.ref, after.ref);
   assert.deepStrictEqual(fs.readdirSync(out), [], 'the restore wrote into a directory outside the project');
-  assert.ok(done.some((f) => f.path === 'sub/a.txt' && f.action === 'failed'), 'the refused file must be REPORTED as failed, not skipped silently');
-  assert.ok(!done.some((f) => f.path === 'sub/a.txt' && f.action === 'restored'));
+  /* the link is removed (never followed) and the file is restored inside the project - both reported, none silent */
+  assert.ok(done.some((f) => f.path === 'sub' && f.action === 'removed'));
+  assert.ok(done.some((f) => f.path === 'sub/a.txt' && f.action === 'restored'));
+  assert.strictEqual(fs.readFileSync(path.join(root, 'sub/a.txt'), 'utf8'), 'ORIGINAL\n');
 });
