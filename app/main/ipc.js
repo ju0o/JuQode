@@ -438,7 +438,8 @@ function makeHandlers(deps) {
       const gate = needDb();
       if (gate) return gate;
       if (confirmedStopped !== true) return { ok: false, reason: 'confirmation-required' };
-      if (!Array.isArray(runIds) || !runIds.length || runIds.some((x) => typeof x !== 'string' || !x)) return { ok: false, reason: 'no-runs-named' };
+      const bad = (!guard.shortId(projectId) ? { ok: false, reason: 'bad-input' } : null) ?? guard.idList(runIds);
+      if (bad) return bad;
       if (!db().prepare('select id from project where id = ?').get(projectId)) return { ok: false, reason: 'no-project' };
       if (!ensureHolds(projectId)) return { ok: false, reason: 'qc-restore-failed', detail: qcUncertain.restoreFailure(projectId)?.reason ?? null };
       const root = deps.evidenceStore(projectId);

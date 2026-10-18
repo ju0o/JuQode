@@ -108,9 +108,9 @@ test('Git Evidence excludes secret FILES by name before opening them (it does no
     assert.strictEqual(isExcludedPath(f), true, f);
   }
   assert.strictEqual(isExcludedPath('src/app.js'), false);
-  // FINDING (PM decision, D-126a is the list): these usually hold credentials and are NOT on it.
+  // V1-409: the PM-approved widening of D-126a (F-M3). Pinned so a removal fails here.
   for (const f of ['.npmrc', '.netrc', '.pypirc', 'credentials.json', 'service-account.json', 'release.keystore']) {
-    assert.strictEqual(isExcludedPath(f), false, `${f}: if this starts failing, D-126a was widened - update the contract`);
+    assert.strictEqual(isExcludedPath(f), true, f);
   }
 });
 

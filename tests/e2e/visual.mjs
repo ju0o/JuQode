@@ -2968,7 +2968,8 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     await evalJs(`document.querySelector('${sel}').focus()`);
     await press('Enter', 'Enter', 13); await sleep(250);
     const opened = JSON.parse(await evalJs(`JSON.stringify({ cards: [...document.querySelectorAll('.sc04-rawcard')].map((c) => ({ title: c.querySelector('.sc04-filename').title, patch: c.querySelector('.sc04-patch')?.textContent ?? null })),
-      focusIsRaw: document.activeElement?.classList?.contains('sc04-raw'), on: document.querySelectorAll('.sc04-block.on').length })`));
+      focusIsRaw: document.activeElement?.classList?.contains('sc04-raw'), on: document.querySelectorAll('.sc04-block.on').length,
+      note: document.querySelector('.sc04-rawnote')?.textContent ?? null, noteBeforeCopy: Boolean(document.querySelector('.sc04-rawnote')?.compareDocumentPosition(document.querySelector('.sc04-copy')) & Node.DOCUMENT_POSITION_FOLLOWING), noteBold: getComputedStyle(document.querySelector('.sc04-rawnote')).fontWeight })`));
     await evalJs(`document.querySelector('.sc04-copy').click()`); await sleep(100);
     const copied = JSON.parse(await evalJs(`JSON.stringify(window.__copied)`));
     await press('Escape', 'Escape', 27); await sleep(250);
@@ -4644,6 +4645,8 @@ for (const [kind, rows] of Object.entries(results.sc04d3)) {
     assert.strictEqual(r.opened.cards[0].patch, PATCH[r.fi], `${at}: the patch text is not the stored patch, byte for byte`);
     assert.strictEqual(r.opened.on, 1, `${at}: ${r.opened.on} blocks marked selected`);
     assert.strictEqual(r.opened.focusIsRaw, true, `${at}: opening Raw did not move focus into it`);
+    assert.strictEqual(r.opened.note, '원문 변경 내용은 가려지지 않고 복사돼요. 비밀번호나 비밀 키가 들어 있는지 확인해 주세요.', `${at}: the raw-copy note is missing or changed`);
+    assert.ok(r.opened.noteBeforeCopy && Number(r.opened.noteBold) <= 400, `${at}: the raw-copy note must sit beside the copy button and not be emphasised`);
     assert.deepStrictEqual(r.copied, [PATCH[r.fi]], `${at}: copy did not copy exactly this file's stored patch: ${JSON.stringify(r.copied)}`);
     assert.deepStrictEqual([r.closed.raw, r.closed.patches, r.closed.focus], [false, 0, `${r.fi}:0`], `${at}: Esc did not close Raw and return focus to the block: ${JSON.stringify(r.closed)}`);
   }

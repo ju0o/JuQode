@@ -21,11 +21,15 @@ const path = require('node:path');
 
 /** D-126a lists these by name. `.env*` is a prefix rule, not just `.env` and `.env.<x>`. */
 const GLOBS = ['.env*', '*.pem', '*.key', '*.p12', '*.pfx', '*.jks',
-               'id_rsa*', 'id_dsa*', 'id_ecdsa*', 'id_ed25519*'];
+               'id_rsa*', 'id_dsa*', 'id_ecdsa*', 'id_ed25519*',
+               /* V1-409 security reinforcement (PM-approved; D-126a canon text is unchanged): package-
+                * registry / netrc / cloud credential files that D-126a's name list did not cover. */
+               '.npmrc', '.netrc', '.pypirc', 'credentials.json', 'service-account.json', '*.keystore'];
 
 const RE = [
   /^\.env/i, /\.pem$/i, /\.key$/i, /\.p12$/i, /\.pfx$/i, /\.jks$/i,
   /^id_rsa/i, /^id_dsa/i, /^id_ecdsa/i, /^id_ed25519/i,
+  /^\.npmrc$/i, /^\.netrc$/i, /^\.pypirc$/i, /^credentials\.json$/i, /^service-account\.json$/i, /\.keystore$/i,
 ];
 
 const isSecretName = (name) => RE.some((re) => re.test(name));

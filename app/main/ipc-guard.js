@@ -14,6 +14,7 @@ const LIMITS = Object.freeze({
   criteria: 50,         // acceptance criteria per Task
   dependencies: 100,    // Task ids per Task
   id: 128,              // any id / key the renderer names
+  ackRuns: 50,          // runs named in ONE qc-ack-stopped request
 });
 
 /* UTF-16 length bounds the code-point count: points <= length <= 2*points. Only the band in
@@ -46,6 +47,14 @@ function shellLine(value) {
 }
 
 const shortId = (v) => typeof v === 'string' && v.length > 0 && v.length <= LIMITS.id;
+
+/** An array of ids the renderer names (qc-ack-stopped). Shape and size only; ownership stays with the handler. */
+function idList(value, max = LIMITS.ackRuns) {
+  if (!Array.isArray(value) || !value.length) return { ok: false, reason: 'no-runs-named' };
+  if (value.length > max) return tooLong(max, 'items');
+  if (!value.every(shortId)) return badInput();
+  return null;
+}
 
 /** The Task input / patch the renderer sends. Shape and size only; meaning stays in `repo`. */
 function taskInput(input, { patch = false } = {}) {
@@ -151,5 +160,5 @@ const DETAIL_EXEMPT = new Set(['juqode:open-project', 'juqode:open-path']);
 const publicOut = (channel, r) => (r && typeof r === 'object' && r.detail != null && !DETAIL_EXEMPT.has(channel)
   ? { ...r, detail: scrubDetail(r.detail) } : r);
 
-module.exports = { scrubString, scrubDetail, publicOut, DETAIL_EXEMPT, LIMITS, text, shellLine, taskInput, shortId, taskErrorCode, TASK_ERRORS, REVIEW_ERRORS, TASK_CODES, safeCode,
+module.exports = { idList, scrubString, scrubDetail, publicOut, DETAIL_EXEMPT, LIMITS, text, shellLine, taskInput, shortId, taskErrorCode, TASK_ERRORS, REVIEW_ERRORS, TASK_CODES, safeCode,
   overPoints, overBytes };

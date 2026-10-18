@@ -502,6 +502,7 @@ function rawColumn(group, state, nav) {
   /* `15` SC-04 Inputs: `원문 diff 복사`. A reader who cannot get the text out of the app has to
    * retype it. `18` carries the approved label. */
   if (shown.some((f) => f.displayable && f.patch)) {
+    col.appendChild(el('p', 'xs mut sc04-rawnote', C.gap.readerRawNote));   // V1-409: the raw copy is not masked, and says so
     const copy = btn('btn sm ghost sc04-copy', C.reader.copy, async () => {
       const text = shown.filter((f) => f.displayable).map((f) => f.patch).join('\n');
       try { await navigator.clipboard.writeText(text); copy.textContent = C.gap.readerCopied; }

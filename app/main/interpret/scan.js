@@ -37,13 +37,9 @@ const README_BYTES = 8 * 1024;
 
 /* `19` §C1 ④ / D-126a say `.env*`, so the prefix is the rule — `.envrc` and `.env-production`
  * hold credentials just as `.env` does. `id_ed25519` is the modern SSH default and was missing. */
-const SECRET = [
-  /^\.env/i, /\.pem$/i, /\.key$/i, /\.p12$/i, /\.pfx$/i, /\.jks$/i,
-  /^id_rsa/i, /^id_dsa/i, /^id_ecdsa/i, /^id_ed25519/i,
-];
+const { isSecretName: isSecret } = require('../evidence/exclude');   // ONE list (V1-409): the scan and the evidence basis cannot disagree
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'build', 'out', 'target', '.next', 'vendor', '__pycache__', '.venv', 'venv']);
 
-const isSecret = (name) => SECRET.some((re) => re.test(name));
 
 /* Manifest → the technology it proves. `19` §C1: manifests are what makes 쓰인 기술 확인됨. */
 const MANIFESTS = [

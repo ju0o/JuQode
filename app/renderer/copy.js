@@ -922,6 +922,7 @@ export const C = {
      * labels collide with approved keys that mean something else — `실행` is `18`'s RUN BUTTON —
      * so the panel lists the six flat rather than duplicating Canon copy for a heading. */
     /* `18` has `reader.copy` for the button; it has no key for what the button says afterwards. */
+    readerRawNote:    '원문 변경 내용은 가려지지 않고 복사돼요. 비밀번호나 비밀 키가 들어 있는지 확인해 주세요.',
     readerCopied:     '복사했어요',
     readerCopyFailed: '복사하지 못했어요',
     /* `18` has `history.changes` for the BUTTON and no key for the count on a row. `15` writes
