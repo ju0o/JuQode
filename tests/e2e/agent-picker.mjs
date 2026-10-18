@@ -249,6 +249,7 @@ await session('ready', FAKE_CLI, async (t) => {
   /* the fixture CLI refuses the edit, so this Task's attempt is WAITING FOR A PERMISSION: that card is the one thing to do */
   const live = await t.ev(`!!document.querySelector('[data-region="inspector"] [data-el="inspect-permission"]')`);
   ok('ready: the saved Task has a live attempt waiting for a permission (fixture)', live);
+  ok('ready: permission wait - 그만두기 says what it does (ends the Work, no refuse-and-continue)', /이 요청을 허용하지 않고 이 작업을 끝내요/.test(await t.ev(`document.querySelector('[data-el="inspect-permission"]').innerText`)));
   ok('ready: permission wait - the AI choice panel is hidden, not competing', await t.ev(`document.querySelector('[data-el="agent-panel"]').hidden === true && document.querySelector('[data-el="agent-panel"]').offsetParent === null`));
   ok('ready: permission wait - no agent control is focusable inside the Inspector', await t.ev(`![...document.querySelectorAll('[data-region="inspector"] [data-agent] input, [data-region="inspector"] [data-act^="agent-"]')].some((n) => n.offsetParent !== null)`));
   for (const [w, th] of [[1200, 'light'], [880, 'dark'], [880, 'light'], [1200, 'dark']]) {

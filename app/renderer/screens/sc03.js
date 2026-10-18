@@ -256,13 +256,12 @@ function permissionPanel(snap, api, state) {
   panel.appendChild(raw);
 
   panel.appendChild(el('div', 'sm', C.work.permGlossB));
-  if (d.argsHidden) panel.appendChild(el('div', 'xs', C.gap.workArgsHidden));
 
   const acts = el('div', 'row-acts');
   /* Decided BEFORE the button is drawn. Offering `허용하고 다시 해 보기` and then explaining
    * that no button can be offered is a control that contradicts itself. */
   if (d.scopable === false) {
-    panel.appendChild(el('div', 'xs mut', C.gap.workNoScope));
+    panel.appendChild(el('div', 'xs mut', d.scopeRefusal === 'outside-project' ? C.gap.workOutsideProject : (d.scopeRefusal === 'args-hidden' ? C.gap.workArgsHiddenRefused : C.gap.workNoScope)));
   } else {
     /* No `cannot-scope` branch here, on purpose. `scopable` on the snapshot and the supervisor's
      * refusal are the SAME computation — `session.allowSpec(denial, cwd)` — over the same
@@ -273,14 +272,14 @@ function permissionPanel(snap, api, state) {
      * are ever allowed to disagree, the honest fix is one authority, not a second message. */
     const retry = btn('btn sm pri', C.work.permRetry, async () => {
       retry.disabled = true;
-      const r = await api.workAllow(snap.work.id, d.toolUseId ?? null);
-      if (r?.reason === 'permission-args-hidden') panel.appendChild(el('div', 'xs', C.gap.workArgsHiddenRefused));
+      await api.workAllow(snap.work.id, d.toolUseId ?? null);
       retry.disabled = false;
     });
     acts.appendChild(retry);
   }
   acts.appendChild(btn('btn sm cancel', C.gap.permStop, () => api.workCancel(snap.work.id)));
   panel.appendChild(acts);
+  panel.appendChild(el('div', 'xs mut', C.gap.permStopNote));
   return panel;
 }
 

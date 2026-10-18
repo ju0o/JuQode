@@ -1301,23 +1301,20 @@ test('a denial carries the GRANT STRING, not only the model\'s raw input', () =>
    * D-133's whole contract is that the person approves what they were shown. */
   const session = require(path.join(R, 'app/main/claude/session.js'));
   const cwd = '/p/app';
-  const denial = { tool: 'Edit', toolUseId: 't1', input: { file_path: '../../etc/hosts' } };
-  const spec = session.allowSpec(denial, cwd);
-  if (fake.WIN) {
-    /* How Claude Code spells a path outside the project on Windows is UNKNOWN, so there is no grant. */
-    assert.strictEqual(spec, null);
-  } else {
-    assert.strictEqual(spec, 'Edit(//etc/hosts)');
-    /* The raw input and the grant do NOT read the same — which is exactly why the card must
-     * carry the grant. */
-    assert.notStrictEqual(denial.input.file_path, spec);
-  }
-
+  /* A path that leaves the project is NOT offered a grant at all (V1-004 §7.7; it used to be `Edit(//etc/hosts)` on POSIX). */
+  const out = { tool: 'Edit', toolUseId: 't1', input: { file_path: '../../etc/hosts' } };
+  assert.strictEqual(session.allowSpec(out, '/p/app'), null);
+  assert.strictEqual(session.scopeOf(out, '/p/app').refusal, 'outside-project');
+  /* what the card shows IS the grant: a relative path that stays inside resolves to the same string the flag gets */
+  const inside = { tool: 'Edit', toolUseId: 't1', input: { file_path: './sub/../hello.txt' } };
+  const dir = tempDir('juqode-spec-');
+  assert.strictEqual(session.allowSpec(inside, dir), 'Edit(hello.txt)');
+  assert.notStrictEqual(inside.input.file_path, 'Edit(hello.txt)');
   /* The snapshot puts it there. */
   const sup = srcOf('app/main/work/supervisor.js');
-  assert.ok(/const spec = session\.allowSpec\(d, cwd \?\? '\/'\);/.test(sup),
+  assert.ok(/const r = session\.scopeOf\(d, cwd \?\? '\/'\);/.test(sup),
     'withScope no longer builds the spec');
-  assert.ok(/return \{ \.\.\.d, scopable: Boolean\(spec\), spec \};/.test(sup),
+  assert.ok(/scopable: Boolean\(r\.spec\), spec: r\.spec \?\? null/.test(sup),
     'the grant string does not travel with the denial');
 
   /* …and the card prefers it. */

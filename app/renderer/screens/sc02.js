@@ -1118,7 +1118,7 @@ function inspectPermission(snap, api, refresh) {
   panel.appendChild(raw);
   const acts = el('div', 'row-acts');
   if (d.scopable === false) {
-    panel.appendChild(el('div', 'xs mut', C.gap.workNoScope));
+    panel.appendChild(el('div', 'xs mut', d.scopeRefusal === 'outside-project' ? C.gap.workOutsideProject : (d.scopeRefusal === 'args-hidden' ? C.gap.workArgsHiddenRefused : C.gap.workNoScope)));
   } else {
     const allow = btn('btn sm pri', C.gap.board.allowContinue, async () => {
       allow.disabled = true;
@@ -1133,6 +1133,7 @@ function inspectPermission(snap, api, refresh) {
     await refresh();
   }));
   panel.appendChild(acts);
+  panel.appendChild(el('div', 'xs mut', C.gap.permStopNote));
   return panel;
 }
 

@@ -216,3 +216,16 @@ test('다른 행이 아직 가리키는 blob 은 지우지 않는다', () => {
     .map((n) => `diffs/${n}`)[0], '남은 행의 참조가 실제 파일과 다르다');
   db.close();
 });
+
+test('되돌리기: a directory the Work replaced with a symlink to OUTSIDE cannot carry the restore out of the project', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows (H1 not run)' }, () => {
+  const { root, store } = repoWith({ 'sub/a.txt': 'ORIGINAL\n', 'keep.txt': 'k\n' });
+  const out = fs.realpathSync(tempDir('juqode-revert-outside-'));          // a scratch "outside"; nothing real is touched
+  const before = gitEvidence.capture(root, store, 'before');
+  fs.rmSync(path.join(root, 'sub'), { recursive: true });
+  fs.symlinkSync(out, path.join(root, 'sub'));
+  const after = gitEvidence.capture(root, store, 'after');
+  const done = gitEvidence.restore(root, store, before.ref, after.ref);
+  assert.deepStrictEqual(fs.readdirSync(out), [], 'the restore wrote into a directory outside the project');
+  assert.ok(done.some((f) => f.path === 'sub/a.txt' && f.action === 'failed'), 'the refused file must be REPORTED as failed, not skipped silently');
+  assert.ok(!done.some((f) => f.path === 'sub/a.txt' && f.action === 'restored'));
+});

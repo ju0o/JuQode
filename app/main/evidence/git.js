@@ -450,6 +450,24 @@ function treeModes(root, store, ref) {
   return modes;
 }
 
+/** Is the directory that would receive `abs` really inside `realRoot`? Walks up to the nearest existing ancestor of the parent. */
+function realParentInside(realRoot, abs) {
+  let p = path.dirname(abs);
+  for (;;) {
+    let exists = true;
+    try { fs.lstatSync(p); } catch (e) { if (e.code !== 'ENOENT') return false; exists = false; }
+    if (exists) {
+      let real;
+      try { real = fs.realpathSync(p); } catch { return false; }
+      const rel = path.relative(realRoot, real);
+      return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+    }
+    const up = path.dirname(p);
+    if (up === p) return false;
+    p = up;
+  }
+}
+
 /**
  * Put every file this Work changed back to its before-basis content.
  *
@@ -459,6 +477,8 @@ function treeModes(root, store, ref) {
  */
 function restore(root, store, beforeRef, afterRef) {
   const paths = changedPaths(root, store, beforeRef, afterRef);
+  let realRoot;
+  try { realRoot = fs.realpathSync(root); } catch { return paths.map((rel) => ({ path: rel, action: 'failed' })); }
   const modes = treeModes(root, store, beforeRef);
   const done = [];
 
@@ -468,6 +488,10 @@ function restore(root, store, beforeRef, afterRef) {
      * here. It makes "nothing outside the project is written" a property of the code rather
      * than a property of the data. */
     if (abs !== root && !abs.startsWith(root + path.sep)) { done.push({ path: rel, action: 'failed' }); continue; }
+    /* ...and the same on the REAL filesystem: a directory the Work replaced with a symlink must not carry the write out of the
+     * project (V1-004 §7.7 family). The check is on the nearest existing ancestor of the PARENT - the file itself may be absent or
+     * be a link we are about to remove (removing a link never follows it). Anything that cannot be resolved is `failed`. */
+    if (!realParentInside(realRoot, abs)) { done.push({ path: rel, action: 'failed' }); continue; }
 
     const bytes = bytesAt(root, store, beforeRef, rel);
     if (bytes === null) {

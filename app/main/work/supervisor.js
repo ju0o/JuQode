@@ -447,8 +447,8 @@ function manifestFiles(db, workId, phase) {
  * can point at one file while READING as two different places. The card showed the raw one.
  */
 const withScope = (d, cwd) => {
-  const spec = session.allowSpec(d, cwd ?? '/');
-  return { ...d, scopable: Boolean(spec), spec };
+  const r = session.scopeOf(d, cwd ?? '/');
+  return { ...d, scopable: Boolean(r.spec), spec: r.spec ?? null, ...(r.spec ? {} : { scopeRefusal: r.refusal }) };
 };
 
 /* One masking rule for what is STORED and for what a row stored by an OLDER build shows when it is read back
@@ -739,9 +739,14 @@ function apply(db, workId, sig, onUpdate) {
  * renderer is masked; the state itself, and so what a grant acts on, is untouched. */
 const masked = (v) => (v == null ? v : safeStructuredSnapshot(v));
 /* What the card shows is the masked copy; what the grant acts on is the raw denial. When they differ, the user is approving
- * something part of which they cannot read. `argsHidden` says so on the card, and `allow` refuses in v1-protected mode. */
+ * something part of which they cannot read. the card offers no allow button and `allow` refuses - in every execution mode (V1-004 §7.8). */
 const hidesArgs = (raw) => JSON.stringify(masked(raw)) !== JSON.stringify(raw);
-const shownPermission = (d, cwd) => { const raw = withScope(d, cwd); return { ...masked(raw), argsHidden: hidesArgs(raw) }; };
+const shownPermission = (d, cwd) => {
+  const raw = withScope(d, cwd);
+  const hidden = hidesArgs(raw);
+  /* V1-004 §7.8: a grant whose effective scope the card cannot show is not offered, in ANY execution mode. */
+  return { ...masked(raw), argsHidden: hidden, ...(hidden ? { scopable: false, scopeRefusal: 'args-hidden' } : {}) };
+};
 
 function snapshot(db, workId) {
   const work = repo.getWork(db, workId);
@@ -828,12 +833,15 @@ async function allow(db, workId, toolUseId, opts = {}) {
   const denial = toolUseId ? open.find((d) => d.toolUseId === toolUseId) : open[0];
   if (!denial) return { ok: false, reason: toolUseId ? 'no-such-permission' : 'no-open-permission' };
 
-  const spec = session.allowSpec(denial, entry.cwd);
-  /* Nothing we can scope narrowly means no grant at all — never a grant of the whole tool. */
-  if (!spec) return { ok: false, reason: 'cannot-scope' };
-
   const refused = resumeRefusal(db, entry);
   if (refused) return refused;
+
+  const scope = session.scopeOf(denial, entry.cwd);
+  const spec = scope.spec ?? null;
+  /* Nothing we can scope narrowly means no grant at all — never a grant of the whole tool. A file outside the project (or one that
+   * leads out through a link, or that cannot be told apart from one) is refused here: no grant record, no process. */
+  if (!spec) return { ok: false, reason: scope.refusal === 'outside-project' ? 'outside-project' : 'cannot-scope' };
+
 
   /* THE WHOLE TOOL SURFACE of the retry, not just the grant: `--allowedTools` only pre-approves, it does not remove tools. The retry may use the
    * denied tool and Read; every other built-in tool and every connector (MCP) tool is off (`--tools` + `--strict-mcp-config`). A denied tool that
@@ -841,10 +849,10 @@ async function allow(db, workId, toolUseId, opts = {}) {
   const tools = scopedRetryTools(denial);
   if (tools === null) return { ok: false, reason: 'cannot-scope-tool-surface' };
   const mode = opts.executionMode ?? entry.mode ?? undefined;
-  /* v1-protected: no approval of something the card could not show. dev-compat goes on (and says `argsHidden`), and is never
-   * labelled attested. This is a refusal BEFORE the grant; it does not make a later audit a prevention. */
+  /* No approval of something the card could not show - the mode (dev-compat or v1-protected) does not matter. Refused BEFORE the
+   * grant record and before any process; this is a refusal, not an audit: nothing ran. */
   const argsHidden = hidesArgs(withScope(denial, entry.cwd));
-  if (argsHidden && session.effectiveMode(mode) === 'v1-protected') return { ok: false, reason: 'permission-args-hidden' };
+  if (argsHidden) return { ok: false, reason: 'permission-args-hidden' };
   /* Dry run of the launch checks BEFORE the grant is recorded or the state moves: a refused launch leaves the Work exactly as it was. */
   const pf = session.preflightRun({ sessionId: entry.sessionId, resume: true, allowedTools: [spec], tools, bin: entry.bin, mode, recorded: entry.launchIdentity ?? null });
   if (!pf.ok) return { ok: false, reason: 'preflight-refused', detail: pf.reason };

@@ -1012,8 +1012,8 @@ export const C = {
     briefFailOther: '폴더를 읽는 중에 막혔어요.',
     /* SC-03 states `18` has no key for. Written in the `18` §0 voice; filed as CF-8. */
     workDenialTool: '하려던 동작',
-    workArgsHidden: '허용할 동작의 일부가 가려져 있어요. 보이는 부분만 보고 허용하면, 가려진 부분까지 함께 허용될 수 있어요.',
-    workArgsHiddenRefused: '가려진 부분이 있어서 이 보호 모드에서는 허용하지 않았어요. 아무것도 실행되지 않았어요.',
+    workArgsHiddenRefused: '허용할 동작의 일부가 가려져 있어서 허용 버튼을 드리지 않아요. 아무것도 실행되지 않았어요.',
+    workOutsideProject: '이 동작은 이 프로젝트 밖의 파일을 바꾸려는 거라서 허용 버튼을 드리지 않아요. 아무것도 바뀌지 않았어요.',
     workNoScope:    '이 동작은 좁게 허용할 방법이 없어서 허용 버튼을 드리지 않아요.',
     /* Short labels for the header chip. `18`'s panel TITLES are sentences and belong in the
      * panel; a chip that repeats a 17-word sentence says the same thing twice (`18` §0.8). */
@@ -1032,6 +1032,7 @@ export const C = {
     claimNotDone:     '허용되지 않아서 하지 못한 것',
     /* `15` SC-03 contract B names this button; `18` carries the other three of the four. */
     permStop:       '그만두기',
+    permStopNote:   '그만두기는 이 요청을 허용하지 않고 이 작업을 끝내요. 이 요청만 거절하고 이어가는 기능은 아직 없어요.',
     claudeUnknown:  'Claude Code를 쓸 수 없는 이유를 확인하지 못했어요.',
     workRefused:    '작업을 시작하지 않았어요.',
     /* The liveness line names WHAT was last seen. The signal kinds are machine words and

@@ -119,7 +119,8 @@ test('permission card: a command with a secret says args are hidden; v1-protecte
   assert.strictEqual(snap.permission?.tool, 'Bash');
   assert.strictEqual(snap.permission.argsHidden, true);
   assert.ok(!leaks(snap.permission), 'the card must not show the secret');
-  assert.ok(snap.permission.scopable, 'scopable must hold or this test proves nothing');
+  assert.strictEqual(snap.permission.scopable, false, 'no allow button when the card cannot show what is granted');
+  assert.strictEqual(snap.permission.scopeRefusal, 'args-hidden');
   const before = rows(hidden.db);
   const out = await supervisor.allow(hidden.db, r.workId, 'tu_p', { executionMode: 'v1-protected' });
   assert.deepStrictEqual([out.ok, out.reason], [false, 'permission-args-hidden']);
@@ -135,26 +136,28 @@ test('permission card: a command with a secret says args are hidden; v1-protecte
   assert.strictEqual(cs.permission.spec, require(path.join(R, 'app/main/claude/session.js')).allowSpec({ tool: 'Bash', input: { command: 'echo hello' } }, live.cwd), 'the card shows the grant string itself');
 });
 
-test('dev-compat still allows a card with hidden args, but says so on the card, in the grant record and in the answer (never "attested")', async () => {
+test('dev-compat refuses a card with hidden args too (V1-004 §7.8): no grant record, no process, the Work keeps waiting', async () => {
   const b = permBench(`echo ${API} done`);
   const r = await supervisor.start(b.db, b.project, 'x', { evidenceStore: b.store, bin: b.bin, detect: AVAILABLE });
   await r.done;
+  const retried = path.join(b.home, 'RETRIED');
   const e = supervisor.live.get(r.workId);
-  e.bin = fake.scriptBin(b.home, 'retry-ok', 'init(); result(); process.exit(0);');
+  e.bin = fake.scriptBin(b.home, 'retry-ok', `require('fs').writeFileSync(${JSON.stringify(retried)}, 'ran'); init(); result(); process.exit(0);`);
   e.binding = require(path.join(R, 'app/main/claude/session.js')).bindSession({ cwd: e.cwd, sessionId: e.sessionId, reportedSessionId: e.sessionId, bin: e.bin });
   e.launchIdentity = null;
-  const out = await supervisor.allow(b.db, r.workId, 'tu_p', { executionMode: 'dev-compat' });
-  assert.strictEqual(out.ok, true, JSON.stringify(out));
-  assert.strictEqual(out.argsHidden, true);
-  assert.strictEqual(out.safety, 'dev-compat-unattested');
-  const g = repo.signalsFor(b.db, r.workId).find((s) => s.kind === 'permission_granted');
-  assert.strictEqual(JSON.parse(g.payload).argsHidden, true);
-  assert.ok(!leaks(g.payload), 'the stored grant record is masked too');
+  const before = rows(b.db);
+  for (const mode of ['dev-compat', undefined]) {
+    const out = await supervisor.allow(b.db, r.workId, 'tu_p', mode ? { executionMode: mode } : {});
+    assert.deepStrictEqual([out.ok, out.reason], [false, 'permission-args-hidden'], String(mode));
+  }
+  assert.strictEqual(rows(b.db), before, 'a refusal records nothing and moves nothing');
+  assert.ok(!fs.existsSync(retried), 'a retry process was started');
+  assert.strictEqual(repo.getWork(b.db, r.workId).status, 'permission_waiting');
 });
 
 test('the renderer card shows the hidden-args sentence and the protected-mode refusal sentence (source pin; no GUI run claimed here)', () => {
   const src = require(path.join(__dirname, 'src.js')).code('app/renderer/screens/sc03.js');
-  assert.ok(/d\.argsHidden/.test(src) && /permission-args-hidden/.test(src));
+  assert.ok(/scopeRefusal === 'args-hidden'/.test(src) && /workArgsHiddenRefused/.test(src));
   const C = require(path.join(__dirname, 'src.js')).text('app/renderer/copy.js');
-  assert.ok(C.includes('workArgsHidden:') && C.includes('workArgsHiddenRefused:'));
+  assert.ok(C.includes('workArgsHiddenRefused:'));
 });

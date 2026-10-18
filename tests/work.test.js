@@ -917,17 +917,14 @@ test('parallel tool calls in one message are all counted', () => {
 });
 
 test('allowing narrows to one tool and one target, never to the tool as a whole', () => {
-  assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: '/p/note.txt' } }, '/p'), 'Edit(note.txt)');
-  assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: '/p/note.txt' } }, '/p'), 'Edit(note.txt)',
+  /* the project must be a REAL directory now: containment is decided on the real filesystem (V1-004 §7.7) */
+  const P = fs.realpathSync(tempDir('juqode-work-spec-'));
+  assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: `${P}/note.txt` } }, P), 'Edit(note.txt)');
+  assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: `${P}/note.txt` } }, P), 'Edit(note.txt)',
     'Claude Code Write requests must use its file-edit permission rule');
-  /* `Edit(/abs)` with ONE leading slash is read as a cwd-relative glob and silently denies.
-   * That is the POSIX form. How Claude Code spells an absolute path OUTSIDE the project on Windows
-   * (drive letter, backslashes) is UNKNOWN — unmeasured on H1 — so no exact Windows string is
-   * asserted here; the Windows case below only pins that it stays ONE scoped target. */
-  if (!WIN) {
-    assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: '/elsewhere/x' } }, '/p'), 'Edit(//elsewhere/x)');
-    assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: '/elsewhere/x' } }, '/p'), 'Edit(//elsewhere/x)');
-  }
+  /* A path OUTSIDE the project gets no grant at all (V1-004 §7.7; it used to be `Edit(//elsewhere/x)` on POSIX). */
+  assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: '/elsewhere/x' } }, P), null);
+  assert.strictEqual(allowSpec({ tool: 'Write', input: { file_path: '/elsewhere/x' } }, P), null);
   assert.strictEqual(allowSpec({ tool: 'Bash', input: { command: 'npm test' } }, '/p'), 'Bash(npm test:*)');
   assert.strictEqual(allowSpec({ tool: 'Bash', input: {} }, '/p'), null,
     'with nothing to scope to, the answer is no grant — never a grant of the whole tool');
@@ -937,17 +934,16 @@ test('allowing narrows to one tool and one target, never to the tool as a whole'
    * consequences: a glob target produced `Edit(*)`, which is the bare-tool grant D-133 bans
    * outright while the card showed one path; and `)` plus `,` closed the spec and opened a
    * second, independent one. Anything that could mean more than one thing is refused. */
-  for (const bad of ['/p/*', '/p/**', '/p/a?', '/p/[abc]', '/p/a),Bash(rm -rf ~', '/p/a),Edit', '/p/x\ny']) {
-    assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: bad } }, '/p'), null,
+  for (const bad of ['*', '**', 'a?', '[abc]', 'a),Bash(rm -rf ~', 'a),Edit', 'x\ny']) {
+    assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: `${P}/${bad}` } }, P), null,
       `${JSON.stringify(bad)} produced a grant`);
   }
   assert.strictEqual(allowSpec({ tool: 'Bash', input: { command: 'ls),Edit' } }, '/p'), null);
-  assert.strictEqual(allowSpec({ tool: 'Edit; rm -rf /', input: { file_path: '/p/a' } }, '/p'), null,
+  assert.strictEqual(allowSpec({ tool: 'Edit; rm -rf /', input: { file_path: `${P}/a` } }, P), null,
     'the tool name is not validated');
 
   /* A relative path is the PROJECT's, not JuQode's working directory. */
-  assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: 'sub/a.txt' } }, '/p'), 'sub/a.txt'
-    ? 'Edit(sub/a.txt)' : null);
+  assert.strictEqual(allowSpec({ tool: 'Edit', input: { file_path: 'sub/a.txt' } }, P), 'Edit(sub/a.txt)');
 });
 
 test('Windows: a path outside the project gets NO grant (its spelling in Claude Code is UNKNOWN); inside stays scoped', { skip: !WIN && 'Windows-only' }, () => {

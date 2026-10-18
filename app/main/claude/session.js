@@ -165,10 +165,43 @@ function baseArgs(sessionId) {
 const UNSAFE_TARGET = /[(),*?[\]{}!\n\r\0]|^\s*$/;
 
 function allowSpec(denial, cwd) {
+  const r = scopeOf(denial, cwd);
+  return r.spec ?? null;
+}
+
+/** Where a file the model names REALLY is: symlinks resolved, and for a file that does not exist yet, the real path of its nearest
+ * existing ancestor plus the remaining names. `null` = ambiguous (dangling link, a non-directory in the way, unreadable) and
+ * ambiguity is a refusal, never a guess. */
+function realTarget(abs) {
+  const rest = [];
+  let p = abs;
+  for (;;) {
+    let exists = true;
+    try { fs.lstatSync(p); } catch (e) { if (e.code !== 'ENOENT') return null; exists = false; }
+    if (exists) {
+      /* it is there (file, directory or link). A DANGLING link is there too, and realpath refuses it: ambiguous, not "free". */
+      try { return path.join(fs.realpathSync(p), ...rest); } catch { return null; }
+    }
+    const parent = path.dirname(p);
+    if (parent === p) return null;
+    rest.unshift(path.basename(p));
+    p = parent;
+  }
+}
+
+/**
+ * What allowing a refused action would grant, or why nothing is offered.
+ *
+ * A file grant is only ever offered for a file INSIDE the project, checked on the real filesystem (V1-004 §7.7): a relative or
+ * absolute path that leaves the project, a symlink that leads out, and anything ambiguous are refused here - before a grant is
+ * recorded and before any process exists. `Bash` keeps its own contract (the command is the grant); this is not a path check.
+ * @returns {{spec: string}|{refusal: 'outside-project'|'cannot-scope'}}
+ */
+function scopeOf(denial, cwd) {
   /* Claude Code's file permission rule is `Edit`, including calls emitted by its `Write` tool.
    * Use that rule name while keeping the grant scoped to the denied file. */
   const tool = denial?.tool === 'Write' ? 'Edit' : denial?.tool;
-  if (!tool || !/^[A-Za-z][A-Za-z0-9_]*$/.test(tool)) return null;
+  if (!tool || !/^[A-Za-z][A-Za-z0-9_]*$/.test(tool)) return { refusal: 'cannot-scope' };
   const input = denial.input ?? {};
   const file = input.file_path ?? input.path ?? input.notebook_path ?? null;
 
@@ -176,24 +209,26 @@ function allowSpec(denial, cwd) {
     /* Resolve against the PROJECT, not against JuQode's own working directory — measured:
      * a relative `../../../etc/shadow` resolved into an unrelated tree, so the card and the
      * grant named different files. */
-    const abs = path.resolve(cwd, file);
-    const rel = path.relative(cwd, abs).split(path.sep).join('/');
-    const inside = Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
-    /* Outside the project the grant has to be an absolute path, whose spelling in Claude Code's
-     * rule grammar is only known on POSIX (`//abs`). On Windows it is UNKNOWN (unmeasured): the old
-     * code produced `/C:/…`, and a single leading slash is exactly the form that is read as a
-     * cwd-relative glob and silently denies. Not granting is always safe — no grant. */
-    if (!inside && WINDOWS) return null;
-    const target = inside ? rel : `/${abs.split(path.sep).join('/')}`;
-    if (UNSAFE_TARGET.test(target)) return null;
-    return `${tool}(${target})`;
+    const root = cwd ?? '/';
+    const abs = path.resolve(root, file);
+    const rel = path.relative(root, abs).split(path.sep).join('/');
+    const lexicallyInside = Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
+    if (!lexicallyInside) return { refusal: 'outside-project' };
+    if (UNSAFE_TARGET.test(rel)) return { refusal: 'cannot-scope' };
+    let realRoot; let real;
+    try { realRoot = fs.realpathSync(root); } catch { return { refusal: 'cannot-scope' }; }
+    real = realTarget(abs);
+    if (real === null) return { refusal: 'cannot-scope' };
+    const rr = path.relative(realRoot, real);
+    if (!rr || rr.startsWith('..') || path.isAbsolute(rr)) return { refusal: 'outside-project' };
+    return { spec: `${tool}(${rel})` };
   }
 
   if (typeof input.command === 'string' && input.command.trim()) {
-    if (UNSAFE_TARGET.test(input.command)) return null;
-    return `${tool}(${input.command}:*)`;
+    if (UNSAFE_TARGET.test(input.command)) return { refusal: 'cannot-scope' };
+    return { spec: `${tool}(${input.command}:*)` };
   }
-  return null;                       // nothing we can scope narrowly → do not widen it instead
+  return { refusal: 'cannot-scope' };      // nothing we can scope narrowly → do not widen it instead
 }
 
 /**
@@ -404,5 +439,5 @@ const prewarmIdentity = (bin) => identityCache.prewarm(bin || resolveBin()).catc
 /** The mode a launch with this `mode` argument really runs under (anything but exactly 'dev-compat' is protected). */
 const effectiveMode = (mode) => normaliseMode(mode ?? envMode());
 
-module.exports = { effectiveMode, prewarmIdentity, preflightRun, run, stop, sameDir, canonicalDir, binaryIdentity, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
+module.exports = { scopeOf, effectiveMode, prewarmIdentity, preflightRun, run, stop, sameDir, canonicalDir, binaryIdentity, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
   windowsRunnerTreeMayBeAlive, processTreeMayBeAlive };
