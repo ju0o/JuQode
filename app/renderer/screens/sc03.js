@@ -256,6 +256,7 @@ function permissionPanel(snap, api, state) {
   panel.appendChild(raw);
 
   panel.appendChild(el('div', 'sm', C.work.permGlossB));
+  if (d.argsHidden) panel.appendChild(el('div', 'xs', C.gap.workArgsHidden));
 
   const acts = el('div', 'row-acts');
   /* Decided BEFORE the button is drawn. Offering `허용하고 다시 해 보기` and then explaining
@@ -272,7 +273,8 @@ function permissionPanel(snap, api, state) {
      * are ever allowed to disagree, the honest fix is one authority, not a second message. */
     const retry = btn('btn sm pri', C.work.permRetry, async () => {
       retry.disabled = true;
-      await api.workAllow(snap.work.id, d.toolUseId ?? null);
+      const r = await api.workAllow(snap.work.id, d.toolUseId ?? null);
+      if (r?.reason === 'permission-args-hidden') panel.appendChild(el('div', 'xs', C.gap.workArgsHiddenRefused));
       retry.disabled = false;
     });
     acts.appendChild(retry);

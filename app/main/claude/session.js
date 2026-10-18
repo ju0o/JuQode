@@ -15,7 +15,7 @@
  *     `--allowedTools Edit` was measured changing a second, unapproved file.
  */
 const { spawn, spawnSync } = require('node:child_process');
-const { preflightLaunch, createIdentityCache, EXECUTION_MODES } = require('../provider/claude-contract');
+const { preflightLaunch, createIdentityCache, EXECUTION_MODES, normaliseMode } = require('../provider/claude-contract');
 
 /* sha256 per file fingerprint; the version is taken from the process's own `init` event (a `--version` spawn per launch would also pollute fixtures and cost time) */
 const identityCache = createIdentityCache();
@@ -401,5 +401,8 @@ const preflightRun = ({ sessionId, resume = false, allowedTools = [], tools = nu
 /** Hash the binary off the hot path so the adjacent-sync check in run() is a cache hit. Best effort: a failure here only means run() hashes itself. */
 const prewarmIdentity = (bin) => identityCache.prewarm(bin || resolveBin()).catch(() => ({ ok: false }));
 
-module.exports = { prewarmIdentity, preflightRun, run, stop, sameDir, canonicalDir, binaryIdentity, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
+/** The mode a launch with this `mode` argument really runs under (anything but exactly 'dev-compat' is protected). */
+const effectiveMode = (mode) => normaliseMode(mode ?? envMode());
+
+module.exports = { effectiveMode, prewarmIdentity, preflightRun, run, stop, sameDir, canonicalDir, binaryIdentity, bindSession, verifyResume, killPlan, allowSpec, grantedSignal, baseArgs, START_WINDOW_MS,
   windowsRunnerTreeMayBeAlive, processTreeMayBeAlive };

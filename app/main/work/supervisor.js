@@ -451,6 +451,28 @@ const withScope = (d, cwd) => {
   return { ...d, scopable: Boolean(spec), spec };
 };
 
+/* One masking rule for what is STORED and for what a row stored by an OLDER build shows when it is read back
+ * (`readOnly`: an untouched payload is returned byte for byte, and a hit is marked `at:'read'` so the
+ * display copy is auditable). The row itself is never rewritten. */
+function maskPayload(payload, { readOnly = false } = {}) {
+  let parsed = payload;
+  let wasJson = false;
+  if (typeof payload === 'string') {
+    try { parsed = JSON.parse(payload); wasJson = true; } catch { parsed = payload; }
+  }
+  const rules = redactionRules(parsed);
+  if (!rules.length && readOnly) return payload;
+  if (rules.length) {
+    const safe = safeStructuredSnapshot(parsed);
+    const record = safe && typeof safe === 'object' && !Array.isArray(safe) ? safe : { value: safe };
+    record.juqodeRedaction = { applied: true, rules, paths: redactionLocations(parsed).map((item) => item.path), ...(readOnly ? { at: 'read' } : {}) };
+    return JSON.stringify(record);
+  }
+  if (wasJson) return JSON.stringify(safeStructuredSnapshot(parsed));
+  if (typeof parsed !== 'string') return safeStructuredSnapshot(parsed);
+  return safeSnapshot(parsed).safe;
+}
+
 /**
  * ONE authority for `seq`, and a boundary around it.
  *
@@ -462,31 +484,11 @@ const withScope = (d, cwd) => {
  */
 function writeSignal(db, workId, { source, kind, payload }) {
   try {
-    let persistedPayload = payload;
-    {   // masked for EVERY Work (V1-409); the shape and event identifiers survive
-      let parsed = payload;
-      let wasJson = false;
-      if (typeof payload === 'string') {
-        try { parsed = JSON.parse(payload); wasJson = true; } catch { parsed = payload; }
-      }
-      const rules = redactionRules(parsed);
-      if (rules.length) {
-        const safe = safeStructuredSnapshot(parsed);
-        const record = safe && typeof safe === 'object' && !Array.isArray(safe) ? safe : { value: safe };
-        record.juqodeRedaction = { applied: true, rules, paths: redactionLocations(parsed).map((item) => item.path) };
-        persistedPayload = JSON.stringify(record);
-      } else if (wasJson) {
-        persistedPayload = JSON.stringify(safeStructuredSnapshot(parsed));
-      } else if (typeof parsed !== 'string') {
-        persistedPayload = safeStructuredSnapshot(parsed);
-      } else {
-        persistedPayload = safeSnapshot(parsed).safe;
-      }
-    }
+    const persistedPayload = maskPayload(payload);   // masked for EVERY Work (V1-409); shape and event identifiers survive
     repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), source, kind, payload: persistedPayload, observedAt: now() });
     return true;
   } catch (e) {
-    try { repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), source: 'juqode', kind: KIND.RAW, payload: `signal-write-failed: ${/^[A-Za-z0-9_.-]{1,48}$/.test(e?.code) ? e.code : 'unknown'}` }); }
+    try { repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), source: 'juqode', kind: KIND.RAW, payload: `signal-write-failed: ${typeof e?.code === 'string' && /^[A-Za-z0-9_.-]{1,48}$/.test(e.code) ? e.code : 'unknown'}` }); }
     catch { /* the store is beyond us; the app stays up */ }
     return false;
   }
@@ -642,7 +644,7 @@ function readerFor(db, workId, project, store) {
     files: diffs.length,
     evidenceGap: evidenceGap(db, workId),
     groups: groups.map((g) => ({
-      ...g,
+      ...masked({ ...g, files: undefined }),   // title / what / why / affects: explanation text; patch and blocks below stay raw (SC-04)
       files: g.files.map((file) => {
         const d = byFile.get(file);
         const seg = segments.get(file) ?? {};
@@ -736,17 +738,23 @@ function apply(db, workId, sig, onUpdate) {
 /* V1-409: the live state is built from the provider's raw lines (a denied command, a result text). What LEAVES for the
  * renderer is masked; the state itself, and so what a grant acts on, is untouched. */
 const masked = (v) => (v == null ? v : safeStructuredSnapshot(v));
+/* What the card shows is the masked copy; what the grant acts on is the raw denial. When they differ, the user is approving
+ * something part of which they cannot read. `argsHidden` says so on the card, and `allow` refuses in v1-protected mode. */
+const hidesArgs = (raw) => JSON.stringify(masked(raw)) !== JSON.stringify(raw);
+const shownPermission = (d, cwd) => { const raw = withScope(d, cwd); return { ...masked(raw), argsHidden: hidesArgs(raw) }; };
 
 function snapshot(db, workId) {
   const work = repo.getWork(db, workId);
   if (!work) return null;
   const entry = entryFor(db, workId) ?? { state: initial() };
   const s = entry.state;
+  /* V1-409: rows an OLDER build stored may still hold what the user typed or the provider printed. The row is never
+   * rewritten; the copy that leaves for the renderer is masked by the same rule as a new row. */
   return {
-    work,
-    contextBundle: repo.contextBundleFor(db, workId),
-    runEvidence: repo.runEvidenceFor(db, workId),
-    steps: repo.stepsFor(db, workId),
+    work: { ...work, intent: safeSnapshot(work.intent).safe },
+    contextBundle: masked(repo.contextBundleFor(db, workId)),
+    runEvidence: masked(repo.runEvidenceFor(db, workId)),
+    steps: masked(repo.stepsFor(db, workId)),
     status: work.status,
     outcome: work.outcome,
     lastObserved: s.lastObserved,
@@ -754,8 +762,8 @@ function snapshot(db, workId) {
     /* `scopable` travels with the denial so the screen can decide BEFORE it draws a button:
      * offering `허용하고 다시 해 보기` and then explaining that no button can be offered is a
      * control that contradicts itself. */
-    openPermissions: openPermissions(s).map((d) => masked(withScope(d, entry.cwd))),
-    permission: openPermission(s) ? masked(withScope(openPermission(s), entry.cwd)) : null,
+    openPermissions: openPermissions(s).map((d) => shownPermission(d, entry.cwd)),
+    permission: openPermission(s) ? shownPermission(openPermission(s), entry.cwd) : null,
     finish: masked(s.finish),
     /* WBS-15 · `15` names two quiet states and both are about the ABSENCE of a signal, so they
      * are the one place a clock is legitimate — and it measures how long since the last
@@ -767,7 +775,7 @@ function snapshot(db, workId) {
     cancelUnconfirmed: work.status === 'cancel_requested' && sinceMs(s.cancelRequestedAt) > CANCEL_CONFIRM_MS,
     signalCount: repo.nextSeq(db, workId),
     evidence: { before: Boolean(repo.basisFor(db, workId, 'before')), after: Boolean(repo.basisFor(db, workId, 'after')) },
-    result: work.status === 'ended' ? repo.resultFor(db, workId) : null,
+    result: work.status === 'ended' ? masked(repo.resultFor(db, workId)) : null,
   };
 }
 
@@ -833,13 +841,17 @@ async function allow(db, workId, toolUseId, opts = {}) {
   const tools = scopedRetryTools(denial);
   if (tools === null) return { ok: false, reason: 'cannot-scope-tool-surface' };
   const mode = opts.executionMode ?? entry.mode ?? undefined;
+  /* v1-protected: no approval of something the card could not show. dev-compat goes on (and says `argsHidden`), and is never
+   * labelled attested. This is a refusal BEFORE the grant; it does not make a later audit a prevention. */
+  const argsHidden = hidesArgs(withScope(denial, entry.cwd));
+  if (argsHidden && session.effectiveMode(mode) === 'v1-protected') return { ok: false, reason: 'permission-args-hidden' };
   /* Dry run of the launch checks BEFORE the grant is recorded or the state moves: a refused launch leaves the Work exactly as it was. */
   const pf = session.preflightRun({ sessionId: entry.sessionId, resume: true, allowedTools: [spec], tools, bin: entry.bin, mode, recorded: entry.launchIdentity ?? null });
   if (!pf.ok) return { ok: false, reason: 'preflight-refused', detail: pf.reason };
 
   retrying.add(workId);
   try {
-    return await runRetry(db, workId, entry, denial, spec, { ...opts, tools, mode });
+    return await runRetry(db, workId, entry, denial, spec, { ...opts, tools, mode, argsHidden });
   } finally {
     retrying.delete(workId);
   }
@@ -875,7 +887,7 @@ function endRetryViolation(db, workId, entry, audit, onUpdate) {
 
 async function runRetry(db, workId, entry, denial, spec, opts) {
   const granted = session.grantedSignal(denial, spec);
-  writeSignal(db, workId, { source: 'juqode', kind: KIND.PERMISSION_GRANTED, payload: granted.payload });
+  writeSignal(db, workId, { source: 'juqode', kind: KIND.PERMISSION_GRANTED, payload: { ...granted.payload, argsHidden: Boolean(opts.argsHidden) } });
   apply(db, workId, granted, opts.onUpdate ?? (() => {}));
 
   /* Same Work, same session. Restating the whole request made Claude repeat completed writes
@@ -910,7 +922,7 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
   finishResult(db, workId, opts.project ?? { path: entry.cwd }, entry.store);
   release(db, workId);
   (opts.onUpdate ?? (() => {}))(snapshot(db, workId));
-  return { ok: true, scope: spec, safety: launch?.safety ?? 'dev-compat-unattested', containment: launch?.containment ?? null };
+  return { ok: true, scope: spec, argsHidden: Boolean(opts.argsHidden), safety: launch?.safety ?? 'dev-compat-unattested', containment: launch?.containment ?? null };
 }
 
 /**
@@ -1089,4 +1101,4 @@ function revert(db, workId, project, store) {
 
 module.exports = { start, allow, answer, cancel, snapshot, preflight, changes, captureAfter,
                    finishResult, saveDiffs, blocksFor, readerFor, revert, watchQuiet, live, starting,
-                   QUIET_MS, CANCEL_CONFIRM_MS };
+                   QUIET_MS, CANCEL_CONFIRM_MS, maskPayload };

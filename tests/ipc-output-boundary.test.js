@@ -107,5 +107,40 @@ test('the provider is still sent the user\'s text unmasked (stored form and sent
 test('writeSignal failure records a safe code, never the exception text', () => {
   const src = require(path.join(__dirname, 'src.js')).code('app/main/work/supervisor.js');
   assert.ok(!/signal-write-failed: \$\{e\?\.code \?\? e\?\.message/.test(src));
-  assert.ok(/signal-write-failed: \$\{\/\^\[A-Za-z0-9_\.-\]\{1,48\}\$\/\.test\(e\?\.code\)/.test(src));
+  assert.ok(/signal-write-failed: \$\{typeof e\?\.code === 'string' && \/\^\[A-Za-z0-9_\.-\]\{1,48\}\$\/\.test\(e\.code\)/.test(src));
 });
+
+/* a REAL exception thrown by the store while a signal is written - the fallback row must hold a code and nothing else */
+const FAILURES = [
+  ['SQL error', Object.assign(new Error(`SQLITE_CONSTRAINT: UNIQUE constraint failed: work_signal.seq (insert into work_signal values ('${SECRETS[0]}'))`), { code: 'ERR_SQLITE_ERROR' })],
+  ['local path', Object.assign(new Error('EACCES: permission denied, open \'/home/someone/.config/juqode/app.db\''), { code: 'EACCES' })],
+  ['API token', new Error(`request failed with ${SECRETS[2]}`)],
+  ['multi-line', new Error(`first line\n  at secret (${SECRETS[1]})\n/home/someone/x.js:1:1`)],
+  ['unsafe code', Object.assign(new Error('boom'), { code: `bad code with spaces ${SECRETS[0]}` })],
+];
+for (const [name, err] of FAILURES) {
+  test(`a signal write that throws (${name}) leaves a code-only fallback, keeps the earlier history, and does not stop the Work`, async () => {
+    const dir = tempDir('juqode-wf-');
+    const db = openDb(':memory:');
+    const project = repo.openProject(db, dir, 'p');
+    const home = tempDir('juqode-wf-cli-');
+    const bin = fake.scriptBin(home, 'say', `init(); emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'THROWME' }] } }); result(); process.exit(0);`);
+    const orig = repo.addSignal;
+    let thrown = 0;
+    repo.addSignal = (d, id, sig) => { if (!thrown && String(sig.payload).includes('THROWME')) { thrown++; throw err; } return orig(d, id, sig); };
+    let run;
+    try {
+      run = await supervisor.start(db, project, 'hello', { evidenceStore: tempDir('juqode-wf-store-'), bin, detect: AVAILABLE });
+      await run.done;
+    } finally { repo.addSignal = orig; }
+    assert.strictEqual(thrown, 1, 'the injected failure never fired');
+    const rows = repo.signalsFor(db, run.workId);
+    const fallback = rows.filter((s) => String(s.payload).startsWith('signal-write-failed'));
+    assert.strictEqual(fallback.length, 1);
+    assert.match(fallback[0].payload, /^signal-write-failed: (unknown|ERR_SQLITE_ERROR|EACCES)$/);
+    assert.ok(!/someone|SQLITE_CONSTRAINT|request failed|first line|bad code|THROWME|secret/.test(JSON.stringify(rows)), 'the fallback carried exception text');
+    assert.ok(!hasSecret(rows) && !hasSecret(db.prepare('select * from work_signal').all()));
+    assert.ok(rows.length >= 3 && rows.some((s) => s.kind === 'session_start'), 'earlier history was lost');
+    assert.strictEqual(repo.getWork(db, run.workId).status, 'ended', 'the Work did not reach its end');
+  });
+}

@@ -28,6 +28,7 @@ const { classify } = require('./router/intent');
 const { scan } = require('./interpret/scan');
 const { answers, statusOf } = require('./interpret/answers');
 const guard = require('./ipc-guard');
+const { safeSnapshot } = require('./work/context');
 const { unknownTaskRunWithLiveRunner, unresolvedLegacyUnknownWorks } = require('./work/runner-liveness');
 
 /**
@@ -786,7 +787,7 @@ function makeHandlers(deps) {
          * to zero — `12` has a state for "we could not tell". */
         const changed = w.status === 'ended' ? supervisor.changes(db(), w.id, row, store) : null;
         return {
-          id: w.id, intent: w.intent, status: w.status, outcome: w.outcome,
+          id: w.id, intent: safeSnapshot(w.intent).safe, status: w.status, outcome: w.outcome,
           startedAt: w.started_at, endedAt: w.ended_at,
           changes: changed && changed.known ? changed.files.length : null,
         };
@@ -872,7 +873,7 @@ function makeHandlers(deps) {
       if (gate) return gate;
       if (!workOr(workId)) return { ok: false, reason: 'no-work' };
       return { ok: true, signals: repo.signalsFor(db(), workId)
-        .map((s) => ({ seq: s.seq, source: s.source, kind: s.kind, payload: s.payload, at: s.observed_at })) };
+        .map((s) => ({ seq: s.seq, source: s.source, kind: s.kind, payload: supervisor.maskPayload(s.payload, { readOnly: true }), at: s.observed_at })) };
     },
   };
 
