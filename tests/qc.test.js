@@ -746,7 +746,7 @@ function qcBench(files = { 'package.json': pkg({ test: 'node -e "console.log(1)"
   const proj = repo.openProject(db, dir, path.basename(dir));
   const pushed = [];
   /* the evidence store the handlers write the Stop proof into -- a real directory of this bench, read back by stopEvidenceOf */
-  const evidence = fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qc-evidence-'));
+  const evidence = tempDir('juqode-qc-evidence-');
   const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => evidence,
                            push: () => {}, pushQc: (u) => pushed.push(u), ...extra });
   return { dir, db, project: proj, h, pushed, evidence };

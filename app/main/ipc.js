@@ -91,7 +91,7 @@ function makeHandlers(deps) {
   /* A workId is a name the renderer supplies, so every channel that takes one checks the Work
    * exists before acting on it. `19` §S: the bridge is narrow by construction, and "any id in
    * the store" is wider than any screen ever needs. */
-  const workOr = (workId) => (typeof workId === 'string' && workId ? repo.getWork(db(), workId) : null);
+  const workOr = (workId) => (guard.shortId(workId) ? repo.getWork(db(), workId) : null);
 
   let lastPick = null;
   let detecting = null;
@@ -215,6 +215,7 @@ function makeHandlers(deps) {
     'juqode:interpret': async (_e, projectId) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       const hold = Number(process.env.JUQODE_INTERPRET_DELAY_MS) || 0;
       if (hold) await new Promise((r) => setTimeout(r, hold));
 
@@ -284,6 +285,7 @@ function makeHandlers(deps) {
     'juqode:brief': (_e, projectId) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
 
@@ -305,6 +307,7 @@ function makeHandlers(deps) {
     'juqode:qc-route': (_e, projectId, phrase) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       const bad = guard.text(phrase, guard.LIMITS.qcPhrase, { allowEmpty: true });   // before the matcher runs
       if (bad) return bad;
       const row = db().prepare('select * from project where id = ?').get(projectId);
@@ -330,6 +333,7 @@ function makeHandlers(deps) {
     'juqode:qc-list': (_e, projectId) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
       ensureHolds(projectId);                          // a failed restore is tried again every time the list is opened
@@ -348,6 +352,7 @@ function makeHandlers(deps) {
     'juqode:qc-run': async (_e, projectId, ruleId, phrase) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       if (!guard.shortId(ruleId)) return { ok: false, reason: 'unknown-rule' };
       if (phrase != null) { const bad = guard.text(phrase, guard.LIMITS.qcPhrase, { allowEmpty: true }); if (bad) return bad; }
       const row = db().prepare('select * from project where id = ?').get(projectId);
@@ -463,6 +468,8 @@ function makeHandlers(deps) {
     'juqode:qc-stop': (_e, projectId, runId = null) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
+      if (runId != null && !guard.shortId(runId)) return { ok: false, reason: 'not-running' };
       const running = liveFor(projectId);
       /* A named run, else the dev server, else the only thing going. `19` §C4: only a process
        * JuQode itself started can be signalled, and every entry here is one. */
@@ -485,6 +492,7 @@ function makeHandlers(deps) {
     'juqode:term-open': (_e, projectId) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
       /* 프로젝트가 바뀌면 앞의 세션은 끝난다 — REC-010. 사용자가 A 에서 `cd` 해 둔 셸에
@@ -515,6 +523,7 @@ function makeHandlers(deps) {
        * 존재할 수 있고, 프로젝트를 여는 것 자체가 저장소를 필요로 한다. */
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       if (!termLive || termLive.projectId !== projectId) return { ok: false, reason: 'not-open' };
       /* A resource limit, not a command filter: `19` §C4 runs the line exactly as typed. */
       const bad = guard.shellLine(line);
@@ -527,6 +536,7 @@ function makeHandlers(deps) {
     'juqode:term-stop': (_e, projectId) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       if (!termLive || termLive.projectId !== projectId) return { ok: false, reason: 'not-open' };
       termClose();
       return { ok: true };
@@ -536,6 +546,7 @@ function makeHandlers(deps) {
     'juqode:qc-runs': (_e, projectId) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       return { ok: true, runs: repo.qcRunsFor(db(), projectId) };
     },
 
@@ -553,6 +564,7 @@ function makeHandlers(deps) {
     'juqode:task-list': (_e, projectId) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       if (!db().prepare('select id from project where id = ?').get(projectId)) return { ok: false, reason: 'no-project' };
       return { ok: true, tasks: repo.tasksForProject(db(), projectId),
         legacyUnknownRuns: unresolvedLegacyUnknownWorks(db(), projectId) };
@@ -561,6 +573,7 @@ function makeHandlers(deps) {
     'juqode:legacy-unknown-ack': (_e, projectId, workId, confirmedStopped) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       if (confirmedStopped !== true) return { ok: false, reason: 'confirmation-required' };
       const work = workOr(workId);
       if (!work || work.project_id !== projectId || work.task_id != null) {
@@ -572,6 +585,7 @@ function makeHandlers(deps) {
     'juqode:task-create': (_e, projectId, input) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       const bad = guard.taskInput(input);
       if (bad) return bad;
       if (!db().prepare('select id from project where id = ?').get(projectId)) return { ok: false, reason: 'no-project' };
@@ -592,6 +606,7 @@ function makeHandlers(deps) {
     'juqode:task-detail': (_e, taskId) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(taskId)) return { ok: false, reason: 'no-task' };
       const task = repo.getTask(db(), taskId);
       if (!task) return { ok: false, reason: 'no-task' };
       return { ok: true, task, reviews: repo.taskCriterionReviewsFor(db(), task.id),
@@ -604,6 +619,7 @@ function makeHandlers(deps) {
     'juqode:task-review-criterion': (_e, taskId, workId, criterionId, verdict, evidenceIds) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(taskId)) return { ok: false, reason: 'no-task' };
       if (![taskId, workId, criterionId].every(guard.shortId) || typeof verdict !== 'string' ||
           !Array.isArray(evidenceIds) || evidenceIds.length > guard.LIMITS.criteria * 4 || !evidenceIds.every(guard.shortId)) {
         return { ok: false, reason: 'bad-input' };
@@ -676,6 +692,7 @@ function makeHandlers(deps) {
     'juqode:work-start': async (_e, projectId, intent, taskId = null, idempotencyKey = null) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
       if (typeof intent !== 'string' || !intent.trim()) return { ok: false, reason: 'empty-intent' };
@@ -732,7 +749,7 @@ function makeHandlers(deps) {
       const gate = needDb();
       if (gate) return gate;
       if (!workOr(workId)) return { ok: false, reason: 'no-work' };
-      if (toolUseId != null && typeof toolUseId !== 'string') return { ok: false, reason: 'bad-permission-id' };
+      if (toolUseId != null && !guard.shortId(toolUseId)) return { ok: false, reason: 'bad-permission-id' };
       return supervisor.allow(db(), workId, toolUseId ?? null, { onUpdate: deps.push });
     },
 
@@ -758,6 +775,7 @@ function makeHandlers(deps) {
     'juqode:history': (_e, projectId) => {
       const gate = needDb();
       if (gate) return gate;
+      if (!guard.shortId(projectId)) return { ok: false, reason: 'no-project' };
       const row = db().prepare('select * from project where id = ?').get(projectId);
       if (!row) return { ok: false, reason: 'no-project' };
 

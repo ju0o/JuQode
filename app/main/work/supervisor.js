@@ -157,7 +157,8 @@ async function startGuarded(db, project, intent, {
 
   let context = null;
   let agentPrompt = intent;
-  const storedIntent = taskId ? safeSnapshot(intent).safe : intent;
+  /* V1-409: what is STORED is masked for EVERY Work, Task or not; `agentPrompt` (what the provider is sent) stays the user's text. */
+  const storedIntent = safeSnapshot(intent).safe;
   if (taskId) {
     const task = repo.getTask(db, taskId);
     if (!task) return { ok: false, reason: 'no-task' };
@@ -278,7 +279,7 @@ async function startGuarded(db, project, intent, {
         if (!workId) {
           /* The session spoke, so a Work exists. The guard is re-checked here by the engine
            * itself — `beginWork` inserts, and the partial unique index is the arbiter. */
-          const begun = repo.beginWork(db, project.id, taskId ? storedIntent : intent, { taskId });
+          const begun = repo.beginWork(db, project.id, storedIntent, { taskId });
           if (!begun.ok) {
             /* We lost the race for the slot. The process we started is ours to stop — leaving
              * it running would put two Claude Code sessions in one repository. */
@@ -461,9 +462,8 @@ const withScope = (d, cwd) => {
  */
 function writeSignal(db, workId, { source, kind, payload }) {
   try {
-    const work = repo.getWork(db, workId);
     let persistedPayload = payload;
-    if (work?.task_id) {
+    {   // masked for EVERY Work (V1-409); the shape and event identifiers survive
       let parsed = payload;
       let wasJson = false;
       if (typeof payload === 'string') {
@@ -480,13 +480,13 @@ function writeSignal(db, workId, { source, kind, payload }) {
       } else if (typeof parsed !== 'string') {
         persistedPayload = safeStructuredSnapshot(parsed);
       } else {
-        persistedPayload = parsed;
+        persistedPayload = safeSnapshot(parsed).safe;
       }
     }
     repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), source, kind, payload: persistedPayload, observedAt: now() });
     return true;
   } catch (e) {
-    try { repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), source: 'juqode', kind: KIND.RAW, payload: `signal-write-failed: ${e?.code ?? e?.message ?? 'unknown'}` }); }
+    try { repo.addSignal(db, workId, { seq: repo.nextSeq(db, workId), source: 'juqode', kind: KIND.RAW, payload: `signal-write-failed: ${/^[A-Za-z0-9_.-]{1,48}$/.test(e?.code) ? e.code : 'unknown'}` }); }
     catch { /* the store is beyond us; the app stays up */ }
     return false;
   }
@@ -550,17 +550,14 @@ function finishResult(db, workId, project, store) {
   if (problems.length) {
     writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW, payload: JSON.stringify({ resultProblems: problems }) });
   }
-  if (work.task_id) {
-    const safeResult = safeStructuredSnapshot(result);
-    const rules = redactionRules(result);
-    const report = safeResult.claims?.find((claim) => claim.kind === 'agent-report');
-    if (rules.length && report?.data) {
-      report.data.redacted = true;
-      report.data.redactionRules = rules;
-    }
-    return repo.saveResult(db, workId, safeResult);
+  const safeResult = safeStructuredSnapshot(result);
+  const rules = redactionRules(result);
+  const report = safeResult.claims?.find((claim) => claim.kind === 'agent-report');
+  if (rules.length && report?.data) {
+    report.data.redacted = true;
+    report.data.redactionRules = rules;
   }
-  return repo.saveResult(db, workId, result);
+  return repo.saveResult(db, workId, safeResult);
 }
 
 /**
@@ -736,6 +733,10 @@ function apply(db, workId, sig, onUpdate) {
 }
 
 /** What the screen renders. Only facts: nothing here is derived from elapsed time. */
+/* V1-409: the live state is built from the provider's raw lines (a denied command, a result text). What LEAVES for the
+ * renderer is masked; the state itself, and so what a grant acts on, is untouched. */
+const masked = (v) => (v == null ? v : safeStructuredSnapshot(v));
+
 function snapshot(db, workId) {
   const work = repo.getWork(db, workId);
   if (!work) return null;
@@ -753,14 +754,14 @@ function snapshot(db, workId) {
     /* `scopable` travels with the denial so the screen can decide BEFORE it draws a button:
      * offering `허용하고 다시 해 보기` and then explaining that no button can be offered is a
      * control that contradicts itself. */
-    openPermissions: openPermissions(s).map((d) => withScope(d, entry.cwd)),
-    permission: openPermission(s) ? withScope(openPermission(s), entry.cwd) : null,
-    finish: s.finish,
+    openPermissions: openPermissions(s).map((d) => masked(withScope(d, entry.cwd))),
+    permission: openPermission(s) ? masked(withScope(openPermission(s), entry.cwd)) : null,
+    finish: masked(s.finish),
     /* WBS-15 · `15` names two quiet states and both are about the ABSENCE of a signal, so they
      * are the one place a clock is legitimate — and it measures how long since the last
      * OBSERVED fact, never how far along anything is. */
     liveness: livenessOf(s, work),
-    inputRequest: s.inputRequest ?? null,
+    inputRequest: masked(s.inputRequest ?? null),
     /* WBS-16 · we asked it to stop and have not seen it stop. Red, because claiming the stop
      * would be the lie (`07` §8.1: a cancelled child exits 0). */
     cancelUnconfirmed: work.status === 'cancel_requested' && sinceMs(s.cancelRequestedAt) > CANCEL_CONFIRM_MS,
