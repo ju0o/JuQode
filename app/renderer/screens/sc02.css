@@ -321,7 +321,7 @@
 /* The proposal form and the example lines belong to starting something new. They step aside
    while a Run is live. The task itself stays in the inspector so the objective is still readable. */
 .sc02:has([data-card="stream"][data-live="work"]) .composer-draft,
-.sc02:has([data-card="stream"][data-live="work"]) .agent-picker,
+.sc02:has([data-card="stream"][data-live="work"]) .agent-summary-card,
 .sc02:has([data-card="stream"][data-live="work"]) .task-request-note { display: none; }
 
 .sc02 .panel {
@@ -664,13 +664,15 @@
 /* Says that the emphasised button starts Claude (D-116 4번); the essay notes above stay hidden. */
 .sc02 .start-note { display: block; }
 
-/* V1-304 · Agent picker. Same panel language as the composer draft; no new colour. */
-.sc02 .agent-picker { border: 1px solid var(--line); border-radius: var(--r-inner); padding: 8px 12px; min-width: 0; }
-.sc02 .agent-summary { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; cursor: pointer; flex-wrap: wrap; }
-.sc02 .agent-summary:focus-visible, .sc02 .agent-row:focus-within { outline: 2px solid var(--juqline); outline-offset: 2px; }
-.sc02 .agent-body { display: flex; flex-direction: column; gap: 10px; padding-top: 8px; min-width: 0; }
+/* V1-304 · Agent choice. The composer holds a short summary; the Inspector holds the panel. Same panel language; no new colour. */
+.sc02 .agent-summary-card { border: 1px solid var(--line); border-radius: var(--r-inner); padding: 8px 12px; min-width: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; overflow-wrap: anywhere; }
+.sc02 .agent-summary-card[data-usable="false"][data-checking="false"] { border-color: var(--juqline); }
+.sc02 .agent-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-top: 10px; border-top: 1px solid var(--line); margin-top: 10px; }
+.sc02 .task-selected[hidden] + .agent-panel { border-top: 0; margin-top: 0; padding-top: 0; }
+.sc02 .task-selected[hidden] { display: none; }
 .sc02 .agent-group { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .sc02 .agent-row { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-inner); min-width: 0; }
+.sc02 .agent-row:focus-within { outline: 2px solid var(--juqline); outline-offset: 2px; }
 .sc02 .agent-row.is-off { background: transparent; }
 .sc02 .agent-row:has(input:checked:not(:disabled)) { border-color: var(--juqline); background: var(--juqbg); }
 .sc02 .agent-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }

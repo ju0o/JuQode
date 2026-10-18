@@ -75,48 +75,81 @@ async function session(label, bin, body) {
       await ev(`[...document.querySelectorAll('[data-el="recent-row"]')].find((r) => r.innerText.includes(${JSON.stringify(path.basename(dir))}))?.click()`);
       for (let i = 0; i < 60 && (await ev('window.__screen()')) !== 'SC-02'; i++) await sleep(250);
       await ev(`(document.querySelector('[data-act="board-start"]') ?? document.querySelector('.nav-new'))?.click()`); await sleep(300);
-      for (let i = 0; i < 60 && !(await ev(`!!document.querySelector('[data-el="agent-picker"]')`)); i++) await sleep(250);
-      for (let i = 0; i < 60 && /확인하는 중/.test(await ev(`document.querySelector('[data-el="agent-summary"]').innerText`)); i++) await sleep(250);
+      for (let i = 0; i < 60 && !(await ev(`!!document.querySelector('[data-el="agent-summary"]')`)); i++) await sleep(250);
+      for (let i = 0; i < 60 && (await ev(`document.querySelector('[data-el="agent-summary"]').dataset.checking`)) !== 'false'; i++) await sleep(250);
     };
     const rows = async () => JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('[data-agent]')].map((r) => ({ id: r.dataset.agent, state: r.dataset.state, disabled: r.querySelector('input').disabled, checked: r.querySelector('input').checked, text: r.textContent.replace(/\\s+/g, ' ').trim() })))`));
-    const open = (v) => ev(`document.querySelector('[data-el="agent-picker"]').open = ${v}`);
+    const summaryText = () => ev(`document.querySelector('[data-el="agent-summary"]').innerText.replace(/\\s+/g, ' ').trim()`);
+    const startNotes = () => ev(`JSON.stringify([...document.querySelectorAll('.start-note')].filter((n) => n.offsetParent !== null).map((n) => n.innerText.trim()))`).then(JSON.parse);
+    const panelVisible = () => ev(`(() => { const p = document.querySelector('[data-el="agent-panel"]'); return !!p && p.offsetParent !== null; })()`);
+    const openPanel = async () => { await ev(`document.querySelector('[data-act="agent-open"]').click()`); await sleep(350); };
+    const closePanel = async () => { await ev(`document.querySelector('[data-act="inspect-close"]').click()`); await sleep(300); };
     const overflow = async (n) => { const o = JSON.parse(await ev(`JSON.stringify({ sw: document.scrollingElement.scrollWidth, iw: window.innerWidth })`)); ok(`${n}: no sideways scroll`, o.sw <= o.iw + 1, JSON.stringify(o)); };
-    await body({ ev, send, key, view, shot, works, openProject, rows, open, overflow, sleep });
+    await body({ ev, send, key, view, shot, works, openProject, rows, summaryText, startNotes, panelVisible, openPanel, closePanel, overflow, sleep });
   } finally { killTree(app); await sleep(500); }
 }
 
 const WIDTHS = [880, 1024, 1200, 1440];
+/* the composer summary first (panel closed), then the Inspector panel across the matrix; closing returns focus to the way in */
 async function gallery(t, state) {
-  await t.open(true);
-  for (const w of WIDTHS) for (const th of ['light', 'dark']) { await t.view(w, th); await t.overflow(`${state} ${w} ${th}`); await t.shot(`${state}-${w}-${th}`); }
-  await t.view(1200, 'light', 1.5); await t.overflow(`${state} 1200 150%`); await t.shot(`${state}-1200-light-zoom150`);
+  for (const w of [880, 1200]) for (const th of ['light', 'dark']) { await t.view(w, th); await t.overflow(`${state} composer ${w} ${th}`); await t.shot(`${state}-composer-${w}-${th}`); }
+  await t.view(1200, 'light');
+  await t.openPanel();
+  ok(`${state}: the panel opens from the composer summary`, await t.panelVisible());
+  for (const w of WIDTHS) for (const th of ['light', 'dark']) { await t.view(w, th); await t.overflow(`${state} panel ${w} ${th}`); await t.shot(`${state}-panel-${w}-${th}`); }
+  await t.view(1200, 'light', 1.5); await t.overflow(`${state} panel 1200 150%`); await t.shot(`${state}-panel-1200-light-zoom150`);
   await t.view(1200, 'light', 1);
 }
+const NO_PROMISE = /준비(가)? 됐|준비 완료|모델 선택 완료|선택 완료/;
 
-/* ── states reached through the real probe ── */
+/* every blocked state must say the choice is void, name the state, never promise a start, and never substitute another AI */
+async function blockedChecks(t, label, tag) {
+  const sum = await t.summaryText();
+  ok(`${label}: summary names the state`, sum.includes(tag), sum);
+  ok(`${label}: summary says the choice is void and nothing was substituted`, /이 선택은 지금 쓸 수 없어요/.test(sum) && /다른 AI로 바꾸지 않았어요/.test(sum), sum);
+  ok(`${label}: summary never claims readiness`, !NO_PROMISE.test(sum), sum);
+  const notes = (await t.startNotes()).join(' | ');
+  ok(`${label}: no "바로 시작해요" promise while the AI cannot run`, !/바로 시작해요/.test(notes) && /쓸 수 없는 상태예요/.test(notes), notes);
+}
+
 ctrl({ version: '2.1.0', loggedIn: false });
 await session('auth', CTRL_CLI, async (t) => {
   await t.openProject(SEED);
-  const r = await t.rows();
-  results.launches.auth = r;
+  await blockedChecks(t, 'auth', '인증 필요');
+  await t.openPanel();
+  const r = await t.rows(); results.launches.auth = r;
   ok('auth: Claude 인증 필요 and not selectable', r[0].state === 'auth' && r[0].disabled && /인증 필요/.test(r[0].text), JSON.stringify(r));
+  await t.closePanel();
   await gallery(t, 'auth');
 });
 ctrl({ version: '', loggedIn: true });
 await session('version-unknown', CTRL_CLI, async (t) => {
   await t.openProject(SEED);
+  await blockedChecks(t, 'version-unknown', '버전 불명');
+  await t.openPanel();
   const r = await t.rows(); results.launches['version-unknown'] = r;
   ok('version-unknown: 버전 불명 and not selectable', r[0].state === 'version-unknown' && r[0].disabled && /버전 불명/.test(r[0].text), JSON.stringify(r));
+  await t.closePanel();
   await gallery(t, 'version-unknown');
 });
 await session('missing', '/nonexistent/juqode-picker-claude', async (t) => {
   await t.openProject(SEED);
+  await blockedChecks(t, 'missing', '미설치');
+  await t.openPanel();
   const r = await t.rows(); results.launches.missing = r;
   ok('missing: 미설치 and not selectable', r[0].state === 'missing' && r[0].disabled && /미설치/.test(r[0].text), JSON.stringify(r));
+  await t.closePanel();
   const w0 = await t.works();
-  const summary = await t.ev(`document.querySelector('[data-el="agent-summary"]').innerText`);
-  ok('missing: the one-line summary says it is unusable', /쓸 수 없는 상태/.test(summary), summary);
   ok('missing: no Work created by looking', (await t.works()) === w0);
+  /* the Canon flow is kept: pressing start is still allowed and the refusal card explains it; nothing is created */
+  await t.ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = 'README에 한 줄 추가해 줘'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await t.sleep(400);
+  const disabled = await t.ev(`[...document.querySelectorAll('.btn.pri')].filter((b) => b.offsetParent !== null).every((b) => !b.disabled)`);
+  ok('missing: the start button is NOT disabled (existing flow kept)', disabled);
+  await t.ev(`document.querySelector('.btn.pri').click()`); await t.sleep(2500);
+  const card = await t.ev(`document.querySelector('[data-el="consequence"]').innerText.replace(/\\s+/g, ' ').trim()`);
+  ok('missing: pressing start shows the existing refusal explanation', card.length > 10 && !/바로 시작해요/.test(card), card);
+  ok('missing: still no Work', (await t.works()) === w0);
   await gallery(t, 'missing');
 });
 
@@ -124,64 +157,99 @@ await session('missing', '/nonexistent/juqode-picker-claude', async (t) => {
 ctrl({ version: '2.1.0', loggedIn: true });
 await session('version-changed', CTRL_CLI, async (t) => {
   await t.openProject(SEED);
+  await t.openPanel();
   let r = await t.rows();
   ok('version-changed: first probe is ready', r[0].state === 'ready' && !r[0].disabled);
   const w0 = await t.works();
+  /* tick the optional "seen" mark; a version change must void it */
+  await t.ev(`document.querySelector('[data-act="agent-ack"]').focus()`);
+  await t.key(' ', 'Space', 32, ' ');
+  ok('version-changed: "seen" ticked', await t.ev(`document.querySelector('[data-act="agent-ack"]').checked`));
   ctrl({ version: '2.2.0', loggedIn: true });
-  await t.open(true);
   await t.ev(`document.querySelector('[data-act="agent-recheck"]').focus()`);
   await t.key('Enter', 'Enter', 13, '\r');
   for (let i = 0; i < 40 && (await t.rows())[0].state === 'ready'; i++) await t.sleep(250);
   r = await t.rows(); results.launches['version-changed'] = r;
   ok('version-changed: 버전 변경 and not selectable', r[0].state === 'version-changed' && r[0].disabled && /버전 변경/.test(r[0].text) && /2\.1\.0.*2\.2\.0/.test(r[0].text), r[0].text);
-  const act = await t.ev(`document.activeElement?.getAttribute('data-act')`);
-  ok('version-changed: focus stayed on 다시 확인 while the status changed', act === 'agent-recheck', String(act));
-  ok('version-changed: no Work created', (await t.works()) === w0);
-  await gallery(t, 'version-changed');
+  ok('version-changed: focus stayed on 다시 확인 while the status changed', (await t.ev(`document.activeElement?.getAttribute('data-act')`)) === 'agent-recheck');
+  await t.closePanel();
+  await blockedChecks(t, 'version-changed', '버전 변경');
+  await t.openPanel();
   await t.ev(`document.querySelector('[data-act="agent-accept-version"]').click()`); await t.sleep(300);
   r = await t.rows();
-  ok('version-changed: after the person accepts the new version, Claude is ready again', r[0].state === 'ready' && !r[0].disabled);
+  ok('version-changed: after the person accepts the new version, Claude is selectable again', r[0].state === 'ready' && !r[0].disabled);
+  ok('version-changed: the earlier "seen" mark was voided and is NOT restored', !(await t.ev(`document.querySelector('[data-act="agent-ack"]').checked`)));
+  ok('version-changed: no Work created by any of this', (await t.works()) === w0);
+  await t.closePanel();
+  await gallery(t, 'version-changed');
 });
 
-/* ── ready + the explicit approval, on the fixture CLI that can actually run a Work ── */
+/* ── ready: summary, the way into the Inspector from an UNSAVED request, the same state on a saved Task, and the one approval ── */
 await session('ready', FAKE_CLI, async (t) => {
   await t.openProject(SEED2);
+  const sum = await t.summaryText();
+  results.readySummary = sum;
+  ok('ready: composer summary names the AI, LIMITED mode and the default', /Claude Code/.test(sum) && /제한 모드\(안전 인증 아님\)/.test(sum) && /기본으로 골라져 있어요 \(실행 승인 아님\)/.test(sum), sum);
+  ok('ready: summary says the model is unconfirmed and the choice is not wired to the run', /모델: 확인하지 못함/.test(sum) && /실제 실행 인자에 연결되지 않았어요/.test(sum), sum);
+  ok('ready: summary never claims readiness / a finished model choice', !NO_PROMISE.test(sum), sum);
+  ok('ready: the panel is NOT in the composer (it lives in the Inspector region)', await t.ev(`!document.querySelector('[data-region="stage"] [data-el="agent-panel"]') && !!document.querySelector('[data-region="inspector"] [data-el="agent-panel"]')`));
+  await gallery(t, 'ready');
+
+  /* an unsaved request: type it, open the choice from the summary - the text and the proposal must survive, focus must return */
+  const text = 'README에 한 줄 추가해 줘';
+  await t.view(1200, 'light');
+  await t.ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = ${JSON.stringify(text)}; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await t.sleep(400);
+  const w0 = await t.works();
+  await t.openPanel();
+  ok('ready: unsaved request - panel opened beside it', await t.panelVisible());
+  ok('ready: unsaved request - the written text is untouched', (await t.ev(`document.querySelector('[data-el="intent"]').value`)) === text);
+  ok('ready: unsaved request - the proposal is still there', await t.ev(`!document.querySelector('[data-el="composer-draft"]').hidden`));
   const r = await t.rows(); results.launches.ready = r;
   ok('ready: Claude 설치됨·로그인됨, selected, selectable', r[0].state === 'ready' && !r[0].disabled && r[0].checked && /설치됨/.test(r[0].text) && /제한 모드/.test(r[0].text), r[0].text);
   for (const i of [1, 2]) ok(`ready: ${r[i].id} is 미실측 + 현재 실행 불가 and disabled`, r[i].state === 'unmeasured' && r[i].disabled && /미실측/.test(r[i].text) && /현재 실행 불가/.test(r[i].text) && !r[i].checked);
-  await gallery(t, 'ready');
-
-  /* ③ is visible and read-only: no model list, no select */
-  await t.open(true);
   const model = await t.ev(`document.querySelector('[data-el="agent-model"]').innerText`);
   ok('ready: ③ says the model is NOT confirmed and is not replaced', /확인하지 못함/.test(model) && /바꾸지 않아요/.test(model), model);
-  ok('ready: no model <select>/<option> anywhere in the picker', await t.ev(`!document.querySelector('[data-el="agent-picker"] select, [data-el="agent-picker"] option')`));
-  const pickerButtons = await t.ev(`JSON.stringify([...document.querySelectorAll('[data-el="agent-picker"] button')].map((b) => b.dataset.act))`);
-  ok('ready: the picker holds only re-check / accept-version buttons - no start control', JSON.parse(pickerButtons).every((a) => ['agent-recheck', 'agent-accept-version'].includes(a)), pickerButtons);
-
-  /* ② ③ without ④: tick the check-box with the keyboard, change the radio, re-check - the Work count must not move */
-  const w0 = await t.works();
+  ok('ready: ③ "seen" mark is optional and says so', /선택 사항/.test(model), model);
+  ok('ready: no model <select>/<option> anywhere in the panel', await t.ev(`!document.querySelector('[data-el="agent-panel"] select, [data-el="agent-panel"] option')`));
+  const pb = await t.ev(`JSON.stringify([...document.querySelectorAll('[data-el="agent-panel"] button')].map((b) => b.dataset.act))`);
+  ok('ready: the panel holds only re-check / accept-version buttons - no start control', JSON.parse(pb).every((a) => ['agent-recheck', 'agent-accept-version'].includes(a)), pb);
   await t.ev(`document.querySelector('[data-act="agent-ack"]').focus()`);
   await t.key(' ', 'Space', 32, ' ');
-  ok('ready: ③ check-box ticked by keyboard, focus stayed', await t.ev(`document.querySelector('[data-act="agent-ack"]').checked && document.activeElement === document.querySelector('[data-act="agent-ack"]')`));
+  ok('ready: "seen" ticked by keyboard, focus stayed', await t.ev(`document.querySelector('[data-act="agent-ack"]').checked && document.activeElement === document.querySelector('[data-act="agent-ack"]')`));
+  ok('ready: the composer summary shows the SAME state (seen) - one source', /내용은 봤어요/.test(await t.summaryText()));
   const approve = await t.ev(`document.querySelector('[data-el="agent-approve"]').innerText`);
-  ok('ready: ④ text says nothing has started and says only the start button starts it', /일은 아직 시작되지 않았어요/.test(approve) && /시작 버튼을 눌렀을 때만/.test(approve), approve);
+  ok('ready: ④ text says nothing has started and that the composer start button is the only start', /일은 아직 시작되지 않았어요/.test(approve) && /시작 버튼을 눌렀을 때만/.test(approve) && !NO_PROMISE.test(approve), approve);
+  ok('ready: panel says the choice is not wired to the run arguments', /실제 실행 인자에 연결되지 않았어요/.test(await t.ev(`document.querySelector('[data-el="agent-panel"]').innerText`)));
   await t.ev(`document.querySelector('[data-act="agent-recheck"]').click()`); await t.sleep(1500);
-  ok('ready: selecting / confirming / re-checking created no Work', (await t.works()) === w0, `${w0} -> ${await t.works()}`);
+  ok('ready: choosing / viewing / re-checking created no Work', (await t.works()) === w0, `${w0} -> ${await t.works()}`);
+  await t.shot('ready-unsaved-request-panel-open-1200-light');
+  await t.closePanel();
+  ok('ready: closing the panel returns focus to the way in (AI 고르기·확인)', (await t.ev(`document.activeElement?.getAttribute('data-act')`)) === 'agent-open');
+  ok('ready: the written text survived open + close', (await t.ev(`document.querySelector('[data-el="intent"]').value`)) === text);
   results.workCount = { beforeApproval: w0 };
-  await t.view(1200, 'light'); await t.shot('ready-after-confirm-before-start-1200-light');
 
-  /* ④ the one explicit approval: type a request, press the emphasised start button */
-  await t.ev(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = 'README에 한 줄 추가해 줘'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await t.sleep(400);
-  const btnLabel = await t.ev(`[...document.querySelectorAll('.btn.pri')].filter((b) => b.offsetParent !== null).map((b) => b.innerText.trim()).join('|')`);
-  ok('ready: exactly one emphasised start button is on screen', btnLabel.split('|').length === 1 && btnLabel.length > 0, btnLabel);
+  /* ④ the one explicit approval: the emphasised start button of the composer */
+  const label = await t.ev(`[...document.querySelectorAll('.btn.pri')].filter((b) => b.offsetParent !== null).map((b) => b.innerText.trim()).join('|')`);
+  ok('ready: exactly one emphasised start button is on screen', label.split('|').length === 1 && label.length > 0, label);
   ok('ready: still no Work before the start button is pressed', (await t.works()) === w0);
   await t.ev(`document.querySelector('.btn.pri').click()`);
   for (let i = 0; i < 40 && (await t.works()) === w0; i++) await t.sleep(250);
   const w1 = await t.works();
   ok('ready: the start button created exactly one Work', w1 === w0 + 1, `${w0} -> ${w1}`);
   results.workCount.afterApproval = w1;
+
+  /* an EXISTING Task: the same panel in its Inspector, the same state as the composer summary */
+  for (let i = 0; i < 40 && (await t.ev('window.__screen()')) !== 'SC-02'; i++) {
+    await t.ev(`[...document.querySelectorAll('.topbar button')].find((b) => b.textContent.includes('작업대로'))?.click()`); await t.sleep(500);
+  }
+  for (let i = 0; i < 40 && !(await t.ev(`!!document.querySelector('.task-pick')`)); i++) await t.sleep(250);
+  await t.view(1200, 'light');
+  await t.ev(`document.querySelector('.task-pick').click()`); await t.sleep(600);
+  ok('ready: a saved Task - its Inspector shows the Task AND the AI choice', await t.ev(`!!document.querySelector('[data-region="inspector"] [data-el="selected-task"]:not([hidden])') && !!document.querySelector('[data-region="inspector"] [data-el="agent-panel"]')`));
+  ok('ready: a saved Task - the panel and the composer summary agree', await t.ev(`document.querySelector('[data-el="agent-panel"]').dataset.usable === document.querySelector('[data-el="agent-summary"]').dataset.usable && document.querySelector('[data-agent="claude"] input').checked`));
+  await t.shot('ready-saved-task-inspector-1200-light');
+  await t.view(880, 'dark'); await t.shot('ready-saved-task-inspector-880-dark'); await t.view(1200, 'light');
 });
 
 fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 1));

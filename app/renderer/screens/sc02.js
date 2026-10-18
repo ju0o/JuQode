@@ -308,22 +308,37 @@ export function renderSC02(root, api, nav, state) {
   const selectedTask = el('section', 'task-selected');
   selectedTask.setAttribute('data-el', 'selected-task');
   const detailHead = el('div', 'detail-kicker');
-  detailHead.appendChild(el('span', '', C.gap.board.detail));
+  const detailTitle = el('span', '', C.gap.board.detail);
+  detailHead.appendChild(detailTitle);
   /* Closing the Inspector does NOT forget which Task is selected: the tile stays marked and the filter
    * stays as it was, so coming back to the board is coming back to the same place. */
   const closeInspector = () => {
     const was = state.selectedTaskId;
+    const fromAgent = state.agentSheet;
     state.inspectDismissed = true;
+    state.agentSheet = false;
     syncShell();
     paintTaskList();
-    if (was) board.querySelector(`.task-pick[data-task-id="${was}"]`)?.focus();
+    if (fromAgent) agentPicker.summary.querySelector('[data-act="agent-open"]')?.focus();
+    else if (was) board.querySelector(`.task-pick[data-task-id="${was}"]`)?.focus();
   };
+  /* The way in from a request that is not saved as a Task yet: the Inspector opens as a sheet / column holding only the
+   * AI choice, and the composer (its text, its proposal) is not touched. */
+  function openAgent() {
+    state.agentSheet = true;
+    syncShell();
+    colInspect.scrollTop = 0;
+    agentPicker.panel.querySelector('input:not(:disabled), button')?.focus();
+  }
   const closeBtn = btn('btn sm ghost inspect-close', C.term.close, closeInspector);
   closeBtn.setAttribute('data-act', 'inspect-close');
   closeBtn.title = C.gap.board.backToBoard;
   detailHead.appendChild(closeBtn);
   colInspect.appendChild(detailHead);
-  colInspect.appendChild(selectedTask);
+  /* ONE agent state (`state.agent`), two views: the Inspector panel here and the summary in the composer. */
+  const agentPicker = mountAgentPicker(api, state, { onOpen: () => openAgent() });
+  colInspect.appendChild(selectedTask);          // the Task's own name stays the first thing in its Inspector (measured at 880)
+  colInspect.appendChild(agentPicker.panel);
   colInspect.appendChild(createTask);        // the selected Task comes first; writing another one is last
   const requestLabel = el('div', 'sm task-request-label', C.gap.stage.ask);
   intent.appendChild(requestLabel);
@@ -354,6 +369,7 @@ export function renderSC02(root, api, nav, state) {
   let primaryReady = false;
   const commit = btn('btn pri', C.gap.task.commitNew, once(() => commitNewTask()));
   commit.setAttribute('data-act', 'commit-task');
+  const draftStartNote = el('div', 'xs mut start-note', C.gap.task.startNoteNew);
   draft.title = `${C.gap.task.draftHandoff}\n${C.gap.task.contextScope}`;
   draft.append(
     el('div', 'sm', C.gap.task.draftLead),
@@ -361,12 +377,11 @@ export function renderSC02(root, api, nav, state) {
     criteriaBox,
     draftNote,
     commit,
-    el('div', 'xs mut start-note', C.gap.task.startNoteNew),
+    draftStartNote,
   );
   intent.appendChild(draft);
-  /* V1-304 · ② AI / ③ model: choices that create nothing. The start buttons below stay the only way a Work begins. */
-  const agentPicker = mountAgentPicker(api, state);
-  intent.appendChild(agentPicker.root);
+  /* V1-304 · the composer holds only the SUMMARY of ② AI / ③ model; the choice itself lives in the Inspector (08 §3). */
+  intent.appendChild(agentPicker.summary);
   agentPicker.refresh();
   const paintDraft = () => {
     const proposal = draftSuppressed ? null : proposeDraft(field.value);
@@ -401,8 +416,12 @@ export function renderSC02(root, api, nav, state) {
     commit.classList.toggle('pri', newTaskPrimary);
     submit.classList.toggle('pri', !newTaskPrimary);
     submit.textContent = newTaskPrimary ? C.gap.task.sendOnce : (draftOn && linked ? C.gap.task.sendToTask : C.intent.submit);
-    submitNote.textContent = newTaskPrimary ? C.gap.task.startNoteOnce : (linked ? C.gap.task.startNoteTask : C.gap.task.startNoteNew);
+    /* A start that may fail is not announced as a start: the refusal card (UF-CLAUDE-UNAVAILABLE) still explains it on press. */
+    const blocked = !agentPicker.usable() && !agentPicker.checking();
+    submitNote.textContent = blocked ? C.gap.agent.startUnusable : (newTaskPrimary ? C.gap.task.startNoteOnce : (linked ? C.gap.task.startNoteTask : C.gap.task.startNoteNew));
+    draftStartNote.textContent = blocked ? C.gap.agent.startUnusable : C.gap.task.startNoteNew;
   }
+  agentPicker.onPaint(() => syncPrimary());
   paintDraft();
 
   const consequence = el('div', 'consequence');
@@ -441,13 +460,16 @@ export function renderSC02(root, api, nav, state) {
   document.addEventListener('focusin', keepFocusIn);
   document.addEventListener('keydown', noteTab, true);
   const syncShell = () => {
-    const open = Boolean(state.selectedTaskId) && !state.inspectDismissed;
+    const taskOpen = Boolean(state.selectedTaskId) && !state.inspectDismissed;
+    const open = taskOpen || Boolean(state.agentSheet);
+    selectedTask.hidden = !taskOpen;
+    detailTitle.textContent = taskOpen ? C.gap.board.detail : C.gap.agent.sheetTitle;
     const sheet = open && narrowQuery.matches;
     board.classList.toggle('is-inspect', open);
     board.classList.toggle('is-sheet', sheet);
     colInspect.setAttribute('role', sheet ? 'dialog' : 'complementary');
     if (sheet) colInspect.setAttribute('aria-modal', 'true'); else colInspect.removeAttribute('aria-modal');
-    colInspect.setAttribute('aria-label', C.gap.board.detail);
+    colInspect.setAttribute('aria-label', taskOpen ? C.gap.board.detail : C.gap.agent.sheetTitle);
     if (sheet && !sheetOpen) setTimeout(() => closeBtn.focus(), 0);
     sheetOpen = sheet;
     board.classList.toggle('composer-open', Boolean(state.composerOpen) || consequence.childNodes.length > 0 || draft.hidden === false);
@@ -584,6 +606,7 @@ export function renderSC02(root, api, nav, state) {
       state.selectedTaskId = task.id;
       state.inspectDismissed = false;
       syncShell();
+      colInspect.scrollTop = 0;     // an Inspector scrolled down to the AI choice must not open a Task with its name out of sight (set once it is displayed)
       paintTaskList();
       paintSelectedTask();
     });

@@ -50,6 +50,10 @@ test('the picker never calls a Work-creating API, never sends the selection, and
 
 test('SC-02 mounts the picker without letting it gate or replace the start buttons', () => {
   const code = src.code('app/renderer/screens/sc02.js');
-  assert.ok(/mountAgentPicker\(api, state\)/.test(code));
+  assert.ok(/mountAgentPicker\(api, state, /.test(code));
+  assert.ok(/colInspect\.appendChild\(agentPicker\.panel\)/.test(code) && /intent\.appendChild\(agentPicker\.summary\)/.test(code), 'panel in the Inspector, summary in the composer');
+  assert.ok(!/state\.agent\b/.test(code), 'sc02 must not keep its own copy of the choice');
+  const mod = src.code('app/renderer/agent-picker.mjs');
+  assert.strictEqual((mod.match(/state\.agent \?\?=/g) ?? []).length, 1, 'the choice has exactly one owner');
   assert.ok(!/agentPicker\.[a-z]+\([^)]*workStart/.test(code));
 });
