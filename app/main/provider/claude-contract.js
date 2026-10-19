@@ -17,25 +17,60 @@ const SESSION_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const FILE_WRITERS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const GRANT = /^([A-Za-z][A-Za-z0-9_]*)\((.+)\)$/;
 
+/** Why a grant is NOT one tool and one narrow input, or null. A grant that is wider than, or reads differently from, what a card could show is refused here too (the
+ *  authoritative gate), not only where the model's path is first turned into a spec. File-ish specs: no wildcard, no `..`, no `~` (Claude expands it to the home folder),
+ *  no absolute path, no backslash, no invisible/control character, no edge whitespace. Bash: one non-wildcard prefix (`cmd:*`) or one exact command. */
+function grantRefusal(g) {
+  const m = GRANT.exec(String(g));
+  if (!m || typeof g !== 'string' || /[,\n\r\0]/.test(g)) return 'unscoped-grant';
+  const spec = m[2];
+  if (spec !== spec.trim() || !spec || /[\p{Cc}\p{Cf}]/u.test(spec) || /^[*?]+$/.test(spec)) return 'unscoped-grant';
+  if (m[1] === 'Bash') return /^[^*?]+(:\*)?$/.test(spec) && spec !== ':*' ? null : 'unscoped-grant';
+  if (/[*?[\]{}!\\]/.test(spec) || /^[~/]/.test(spec) || spec.split('/').includes('..')) return 'unscoped-grant';
+  return null;
+}
+
 /** @returns {{ok:true,args:string[],containment:object}|{ok:false,reason:string}} -- same argv order the session code always used */
 function buildArgs({ sessionId, resume = false, allowedTools = [], tools = null } = {}) {
   if (typeof sessionId !== 'string' || !SESSION_TOKEN.test(sessionId)) return { ok: false, reason: 'bad-session-id' };
   const args = resume ? ['--resume', sessionId, '-p', '--output-format', 'stream-json', '--verbose']
                       : ['-p', '--output-format', 'stream-json', '--verbose', '--session-id', sessionId];
-  for (const g of allowedTools) {
-    const m = GRANT.exec(String(g));
-    /* a grant is ONE tool and ONE scoped input: no bare tool, no list, no wildcard-only spec */
-    if (!m || /[,\n\r\0]/.test(g) || /^[*?]+$/.test(m[2].trim())) return { ok: false, reason: 'unscoped-grant' };
-  }
+  if (!Array.isArray(allowedTools)) return { ok: false, reason: 'unscoped-grant' };
+  for (const g of allowedTools) if (grantRefusal(g)) return { ok: false, reason: 'unscoped-grant' };
   if (allowedTools.length) args.push('--allowedTools', ...allowedTools);
   if (tools !== null) {
-    if (typeof tools !== 'string') return { ok: false, reason: 'bad-tools' };
+    /* a tool LIST of plain names only: `default` (= every built-in tool), `*`, `Bash(*)` or a flag-looking token would widen what the caller said */
+    if (typeof tools !== 'string' || (tools !== '' && !tools.split(',').every((t) => /^[A-Za-z][A-Za-z0-9_]*$/.test(t) && t !== 'default'))) return { ok: false, reason: 'bad-tools' };
     /* a run that says "restricted tools" must not still expose connector (MCP) tools: `--tools ""` alone left 19 (H3 measured) */
     args.push('--tools', tools, '--strict-mcp-config');
   }
   const bad = permissiveArgs(args);
   if (bad.length) return { ok: false, reason: `permissive-arg:${bad[0]}` };
   return { ok: true, args, containment: containment({ tools }) };
+}
+
+/* The project's OWN Claude settings (`<project>/.claude/settings.json`, `settings.local.json`) are read by the CLI whatever we pass, and a few keys widen what the run may do beyond
+ * what any JuQode screen shows: a permission mode that stops asking, an unscoped allow rule (bare tool / wildcard-only), extra directories. Those are refused BEFORE a start or a
+ * resume. A file that exists but cannot be read or parsed is UNKNOWN, and unknown is refused. Scoped allow rules are NOT judged here (product decision, see OPEN). The user's
+ * and managed settings are never read by JuQode: they stay UNKNOWN (containment().permissions). */
+const PERMISSIVE_MODES = new Set(['bypasspermissions', 'acceptedits', 'auto']);
+function projectSettingsRefusal(projectPath) {
+  for (const name of ['settings.json', 'settings.local.json']) {
+    const file = path.join(String(projectPath), '.claude', name);
+    let doc;
+    try { doc = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
+      if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue;
+      return { reason: 'project-settings-unreadable', source: name };
+    }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { reason: 'project-settings-unreadable', source: name };
+    const perm = doc.permissions;
+    if (perm == null) continue;
+    if (typeof perm !== 'object' || Array.isArray(perm)) return { reason: 'project-settings-unreadable', source: name };
+    if (perm.defaultMode != null && (typeof perm.defaultMode !== 'string' || PERMISSIVE_MODES.has(perm.defaultMode.trim().toLowerCase()))) return { reason: 'project-settings-permissive-mode', source: name };
+    if (perm.additionalDirectories != null && (!Array.isArray(perm.additionalDirectories) || perm.additionalDirectories.length)) return { reason: 'project-settings-additional-directories', source: name };
+    if (perm.allow != null && (!Array.isArray(perm.allow) || perm.allow.some((r) => typeof r !== 'string' || !/\(.*\)$/.test(r.trim()) || /^[^(]*\(\s*[*?:]*\s*\)$/.test(r.trim())))) return { reason: 'project-settings-unscoped-allow', source: name };
+  }
+  return null;
 }
 
 /** What a launch may CLAIM. hooks/permissions are never verified before launch, so `attested` is always false. */
@@ -308,4 +343,4 @@ function problems(s, ctx) {
   return p;
 }
 
-module.exports = { EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
+module.exports = { projectSettingsRefusal, grantRefusal, EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };

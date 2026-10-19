@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const repo = require('../db/repo');
 const claude = require('../claude-detect');
 const session = require('../claude/session');
-const { scopedRetryTools, summarizeRun } = require('../provider/claude-contract');
+const { scopedRetryTools, summarizeRun, projectSettingsRefusal } = require('../provider/claude-contract');
 const gitEvidence = require('../evidence/git');
 const manifest = require('../evidence/manifest');
 const { toSignal, reduce, initial, openPermission, openPermissions, KIND } = require('./reducer');
@@ -83,6 +83,9 @@ async function preflight(db, project, { evidenceStore, detect = claude.detect, t
   if (taskRefusal) return { ok: false, reason: taskRefusal };
   const status = await detect();
   if (!status.available) return { ok: false, reason: 'claude-unavailable', detail: status };
+  /* the project's own Claude settings can widen what the run may do beyond any screen: refused before a row, a basis or a process exists */
+  const widened = projectSettingsRefusal(project.path);
+  if (widened) return { ok: false, reason: 'effective-permission-widened', detail: widened };
 
   const active = repo.activeWork(db, project.id);
   if (active) return { ok: false, reason: 'active-work', detail: active };
@@ -800,6 +803,8 @@ function snapshot(db, workId) {
  * elsewhere. */
 function resumeRefusal(db, entry) {
   const project = entry.projectId ? db.prepare('select path from project where id = ?').get(entry.projectId) : null;
+  const widened = project?.path ? projectSettingsRefusal(project.path) : null;
+  if (widened) return { ok: false, reason: 'effective-permission-widened', detail: widened };
   const v = session.verifyResume(entry.binding, { cwd: entry.cwd, sessionId: entry.sessionId, bin: entry.bin,
     projectPath: project?.path });
   return v.ok ? null : { ok: false, reason: 'resume-binding-unverified', detail: v.reason };

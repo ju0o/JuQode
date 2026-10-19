@@ -163,6 +163,9 @@ function baseArgs(sessionId) {
  *     accepts comma-separated specs, so the second half became an independent grant.
  * Anything that could mean more than one thing is refused. Not granting is always safe. */
 const UNSAFE_TARGET = /[(),*?[\]{}!\n\r\0]|^\s*$/;
+/* A FILE spec is also refused when it would READ differently from the card: `~` (Claude expands it to the home folder, so `Edit(~/x)` is not the project file `~/x`),
+ * a backslash (an escape in the rule grammar, a separator only on Windows - where the path is already normalised), invisible or control characters, edge whitespace. */
+const UNSAFE_FILE_SPEC = /^~|\\|[\p{Cc}\p{Cf}]|^\s|\s$/u;
 
 function allowSpec(denial, cwd) {
   const r = scopeOf(denial, cwd);
@@ -203,18 +206,21 @@ function scopeOf(denial, cwd) {
   const tool = denial?.tool === 'Write' ? 'Edit' : denial?.tool;
   if (!tool || !/^[A-Za-z][A-Za-z0-9_]*$/.test(tool)) return { refusal: 'cannot-scope' };
   const input = denial.input ?? {};
-  const file = input.file_path ?? input.path ?? input.notebook_path ?? null;
+  /* `Bash(<path>)` is a COMMAND rule, never a file: a Bash denial is scoped by its command only. */
+  const file = tool === 'Bash' ? null : (input.file_path ?? input.path ?? input.notebook_path ?? null);
+  /* no project folder given = nothing to be "inside" of; `cwd ?? '/'` used to make the whole filesystem the project */
+  if (typeof cwd !== 'string' || !cwd) return { refusal: 'cannot-scope' };
 
   if (typeof file === 'string' && file) {
     /* Resolve against the PROJECT, not against JuQode's own working directory — measured:
      * a relative `../../../etc/shadow` resolved into an unrelated tree, so the card and the
      * grant named different files. */
-    const root = cwd ?? '/';
+    const root = cwd;
     const abs = path.resolve(root, file);
     const rel = path.relative(root, abs).split(path.sep).join('/');
     const lexicallyInside = Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
     if (!lexicallyInside) return { refusal: 'outside-project' };
-    if (UNSAFE_TARGET.test(rel)) return { refusal: 'cannot-scope' };
+    if (UNSAFE_TARGET.test(rel) || UNSAFE_FILE_SPEC.test(rel)) return { refusal: 'cannot-scope' };
     let realRoot; let real;
     try { realRoot = fs.realpathSync(root); } catch { return { refusal: 'cannot-scope' }; }
     real = realTarget(abs);
