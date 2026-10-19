@@ -128,3 +128,58 @@ test('a result event with no success evidence is not reported as complete', () =
   const s = replay([toSignal({ type: 'result', subtype: 'success', is_error: 'true' })]);
   assert.notStrictEqual(s.outcome, 'complete');
 });
+
+/* ───────────── QA test-power additions (mutation-driven) ───────────── */
+const FIN_OK = { subtype: 'success', terminalReason: 'end_turn', denials: [] };
+
+test('a result with is_error absent or null is a finished, complete Work (absent is success; only a non-false value fails)', () => {
+  for (const ev of [{ type: 'result', subtype: 'success' }, { type: 'result', subtype: 'success', is_error: null }, { type: 'result', subtype: 'success', is_error: false }]) {
+    const s = replay([toSignal(ev)]);
+    assert.deepStrictEqual([s.status, s.outcome], ['ended', 'complete'], JSON.stringify(ev));
+  }
+  for (const bad of [true, 'true', 0, 1]) {
+    assert.strictEqual(replay([toSignal({ type: 'result', subtype: 'success', is_error: bad })]).outcome, 'failed', String(bad));
+  }
+});
+
+test('a question only moves running to input_waiting; it never overrides permission_waiting or cancel_requested', () => {
+  const q = { kind: KIND.INPUT_REQUEST, payload: { text: 'q' } };
+  const perm = reduce(initial(), { kind: KIND.PERMISSION_DENIED, payload: { tool: 'Bash', toolUseId: 'a' } });
+  const canc = reduce(initial(), { kind: KIND.CANCEL_REQUEST, payload: null });
+  assert.strictEqual(reduce(perm, q).status, 'permission_waiting');
+  assert.strictEqual(reduce(canc, q).status, 'cancel_requested');
+  assert.strictEqual(reduce(initial(), q).status, 'input_waiting');
+  /* a state that is already input_waiting and gets a second signal keeps waiting */
+  assert.strictEqual(reduce(reduce(initial(), q), { kind: KIND.TOOL_USE, payload: { all: [{}] } }).status, 'input_waiting');
+});
+
+test('hydrated cancel_requested (row status only, cancelRequested=false) stays cancel_requested; finish there is documented below', () => {
+  const hyd = { ...initial(), status: 'cancel_requested', outcome: null };
+  assert.strictEqual(hyd.cancelRequested, false);
+  for (const sig of [{ kind: KIND.INPUT_REQUEST, payload: { text: 'q' } }, { kind: KIND.SESSION_START, payload: {} },
+                     { kind: KIND.ANSWER, payload: null }, { kind: KIND.PERMISSION_GRANTED, payload: { tool: 'Bash' } },
+                     { kind: KIND.PERMISSION_DENIED, payload: { tool: 'Bash', toolUseId: 'z' } }]) {
+    assert.strictEqual(reduce(hyd, sig).status, 'cancel_requested', sig.kind);
+  }
+  assert.deepStrictEqual(['ended', 'ended_unknown'], (({ status, outcome }) => [status, outcome])(reduce(hyd, { kind: KIND.RECONCILED, payload: null })));
+  assert.deepStrictEqual(['ended', 'cancelled_nochange'], (({ status, outcome }) => [status, outcome])(reduce(hyd, { kind: KIND.CANCEL_CONFIRMED, payload: null })));
+  /* DOCUMENTED PRE-EXISTING OPEN (not changed here): the finish branch reads the in-memory cancelRequested flag, which a
+   * hydrated entry does not have, so a finish on a hydrated cancel_requested Work is judged like an ordinary one. */
+  const fin = reduce(hyd, { kind: KIND.FINISH, payload: FIN_OK });
+  assert.strictEqual(fin.outcome, 'complete', 'known limitation: hydrated cancel_requested + finish => complete, not cancelled_*');
+});
+
+test('known limitation (OPEN): a finish that re-reports an already-resolved denial id does not reopen it', () => {
+  let s = reduce(initial(), { kind: KIND.PERMISSION_DENIED, payload: { tool: 'Bash', toolUseId: 'a' } });
+  s = reduce(s, { kind: KIND.PERMISSION_GRANTED, payload: { toolUseId: 'a' } });
+  assert.strictEqual(s.status, 'running');
+  s = reduce(s, { kind: KIND.FINISH, payload: { ...FIN_OK, denials: [{ tool: 'Bash', toolUseId: 'a', input: { c: 1 } }] } });
+  assert.deepStrictEqual([s.status, s.outcome, openPermissions(s).length], ['ended', 'complete', 0]);
+  assert.strictEqual(s.denials[0].resolved, true);
+  assert.deepStrictEqual(s.denials[0].input, { c: 1 }, 'the re-report only enriches');
+});
+
+test('known limitation (OPEN): the same tool_use delivered twice is counted twice in toolsUsed', () => {
+  const tu = { kind: KIND.TOOL_USE, payload: { tool: 'Edit', toolUseId: 't1', all: [{ tool: 'Edit', toolUseId: 't1' }] } };
+  assert.strictEqual(reduce(reduce(initial(), tu), tu).toolsUsed, 2, 'known limitation: not deduplicated');
+});
