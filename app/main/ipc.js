@@ -31,7 +31,7 @@ const { scan } = require('./interpret/scan');
 const { answers, statusOf } = require('./interpret/answers');
 const guard = require('./ipc-guard');
 const { safeSnapshot } = require('./work/context');
-const { unknownTaskRunWithLiveRunner, unresolvedLegacyUnknownWorks } = require('./work/runner-liveness');
+const { unknownTaskRunWithLiveRunner, unresolvedLegacyUnknownWorks, acknowledgeAfterObservation } = require('./work/runner-liveness');
 
 /**
  * @param {object} deps
@@ -582,7 +582,7 @@ function makeHandlers(deps) {
       if (!work || work.project_id !== projectId || work.task_id != null) {
         return { ok: false, reason: 'not-legacy-work' };
       }
-      return repo.acknowledgeUnknownProcessStopped(db(), projectId, workId);
+      return acknowledgeAfterObservation(db(), projectId, workId, deps.observeRunner);
     },
 
     'juqode:task-create': (_e, projectId, input) => {
@@ -658,7 +658,7 @@ function makeHandlers(deps) {
         return { ok: false, reason: 'prior-process-may-still-live' };
       }
       if (prior.outcome === 'ended_unknown' && confirmPriorStopped) {
-        const acknowledged = repo.acknowledgeUnknownProcessStopped(db(), task.project_id, prior.id);
+        const acknowledged = acknowledgeAfterObservation(db(), task.project_id, prior.id, deps.observeRunner);
         if (!acknowledged.ok) return acknowledged;
       }
       const holdWhy = qcHoldReason(task.project_id);

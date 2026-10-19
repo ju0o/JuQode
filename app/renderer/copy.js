@@ -588,7 +588,7 @@ export const C = {
       retrySubmit: '새 Run 시작',
       retryNeedsReason: '다음 시도에서 보완할 점을 적어 주세요.',
       retryFailed: '새 Run을 시작하지 못했어요.',
-      retryProcessStillLive: '이전 Claude 프로세스가 아직 실행 중일 수 있어요. 끝난 것을 확인한 뒤 다시 시도해 주세요.',
+      retryProcessStillLive: '이전 작업이 아직 실행 중일 수 있어요. 상태를 확인하기 전에는 새 작업을 시작하지 않아요.',
       retryUnknownConfirm: '이전 실행이 끝났는지 확인하기 어려워요. 이전 Claude 실행이 멈춘 것을 직접 확인했어요.',
       retryUnknownRequired: '이전 Claude 실행이 멈춘 것을 확인한 뒤 새 Run을 시작해 주세요.',
       savedReviews: '이전 Run에서 저장한 조건 검토',

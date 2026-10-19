@@ -13,7 +13,7 @@ const repo = require(path.join(R, 'app/main/db/repo.js'));
 const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
 const { tempDir } = require(path.join(__dirname, 'tmp.js'));
 
-async function rig(fn) {
+async function rig(fn, deps = {}) {
   const dir = tempDir('juqode-wh-');
   fs.writeFileSync(path.join(dir, 'keep.txt'), 'same');
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'x', scripts: { build: 'true', test: 'true', dev: 'true', deploy: 'true' } }));
@@ -22,7 +22,7 @@ async function rig(fn) {
   fs.writeFileSync(path.join(dir, 'pending.txt'), 'uncommitted');          // so qc.git.commit has something it could save
   const db = openDb(':memory:');
   const project = repo.openProject(db, dir, 'p');
-  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => tempDir('juqode-wh-ev-'), push() {}, pushQc() {} });
+  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => tempDir('juqode-wh-ev-'), push() {}, pushQc() {}, ...deps });
   const t1 = repo.createTask(db, project.id, { goal: 'one', acceptanceCriteria: ['a'] });
   const t2 = repo.createTask(db, project.id, { goal: 'two', acceptanceCriteria: ['b'] });
   const prior = repo.beginWork(db, project.id, 'first try', { taskId: t1.id, idempotencyKey: 'k-first' }).work;
@@ -76,7 +76,7 @@ test('only the user\'s explicit confirmation lifts the hold, and then it lifts f
     assert.strictEqual(r.reason, 'claude-unavailable', 'with PATH emptied the ordinary next gate answers, not a model call');
     const ack = db.prepare("select source, kind from work_signal where work_id = ? and payload like '%stoppedConfirmedByUser%'").get(prior.id);
     assert.deepStrictEqual({ ...ack }, { source: 'user', kind: 'raw' });
-  });
+  }, { observeRunner: () => ({ verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'stub-see-runner-liveness.test.js' }) });   // the real observer is exercised there
 });
 
 test('the hold is a single shared gate: preflight and the Quick Command gate both read the same acknowledgement lookup (source pin)', () => {

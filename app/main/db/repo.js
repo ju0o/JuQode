@@ -560,14 +560,15 @@ function hasStoppedProcessAcknowledgement(db, workId) {
   });
 }
 
-function acknowledgeUnknownProcessStopped(db, projectId, workId) {
+/* Writes the record only. Callers go through runner-liveness.acknowledgeAfterObservation, which decides whether it may be written. */
+function acknowledgeUnknownProcessStopped(db, projectId, workId, observation = null) {
   const work = db.prepare(`select id, project_id, task_id, status, outcome from work where id = ?`).get(workId);
   if (!work || work.project_id !== projectId || work.status !== 'ended' || work.outcome !== 'ended_unknown') {
     return { ok: false, reason: 'not-unknown-work' };
   }
   if (hasStoppedProcessAcknowledgement(db, workId)) return { ok: true, existing: true };
   addSignal(db, workId, { seq: nextSeq(db, workId), source: 'user', kind: 'raw',
-    payload: { juqodeProcess: { workId, stoppedConfirmedByUser: true } } });
+    payload: { juqodeProcess: { workId, stoppedConfirmedByUser: true, ...(observation ? { observation } : {}) } } });
   return { ok: true, existing: false };
 }
 

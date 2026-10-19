@@ -516,7 +516,10 @@ export function renderSC02(root, api, nav, state) {
       acknowledge.disabled = true;
       const result = await api.legacyUnknownAck(p.id, work.id, true);
       if (result?.ok) await refreshTasks();
-      else { note.textContent = C.gap.task.retryFailed; acknowledge.disabled = false; }
+      else {
+        note.textContent = result?.reason === 'prior-process-may-still-live' ? C.gap.task.retryProcessStillLive : C.gap.task.retryFailed;
+        acknowledge.disabled = false;
+      }
     });
     acknowledge.disabled = true;
     check.addEventListener('change', () => { acknowledge.disabled = !check.checked; });
