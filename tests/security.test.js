@@ -421,3 +421,19 @@ test('the offline guard blocks what leaves and passes what does not', () => {
   assert.strictEqual(read().length, 100, 'the attempt list is unbounded');
   assert.strictEqual(read.count(), 210, 'the count stopped when the list did');
 });
+
+test('every permission request and check is denied (Electron grants them all by default)', () => {
+  const { denyPermissions } = require(path.join(R, 'app/main/security.js'));
+  let request = null; let check = null;
+  denyPermissions({ setPermissionRequestHandler: (fn) => { request = fn; }, setPermissionCheckHandler: (fn) => { check = fn; } });
+  assert.strictEqual(typeof request, 'function', 'no permission request handler was registered');
+  assert.strictEqual(typeof check, 'function', 'no permission check handler was registered');
+  for (const p of ['media', 'geolocation', 'notifications', 'clipboard-read', 'openExternal']) {
+    let answer = null;
+    request({}, p, (ok) => { answer = ok; });
+    assert.strictEqual(answer, false, `${p} was granted`);
+    assert.strictEqual(check({}, p), false, `${p} check passed`);
+  }
+  const main = read('app/main/main.js');
+  assert.ok(/denyPermissions\(session\.defaultSession\)/.test(main), 'main.js does not apply the permission denial to the window\'s session');
+});

@@ -274,7 +274,7 @@ function makeHandlers(deps) {
                interpretation: { ...saved, failedCode: scanned.failed ?? null },
                /* Why the Brief looks the way it does, for the run log — not for the screen. */
                narrative: narrated ? { filled: narrated.filled, grounded: narrated.grounded,
-                                       reason: narrated.reason, detail: narrated.detail ?? null }
+                                       reason: narrated.reason, detail: narrated.detail == null ? null : guard.scrubString(narrated.detail) }
                                    : { skipped: true } };
     },
 

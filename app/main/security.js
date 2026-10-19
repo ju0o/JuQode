@@ -58,4 +58,11 @@ function enforceLocalOnly(session) {
   return read;
 }
 
-module.exports = { WEB_PREFERENCES, lockNavigation, enforceLocalOnly };
+/** Electron grants every permission request (camera, clipboard, geolocation, notifications...) unless a handler says
+ * otherwise. This app asks for none, so the answer is no, for the request and for the check. */
+function denyPermissions(session) {
+  session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  session.setPermissionCheckHandler(() => false);
+}
+
+module.exports = { WEB_PREFERENCES, lockNavigation, enforceLocalOnly, denyPermissions };

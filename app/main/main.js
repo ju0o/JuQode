@@ -8,7 +8,7 @@
 const path = require('node:path');
 const { app, BrowserWindow, ipcMain, session } = require('electron');
 const { createWindow } = require('./window');
-const { enforceLocalOnly } = require('./security');
+const { enforceLocalOnly, denyPermissions } = require('./security');
 const { openDb } = require('./db/db');
 const project = require('./project');
 const claude = require('./claude-detect');
@@ -150,6 +150,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     readExternalAttempts = enforceLocalOnly(session.defaultSession);
+    denyPermissions(session.defaultSession);
     openStore();
     if (db) {
       const appSession = repo.startAppSession(db, { appVersion: app.getVersion(), platform: process.platform });
