@@ -5,8 +5,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
-const { computePatch, sideFromManifest, fsReader, stateOfRow, PATCH_STATES } =
+const { computePatch, sideFromManifest, fsReader, sideFromGit, gitSides, stateOfRow, PATCH_STATES } =
   require(path.join(__dirname, '..', 'app/main/evidence/patch.js'));
+const gitEv = require(path.join(__dirname, '..', 'app/main/evidence/git.js'));
 const manifest = require(path.join(__dirname, '..', 'app/main/evidence/manifest.js'));
 const { tempDir } = require('./tmp.js');
 
@@ -339,4 +340,165 @@ test('far-apart edits make separate hunks with exactly 3 lines of context', () =
   assert.deepEqual(f.patch_text.split('\n').filter((l) => l.startsWith('@@')), ['@@ -1,5 +1,5 @@', '@@ -15,6 +15,6 @@']);
   assert.ok(!f.patch_text.includes(' l6\n') && !f.patch_text.includes(' l14\n'));
   assert.equal(applyTo(bt, f.patch_text).toString(), at);
+});
+
+/* ── slice B: fsReader hardening ─────────────────────────────────────────────────────────── */
+const fsSide = (root, names) => ({ files: names.map((path_) => ({ path: path_ })), read: fsReader(root) });
+const fsOne = (root, name, opts) => one(computePatch({ before: { files: [], read: () => null }, after: fsSide(root, [name]) }, opts), name);
+
+test('hardlink to a secret under a harmless name is unavailable and its bytes are never read', (t) => {
+  const root = tempDir('patch-hl');
+  fs.writeFileSync(path.join(root, '.env'), 'TOKEN=abc\n');
+  fs.linkSync(path.join(root, '.env'), path.join(root, 'notes.txt'));
+  fs.writeFileSync(path.join(root, 'plain.txt'), 'ok\n');
+  const orig = fs.readFileSync; const reads = [];
+  t.mock.method(fs, 'readFileSync', (...a) => { reads.push(a[0]); return orig(...a); });
+  const f = fsOne(root, 'notes.txt');
+  assert.equal(f.patch_state, 'unavailable');
+  assert.equal(f.patch_text, null);
+  assert.equal(f.after_digest, null);
+  assert.equal(reads.length, 0, 'no read at all');
+  assert.equal(fsOne(root, 'plain.txt').patch_state, 'stored');
+});
+
+test('symlink that resolves into a manifest SKIP_DIR is unavailable', () => {
+  const root = tempDir('patch-skip');
+  fs.mkdirSync(path.join(root, 'node_modules'));
+  fs.mkdirSync(path.join(root, '.git'));
+  fs.writeFileSync(path.join(root, 'node_modules/x.js'), 'x\n');
+  fs.writeFileSync(path.join(root, '.git/HEAD'), 'ref\n');
+  fs.symlinkSync('node_modules/x.js', path.join(root, 'l1.txt'));
+  fs.symlinkSync('.git', path.join(root, 'gl'));
+  assert.equal(fsOne(root, 'l1.txt').patch_state, 'unavailable');
+  assert.equal(fsOne(root, 'gl/HEAD').patch_state, 'unavailable');
+});
+
+test('oversize file: size decided from fstat BEFORE the read; streamed digest, no body load, too_large', (t) => {
+  const root = tempDir('patch-big');
+  const big = Buffer.alloc(300 * 1024, 'a');
+  fs.writeFileSync(path.join(root, 'big.txt'), big);
+  const orig = fs.readFileSync; let whole = 0;
+  t.mock.method(fs, 'readFileSync', (...a) => { whole++; return orig(...a); });
+  const f = fsOne(root, 'big.txt', { maxSideBytes: 100 * 1024 });
+  assert.equal(f.patch_state, 'too_large');
+  assert.equal(f.patch_text, null);
+  assert.equal(f.after_digest, sha(big), 'digest streamed in 64 KiB chunks');
+  assert.equal(whole, 0, 'file never loaded whole');
+});
+
+test('oversize on both sides with equal bytes is unchanged; a differing oversize side is too_large', () => {
+  const a = tempDir('patch-bigA'); const b = tempDir('patch-bigB');
+  for (const d of [a, b]) fs.writeFileSync(path.join(d, 'f'), Buffer.alloc(2000, 'z'));
+  const opts = { maxSideBytes: 1000 };
+  const same = computePatch({ before: fsSide(a, ['f']), after: fsSide(b, ['f']) }, opts);
+  assert.equal(one(same, 'f').patch_state, 'unchanged');
+  fs.writeFileSync(path.join(b, 'f'), Buffer.alloc(2000, 'y'));
+  const diff = computePatch({ before: fsSide(a, ['f']), after: fsSide(b, ['f']) }, opts);
+  assert.equal(one(diff, 'f').patch_state, 'too_large');
+  assert.notEqual(one(diff, 'f').before_digest, one(diff, 'f').after_digest);
+});
+
+test('exactly at the cap is still read and diffed', () => {
+  const root = tempDir('patch-cap');
+  fs.writeFileSync(path.join(root, 'e.txt'), 'x'.repeat(99) + '\n');
+  assert.equal(fsOne(root, 'e.txt', { maxSideBytes: 100 }).patch_state, 'stored');
+});
+
+/* ── slice B: Git side ───────────────────────────────────────────────────────────────────── */
+function gitRig() {
+  const root = tempDir('patch-git');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
+  const g = (...a) => execFileSync('git', a, { cwd: root, env, stdio: 'pipe' });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  const w = (n, v) => { fs.mkdirSync(path.dirname(path.join(root, n)), { recursive: true }); fs.writeFileSync(path.join(root, n), v); };
+  return { root, g, w, store: path.join(tempDir('patch-gitstore'), 'evidence') };
+}
+
+test('Git: before/after tree pair gives the same per-file result as the non-Git path; dirty-before file is not in the Run patch', () => {
+  const { root, g, w, store } = gitRig();
+  w('edit.txt', 'one\ntwo\nthree\n'); w('dirty.txt', 'base\n'); w('gone.txt', 'bye\n'); w('bin.dat', 'x'); w('same.txt', 's\n');
+  g('add', '-A'); g('commit', '-qm', 'base');
+  w('dirty.txt', 'dirty before the run\n');                    // dirty at Run start, untouched afterwards
+  const before = gitEv.capture(root, store, 'before');
+  const snapFiles = fs.readdirSync(root).filter((n) => n !== '.git');
+  const memBefore = Object.fromEntries(snapFiles.map((n) => [n, fs.readFileSync(path.join(root, n))]));
+  w('edit.txt', 'one\n2\nthree\n'); fs.rmSync(path.join(root, 'gone.txt')); w('new.txt', 'hi\n');
+  w('bin.dat', Buffer.from([0, 1, 2, 0xff]));
+  const after = gitEv.capture(root, store, 'after');
+  const memAfter = Object.fromEntries(fs.readdirSync(root).filter((n) => n !== '.git').map((n) => [n, fs.readFileSync(path.join(root, n))]));
+
+  const { before: sb, after: sa } = gitSides(root, store, before.ref, after.ref);
+  const rg = computePatch({ before: sb, after: sa });
+  const rm = computePatch({ before: mem(memBefore), after: mem(memAfter) });
+  const pick = (r) => r.files.filter((f) => f.patch_state !== 'unchanged').map((f) => [f.path, f.change, f.patch_state, f.before_digest, f.after_digest, f.patch_text]);
+  assert.deepEqual(pick(rg), pick(rm));
+  assert.deepEqual(rg.files.map((f) => f.path), ['bin.dat', 'edit.txt', 'gone.txt', 'new.txt'], 'dirty.txt and same.txt are not in the Run');
+  assert.equal(one(rg, 'bin.dat').patch_state, 'binary');
+  assert.equal(one(rg, 'edit.txt').patch_state, 'stored');
+});
+
+test('Git: sensitive names never reach bytesAt/sizeAt, even when the tree holds one', (t) => {
+  const { root, g, w, store } = gitRig();
+  w('ok.txt', 'a\n'); w('.env', 'SECRET=1\n'); w('keys/server.pem', 'PEM\n');
+  g('add', '-A'); g('add', '-f', '.env', 'keys/server.pem'); g('commit', '-qm', 'secret committed');
+  fs.mkdirSync(path.join(store, 'objects'), { recursive: true });
+  const asked = [];
+  for (const fn of ['bytesAt', 'sizeAt']) { const o = gitEv[fn]; t.mock.method(gitEv, fn, (r, s, ref, p) => { asked.push(p); return o(r, s, ref, p); }); }
+  const side = sideFromGit(root, store, 'HEAD', null);
+  assert.ok(side.files.some((f) => f.path === '.env'), 'precondition: the secret is in the tree');
+  const r = computePatch({ before: { files: [], read: () => null }, after: side });
+  assert.equal(one(r, '.env').patch_state, 'sensitive_excluded');
+  assert.equal(one(r, 'keys/server.pem').patch_state, 'sensitive_excluded');
+  assert.equal(one(r, '.env').after_digest, null);
+  assert.deepEqual([...new Set(asked)], ['ok.txt'], 'only the harmless file was requested');
+  assert.throws(() => side.read('.env'), { code: 'SENSITIVE' });
+});
+
+test('Git: symlink and submodule/gitlink entries are unavailable, no escape, link target text is not diffed', () => {
+  const { root, g, w, store } = gitRig();
+  w('real.txt', 'r\n'); fs.symlinkSync('/etc/hostname', path.join(root, 'lnk'));
+  g('add', '-A'); g('commit', '-qm', 'base');
+  const blob = g('rev-parse', 'HEAD:real.txt').toString().trim();
+  g('update-index', '--add', '--cacheinfo', `160000,${g('rev-parse', 'HEAD').toString().trim()},sub`);
+  g('commit', '-qm', 'gitlink');
+  fs.mkdirSync(path.join(store, 'objects'), { recursive: true });
+  const side = sideFromGit(root, store, 'HEAD', null);
+  const r = computePatch({ before: { files: [], read: () => null }, after: side });
+  assert.equal(one(r, 'lnk').patch_state, 'unavailable');
+  assert.equal(one(r, 'sub').patch_state, 'unavailable');
+  assert.equal(one(r, 'lnk').patch_text, null);
+  assert.equal(one(r, 'real.txt').patch_state, 'stored');
+  assert.ok(blob);
+});
+
+test('Git: oversize blob is refused by size before bytesAt; digest is null (no streaming source)', (t) => {
+  const { root, g, w, store } = gitRig();
+  w('big.txt', 'a'.repeat(5000)); w('s.txt', 'x\n'); g('add', '-A'); g('commit', '-qm', 'base');
+  fs.mkdirSync(path.join(store, 'objects'), { recursive: true });
+  const asked = []; const o = gitEv.bytesAt;
+  t.mock.method(gitEv, 'bytesAt', (r, s, ref, p) => { asked.push(p); return o(r, s, ref, p); });
+  const r = computePatch({ before: { files: [], read: () => null }, after: sideFromGit(root, store, 'HEAD', null, { maxBytes: 1000 }) }, { maxSideBytes: 1000 });
+  assert.equal(one(r, 'big.txt').patch_state, 'too_large');
+  assert.equal(one(r, 'big.txt').after_digest, null);
+  assert.equal(one(r, 'big.txt').patch_text, null);
+  assert.ok(!asked.includes('big.txt'));
+  assert.equal(one(r, 's.txt').patch_state, 'stored');
+});
+
+test('Git: a path listed in the tree whose blob cannot be read is unavailable, never "absent"', (t) => {
+  const { root, g, w, store } = gitRig();
+  w('a.txt', 'a\n'); g('add', '-A'); g('commit', '-qm', 'base');
+  fs.mkdirSync(path.join(store, 'objects'), { recursive: true });
+  t.mock.method(gitEv, 'bytesAt', () => null);
+  const r = computePatch({ before: { files: [], read: () => null }, after: sideFromGit(root, store, 'HEAD', null) });
+  assert.equal(one(r, 'a.txt').patch_state, 'unavailable');
+});
+
+test('Git: capture leaves the user git config alone (no config writes by sideFromGit)', () => {
+  const { root, g, w, store } = gitRig();
+  w('a.txt', 'a\n'); g('add', '-A'); g('commit', '-qm', 'base');
+  fs.mkdirSync(path.join(store, 'objects'), { recursive: true });
+  const cfg = fs.readFileSync(path.join(root, '.git/config'));
+  sideFromGit(root, store, 'HEAD', null).read('a.txt');
+  assert.deepEqual(fs.readFileSync(path.join(root, '.git/config')), cfg);
 });

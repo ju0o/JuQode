@@ -434,6 +434,17 @@ function bytesAt(root, store, ref, filePath) {
   catch { return null; }
 }
 
+/** Size in bytes of one file's blob at a basis, or null when it is absent. Lets a caller refuse
+ *  an oversize blob BEFORE `bytesAt` buffers it. */
+function sizeAt(root, store, ref, filePath) {
+  const env = {
+    GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
+  };
+  try { const n = Number(git(['cat-file', '-s', `${ref}:${filePath}`], { cwd: root, env })); return Number.isFinite(n) ? n : null; }
+  catch { return null; }
+}
+
 /** `path → mode` for one tree. `-z` because a path with a non-ASCII name — the ordinary case
  *  for this product — is C-quoted by the default output and would not match the worktree. */
 function treeModes(root, store, ref) {
@@ -550,4 +561,4 @@ function restore(root, store, beforeRef, afterRef) {
   return done;
 }
 
-module.exports = { capture, diff, changedPaths, fileAt, bytesAt, restore, worktreeDirty, hasIdentity, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };
+module.exports = { capture, diff, changedPaths, fileAt, bytesAt, sizeAt, treeModes, restore, worktreeDirty, hasIdentity, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };

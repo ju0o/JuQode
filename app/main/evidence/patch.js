@@ -33,6 +33,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { isExcludedPath } = require('./exclude');
+const { SKIP_DIRS } = require('./manifest');
+const gitMod = require('./git');
 
 const PATCH_STATES = Object.freeze(['stored', 'unchanged', 'binary', 'too_large', 'sensitive_excluded', 'unavailable']);
 const MAX_SIDE_BYTES = 1024 * 1024;        // per file, per side (planned G2 ceiling)
@@ -56,24 +58,82 @@ const safePath = (p) => typeof p === 'string' && p !== '' && !/[\x00-\x1f\x7f]/.
 /** Non-Git side: the manifest lists paths/size/sha256, `read` supplies the bytes of that snapshot. */
 const sideFromManifest = (manifest, read) => ({ files: manifest.files, read });
 
-/** A live-directory reader. Refuses anything whose real path leaves `root` (symlink escape). */
+/* A reader may return, instead of a Buffer, `{ oversize: true, size, sha256 }`: the file is over
+ * `maxBytes` and was NOT loaded. sha256 is computed by streaming (bounded memory) for the live
+ * directory, and is null where no streaming source exists (Git blobs). computePatch reports it
+ * as too_large with that digest and never diffs it. */
+const oversize = (size, sha256v) => ({ oversize: true, size, sha256: sha256v });
+
+function streamDigest(fd) {
+  const h = crypto.createHash('sha256');
+  const chunk = Buffer.allocUnsafe(64 * 1024);
+  for (let n; (n = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0;) h.update(chunk.subarray(0, n));
+  return h.digest('hex');
+}
+
+/** A live-directory reader. Refuses anything whose real path leaves `root` (symlink escape),
+ *  lands in a manifest SKIP_DIR, is a hardlinked file, or is not a regular file.
+ *  Hardlink policy: a regular file with st_nlink > 1 is `unavailable`. The name rule judges
+ *  spellings, and a hardlink can give a secret a harmless name (`ln .env notes.txt`) that a
+ *  realpath check cannot see; JuQode cannot tell which name is the "real" one, so it declines.
+ *  Cost: a legitimately hardlinked file gets no patch (digest-less, truthful `unavailable`).
+ *  Size policy: fstat on the OPEN fd decides before any read; > maxBytes streams a digest only. */
 function fsReader(root) {
   const real = fs.realpathSync(root);
-  return (rel) => {
+  return (rel, maxBytes = MAX_SIDE_BYTES) => {
     if (!safePath(rel)) throw new Error('unsafe-path');
     const abs = path.join(real, rel);
     let r;
     try { r = fs.realpathSync(abs); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
     if (!r.startsWith(real + path.sep)) throw new Error('escapes-root');
+    const realRel = path.relative(real, r).split(path.sep).join('/');
     /* The sensitive-name rule applies to where the path REALLY lands, not only to its spelling:
      * `link.txt -> .env` (or a symlinked directory holding one) must not read the secret. This
      * is decided from the real path alone — nothing has been opened yet. */
-    if (isExcludedPath(path.relative(real, r).split(path.sep).join('/'))) {
+    if (isExcludedPath(realRel)) {
       throw Object.assign(new Error('sensitive-target'), { code: 'SENSITIVE' });
     }
-    if (!fs.statSync(r).isFile()) throw new Error('not-a-file');
-    return fs.readFileSync(r);
+    /* A link into .git / node_modules / build output etc. is not the user's file. */
+    if (realRel.split('/').some((s) => SKIP_DIRS.has(s))) throw new Error('skip-dir-target');
+    const fd = fs.openSync(r, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
+    try {
+      const st = fs.fstatSync(fd);
+      if (!st.isFile()) throw new Error('not-a-file');
+      if (st.nlink > 1) throw new Error('hardlink');
+      if (st.size > maxBytes) return oversize(st.size, streamDigest(fd));
+      const buf = fs.readFileSync(fd);
+      return buf.length > maxBytes ? oversize(buf.length, sha256(buf)) : buf;
+    } finally { fs.closeSync(fd); }
   };
+}
+
+/** Git side over two refs produced by git.capture (JuQode-owned object dir, never the user's index).
+ *  `paths` null = every path in the tree. Sensitive names are dropped from the file list AND
+ *  guarded in read, so bytesAt/sizeAt are never called for them. Symlink (120000) and
+ *  gitlink/submodule (160000) entries are listed but unavailable: their blob is not file content. */
+function sideFromGit(root, store, ref, paths = null, { maxBytes = MAX_SIDE_BYTES } = {}) {
+  const modes = gitMod.treeModes(root, store, ref);
+  const want = paths === null ? [...modes.keys()] : paths.filter((p) => modes.has(p));
+  const files = want.map((p) => ({ path: p }));
+  const read = (p, max = maxBytes) => {
+    if (!safePath(p)) throw new Error('unsafe-path');
+    if (isExcludedPath(p)) throw Object.assign(new Error('sensitive-name'), { code: 'SENSITIVE' });
+    if (!modes.has(p)) return null;
+    if (modes.special.has(p)) throw new Error('special-mode');
+    const size = gitMod.sizeAt(root, store, ref, p);
+    if (size === null) throw new Error('unreadable');
+    if (size > max) return oversize(size, null);
+    const buf = gitMod.bytesAt(root, store, ref, p);
+    if (buf === null) throw new Error('unreadable');   // listed in the tree but unreadable: never "absent"
+    return buf;
+  };
+  return { files, read };
+}
+
+/** Before/after sides for a Git Run: only paths that differ between the two trees. */
+function gitSides(root, store, beforeRef, afterRef, opts) {
+  const changed = gitMod.changedPaths(root, store, beforeRef, afterRef);
+  return { before: sideFromGit(root, store, beforeRef, changed, opts), after: sideFromGit(root, store, afterRef, changed, opts) };
 }
 
 /* Lines keep an end-of-line flag, so "a" and "a\n" are different lines (git's "\ No newline"). */
@@ -189,17 +249,19 @@ function computePatch({ before, after }, opts = {}) {
     let bb = null;
     let ab = null;
     try {
-      if (fb) bb = before.read(p);
-      if (fa) ab = after.read(p);
+      if (fb) bb = before.read(p, maxSide);
+      if (fa) ab = after.read(p, maxSide);
     } catch (e) {
       if (e && e.code === 'SENSITIVE') files.push(row('sensitive_excluded'));
       else files.push(row('unavailable', fb?.sha256 ?? null, fa?.sha256 ?? null));
       continue;
     }
     if ((fb && !bb) || (fa && !ab)) { files.push(row('unavailable', fb?.sha256 ?? null, fa?.sha256 ?? null)); continue; }
-    const bd = bb ? sha256(bb) : null;
-    const ad = ab ? sha256(ab) : null;
-    if (bd === ad) { files.push(row('unchanged', bd, ad)); continue; }
+    const dg = (x) => (x ? (x.oversize ? x.sha256 : sha256(x)) : null);
+    const bd = dg(bb);
+    const ad = dg(ab);
+    if (bd !== null && bd === ad) { files.push(row('unchanged', bd, ad)); continue; }
+    if ((bb && bb.oversize) || (ab && ab.oversize)) { files.push(row('too_large', bd, ad)); continue; }
     if ((bb && bb.length > maxSide) || (ab && ab.length > maxSide)) { files.push(row('too_large', bd, ad)); continue; }
     const bt = bb ? decode(bb) : '';
     const at = ab ? decode(ab) : '';
@@ -220,5 +282,5 @@ function computePatch({ before, after }, opts = {}) {
   return { files: files.sort(byPath), blobs: blobList, patch_bytes: total };
 }
 
-module.exports = { computePatch, sideFromManifest, fsReader, stateOfRow, PATCH_STATES,
+module.exports = { computePatch, sideFromManifest, fsReader, sideFromGit, gitSides, stateOfRow, PATCH_STATES,
                    MAX_SIDE_BYTES, MAX_PATCH_BYTES };
