@@ -1,0 +1,130 @@
+'use strict';
+/* V1-104 slice A · provider-neutral reducer probes. Fixed-seed fuzz over the NORMALIZED signal vocabulary
+ * (no provider event shape is invented here; toSignal is probed only with malformed input). */
+const test = require('node:test');
+const assert = require('node:assert');
+const { toSignal, reduce, replay, initial, openPermissions, KIND } = require('../app/main/work/reducer');
+
+let seed = 104;
+const rnd = (n) => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed % n; };
+const pick = (a) => a[rnd(a.length)];
+const ids = ['t1', 't2', 't3', null];
+const tools = ['Bash', 'Edit'];
+const mkFinish = () => ({ kind: KIND.FINISH, payload: {
+  subtype: pick(['success', 'error_max_turns', null]), terminalReason: pick(['end_turn', 'max_turns', null]),
+  apiErrorStatus: pick([null, null, 500]), isError: pick([true, false]),
+  denials: rnd(2) ? [{ tool: pick(tools), toolUseId: pick(ids.slice(0, 3)), input: {} }] : [] } });
+const gens = [
+  () => ({ kind: KIND.SESSION_START, payload: {} }),
+  () => ({ kind: KIND.TOOL_USE, payload: { tool: 'Edit', toolUseId: pick(ids), all: [{}] } }),
+  () => ({ kind: KIND.TOOL_RESULT, payload: null }),
+  /* id-less denials are not deduplicated by design (reducer.js mergeDenials comment): OPEN, so not generated */
+  () => ({ kind: KIND.PERMISSION_DENIED, payload: { tool: pick(tools), toolUseId: pick(ids.slice(0, 3)) } }),
+  () => ({ kind: KIND.PERMISSION_GRANTED, payload: pick([{ tool: pick(tools) }, { toolUseId: pick(ids) }, null]) }),
+  () => ({ kind: KIND.INPUT_REQUEST, payload: { text: 'q' } }),
+  () => ({ kind: KIND.ANSWER, payload: null }),
+  () => ({ kind: KIND.CANCEL_REQUEST, payload: null }),
+  () => ({ kind: KIND.CANCEL_CONFIRMED, payload: null }),
+  mkFinish,
+  () => ({ kind: KIND.RECONCILED, payload: null }),
+  () => ({ kind: KIND.RAW, payload: { type: 'weird' } }),
+  () => ({ kind: 'never-heard-of-it', payload: 1 }),
+];
+const seqOf = (n) => Array.from({ length: n }, () => pick(gens)());
+const OUT = ['complete', 'partial', 'failed', 'cancelled_nochange', 'cancelled_partial', 'ended_unknown'];
+const STAT = ['running', 'input_waiting', 'permission_waiting', 'cancel_requested', 'ended'];
+/* the part of a state a persisted row / the UI can show; ids (global counter) and clocks excluded */
+const view = (s) => JSON.stringify({ st: s.status, o: s.outcome, open: openPermissions(s).map((d) => [d.tool, d.toolUseId]) });
+const rank = { running: 0, input_waiting: 0, permission_waiting: 0, cancel_requested: 1, ended: 2 };
+
+test('fuzz: no impossible state, ended is terminal, success needs an observed finish', () => {
+  for (let i = 0; i < 3000; i++) {
+    const sigs = seqOf(1 + rnd(14));
+    let s = initial(); let endedAs = null; let sawFinish = false; let cancelSeen = false;
+    sigs.forEach((sig, k) => {
+      if (sig.kind === KIND.FINISH) sawFinish = true;
+      if (sig.kind === KIND.CANCEL_REQUEST && !endedAs) cancelSeen = true;
+      const frozen = JSON.stringify(s);
+      const prev = s;
+      s = reduce(s, sig, k);
+      assert.strictEqual(JSON.stringify(prev), frozen, 'reduce mutated its input');
+      const ctx = JSON.stringify(sigs.slice(0, k + 1).map((x) => x.kind));
+      assert.ok(STAT.includes(s.status), ctx);
+      assert.strictEqual(s.status === 'ended', s.outcome !== null, `outcome iff ended ${ctx}`);
+      if (s.outcome) assert.ok(OUT.includes(s.outcome), ctx);
+      if (endedAs) assert.deepStrictEqual([s.status, s.outcome], endedAs, `ended regressed/rewritten ${ctx}`);
+      else if (s.status === 'ended') endedAs = [s.status, s.outcome];
+      if (s.status === 'ended' || prev.status === 'cancel_requested' || prev.cancelRequested) {
+        assert.ok(rank[s.status] >= rank[prev.status], `cancel_requested left without ending ${ctx}`);
+      }
+      if (s.status !== 'ended' && s.status !== 'cancel_requested' && openPermissions(s).length) assert.strictEqual(s.status, 'permission_waiting', `open denial but ${s.status} ${ctx}`);
+      if (s.outcome === 'complete' || s.outcome === 'partial') assert.ok(sawFinish, 'success without finish');
+      if (s.outcome === 'complete') assert.ok(!cancelSeen, 'cancelled work reported complete');
+    });
+  }
+});
+
+test('fuzz: delivering every event twice, ends in the same view (a whole-stream second pass is NOT asserted: a later grant then re-denial is a legitimate new event)', () => {
+  for (let i = 0; i < 3000; i++) {
+    /* a grant with no tool_use_id resolves 'the oldest open denial for that tool' BY DESIGN, so delivering it twice
+     * legitimately resolves two denials: OPEN (needs an event id from the Provider contract), not generated here */
+    const sigs = seqOf(1 + rnd(12)).filter((x) => x.kind !== KIND.PERMISSION_GRANTED || x.payload?.toolUseId);
+    const once = view(replay(sigs));
+    const dup = view(replay(sigs.flatMap((x) => [x, x])));
+    assert.strictEqual(dup, once, `duplicated events changed the result: ${JSON.stringify(sigs)}`);
+  }
+});
+
+test('an ended Work keeps its outcome when reconciliation speaks about it later', () => {
+  const done = reduce(initial(), { kind: KIND.FINISH, payload: { subtype: 'success', isError: false, denials: [] } });
+  const after = reduce(done, { kind: KIND.RECONCILED, payload: null });
+  assert.deepStrictEqual([after.status, after.outcome], ['ended', 'complete']);
+});
+
+test('cancel_requested is left only by ending; a late question or denial does not reopen the status', () => {
+  let s = reduce(initial(), { kind: KIND.CANCEL_REQUEST, payload: null });
+  for (const k of [{ kind: KIND.INPUT_REQUEST, payload: { text: 'q' } }, { kind: KIND.SESSION_START, payload: {} },
+                   { kind: KIND.PERMISSION_GRANTED, payload: { tool: 'Bash' } }, { kind: KIND.ANSWER, payload: null }]) {
+    assert.strictEqual(reduce(s, k).status, 'cancel_requested', k.kind);
+  }
+});
+
+test('a question answered while a refusal is still open does not report running', () => {
+  let s = reduce(initial(), { kind: KIND.PERMISSION_DENIED, payload: { tool: 'Bash', toolUseId: 'a' } });
+  s = reduce(s, { kind: KIND.INPUT_REQUEST, payload: { text: 'q' } });
+  s = reduce(s, { kind: KIND.ANSWER, payload: null });
+  assert.strictEqual(s.status, 'permission_waiting');
+});
+
+test('a stray grant does not clear a pending question', () => {
+  let s = reduce(initial(), { kind: KIND.INPUT_REQUEST, payload: { text: 'q' } });
+  s = reduce(s, { kind: KIND.PERMISSION_GRANTED, payload: { tool: 'Bash' } });
+  assert.strictEqual(s.status, 'input_waiting');
+});
+
+test('the same denial delivered twice is one card', () => {
+  const d = { kind: KIND.PERMISSION_DENIED, payload: { tool: 'Bash', toolUseId: 'x' } };
+  assert.strictEqual(openPermissions(reduce(reduce(initial(), d), d)).length, 1);
+});
+
+test('malformed provider events never throw and never invent a state', () => {
+  const bad = [null, undefined, 5, 'x', [], {}, { type: 'result', permission_denials: 'x' }, { type: 'result', permission_denials: [null, 3] },
+    { type: 'result', permission_denials: {} }, { type: 'assistant', message: { content: [null, 7, { type: 'tool_use' }] } },
+    { type: 'user', message: { content: [null, { type: 'tool_result' }] } }, { type: 'system', subtype: 'init' },
+    { type: 'result', result: { a: 1 }, is_error: 'true' }, { type: 'x'.repeat(2e6) }];
+  for (const e of bad) {
+    const sig = toSignal(e);
+    assert.ok(Object.values(KIND).includes(sig.kind));
+    const s = reduce(initial(), sig);
+    assert.ok(STAT.includes(s.status));
+  }
+  for (const sig of [null, undefined, {}, { kind: null }, 'finish', 7]) {
+    assert.deepStrictEqual(reduce(initial(), sig).status, 'running');
+  }
+});
+
+test('a result event with no success evidence is not reported as complete', () => {
+  /* UNKNOWN-safe: only the explicit failure markers we can already read; a non-boolean is_error is not "false". */
+  const s = replay([toSignal({ type: 'result', subtype: 'success', is_error: 'true' })]);
+  assert.notStrictEqual(s.outcome, 'complete');
+});
