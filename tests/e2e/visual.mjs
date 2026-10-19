@@ -205,7 +205,6 @@ async function cdp(sendFn) {
   /* V1-404 · the confirmation is recorded only once the stored runner is OBSERVED gone. A runner the fixture left alive (the
    * stubborn CLI's `sleep 60` outlives its killed shell) is REFUSED, on screen, until it really ends: every refusal is kept in
    * `legacyAckRefusals`, and the click is repeated (own scratch fixture, bounded 90 s) until the observation allows it. */
-  const legacyAckRefusals = [];
   const acknowledgeAllLegacyUnknowns = async () => {
     const count = () => evalJs(`(async () => (await window.juqode.taskList(window.__project().id)).legacyUnknownRuns.length)()`);
     let remaining = await count();
@@ -222,12 +221,13 @@ async function cdp(sendFn) {
       await sleep(600);
       remaining = await count();
       if (remaining >= before) {
-        legacyAckRefusals.push(await evalJs(`document.querySelector('[data-el="legacy-unknown"]')?.innerText ?? null`));
+        acknowledgeAllLegacyUnknowns.refusals.push(await evalJs(`document.querySelector('[data-el="legacy-unknown"]')?.innerText ?? null`));
         await sleep(2000);
       }
     }
     return remaining;
   };
+  acknowledgeAllLegacyUnknowns.refusals = [];
   /* The renderer is LOADED before anything is asked of it.
    *
    * `pageTarget` waits for the debugger target, which exists as soon as the window does — the
@@ -1873,7 +1873,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
   out.cancelUnknownGateAfterAck = await acknowledgeAllLegacyUnknowns();
-  out.legacyAckRefusals = [...legacyAckRefusals];
+  out.legacyAckRefusals = [...acknowledgeAllLegacyUnknowns.refusals];
 
   /* ── `15` SC-03 부분 완료 — 된 것과 안 된 것, 둘 다 ────────────────────────────────────
    * The most complex result state and the one WBS-18's acceptance is written about, and it had
