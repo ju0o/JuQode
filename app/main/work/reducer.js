@@ -182,6 +182,8 @@ function reduce(state, signal, at = null) {
 
     case KIND.FINISH: {
       s.finish = signal.payload;
+      /* cancel is sticky: a hydrated entry has the status but not the flag (V1-104) */
+      const cancelled = s.cancelRequested || state.status === 'cancel_requested';
       const denials = signal.payload?.denials ?? [];
       if (denials.length) s.denials = mergeDenials(s.denials, denials);
 
@@ -190,12 +192,12 @@ function reduce(state, signal, at = null) {
        * would throw away the thing the card is for. */
       if (s.denials.some((d) => !d.resolved)) {
         /* …unless the user asked to stop. Then the refusal is moot and the Work ends. */
-        if (!s.cancelRequested) { s.status = 'permission_waiting'; break; }
+        if (!cancelled) { s.status = 'permission_waiting'; break; }
       }
 
       /* A cancelled Work does not become 완료 because the turn happened to report success.
        * `07` §8.1: a cancelled child exits 0 and `result.is_error` is just as blind to it. */
-      if (s.cancelRequested) {
+      if (cancelled) {
         s.status = 'ended';
         s.outcome = s.toolsUsed > 0 ? 'cancelled_partial' : 'cancelled_nochange';
         break;

@@ -153,7 +153,7 @@ test('a question only moves running to input_waiting; it never overrides permiss
   assert.strictEqual(reduce(reduce(initial(), q), { kind: KIND.TOOL_USE, payload: { all: [{}] } }).status, 'input_waiting');
 });
 
-test('hydrated cancel_requested (row status only, cancelRequested=false) stays cancel_requested; finish there is documented below', () => {
+test('hydrated cancel_requested (row status only, cancelRequested=false) stays cancel_requested; a finish there ends cancelled_*', () => {
   const hyd = { ...initial(), status: 'cancel_requested', outcome: null };
   assert.strictEqual(hyd.cancelRequested, false);
   for (const sig of [{ kind: KIND.INPUT_REQUEST, payload: { text: 'q' } }, { kind: KIND.SESSION_START, payload: {} },
@@ -163,10 +163,10 @@ test('hydrated cancel_requested (row status only, cancelRequested=false) stays c
   }
   assert.deepStrictEqual(['ended', 'ended_unknown'], (({ status, outcome }) => [status, outcome])(reduce(hyd, { kind: KIND.RECONCILED, payload: null })));
   assert.deepStrictEqual(['ended', 'cancelled_nochange'], (({ status, outcome }) => [status, outcome])(reduce(hyd, { kind: KIND.CANCEL_CONFIRMED, payload: null })));
-  /* DOCUMENTED PRE-EXISTING OPEN (not changed here): the finish branch reads the in-memory cancelRequested flag, which a
-   * hydrated entry does not have, so a finish on a hydrated cancel_requested Work is judged like an ordinary one. */
-  const fin = reduce(hyd, { kind: KIND.FINISH, payload: FIN_OK });
-  assert.strictEqual(fin.outcome, 'complete', 'known limitation: hydrated cancel_requested + finish => complete, not cancelled_*');
+  /* cancel is sticky: a finish on a hydrated cancel_requested Work never reads as complete (cancelled_* per toolsUsed) */
+  assert.deepStrictEqual([reduce(hyd, { kind: KIND.FINISH, payload: FIN_OK }).status, reduce(hyd, { kind: KIND.FINISH, payload: FIN_OK }).outcome], ['ended', 'cancelled_nochange']);
+  const used = { ...hyd, toolsUsed: 2 };
+  assert.strictEqual(reduce(used, { kind: KIND.FINISH, payload: FIN_OK }).outcome, 'cancelled_partial');
 });
 
 test('known limitation (OPEN): a finish that re-reports an already-resolved denial id does not reopen it', () => {
