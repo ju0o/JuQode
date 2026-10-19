@@ -183,3 +183,38 @@ test('known limitation (OPEN): the same tool_use delivered twice is counted twic
   const tu = { kind: KIND.TOOL_USE, payload: { tool: 'Edit', toolUseId: 't1', all: [{ tool: 'Edit', toolUseId: 't1' }] } };
   assert.strictEqual(reduce(reduce(initial(), tu), tu).toolsUsed, 2, 'known limitation: not deduplicated');
 });
+
+/* ───────────── FINISH under cancel with an unresolved refusal (QA gap) ───────────── */
+const fin = (denials) => toSignal({ type: 'result', subtype: 'success', is_error: false, terminal_reason: 'end_turn', permission_denials: denials });
+const outcomeOf = (s) => [s.status, s.outcome];
+
+test('finish with a refusal on a hydrated cancel_requested Work ends cancelled_*, never permission_waiting', () => {
+  const hyd = { ...initial(), status: 'cancel_requested' };
+  const sig = fin([{ tool_name: 'B', tool_use_id: 'x' }]);
+  assert.deepStrictEqual(outcomeOf(reduce(hyd, sig)), ['ended', 'cancelled_nochange']);
+  assert.deepStrictEqual(outcomeOf(reduce({ ...hyd, toolsUsed: 3 }, sig)), ['ended', 'cancelled_partial']);
+});
+
+test('finish on a live cancelRequested Work with an already-open refusal ends cancelled_*', () => {
+  let s = reduce(initial(), { kind: KIND.PERMISSION_DENIED, payload: { tool: 'B', toolUseId: 'x' } });
+  s = reduce(s, { kind: KIND.CANCEL_REQUEST, payload: null });
+  assert.strictEqual(s.status, 'cancel_requested');
+  assert.deepStrictEqual(outcomeOf(reduce(s, fin([{ tool_name: 'B', tool_use_id: 'x' }]))), ['ended', 'cancelled_nochange']);
+  assert.deepStrictEqual(outcomeOf(reduce({ ...s, toolsUsed: 1 }, fin([]))), ['ended', 'cancelled_partial']);
+});
+
+test('once a stop is requested no signal sequence reaches permission_waiting, resolved refusal or not', () => {
+  let s = reduce(initial(), { kind: KIND.CANCEL_REQUEST, payload: null });
+  for (const sig of [{ kind: KIND.PERMISSION_DENIED, payload: { tool: 'B', toolUseId: 'y' } },
+                     { kind: KIND.PERMISSION_GRANTED, payload: { toolUseId: 'y' } },
+                     { kind: KIND.PERMISSION_DENIED, payload: { tool: 'B', toolUseId: 'z' } }]) {
+    s = reduce(s, sig);
+    assert.strictEqual(s.status, 'cancel_requested', sig.kind);
+  }
+  assert.deepStrictEqual(outcomeOf(reduce(s, fin([]))), ['ended', 'cancelled_nochange']);
+});
+
+test('known limitation: a raw finish signal whose denials contain null throws in mergeDenials (unreachable via toSignal, which filters them)', () => {
+  assert.throws(() => reduce(initial(), { kind: KIND.FINISH, payload: { subtype: 'success', denials: [null] } }), TypeError);
+  assert.deepStrictEqual(outcomeOf(reduce(initial(), fin([null]))), ['ended', 'complete']);
+});
