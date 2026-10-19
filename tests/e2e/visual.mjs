@@ -3449,12 +3449,11 @@ const confirmed = interp.answers.filter((a) => a.confidence === 'confirmed').map
 /* q4 is never 확인됨: the question is what the folders DO, and the scan established only that
  * they exist. A 확인됨 chip there would certify an answer nothing has given. */
 assert.deepStrictEqual(confirmed, [3, 5, 6], `the facts layer confirmed q${confirmed}`);
-/* WBS-04 · the narrative layer answers q1, q2 and q4, and its answers are 예상됨 at best —
- * `19` §C1 ① lets only the facts layer's own output be 확인됨. The fixture grounds q1 and q2 in
- * a file the scan really read and grounds q4 in one nobody read, so q4 stays 확인 못함. */
-assert.deepStrictEqual(interp.answers.filter((a) => a.confidence === 'expected').map((a) => a.q), [1, 2],
-  'the narrative layer did not fill the questions the facts layer left open');
-assert.deepStrictEqual(interp.answers.filter((a) => a.confidence === 'unconfirmed').map((a) => a.q), [4]);
+/* V1-314 · interpreting runs no model: q1, q2 and q4 stay open (확인 못함) until the user asks
+ * for a model read, and nothing is 예상됨 — the fixture CLI would have answered if it were asked. */
+assert.deepStrictEqual(interp.answers.filter((a) => a.confidence === 'expected').map((a) => a.q), [],
+  'a model answer reached the Brief without the user asking for one');
+assert.deepStrictEqual(interp.answers.filter((a) => a.confidence === 'unconfirmed').map((a) => a.q), [1, 2, 4]);
 assert.ok(!interp.answers.some((a) => a.confidence === 'confirmed' && !a.sourceRef),
   '`20`: a 확인됨 answer without the source that backs it');
 
@@ -3472,26 +3471,17 @@ assert.ok(results.sc02RedProbe > 0,
   'the red counter cannot see red — a zero from it would prove nothing (this check was once vacuous)');
 assert.strictEqual(results.sc02Reds, 0, 'SC-02 renders red with nothing failed — red is failure only (16 §2)');
 
-/* ── WBS-04 · the Brief's narrative layer ─────────────────────────────────────────────────── */
+/* ── V1-314 · the Brief has no automatic model layer ─────────────────────────────────────── */
 const narrative = results.narrative ? JSON.parse(results.narrative) : null;
-assert.ok(narrative, 'the renderer never saw a narrative report');
-assert.strictEqual(narrative.reason, null, `the narrative pass did not run: ${JSON.stringify(narrative)}`);
-assert.strictEqual(narrative.filled, 3, 'the three open questions were not filled');
-/* The fixture cites README.md twice (a file the scan really read) and one path nobody read. */
-assert.strictEqual(narrative.grounded, 2, 'a citation nobody read was counted as grounding');
+assert.deepStrictEqual(narrative, { skipped: true, reason: 'not-requested' },
+  `interpret reported a model pass: ${JSON.stringify(narrative)}`);
 
 const briefRows = JSON.parse(results.briefAfterReread ?? results.briefAnswers);
 const chip = (i) => briefRows[i].chip;
-/* ① 하는 일 and ② 주요 기능 cited a file the scan read → 예상됨. NEVER 확인됨: `19` §C1 ① lets
- * only the facts layer's own output be confirmed, and `20` demands a source_ref it cannot have. */
-assert.ok(chip(0).includes('예상됨'), `q1 chip was ${chip(0)}`);
-assert.ok(chip(1).includes('예상됨'), `q2 chip was ${chip(1)}`);
-/* ④ 폴더가 하는 일 cited a path nobody read, so the answer is shown under 확인 못함. */
-assert.ok(chip(3).includes('확인 못함'), `q4 chip was ${chip(3)}`);
-assert.ok(briefRows[3].text.includes('src 에 소스가 있어요'),
-  'the ungrounded answer was hidden instead of marked');
-assert.ok(!briefRows[3].text.includes('nobody-read-this'),
-  'a path nobody read was shown to the user as evidence');
+for (const i of [0, 1, 3]) {
+  assert.ok(chip(i).includes('확인 못함'), `q${i + 1} chip was ${chip(i)}`);
+  assert.ok(!chip(i).includes('예상됨'), `q${i + 1} claims a model read: ${chip(i)}`);
+}
 /* …and the measured rows are untouched by any of it. */
 assert.ok(chip(2).includes('확인됨') && !chip(2).includes('못함'), `q3 chip was ${chip(2)}`);
 assert.strictEqual(results.briefConfirmedHaveSource, 0,

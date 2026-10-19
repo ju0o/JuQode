@@ -247,7 +247,7 @@ export function renderSC02(root, api, nav, state) {
        * and folding it would hide the reason. A re-read the user ASKED for re-opens itself
        * (see `onReread`), because they asked to see the result. */
       if (r?.ok) state.briefFolded = true;
-      /* WBS-04's own report — how many answers the narrative pass filled, and why it did not.
+      /* V1-314 · interpret runs no model, so this is `{ skipped, reason: 'not-requested' }`.
        * It is not drawn: the Brief shows the ANSWERS and their chips, which is what the reader
        * needs. This is for the run log and the e2e, the way `__work` carries counts. */
       state.narrative = r?.narrative ?? null;
