@@ -517,7 +517,8 @@ test('an unattached legacy unknown Work blocks a Task Run until its process stop
     assert.strictEqual(fs.existsSync(invoked), false, 'the uncertain legacy process did not block Agent spawn');
     assert.strictEqual(db.prepare('select count(*) n from work').get().n, 1);
     const handlers = require(path.join(R, 'app/main/ipc.js')).makeHandlers({ db: () => db, dbFault: () => null,
-      evidenceStore: () => tempDir('juqode-legacy-unknown-ack-'), push: () => {} });
+      evidenceStore: () => tempDir('juqode-legacy-unknown-ack-'), push: () => {},
+      observeRunner: () => ({ verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'stub (real observer: runner-liveness.test.js)' }) });
     assert.deepStrictEqual(handlers['juqode:legacy-unknown-ack'](null, project.id, legacy.id, false),
       { ok: false, reason: 'confirmation-required' }, 'the app recorded a stop confirmation without explicit user action');
     const acknowledged = handlers['juqode:legacy-unknown-ack'](null, project.id, legacy.id, true);
@@ -554,7 +555,8 @@ test('retrying an unknown Run requires an explicit stopped-process confirmation 
       return begun.ok ? { ok: true, workId: begun.work.id } : begun;
     };
     const handlers = makeHandlers({ db: () => db, dbFault: () => null,
-      evidenceStore: () => tempDir('juqode-confirm-unknown-'), push: () => {} });
+      evidenceStore: () => tempDir('juqode-confirm-unknown-'), push: () => {},
+      observeRunner: () => ({ verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'stub (real observer: runner-liveness.test.js)' }) });
     const refused = await handlers['juqode:task-retry'](null, task.id, prior.id,
       'Try again after checking', 'unknown-retry-idem');
     assert.strictEqual(refused.reason, 'prior-process-may-still-live');

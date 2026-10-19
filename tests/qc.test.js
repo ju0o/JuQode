@@ -740,6 +740,8 @@ const repo = require(path.join(R, 'app/main/db/repo.js'));
 const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
 const { unknownTaskRunWithLiveRunner } = require(path.join(R, 'app/main/work/runner-liveness.js'));
 
+/* these tests are about WHAT the hold gates; whether a stored runner is really gone is runner-liveness.test.js */
+const OBSERVED_GONE = () => ({ verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'stub' });
 function qcBench(files = { 'package.json': pkg({ test: 'node -e "console.log(1)"', build: 'node -e "process.exit(2)"' }) }, extra = {}) {
   const dir = project(files);
   const db = openDb(':memory:');
@@ -1138,7 +1140,7 @@ test('an unacknowledged ended_unknown Work refuses a file-changing Quick Command
       deploy: 'node -e "require(\'fs\').writeFileSync(\'touched-deploy.txt\',\'x\')"',
     }),
     'keep.txt': 'same',
-  });
+  }, { observeRunner: OBSERVED_GONE });
   execFileSync('git', ['init', '-q'], { cwd: b.dir });
   execFileSync('git', ['config', 'user.email', 'qc-test@example.com'], { cwd: b.dir });
   execFileSync('git', ['config', 'user.name', 'qc-test'], { cwd: b.dir });

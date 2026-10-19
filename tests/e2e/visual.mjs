@@ -2406,6 +2406,10 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     const project = seedDb.prepare('select * from project where path = ?').get(SEED);
     const legacy = repo.beginWork(seedDb, project.id, 'Synthetic legacy unknown Work').work;
     repo.setWorkState(seedDb, legacy.id, { status: 'ended', outcome: 'ended_unknown' });
+    /* V1-404 · the confirmation is only recorded when the stored runner is OBSERVED gone, so this Work carries the identity of a
+     * process that really ran and ended (own child, already reaped) -- the same shape the app records for a real runner. */
+    const dead = require('node:child_process').spawnSync('true');
+    repo.setRunnerIdentity(seedDb, legacy.id, 'synthetic-session', dead.pid, new Date(Date.now() - 1000).toISOString());
     seedDb.close();
   }
   await evalJs(`document.querySelector('.task-create summary')?.click()`);
