@@ -215,3 +215,128 @@ test('the produced diff applies with git apply (round trip)', () => {
   execFileSync('git', ['apply', '--no-index', 'p.diff'], { cwd: root });
   assert.equal(fs.readFileSync(path.join(root, 'f.txt'), 'utf8'), after);
 });
+
+/* ---- QA round 1 ---- */
+const applyTo = (before, patch) => {
+  const root = tempDir('patch-apply2');
+  if (before !== null) fs.writeFileSync(path.join(root, 'f.txt'), before);
+  fs.writeFileSync(path.join(root, 'p.diff'), patch);
+  execFileSync('git', ['apply', '--no-index', 'p.diff'], { cwd: root });
+  return fs.existsSync(path.join(root, 'f.txt')) ? fs.readFileSync(path.join(root, 'f.txt')) : null;
+};
+const liveSide = (root, p) => ({ files: [{ path: p }], read: fsReader(root) });
+const readsSpy = (t) => {
+  const opened = [];
+  for (const m of ['readFileSync', 'openSync']) {
+    const orig = fs[m];
+    t.mock.method(fs, m, (...a) => { opened.push(String(a[0])); return orig(...a); });
+  }
+  return opened;
+};
+
+test('an in-root symlink to a sensitive file is sensitive_excluded: no state leak, no blob, no read', (t) => {
+  const root = tempDir('patch-symsens');
+  fs.writeFileSync(path.join(root, '.env'), 'SECRET=1\n');
+  fs.mkdirSync(path.join(root, 'cfg'));
+  fs.writeFileSync(path.join(root, 'cfg', 'id_rsa'), 'KEY\n');
+  fs.writeFileSync(path.join(root, 'x.pem'), 'PEM\n');
+  fs.mkdirSync(path.join(root, '.env.d'));
+  fs.writeFileSync(path.join(root, '.env.d', 'inner.txt'), 'IN\n');
+  fs.symlinkSync('.env', path.join(root, 'link1.txt'));
+  fs.symlinkSync('cfg/id_rsa', path.join(root, 'link2.txt'));
+  fs.symlinkSync('x.pem', path.join(root, 'link3.txt'));
+  fs.symlinkSync('.env.d', path.join(root, 'dirlink'));
+  const opened = readsSpy(t);
+  const paths = ['link1.txt', 'link2.txt', 'link3.txt', 'dirlink/inner.txt'];
+  const r = computePatch({ before: { files: [], read: () => null },
+    after: { files: paths.map((p) => ({ path: p })), read: fsReader(root) } });
+  for (const p of paths) {
+    const f = one(r, p);
+    assert.equal(f.patch_state, 'sensitive_excluded', p);
+    assert.equal(f.patch_text, null);
+    assert.equal(f.after_digest, null);
+  }
+  assert.equal(r.blobs.length, 0);
+  assert.ok(!opened.some((p) => /\.env|id_rsa|x\.pem/.test(p)), `opened: ${opened}`);
+});
+
+test('a BOM-only change is a visible diff that applies', () => {
+  const after = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('x\n')]);
+  const r = computePatch({ before: mem({ 'f.txt': 'x\n' }), after: { files: [{ path: 'f.txt' }], read: () => after } });
+  const f = one(r, 'f.txt');
+  assert.equal(f.patch_state, 'stored');
+  assert.match(f.patch_text, /@@/);
+  assert.deepEqual(applyTo('x\n', f.patch_text), after);
+});
+
+test('an empty file added or deleted has a truthful, applicable git-style patch', () => {
+  const add = one(computePatch({ before: { files: [], read: () => null }, after: mem({ 'f.txt': '' }) }), 'f.txt');
+  assert.equal(add.patch_state, 'stored');
+  assert.equal(add.patch_text, 'diff --git a/f.txt b/f.txt\nnew file mode 100644\n');
+  assert.equal(applyTo(null, add.patch_text).length, 0);
+  const del = one(computePatch({ before: mem({ 'f.txt': '' }), after: { files: [], read: () => null } }), 'f.txt');
+  assert.equal(del.patch_text, 'diff --git a/f.txt b/f.txt\ndeleted file mode 100644\n');
+  assert.equal(applyTo('', del.patch_text), null);
+});
+
+test('paths with newline, CR or other control characters are unavailable and never read', () => {
+  const reads = [];
+  const bad = ['a\nb', 'a\rb', 'a\0b', 'a\tb', 'a\x7fb'];
+  const r = computePatch({ before: { files: [], read: () => null }, after: mem(Object.fromEntries(bad.map((p) => [p, 'v'])), reads) });
+  assert.deepEqual(r.files.map((f) => f.patch_state), bad.map(() => 'unavailable'));
+  assert.deepEqual(reads, []);
+});
+
+test('real 1 MiB per-side boundary, both sides; and the default 8 MiB Run cap', () => {
+  const M = 1024 * 1024;
+  const at = (c, n = M) => c.repeat(n);
+  const st = (b, a) => run({ f: b }, { f: a }).files[0].patch_state;
+  assert.equal(st(at('a'), at('b')), 'stored', 'exactly 1 MiB each side');
+  assert.equal(st(at('a', M + 1), at('b')), 'too_large', 'before side over');
+  assert.equal(st(at('a'), at('b', M + 1)), 'too_large', 'after side over');
+  assert.equal(st('', at('b', M + 1)), 'too_large', 'added file over');
+  const b = {};
+  const a = {};
+  for (const n of ['1', '2', '3', '4']) { b[n] = at('a'); a[n] = at('b'); }
+  const r = run(b, a);
+  assert.deepEqual(r.files.map((f) => f.patch_state), ['stored', 'stored', 'stored', 'too_large']);
+  assert.ok(r.patch_bytes <= 8 * M);
+});
+
+test('fsReader refuses a symlink into a sibling directory sharing the root name prefix', () => {
+  const base = tempDir('patch-sib');
+  fs.mkdirSync(path.join(base, 'root'));
+  fs.mkdirSync(path.join(base, 'root-evil'));
+  fs.writeFileSync(path.join(base, 'root-evil', 's.txt'), 'evil\n');
+  fs.symlinkSync('../root-evil/s.txt', path.join(base, 'root', 'link.txt'));
+  const r = computePatch({ before: { files: [], read: () => null }, after: liveSide(path.join(base, 'root'), 'link.txt') });
+  assert.equal(r.files[0].patch_state, 'unavailable');
+  assert.equal(r.blobs.length, 0);
+});
+
+test('a listed file whose read returns null is unavailable', () => {
+  const side = { files: [{ path: 'a.txt' }], read: () => null };
+  assert.equal(computePatch({ before: { files: [], read: () => null }, after: side }).files[0].patch_state, 'unavailable');
+  assert.equal(computePatch({ before: side, after: { files: [], read: () => null } }).files[0].patch_state, 'unavailable');
+});
+
+test('the unchanged shortcut needs equal size too: equal sha256 with different size still reads', () => {
+  const reads = [];
+  const mk = (size, txt) => ({ files: [{ path: 'a', size, sha256: 'same' }], read: (p) => { reads.push(p); return Buffer.from(txt); } });
+  const r = computePatch({ before: mk(4, 'abc\n'), after: mk(5, 'abd!\n') });
+  assert.deepEqual(reads, ['a', 'a']);
+  assert.equal(r.files[0].patch_state, 'stored');
+});
+
+test('far-apart edits make separate hunks with exactly 3 lines of context', () => {
+  const lines = Array.from({ length: 20 }, (_, i) => `l${i + 1}`);
+  const mod = lines.slice();
+  mod[1] = 'X2';
+  mod[17] = 'X18';
+  const bt = lines.join('\n') + '\n';
+  const at = mod.join('\n') + '\n';
+  const f = run({ 'f.txt': bt }, { 'f.txt': at }).files[0];
+  assert.deepEqual(f.patch_text.split('\n').filter((l) => l.startsWith('@@')), ['@@ -1,5 +1,5 @@', '@@ -15,6 +15,6 @@']);
+  assert.ok(!f.patch_text.includes(' l6\n') && !f.patch_text.includes(' l14\n'));
+  assert.equal(applyTo(bt, f.patch_text).toString(), at);
+});

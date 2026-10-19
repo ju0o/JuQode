@@ -10,6 +10,13 @@
  * is `sideFromManifest(manifest.capture(...), read)`; any other source supplies its own
  * `files` and `read`. `read` returning null means "absent"; throwing means "cannot be read".
  *
+ * `unchanged` by equal digests (step 3) trusts digests captured by JuQode itself (manifest.capture,
+ * with size compared too). A caller feeding digests it did not compute is vouching for them.
+ * `too_large` also means "too expensive to diff": a file whose differing middle exceeds the LCS
+ * table (about 2000 fully rewritten lines per side) or 20000 lines is reported by digest only.
+ * An empty file added/deleted is a header-only git-style patch ("new file mode"/"deleted file
+ * mode"), because a hunkless ---/+++ pair is not applicable.
+ *
  * Order of judgement, for each path, matters:
  *   1. unsafe path (absolute, `..`, NUL)        -> unavailable   (nothing is read)
  *   2. sensitive name, judged by exclude.js      -> sensitive_excluded (nothing is read, and no
@@ -41,7 +48,9 @@ const stateOfRow = (row) => (row && PATCH_STATES.includes(row.patch_state) ? row
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const byPath = (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);   // not localeCompare: must not vary by locale
 
-const safePath = (p) => typeof p === 'string' && p !== '' && !p.includes('\0') && !p.includes('\\') &&
+/* Control characters (NUL, \n, \r, ...) are refused: a newline in a path would forge extra lines
+ * in the `--- a/<path>` header of a stored patch. */
+const safePath = (p) => typeof p === 'string' && p !== '' && !/[\x00-\x1f\x7f]/.test(p) && !p.includes('\\') &&
   !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.split('/').some((s) => s === '..' || s === '');
 
 /** Non-Git side: the manifest lists paths/size/sha256, `read` supplies the bytes of that snapshot. */
@@ -55,7 +64,13 @@ function fsReader(root) {
     const abs = path.join(real, rel);
     let r;
     try { r = fs.realpathSync(abs); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
-    if (r !== real && !r.startsWith(real + path.sep)) throw new Error('escapes-root');
+    if (!r.startsWith(real + path.sep)) throw new Error('escapes-root');
+    /* The sensitive-name rule applies to where the path REALLY lands, not only to its spelling:
+     * `link.txt -> .env` (or a symlinked directory holding one) must not read the secret. This
+     * is decided from the real path alone — nothing has been opened yet. */
+    if (isExcludedPath(path.relative(real, r).split(path.sep).join('/'))) {
+      throw Object.assign(new Error('sensitive-target'), { code: 'SENSITIVE' });
+    }
     if (!fs.statSync(r).isFile()) throw new Error('not-a-file');
     return fs.readFileSync(r);
   };
@@ -107,6 +122,11 @@ function lcs(a, b) {
 function unified(p, aText, bText, hasA, hasB) {
   const ops = lcs(toLines(aText), toLines(bText));
   if (!ops) return null;
+  /* An empty file added or deleted has no hunk, and a bare ---/+++ pair with no hunk is rejected
+   * by `git apply`. The git-style extended header is the form that carries it. */
+  if (!ops.length && hasA !== hasB) {
+    return `diff --git a/${p} b/${p}\n${hasB ? 'new' : 'deleted'} file mode 100644\n`;
+  }
   let out = `--- ${hasA ? `a/${p}` : '/dev/null'}\n+++ ${hasB ? `b/${p}` : '/dev/null'}\n`;
   const near = ops.map(() => false);
   ops.forEach(([c], i) => {
@@ -132,7 +152,9 @@ function unified(p, aText, bText, hasA, hasB) {
   return out;
 }
 
-const utf8 = new TextDecoder('utf-8', { fatal: true });
+/* ignoreBOM: the BOM is kept as U+FEFF in the text, so a BOM-only change is a visible diff line
+ * rather than a hunkless "stored" patch. */
+const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const decode = (buf) => { try { return utf8.decode(buf); } catch { return null; } };
 
 /**
@@ -169,7 +191,11 @@ function computePatch({ before, after }, opts = {}) {
     try {
       if (fb) bb = before.read(p);
       if (fa) ab = after.read(p);
-    } catch { files.push(row('unavailable', fb?.sha256 ?? null, fa?.sha256 ?? null)); continue; }
+    } catch (e) {
+      if (e && e.code === 'SENSITIVE') files.push(row('sensitive_excluded'));
+      else files.push(row('unavailable', fb?.sha256 ?? null, fa?.sha256 ?? null));
+      continue;
+    }
     if ((fb && !bb) || (fa && !ab)) { files.push(row('unavailable', fb?.sha256 ?? null, fa?.sha256 ?? null)); continue; }
     const bd = bb ? sha256(bb) : null;
     const ad = ab ? sha256(ab) : null;
