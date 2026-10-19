@@ -803,7 +803,7 @@ function snapshot(db, workId) {
  * elsewhere. */
 function resumeRefusal(db, entry) {
   const project = entry.projectId ? db.prepare('select path from project where id = ?').get(entry.projectId) : null;
-  const widened = project?.path ? projectSettingsRefusal(project.path) : null;
+  const widened = projectSettingsRefusal(project?.path);
   if (widened) return { ok: false, reason: 'effective-permission-widened', detail: widened };
   const v = session.verifyResume(entry.binding, { cwd: entry.cwd, sessionId: entry.sessionId, bin: entry.bin,
     projectPath: project?.path });

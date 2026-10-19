@@ -15,7 +15,7 @@
  *     `--allowedTools Edit` was measured changing a second, unapproved file.
  */
 const { spawn, spawnSync } = require('node:child_process');
-const { preflightLaunch, createIdentityCache, EXECUTION_MODES, normaliseMode } = require('../provider/claude-contract');
+const { preflightLaunch, createIdentityCache, EXECUTION_MODES, normaliseMode, grantRefusal } = require('../provider/claude-contract');
 
 /* sha256 per file fingerprint; the version is taken from the process's own `init` event (a `--version` spawn per launch would also pollute fixtures and cost time) */
 const identityCache = createIdentityCache();
@@ -167,6 +167,9 @@ const UNSAFE_TARGET = /[(),*?[\]{}!\n\r\0]|^\s*$/;
  * a backslash (an escape in the rule grammar, a separator only on Windows - where the path is already normalised), invisible or control characters, edge whitespace. */
 const UNSAFE_FILE_SPEC = /^~|\\|[\p{Cc}\p{Cf}]|^\s|\s$/u;
 
+/* ONE predicate for "may this grant be offered" and "may this grant be launched": a spec the launch gate (claude-contract.grantRefusal) would refuse is never offered as a button. */
+const grantOrRefusal = (spec) => (grantRefusal(spec) ? { refusal: 'cannot-scope' } : { spec });
+
 function allowSpec(denial, cwd) {
   const r = scopeOf(denial, cwd);
   return r.spec ?? null;
@@ -227,12 +230,15 @@ function scopeOf(denial, cwd) {
     if (real === null) return { refusal: 'cannot-scope' };
     const rr = path.relative(realRoot, real);
     if (!rr || rr.startsWith('..') || path.isAbsolute(rr)) return { refusal: 'outside-project' };
-    return { spec: `${tool}(${rel})` };
+    /* the project's OWN control files: settings, MCP config and git internals decide what later runs may do (hooks run code), so no one-file grant is offered for them */
+    const protectedPath = (x) => /^(\.claude\/settings(\.local)?\.json|\.mcp\.json|\.git(\/.*)?)$/i.test(x);
+    if (protectedPath(rel) || protectedPath(rr.split(path.sep).join('/'))) return { refusal: 'cannot-scope' };
+    return grantOrRefusal(`${tool}(${rel})`);
   }
 
   if (typeof input.command === 'string' && input.command.trim()) {
     if (UNSAFE_TARGET.test(input.command)) return { refusal: 'cannot-scope' };
-    return { spec: `${tool}(${input.command}:*)` };
+    return grantOrRefusal(`${tool}(${input.command}:*)`);
   }
   return { refusal: 'cannot-scope' };      // nothing we can scope narrowly → do not widen it instead
 }

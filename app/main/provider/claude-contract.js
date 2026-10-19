@@ -17,6 +17,10 @@ const SESSION_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const FILE_WRITERS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const GRANT = /^([A-Za-z][A-Za-z0-9_]*)\((.+)\)$/;
 
+/** A file-tool spec that names a pattern/anywhere rather than one file: wildcard-only (double star, star-slash-star, slash-double-star, dot-slash-star-star, tilde variants), or reaching out of the project (`//abs`, `~`, `..`).
+ *  ONE predicate for the launch grant gate and for the project's allow rules. A directory-limited pattern (`src/**`) is not judged here (OPEN: scope semantics unmeasured). */
+const fileSpecWide = (spec) => /^[*?/\\.~]+$/.test(spec) || /^(\/\/|~)/.test(spec) || spec.split(/[\\/]/).includes('..');
+
 /** Why a grant is NOT one tool and one narrow input, or null. A grant that is wider than, or reads differently from, what a card could show is refused here too (the
  *  authoritative gate), not only where the model's path is first turned into a spec. File-ish specs: no wildcard, no `..`, no `~` (Claude expands it to the home folder),
  *  no absolute path, no backslash, no invisible/control character, no edge whitespace. Bash: one non-wildcard prefix (`cmd:*`) or one exact command. */
@@ -25,8 +29,8 @@ function grantRefusal(g) {
   if (!m || typeof g !== 'string' || /[,\n\r\0]/.test(g)) return 'unscoped-grant';
   const spec = m[2];
   if (spec !== spec.trim() || !spec || /[\p{Cc}\p{Cf}]/u.test(spec) || /^[*?]+$/.test(spec)) return 'unscoped-grant';
-  if (m[1] === 'Bash') return /^[^*?]+(:\*)?$/.test(spec) && spec !== ':*' ? null : 'unscoped-grant';
-  if (/[*?[\]{}!\\]/.test(spec) || /^[~/]/.test(spec) || spec.split('/').includes('..')) return 'unscoped-grant';
+  if (m[1] === 'Bash') { const cmd = spec.replace(/:\*$/, ''); return /^[^*?]+(:\*)?$/.test(spec) && spec !== ':*' && cmd === cmd.trim() ? null : 'unscoped-grant'; }
+  if (/[*?[\]{}!\\]/.test(spec) || /^[~/]/.test(spec) || fileSpecWide(spec)) return 'unscoped-grant';
   return null;
 }
 
@@ -54,7 +58,21 @@ function buildArgs({ sessionId, resume = false, allowedTools = [], tools = null 
  * resume. A file that exists but cannot be read or parsed is UNKNOWN, and unknown is refused. Scoped allow rules are NOT judged here (product decision, see OPEN). The user's
  * and managed settings are never read by JuQode: they stay UNKNOWN (containment().permissions). */
 const PERMISSIVE_MODES = new Set(['bypasspermissions', 'acceptedits', 'auto']);
+/* bare tool names that only READ the project: a bare allow rule for them does not widen what a run may WRITE or execute. Anything else bare (Edit, Write, Bash, NotebookEdit,
+ * WebFetch, WebSearch, mcp__*) is refused; WebSearch / mcp__* are refused only because their risk is not measured (OPEN). */
+const READ_ONLY_BARE = new Set(['Read', 'Glob', 'Grep', 'LS']);
+function allowRuleWidens(rule) {
+  const m = typeof rule === 'string' ? /^\s*([A-Za-z][A-Za-z0-9_]*)\s*(?:\(([\s\S]*)\))?\s*$/.exec(rule) : null;
+  if (!m) return true;
+  const [, tool, inner] = m;
+  if (inner === undefined) return !READ_ONLY_BARE.has(tool);
+  const spec = inner.trim();
+  if (/^[*?:\s]*$/.test(spec)) return true;                 // `Bash()`, `Bash(*)`, `Bash(:*)`
+  return FILE_WRITERS.has(tool) && fileSpecWide(spec);       
+}
 function projectSettingsRefusal(projectPath) {
+  /* an unknown project folder is not "no settings" */
+  if (typeof projectPath !== 'string' || !projectPath) return { reason: 'project-path-unknown', source: null };
   for (const name of ['settings.json', 'settings.local.json']) {
     const file = path.join(String(projectPath), '.claude', name);
     let doc;
@@ -68,7 +86,7 @@ function projectSettingsRefusal(projectPath) {
     if (typeof perm !== 'object' || Array.isArray(perm)) return { reason: 'project-settings-unreadable', source: name };
     if (perm.defaultMode != null && (typeof perm.defaultMode !== 'string' || PERMISSIVE_MODES.has(perm.defaultMode.trim().toLowerCase()))) return { reason: 'project-settings-permissive-mode', source: name };
     if (perm.additionalDirectories != null && (!Array.isArray(perm.additionalDirectories) || perm.additionalDirectories.length)) return { reason: 'project-settings-additional-directories', source: name };
-    if (perm.allow != null && (!Array.isArray(perm.allow) || perm.allow.some((r) => typeof r !== 'string' || !/\(.*\)$/.test(r.trim()) || /^[^(]*\(\s*[*?:]*\s*\)$/.test(r.trim())))) return { reason: 'project-settings-unscoped-allow', source: name };
+    if (perm.allow != null && (!Array.isArray(perm.allow) || perm.allow.some(allowRuleWidens))) return { reason: 'project-settings-unscoped-allow', source: name };
   }
   return null;
 }
@@ -343,4 +361,4 @@ function problems(s, ctx) {
   return p;
 }
 
-module.exports = { projectSettingsRefusal, grantRefusal, EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
+module.exports = { projectSettingsRefusal, grantRefusal, allowRuleWidens, EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
