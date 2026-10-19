@@ -228,3 +228,43 @@ test('source pin: both entry points go through the observation gate; nothing in 
   assert.ok(!/repo\.acknowledgeUnknownProcessStopped|\backnowledgeUnknownProcessStopped\(/.test(all.replace(/acknowledgeAfterObservation/g, '')));
   assert.ok(/obs\?\.verdict !== 'NOT_OBSERVED_WITH_EVIDENCE'/.test(src.code('app/main/work/runner-liveness.js')));
 });
+
+test('the FIRST child\'s identity reaches the Work row (it used to exist only as a signal, so the columns stayed empty)', async () => {
+  const fake = require(path.join(__dirname, 'fakecli.js'));
+  const supervisor = require(path.join(R, 'app/main/work/supervisor.js'));
+  const db = openDb(':memory:');
+  const project = repo.openProject(db, tempDir('juqode-rl-sup-'), 'p');
+  const dir = tempDir('juqode-rl-sup-bin-');
+  const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'rl-session', cwd: project.path });
+  const finish = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [] });
+  const bin = fake.scriptBin(dir, 'claude', `process.stdout.write(${JSON.stringify(init + '\n' + finish + '\n')});`);
+  const t0 = Date.now();
+  const r = await supervisor.start(db, project, 'identity', { evidenceStore: tempDir('juqode-rl-sup-ev-'), bin, detect: async () => ({ available: true }) });
+  assert.strictEqual(r.ok, true);
+  await r.done;
+  const w = repo.getWork(db, r.workId);
+  const sig = db.prepare("select payload from work_signal where work_id = ? and payload like '%juqodeProcess%'").get(w.id);
+  assert.ok(Number.isInteger(w.runner_pid) && w.runner_pid > 1, 'runner_pid never reached the row');
+  assert.strictEqual(w.runner_pid, JSON.parse(sig.payload).juqodeProcess.pid);
+  assert.ok(Date.parse(w.runner_started_at) >= t0 - 1000 && Date.parse(w.runner_started_at) <= Date.now());
+});
+
+test('an older row with the identity only in its juqodeProcess signal is judged by that signal (live refused, ended accepted)', { skip: !LINUX }, async () => {
+  const live = spawnOwned('sleep', ['300']);
+  const gone = spawnOwned('sleep', ['300']);
+  const goneAt = iso(); killGroup(gone.pid);
+  await rig(async ({ db, project, h, unknownWork }) => {
+    const mkSignalOnly = (pid, at) => {
+      const w = unknownWork({}, null);
+      repo.addSignal(db, w.id, { seq: 1, source: 'juqode', kind: 'raw', payload: JSON.stringify({ juqodeProcess: { pid, startedAt: at } }) });
+      return w;
+    };
+    const a = mkSignalOnly(live.pid, iso(Date.now() + 5000));          // signals are written a little after the spawn
+    const r1 = h['juqode:legacy-unknown-ack'](null, project.id, a.id, true);
+    assert.deepStrictEqual([r1.ok, r1.detail?.observation], [false, 'LIVE_CONFIRMED']);
+    const b = mkSignalOnly(gone.pid, goneAt);
+    assert.ok(await until(() => h['juqode:legacy-unknown-ack'](null, project.id, b.id, true).ok));
+    assert.strictEqual(JSON.parse(acks(db, b.id)[0].payload).juqodeProcess.observation.verdict, 'NOT_OBSERVED_WITH_EVIDENCE');
+  });
+  killGroup(live.pid);
+});

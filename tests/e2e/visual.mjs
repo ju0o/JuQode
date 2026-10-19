@@ -222,6 +222,10 @@ async function cdp(sendFn) {
       remaining = await count();
       if (remaining >= before) {
         acknowledgeAllLegacyUnknowns.refusals.push(await evalJs(`document.querySelector('[data-el="legacy-unknown"]')?.innerText ?? null`));
+        /* the same request made directly, so the refusal's observation (LIVE_CONFIRMED vs UNKNOWN, and why) is on the record */
+        acknowledgeAllLegacyUnknowns.refusals.push('direct:' + await evalJs(`(async () => { const p = window.__project().id;
+          const run = (await window.juqode.taskList(p)).legacyUnknownRuns[0];
+          return run ? JSON.stringify(await window.juqode.legacyUnknownAck(p, run.id, true)) : 'none'; })()`));
         await sleep(2000);
       }
     }
@@ -1874,6 +1878,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await sleep(900);
   out.cancelUnknownGateAfterAck = await acknowledgeAllLegacyUnknowns();
   out.legacyAckRefusals = [...acknowledgeAllLegacyUnknowns.refusals];
+  console.log(`  · legacy acknowledgement: remaining=${out.cancelUnknownGateAfterAck}, refused ${out.legacyAckRefusals.length}x; first direct: ${out.legacyAckRefusals.find((r) => r.startsWith("direct:"))}`);
 
   /* ── `15` SC-03 부분 완료 — 된 것과 안 된 것, 둘 다 ────────────────────────────────────
    * The most complex result state and the one WBS-18's acceptance is written about, and it had

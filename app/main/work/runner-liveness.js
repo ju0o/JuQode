@@ -39,6 +39,7 @@ function runnerMayBeAlive(work) {
  *                              an absence of observation, reported with that limit
  *   UNKNOWN                    anything else: non-Linux, identity missing, /proc unreadable or not credible */
 const SKEW_BEFORE_MS = 2000, SKEW_AFTER_MS = 10_000;     // recorded start minus OS start of the root
+const SKEW_AFTER_SIGNAL_MS = 45_000;                      // a juqodeProcess signal is written after the first event (<= 30 s start window)
 const CLK_TCK = 100;                                      // USER_HZ is 100 on Linux
 const LIMITS = ['descendants-that-left-the-session-are-not-observable'];
 
@@ -54,6 +55,19 @@ function readProc(procDir) {
     rows.push({ pid: Number(n), state: f[0], pgrp: Number(f[2]), sid: Number(f[3]), startTicks: Number(f[19]) });
   }
   return rows;
+}
+
+/* Rows written before the first child's identity was stored (every Work whose first child never got a row) carry it only in the
+ * `juqodeProcess` signal. Used only when the columns are empty; the looser window is the signal's later timestamp. */
+function withStoredIdentity(db, work) {
+  if (Number.isInteger(work.runner_pid) && work.runner_started_at) return work;
+  for (const row of db.prepare(`select payload from work_signal where work_id = ? and source = 'juqode' and kind = 'raw' order by seq desc`).all(work.id)) {
+    try {
+      const p = JSON.parse(row.payload ?? '')?.juqodeProcess;
+      if (Number.isInteger(p?.pid) && p.startedAt) return { ...work, runner_pid: p.pid, runner_started_at: p.startedAt, identity_from_signal: true };
+    } catch { /* not that kind of signal */ }
+  }
+  return work;
 }
 
 function observeRunner(work, { procDir = '/proc', platform = process.platform, nowMs = Date.now() } = {}) {
@@ -80,7 +94,7 @@ function observeRunner(work, { procDir = '/proc', platform = process.platform, n
   const evidence = { scanned: rows.length, members: members.map((m) => m.pid), rootPidPresent: Boolean(root) };
   if (root) {
     const d = started - osStart(root);
-    if (root.pgrp === pid && d >= -SKEW_BEFORE_MS && d <= SKEW_AFTER_MS) return verdict('LIVE_CONFIRMED', 'root-identity-matches', evidence);
+    if (root.pgrp === pid && d >= -SKEW_BEFORE_MS && d <= (work.identity_from_signal ? SKEW_AFTER_SIGNAL_MS : SKEW_AFTER_MS)) return verdict('LIVE_CONFIRMED', 'root-identity-matches', evidence);
     return verdict('NOT_OBSERVED_WITH_EVIDENCE', 'root-pid-reused-so-old-group-is-empty', evidence);
   }
   if (members.length) return verdict('LIVE_CONFIRMED', 'group-or-session-members-alive', evidence);
@@ -97,7 +111,7 @@ function acknowledgeAfterObservation(db, projectId, workId, observe = observeRun
   }
   if (repo.hasStoppedProcessAcknowledgement(db, workId)) return { ok: true, existing: true };
   let obs;
-  try { obs = observe(work); } catch { obs = verdictFailed(); }
+  try { obs = observe(withStoredIdentity(db, work)); } catch { obs = verdictFailed(); }
   if (obs?.verdict !== 'NOT_OBSERVED_WITH_EVIDENCE') {
     return { ok: false, reason: 'prior-process-may-still-live',
       detail: { observation: obs?.verdict === 'LIVE_CONFIRMED' ? 'LIVE_CONFIRMED' : 'UNKNOWN', why: obs?.reason ?? 'no-verdict' } };

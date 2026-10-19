@@ -244,8 +244,9 @@ async function startGuarded(db, project, intent, {
       onLaunch: (f) => { launchFacts = f; },
       onChild: (c) => {
         pendingChild.child = c;
-        if (!workId) return;
-        const at = now();
+        pendingChild.spawnedAt = now();
+        if (!workId) return;           // no row yet: the identity is stored the moment beginWork creates it (below)
+        const at = pendingChild.spawnedAt;
         repo.setRunnerIdentity(db, workId, sessionId, c.pid, at);
         const e = runEntry ?? live.get(workId) ?? { state, sessionId, cwd: project.path, projectId: project.id,
           bin, store: evidenceStore, useGit: pre.useGit };
@@ -290,6 +291,9 @@ async function startGuarded(db, project, intent, {
             return;
           }
           workId = begun.work.id;
+          /* V1-404 · the first child exists BEFORE its Work row does, so the identity the liveness observer judges
+           * (pid + the time it was spawned) is written here. Until now only the later resume children were stored. */
+          if (pendingChild.child?.pid) repo.setRunnerIdentity(db, workId, sessionId, pendingChild.child.pid, pendingChild.spawnedAt ?? now());
           if (context) repo.saveRunContextBundle(db, workId, context);
           repo.saveBasis(db, workId, 'before', basis);
           runEntry = live.get(workId) ?? { state, sessionId, cwd: project.path, projectId: project.id,
