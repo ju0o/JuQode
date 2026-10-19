@@ -28,7 +28,7 @@ test('maskOut: nested objects, arrays, Errors, cycles and depth are masked/bound
   assert.deepStrictEqual(leaks(out), [], JSON.stringify(out));
   assert.strictEqual(out.ok, true); assert.strictEqual(out.n, 3); assert.deepStrictEqual(out.ids, ['a1', 'b2']);
   assert.strictEqual(out.nested.err.name, 'Error'); assert.ok(!('stack' in out.nested.err));
-  assert.strictEqual(out.cyc.self, null);
+  assert.strictEqual(out.cyc.self, '[truncated]');
   assert.ok(out.when instanceof Date);
 });
 
@@ -142,4 +142,94 @@ test('SC-04 raw diff text stays raw on the diff channels; their detail is still 
   const r = guard.publicOut('juqode:work-reader', { ok: true, patch: `+${GH}`, detail: GH });
   assert.strictEqual(r.patch, `+${GH}`);
   assert.deepStrictEqual(leaks(r.detail), []);
+});
+
+/* ---- QA round: regressions of the whole-return masker, and the walker / masker limits ---- */
+const { mask } = require(path.join(R, 'app/main/qc/run.js'));
+const { safeSnapshot } = require(path.join(R, 'app/main/work/context.js'));
+const MASKER_LOOKALIKES = ['Rename MAX_TOKENS = 4096 to MAX_CONTEXT', 'Set PASSWORD_MIN_LENGTH = 8 in the form',
+  'Support Basic authentication-based-access in the proxy', 'Add sk_render_pipeline_configuration_value to docs'];
+
+test('F1: folders the renderer echoes back (recent[].path, data.cwd, term cwd, readFiles) are not masked, even when the name looks like a token', () => {
+  const dir = '/tmp/x/sk_render_pipeline_configuration_value';
+  assert.ok(mask(dir) !== dir, 'precondition: the masker does match this folder name');
+  const boot = guard.publicOut('juqode:boot', { ok: true, recent: [{ id: 'p', path: dir }] });
+  assert.strictEqual(boot.recent[0].path, dir);
+  assert.strictEqual(guard.publicOut('juqode:qc-list', { rules: [{ data: { cwd: dir } }] }).rules[0].data.cwd, dir);
+  assert.strictEqual(guard.publicOut('juqode:term-open', { ok: true, cwd: dir }).cwd, dir);
+  assert.deepStrictEqual(guard.publicOut('juqode:brief', { interpretation: { readFiles: [`${dir}/a.js`] } }).interpretation.readFiles, [`${dir}/a.js`]);
+  assert.deepStrictEqual(leaks(guard.publicOut('juqode:term-open', { cwd: dir, detail: GH })), []);
+});
+
+test('F2: a Work intent round-trips through work-get / history / work-update untouched (it was masked at write time already)', () => {
+  for (const intent of MASKER_LOOKALIKES) {
+    assert.strictEqual(guard.publicOut('juqode:work-get', { ok: true, work: { id: 'w', intent } }).work.intent, intent);
+    assert.strictEqual(guard.publicOut('juqode:history', { ok: true, works: [{ id: 'w', intent }] }).works[0].intent, intent);
+    assert.strictEqual(guard.publicPush({ work: { id: 'w', intent } }).work.intent, intent);
+  }
+  assert.strictEqual(guard.publicOut('juqode:qc-route', { phrase: MASKER_LOOKALIKES[0] }).phrase, MASKER_LOOKALIKES[0]);
+});
+
+test('F3: work-explain returns the reader payload raw like work-reader; detail is still scrubbed', () => {
+  const diff = ['+const MAX_TOKENS = 4096;', '+-----BEGIN PRIVATE KEY-----', '+x', '+-----END PRIVATE KEY-----', '+ok'];
+  for (const ch of ['juqode:work-reader', 'juqode:work-explain', 'juqode:work-changes']) {
+    const r = guard.publicOut(ch, { ok: true, groups: [{ files: [{ patch: diff.join('\n'), blocks: [{ offset: 3, lines: diff }] }] }], detail: GH });
+    assert.deepStrictEqual(r.groups[0].files[0].blocks[0].lines, diff, ch);
+    assert.deepStrictEqual(leaks(r.detail), [], ch);
+  }
+});
+
+test('F6: the shared masker is linear (URL-credentials scheme scan was quadratic) and still masks after a long run', () => {
+  const t0 = Date.now();
+  mask('a-'.repeat(80000)); mask(`http://${'a:'.repeat(80000)}`); mask('A'.repeat(200000)); mask('-----BEGIN PRIVATE KEY-----'.repeat(2000));
+  assert.ok(Date.now() - t0 < 1500, `masker too slow: ${Date.now() - t0} ms`);
+  assert.strictEqual(mask(`${'a-'.repeat(80000)} https://user:pw1234@host/x`).endsWith('***host/x'), true);
+  assert.strictEqual(mask('postgres://user:pw1234@db/x'), '***db/x');
+});
+
+test('F7: walker caps leave an explicit marker (a string, never a null a renderer would dereference); key collisions and Error.code survive', () => {
+  const many = guard.walk(Array.from({ length: 25000 }, (_, i) => ({ id: i })), (s) => s);
+  assert.ok(many.length === 25000 && many.filter((x) => x === '[truncated]').length === 5001 && many.every((x) => x === '[truncated]' || typeof x.id === 'number'));
+  assert.strictEqual(many.some((x) => x === null), false);
+  assert.strictEqual(guard.walk({ a: { b: { c: { d: 1 } } } }, (s) => s, { depth: 3, nodes: 99, array: 99 }).a.b.c, '[truncated]');
+  assert.deepStrictEqual(guard.walk([1, 2, 3, 4], (s) => s, { depth: 3, nodes: 99, array: 2 }), [1, 2, '[truncated]']);
+  const keys = guard.maskOut({ 'A_TOKEN=abcd1234efgh5678': 1, 'B_TOKEN=abcd1234efgh5678': 2 });
+  assert.deepStrictEqual(Object.values(keys).sort(), [1, 2], 'two keys that mask to one must both survive');
+  assert.deepStrictEqual(leaks(keys), []);
+  const e = Object.assign(new Error('x'), { code: 'ENOENT', extra: GH });
+  assert.deepStrictEqual(guard.maskOut({ e }).e, { name: 'Error', code: 'ENOENT', message: 'x' });
+  const d = guard.scrubDetail(Array.from({ length: 80 }, () => 'x'));
+  assert.strictEqual(d.length, 51); assert.strictEqual(d[50], '[truncated]');
+  assert.strictEqual(guard.scrubDetail({ a: { b: { c: { d: GH } } } }).a.b.c, '[truncated]');
+});
+
+test('F5: Authorization: Basic <payload> is fully redacted in what is stored (payload no longer left behind)', () => {
+  const payload = 'dXNlcjpwYXNzd29yZDEyMw==';
+  assert.ok(!safeSnapshot(`Authorization: Basic ${payload}`).safe.includes(payload));
+  assert.ok(!safeSnapshot(`curl -H "Authorization: Basic ${payload}"`).safe.includes(payload));
+  for (const t of MASKER_LOOKALIKES.slice(2, 3)) assert.strictEqual(safeSnapshot(t).safe, t);
+});
+
+test('F4: added patterns mask their class, JSON stays valid, and the QA corpus of ordinary text is unchanged', () => {
+  const npm = `npm_${'aB3'.repeat(12)}`, aiza = `AIza${'aB3_-'.repeat(7)}`, hook = 'https://hooks.slack.com/services/T0000000/B0000000/XXXXXXXXXXXXXXXXXXXXXXXX';
+  const j = mask('{"API_TOKEN":"zzzz1234yyyy5678","password": "hunter2hunter2","MAX_TOKENS":4096,"name":"abc"}');
+  assert.strictEqual(JSON.parse(j).API_TOKEN, '***');
+  assert.strictEqual(JSON.parse(j).MAX_TOKENS, 4096);
+  assert.strictEqual(mask(`k ${npm} ${aiza} ${hook} api_key=zzzz1234yyyy5678xxxx`), 'k *** *** https://*** ***');
+  const ordinary = ['"MAX_TOKENS": 4096', '"token_count": "twelve-or-more-characters"', '"name": "a-long-package-name-here"', 'api_key=process.env.API_KEY_VALUE', 'api_key=ABCDEFGHIJKLMNOPQRS',
+    'npm_config_cache=/home/u/.npm', 'AIzaSy is a prefix', 'hooks.slack.com docs'];   // EXISTING over-matches, left OPEN: 'sk_<long identifier>', 'Basic authentication-based-access'; 'MAX_TOKENS = 4096' and 'PASSWORD_MIN_LENGTH = 8' are masked by the EXISTING env pattern (OPEN, not widened here)
+  for (const t of ordinary) assert.strictEqual(mask(t), t, t);
+});
+
+test('sender check: only OUR page, top frame; about:blank / data: / devtools / other file:// are refused', () => {
+  const app = 'file:///opt/juqode/app/renderer/index.html';
+  for (const url of ['about:blank', 'data:text/html,<p>x</p>', 'devtools://devtools/bundled/devtools_app.html', 'file:///opt/juqode/app/renderer/other.html', 'file:///tmp/index.html', `${app}.evil/x`, 'chrome-error://chromewebdata/'])
+    assert.strictEqual(trustedSender({ senderFrame: { url, parent: null } }, app), false, url);
+});
+
+test('main.js wires every push channel through publicPush and every handler through trustedSender (source assertion)', () => {
+  const code = require(path.join(__dirname, 'src.js')).code('app/main/main.js');
+  for (const ch of ['work-update', 'qc-update', 'term-update']) assert.match(code, new RegExp(`send\\('juqode:${ch}', guard\\.publicPush\\(`), ch);
+  assert.match(code, /trustedSender\(e, APP_URL\)/);
+  assert.match(code, /APP_URL = pathToFileURL\(RENDERER\)\.href/);
 });

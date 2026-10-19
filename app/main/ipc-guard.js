@@ -147,37 +147,59 @@ function scrubString(value) {
   return t.length > DETAIL_CAP ? `${t.slice(0, DETAIL_CAP)}…` : t;
 }
 /* One bounded walk over anything that leaves the main process: strings go through `fn`, plain objects and
- * arrays keep their shape, an Error becomes {name, message} (no stack, no cause, no own props), a cycle, a
- * function, a symbol or anything past the depth / node / array caps becomes null. Fail closed, never throw. */
+ * arrays keep their shape, an Error becomes {name, code?, message} (no stack, no cause, no other props), a cycle, a
+ * function, a symbol or anything past the depth / node caps becomes the string TRUNC (a string, so a renderer that
+ * reads `.id` on it gets undefined instead of a TypeError on null), an array cut by `caps.array` ends with TRUNC.
+ * Two keys that mask to the same text keep the first and get `~2`, `~3`... for the rest. `keep`: keys whose string
+ * values are NOT passed through `fn` (text the user typed or a path the renderer echoes back). Fail closed, never throw. */
 const WALK = Object.freeze({ depth: 12, nodes: 20000, array: Infinity });
-function walk(value, fn, caps = WALK) {
+const TRUNC = '[truncated]';
+function walk(value, fn, caps = WALK, keep = null) {
   let nodes = 0;
   const up = new Set();
-  const go = (v, depth) => {
-    if (typeof v === 'string') return fn(v);
+  const go = (v, depth, kept) => {
+    if (typeof v === 'string') return kept ? v : fn(v);
     if (v == null || typeof v === 'number' || typeof v === 'boolean') return v;
-    if (typeof v !== 'object') return null;
-    if (++nodes > caps.nodes || depth >= caps.depth || up.has(v)) return null;
-    if (v instanceof Error) return { name: safeCode(v.name) ?? 'Error', message: fn(String(v.message ?? '')) };
+    if (typeof v !== 'object') return TRUNC;
+    if (++nodes > caps.nodes || depth >= caps.depth || up.has(v)) return TRUNC;
+    if (v instanceof Error) {
+      const e = { name: safeCode(v.name) ?? 'Error', message: fn(String(v.message ?? '')) };
+      if (safeCode(v.code)) e.code = v.code;
+      return e;
+    }
     if (v instanceof Date) return v;
     up.add(v);
     try {
-      if (Array.isArray(v)) return v.slice(0, caps.array).map((x) => go(x, depth + 1));
-      return Object.fromEntries(Object.entries(v).map(([k, x]) => [fn(k), go(x, depth + 1)]));
-    } catch { return null; } finally { up.delete(v); }
+      if (Array.isArray(v)) {
+        const cut = v.length > caps.array;
+        const out = v.slice(0, caps.array).map((x) => go(x, depth + 1, kept));
+        return cut ? [...out, TRUNC] : out;
+      }
+      const out = {};
+      for (const [k, x] of Object.entries(v)) {
+        let key = fn(k);
+        for (let n = 2; Object.hasOwn(out, key); n++) key = `${fn(k)}~${n}`;
+        out[key] = go(x, depth + 1, Boolean(keep && keep.has(k)));
+      }
+      return out;
+    } catch { return TRUNC; } finally { up.delete(v); }
   };
-  return go(value, 0);
+  return go(value, 0, false);
 }
 const scrubDetail = (value) => walk(value, scrubString, { depth: 3, nodes: 500, array: 50 });
 /* Everything else that leaves: the same masker the Quick Command output already passes (qc/run `mask`), nothing
  * longer or shorter. Display only - what was STORED or EXECUTED is untouched. */
-const maskOut = (value) => walk(value, mask);
+/* Keys whose text the renderer sends BACK into a later call or that is the user's own words / a folder: a masked copy
+ * would corrupt the next call (open-path, a resubmitted intent, the Quick Command phrase). `intent` is already masked
+ * at write time by safeSnapshot; paths are the user's own folders, like open-project. */
+const ECHO_KEYS = new Set(['path', 'cwd', 'root', 'readFiles', 'intent', 'phrase']);
+const maskOut = (value) => walk(value, mask, WALK, ECHO_KEYS);
 /* `open-project` / `open-path` echo the folder the USER picked (SC-01's technical disclosure); the Task channels
  * hand back text the user typed so they can edit it (masking it would overwrite the original on save). */
 const DETAIL_EXEMPT = new Set(['juqode:open-project', 'juqode:open-path']);
 const OUT_EXEMPT = new Set([...DETAIL_EXEMPT, 'juqode:task-list', 'juqode:task-detail', 'juqode:task-create', 'juqode:task-update',
   /* SC-04's explicit raw contract: the diff text is the user's own file content (legacy-read-masking.test.js pins it) */
-  'juqode:work-reader', 'juqode:work-changes']);
+  'juqode:work-reader', 'juqode:work-explain', 'juqode:work-changes']);
 const publicOut = (channel, r) => {
   if (r == null || typeof r !== 'object') return typeof r === 'string' && !OUT_EXEMPT.has(channel) ? mask(r) : r;
   let out = OUT_EXEMPT.has(channel) ? r : maskOut(r);

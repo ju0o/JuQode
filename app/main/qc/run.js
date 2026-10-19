@@ -50,7 +50,7 @@ const TOKENISH = [
   /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z]+ )?PRIVATE KEY-----|$)/g,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/g,
   /\bBasic\s+[A-Za-z0-9._~+/=-]{16,}/g,
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]+@/g,          // scheme://user:password@host
+  /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:@/]+:[^\s:@/]+@/g,    // scheme://user:password@host; scheme <= 32 chars keeps the scan linear (it was quadratic on 'a-a-a-…')
   /* An ENV-VAR-SHAPED name and its value, on ONE line.
    *
    * MEASURED before this was narrowed: case-insensitive matching plus `\s*` after the separator
@@ -62,6 +62,11 @@ const TOKENISH = [
    * So: the NAME must look like an environment variable (upper-case, digits, underscores — it
    * is one), and the value must be on the same line. `password:` in an English sentence is not
    * an environment variable and is left alone. */
+  /\bnpm_[A-Za-z0-9]{36}\b/g,
+  /\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]{20,}/g,
+  /\bAIza[0-9A-Za-z_-]{35}/g,
+  /(?<="[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|API_?KEY)[A-Z0-9_]{0,32}"\s{0,4}:\s{0,4}")[^"\s]{12,}(?=")/g,   // JSON: only the quoted VALUE, the document stays valid
+  /\bapi_key[ \t]*=[ \t]*["']?(?=[A-Za-z_-]*\d)[A-Za-z0-9_-]{16,}/g,
   /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*\S+/g,
 ];
 
