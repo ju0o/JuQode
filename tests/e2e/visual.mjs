@@ -202,18 +202,28 @@ async function cdp(sendFn) {
     if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails));
     return r.result?.result?.value;
   };
+  /* V1-404 · the confirmation is recorded only once the stored runner is OBSERVED gone. A runner the fixture left alive (the
+   * stubborn CLI's `sleep 60` outlives its killed shell) is REFUSED, on screen, until it really ends: every refusal is kept in
+   * `out.legacyAckRefusals`, and the click is repeated (own scratch fixture, bounded 90 s) until the observation allows it. */
   const acknowledgeAllLegacyUnknowns = async () => {
-    let remaining = await evalJs(`(async () => (await window.juqode.taskList(window.__project().id)).legacyUnknownRuns.length)()`);
-    const limit = remaining;
-    for (let i = 0; remaining > 0 && i < limit; i++) {
+    const count = () => evalJs(`(async () => (await window.juqode.taskList(window.__project().id)).legacyUnknownRuns.length)()`);
+    let remaining = await count();
+    const deadline = Date.now() + 90_000;
+    while (remaining > 0 && Date.now() < deadline) {
+      const before = remaining;
       await evalJs(`(() => {
         const panel = document.querySelector('[data-el="legacy-unknown"]');
         if (!panel) throw new Error('unresolved legacy Run is missing its confirmation panel');
-        panel.querySelector('input[type="checkbox"]').click();
+        const box = panel.querySelector('input[type="checkbox"]');
+        if (!box.checked) box.click();
         panel.querySelector('button').click();
       })()`);
-      await sleep(450);
-      remaining = await evalJs(`(async () => (await window.juqode.taskList(window.__project().id)).legacyUnknownRuns.length)()`);
+      await sleep(600);
+      remaining = await count();
+      if (remaining >= before) {
+        (out.legacyAckRefusals ??= []).push(await evalJs(`document.querySelector('[data-el="legacy-unknown"]')?.innerText ?? null`));
+        await sleep(2000);
+      }
     }
     return remaining;
   };
@@ -4846,6 +4856,10 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
     `a cancel without full process-tree proof reported ${ended.outcome}`);
   assert.strictEqual(results.cancelUnknownGateAfterAck, 0,
     'the Project remained blocked after visible legacy-unknown acknowledgement');
+  /* V1-404: the killed shell left its `sleep 60` in the runner's group, so the first confirmation(s) were refused on screen */
+  assert.ok((results.legacyAckRefusals?.length ?? 0) >= 1 &&
+    results.legacyAckRefusals[0].includes('아직 실행 중일 수 있어요'),
+    `a confirmation was not refused while the runner's child was alive: ${JSON.stringify(results.legacyAckRefusals)}`);
 }
 
 /* ── `15` SC-03 부분 완료 — WBS-18's acceptance row, rendered ──────────────────────────── */
