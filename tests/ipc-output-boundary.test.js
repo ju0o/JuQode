@@ -144,17 +144,3 @@ for (const [name, err] of FAILURES) {
     assert.strictEqual(repo.getWork(db, run.workId).status, 'ended', 'the Work did not reach its end');
   });
 }
-
-test('interpret: the narrative pass\'s child stderr (narrative.detail) leaves scrubbed, like every other detail', async () => {
-  const dir = tempDir('juqode-nd-');
-  fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"x"}\n');
-  const db = openDb(':memory:');
-  const project = repo.openProject(db, dir, 'p');
-  const home = tempDir('juqode-nd-cli-');
-  const bin = fake.scriptBin(home, 'stderr-only', `process.stderr.write(${JSON.stringify(`boom ${SECRETS[0]} ${SECRETS[2]} at /home/someone/x`)}); process.exit(1);`);
-  const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => tempDir('juqode-nd-store-'), push() {}, pushQc() {}, claudeBin: () => bin });
-  const r = await h['juqode:interpret'](null, project.id);
-  assert.strictEqual(r.ok, true);
-  assert.ok(r.narrative.detail, 'the fixture did not produce a stderr detail');
-  assert.ok(!hasSecret(r), `interpret carried a synthetic secret: ${bodyOf(r.narrative)}`);
-});

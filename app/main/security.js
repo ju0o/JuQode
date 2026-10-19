@@ -58,11 +58,13 @@ function enforceLocalOnly(session) {
   return read;
 }
 
-/** Electron grants every permission request (camera, clipboard, geolocation, notifications...) unless a handler says
- * otherwise. This app asks for none, so the answer is no, for the request and for the check. */
+/* Electron grants every permission request unless a handler says otherwise. The UI uses exactly one: copying text
+ * (`navigator.clipboard.writeText`, sc04.js and file-summary.js), which Chromium asks for as 'clipboard-sanitized-write'. */
+const ALLOWED_PERMISSIONS = Object.freeze(['clipboard-sanitized-write']);
+
 function denyPermissions(session) {
-  session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  session.setPermissionCheckHandler(() => false);
+  session.setPermissionRequestHandler((_contents, permission, callback) => callback(ALLOWED_PERMISSIONS.includes(permission)));
+  session.setPermissionCheckHandler((_contents, permission) => ALLOWED_PERMISSIONS.includes(permission));
 }
 
 module.exports = { WEB_PREFERENCES, lockNavigation, enforceLocalOnly, denyPermissions };
