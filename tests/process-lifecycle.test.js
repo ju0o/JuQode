@@ -165,7 +165,12 @@ posixTest('while the end is unknown the project slot stays held, even after the 
   assert.deepStrictEqual([refused.ok, refused.reason], [false, 'prior-process-may-still-live'], 'a second writer was admitted');
   assert.strictEqual(refused.detail.workId, r.workId);
 
+  /* a bare user statement (the only kind recorded before the observer existed) does not release a hold while the descendant lives */
   assert.deepStrictEqual(repo.acknowledgeUnknownProcessStopped(b.db, b.project.id, r.workId), { ok: true, existing: false });
+  const stillHeld = await supervisor.start(b.db, b.project, 'statement only, runner alive', { evidenceStore: b.store, bin: okBin, detect: AVAILABLE });
+  assert.deepStrictEqual([stillHeld.ok, stillHeld.reason], [false, 'prior-process-may-still-live'], 'a statement released a hold beside a live descendant');
+  process.kill(helper, 'SIGKILL');
+  assert.ok(await until(() => !alive(helper)), 'the descendant did not die');
   const next = await supervisor.start(b.db, b.project, 'after acknowledgement', { evidenceStore: b.store, bin: okBin, detect: AVAILABLE });
   assert.notStrictEqual(next.reason, 'prior-process-may-still-live', 'acknowledgement did not release the slot');
 });

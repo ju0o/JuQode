@@ -486,6 +486,12 @@ function maskPayload(payload, { readOnly = false } = {}) {
  * down. A stream is exactly where an error must not be fatal: the signal is the thing we may
  * lose, never the app.
  */
+/* V1-404 · every resume child is its own process group. Its pid and spawn time are kept as a signal (no schema change) so a Work that
+ * left more than one runner behind can be judged against ALL of them, not just the last one. */
+function recordChild(db, workId, child) {
+  if (child?.pid) writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW, payload: JSON.stringify({ juqodeProcess: { pid: child.pid, startedAt: now(), resume: true } }) });
+}
+
 function writeSignal(db, workId, { source, kind, payload }) {
   try {
     const persistedPayload = maskPayload(payload);   // masked for EVERY Work (V1-409); shape and event identifiers survive
@@ -912,7 +918,7 @@ async function runRetry(db, workId, entry, denial, spec, opts) {
     prompt: 'Continue the original request from this session. Retry the one action that was just allowed, then finish without repeating completed work.',
     bin: entry.bin,
     onLaunch: (f) => { launch = f; },
-    onChild: (c) => { entry.child = c; },
+    onChild: (c) => { entry.child = c; recordChild(db, workId, c); },
     onSignal: (sig, raw, line) => {
       if (raw) seen.push(raw);
       writeSignal(db, workId, { source: 'claude', kind: sig.kind, payload: line });
@@ -969,7 +975,7 @@ async function answer(db, workId, text, opts = {}) {
     answerRun = await session.run({
       cwd: entry.cwd, sessionId: entry.sessionId, resume: true, prompt: text, bin: entry.bin,
       mode: opts.executionMode ?? entry.mode ?? undefined, recorded: entry.launchIdentity ?? null,
-      onChild: (c) => { entry.child = c; },
+      onChild: (c) => { entry.child = c; recordChild(db, workId, c); },
       onSignal: (sig, raw, line) => {
         writeSignal(db, workId, { source: 'claude', kind: sig.kind, payload: line });
         apply(db, workId, sig, opts.onUpdate ?? (() => {}));

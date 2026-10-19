@@ -549,16 +549,23 @@ function addSignal(db, workId, { seq, source = 'claude', kind, payload, observed
 const signalsFor = (db, workId, limit = 500) =>
   db.prepare('select * from work_signal where work_id = ? order by seq limit ?').all(workId, limit);
 
-function hasStoppedProcessAcknowledgement(db, workId) {
-  const rows = db.prepare(`select payload from work_signal where work_id = ? and source = 'user' and kind = 'raw'`)
-    .all(workId);
-  return rows.some((row) => {
+/* What the stored user confirmations for this Work are: 'observed' = one was recorded together with an observation that found no live
+ * runner; 'statement' = the user's word alone (every confirmation recorded before the runner was observed); null = none.
+ * Rows are never rewritten: an old statement stays a statement. */
+function stopAcknowledgementKind(db, workId) {
+  const rows = db.prepare(`select payload from work_signal where work_id = ? and source = 'user' and kind = 'raw'`).all(workId);
+  let kind = null;
+  for (const row of rows) {
     try {
       const process = JSON.parse(row.payload ?? '')?.juqodeProcess;
-      return process?.stoppedConfirmedByUser === true && process?.workId === workId;
-    } catch { return false; }
-  });
+      if (process?.stoppedConfirmedByUser !== true || process?.workId !== workId) continue;
+      if (process.observation?.verdict === 'NOT_OBSERVED_WITH_EVIDENCE') return 'observed';
+      kind = 'statement';
+    } catch { /* not a confirmation */ }
+  }
+  return kind;
 }
+const hasStoppedProcessAcknowledgement = (db, workId) => stopAcknowledgementKind(db, workId) !== null;
 
 /* Writes the record only. Callers go through runner-liveness.acknowledgeAfterObservation, which decides whether it may be written. */
 function acknowledgeUnknownProcessStopped(db, projectId, workId, observation = null) {
@@ -566,7 +573,8 @@ function acknowledgeUnknownProcessStopped(db, projectId, workId, observation = n
   if (!work || work.project_id !== projectId || work.status !== 'ended' || work.outcome !== 'ended_unknown') {
     return { ok: false, reason: 'not-unknown-work' };
   }
-  if (hasStoppedProcessAcknowledgement(db, workId)) return { ok: true, existing: true };
+  const kind = stopAcknowledgementKind(db, workId);
+  if (kind === 'observed' || (kind === 'statement' && !observation)) return { ok: true, existing: true };
   addSignal(db, workId, { seq: nextSeq(db, workId), source: 'user', kind: 'raw',
     payload: { juqodeProcess: { workId, stoppedConfirmedByUser: true, ...(observation ? { observation } : {}) } } });
   return { ok: true, existing: false };
@@ -1034,7 +1042,7 @@ module.exports = {
   saveInterpretation, currentInterpretation,
   activeWork, beginWork, getWork, worksFor, worksForTask, workForIdempotency, workForRetrySource,
   setRunnerIdentity, setRunFailureReason, setWorkState,
-  addSignal, signalsFor, countToolResults, nextSeq, hasStoppedProcessAcknowledgement,
+  addSignal, signalsFor, countToolResults, nextSeq, hasStoppedProcessAcknowledgement, stopAcknowledgementKind,
   acknowledgeUnknownProcessStopped,
   saveBasis, basisFor,
   upsertStep, stepsFor,

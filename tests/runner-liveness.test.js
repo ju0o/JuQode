@@ -268,3 +268,103 @@ test('an older row with the identity only in its juqodeProcess signal is judged 
   });
   killGroup(live.pid);
 });
+
+/* ── F1 · a confirmation recorded before the observer existed is a STATEMENT, never an observation ── */
+const STATEMENT = (db, project, w) => repo.acknowledgeUnknownProcessStopped(db, project.id, w.id);   // exactly what the old code wrote
+const addRunner = (db, w, pid, at = iso()) => repo.addSignal(db, w.id, { seq: repo.nextSeq(db, w.id), source: 'juqode', kind: 'raw', payload: JSON.stringify({ juqodeProcess: { pid, startedAt: at, resume: true } }) });
+
+test('F1: an OLD statement-only confirmation + a runner that is still alive: every start path stays held, nothing is rewritten', { skip: !LINUX }, async () => {
+  const c = spawnOwned('sleep', ['300']);
+  await rig(async ({ db, project, task, h, unknownWork }) => {
+    const w = unknownWork({ taskId: task.id, idempotencyKey: 'f1' }, { pid: c.pid, startedAt: iso() });
+    assert.deepStrictEqual(STATEMENT(db, project, w), { ok: true, existing: false });
+    assert.strictEqual(repo.stopAcknowledgementKind(db, w.id), 'statement');
+    const before = rows(db);
+    const retry = await h['juqode:task-retry'](null, task.id, w.id, 'again', 'k-f1', true);
+    assert.deepStrictEqual([retry.ok, retry.reason, retry.detail?.observation], [false, HELD, 'LIVE_CONFIRMED'], 'task-retry released on a statement');
+    const start = await h['juqode:work-start'](null, project.id, 'new work');
+    assert.strictEqual(start.reason, HELD, 'a new Work started beside a live runner');
+    const q = await h['juqode:qc-run'](null, project.id, 'qc.build', 'b');
+    assert.strictEqual(q.reason, 'prior-run-unknown');
+    assert.strictEqual(rows(db), before, 'a refusal changed or added a row (the old statement must stay exactly as it was)');
+    assert.strictEqual(repo.stopAcknowledgementKind(db, w.id), 'statement', 'the statement was promoted');
+  });
+  killGroup(c.pid);
+});
+
+test('F1: statement-only + identity missing (UNKNOWN) keeps the hold; statement-only + observed gone releases it WITHOUT rewriting, and a new confirmation appends an observed one', { skip: !LINUX }, async () => {
+  const gone = spawnOwned('sleep', ['300']); const startedAt = iso(); killGroup(gone.pid);
+  await rig(async ({ db, project, h, unknownWork }) => {
+    const none = unknownWork({}, null);
+    STATEMENT(db, project, none);
+    assert.strictEqual((await h['juqode:work-start'](null, project.id, 'x')).reason, HELD, 'UNKNOWN identity released a hold');
+    const b = unknownWork({}, { pid: gone.pid, startedAt });
+    STATEMENT(db, project, b);
+    // `none` still holds the project; look at `b` alone through the hold lookup
+    const { unknownTaskRunWithLiveRunner } = require(path.join(R, 'app/main/work/runner-liveness.js'));
+    assert.ok(await until(() => unknownTaskRunWithLiveRunner(db, project.id, none.id) === null), 'a statement beside an observed-gone runner never released');
+    const stmtRows = acks(db, b.id).length;
+    assert.strictEqual(stmtRows, 1);
+    const ok = h['juqode:legacy-unknown-ack'](null, project.id, b.id, true);
+    assert.deepStrictEqual([ok.ok, ok.existing], [true, false]);
+    assert.strictEqual(acks(db, b.id).length, 2, 'the old statement row must stay and the observed one be appended');
+    assert.strictEqual(repo.stopAcknowledgementKind(db, b.id), 'observed');
+  });
+});
+
+/* ── F2 · every runner a Work ever left (first child + each resume child) is judged ── */
+test('F2: two independent process groups: the EARLIER group\'s child is alive, the later group ended -> LIVE, refused; the reverse too; both ended -> accepted', { skip: !LINUX }, async () => {
+  const mkGroup = async (withChild) => {
+    const g = withChild ? spawnOwned('sh', ['-c', 'sleep 300 & wait']) : spawnOwned('sleep', ['300']);
+    if (withChild) await until(() => cp.spawnSync('pgrep', ['-g', String(g.pid), '-x', 'sleep']).status === 0);
+    return { pid: g.pid, at: iso() };
+  };
+  const first = await mkGroup(true);          // later: only its root dies, the child stays
+  const second = await mkGroup(false);        // the resume runner
+  process.kill(first.pid, 'SIGKILL'); killGroup(second.pid);
+  await rig(async ({ db, project, task, h, unknownWork }) => {
+    const w = unknownWork({ taskId: task.id, idempotencyKey: 'f2' }, { pid: first.pid, startedAt: first.at });
+    addRunner(db, w, second.pid, second.at);
+    repo.addSignal(db, w.id, { seq: repo.nextSeq(db, w.id), source: 'juqode', kind: 'permission_granted', payload: '{}' });   // one resume happened
+    const o = require(path.join(R, 'app/main/work/runner-liveness.js')).observeWork(repo.getWork(db, w.id), db);
+    assert.strictEqual(o.verdict, 'LIVE_CONFIRMED', 'the later group ending hid the earlier group\'s live child');
+    assert.deepStrictEqual(o.evidence.runners.map((r) => r.verdict), ['LIVE_CONFIRMED', 'NOT_OBSERVED_WITH_EVIDENCE']);
+    const before = rows(db);
+    const r = await h['juqode:task-retry'](null, task.id, w.id, 'again', 'k-f2', true);
+    assert.deepStrictEqual([r.ok, r.reason, r.detail?.observation], [false, HELD, 'LIVE_CONFIRMED']);
+    assert.strictEqual(rows(db), before);
+    killGroup(first.pid);                      // now the earlier group's child ends too
+    assert.ok(await until(() => require(path.join(R, 'app/main/work/runner-liveness.js')).observeWork(repo.getWork(db, w.id), db).verdict === 'NOT_OBSERVED_WITH_EVIDENCE'));
+    const ok = h['juqode:legacy-unknown-ack'](null, project.id, w.id, true);   // task-linked: legacy path refuses by contract
+    assert.strictEqual(ok.reason, 'not-legacy-work');
+    const r2 = await h['juqode:task-retry'](null, task.id, w.id, 'again', 'k-f2b', true);
+    assert.strictEqual(r2.reason, 'claude-unavailable', 'with every recorded runner gone the ordinary gate follows');
+  });
+  killGroup(first.pid); killGroup(second.pid);
+});
+
+test('F2: the LATER group alive while the earlier one ended -> LIVE; a resume that left no identity -> UNKNOWN (nothing invented), a live one still wins', { skip: !LINUX }, async () => {
+  const dead = spawnOwned('sleep', ['300']); const deadAt = iso(); killGroup(dead.pid);
+  const live = spawnOwned('sleep', ['300']);
+  await rig(async ({ db, unknownWork }) => {
+    const { observeWork } = require(path.join(R, 'app/main/work/runner-liveness.js'));
+    const a = unknownWork({}, { pid: dead.pid, startedAt: deadAt });
+    addRunner(db, a, live.pid);
+    assert.strictEqual(observeWork(repo.getWork(db, a.id), db).verdict, 'LIVE_CONFIRMED');
+    // a grant happened but only the first runner was ever recorded (older data): incomplete
+    const b = unknownWork({}, { pid: dead.pid, startedAt: deadAt });
+    repo.addSignal(db, b.id, { seq: repo.nextSeq(db, b.id), source: 'juqode', kind: 'permission_granted', payload: '{}' });
+    assert.ok(await until(() => observeWork(repo.getWork(db, b.id), db).reason === 'runner-identities-incomplete'), 'an unrecorded resume runner was assumed gone');
+    assert.strictEqual(observeWork(repo.getWork(db, b.id), db).verdict, 'UNKNOWN');
+    // an answer counts as a resume as well
+    const c = unknownWork({}, { pid: dead.pid, startedAt: deadAt });
+    repo.addSignal(db, c.id, { seq: repo.nextSeq(db, c.id), source: 'user', kind: 'answer', payload: 'yes' });
+    assert.strictEqual(observeWork(repo.getWork(db, c.id), db).reason, 'runner-identities-incomplete');
+  });
+  killGroup(live.pid);
+});
+
+test('F2/source: supervisor records each resume child (permission grant retry and answer resume)', () => {
+  const sup = src.code('app/main/work/supervisor.js');
+  assert.strictEqual((sup.match(/recordChild\(db, workId, c\)/g) ?? []).length, 2);
+});

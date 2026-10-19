@@ -1222,7 +1222,7 @@ test('an unacknowledged ended_unknown Work refuses a file-changing Quick Command
   const held = await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘');
   assert.strictEqual(held.reason, 'prior-run-unknown', 'acking one unknown Work freed another');
 
-  const cleared = repo.acknowledgeUnknownProcessStopped(b.db, b.project.id, linked.work.id);
+  const cleared = repo.acknowledgeUnknownProcessStopped(b.db, b.project.id, linked.work.id, { verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'stub' });   // a recorded confirmation WITH an observation
   assert.strictEqual(cleared.ok, true, cleared.reason);
   assert.strictEqual(repo.getWork(b.db, linked.work.id).outcome, 'ended_unknown');
   assert.strictEqual(unknownTaskRunWithLiveRunner(b.db, b.project.id), null);

@@ -57,19 +57,6 @@ function readProc(procDir) {
   return rows;
 }
 
-/* Rows written before the first child's identity was stored (every Work whose first child never got a row) carry it only in the
- * `juqodeProcess` signal. Used only when the columns are empty; the looser window is the signal's later timestamp. */
-function withStoredIdentity(db, work) {
-  if (Number.isInteger(work.runner_pid) && work.runner_started_at) return work;
-  for (const row of db.prepare(`select payload from work_signal where work_id = ? and source = 'juqode' and kind = 'raw' order by seq desc`).all(work.id)) {
-    try {
-      const p = JSON.parse(row.payload ?? '')?.juqodeProcess;
-      if (Number.isInteger(p?.pid) && p.startedAt) return { ...work, runner_pid: p.pid, runner_started_at: p.startedAt, identity_from_signal: true };
-    } catch { /* not that kind of signal */ }
-  }
-  return work;
-}
-
 function observeRunner(work, { procDir = '/proc', platform = process.platform, nowMs = Date.now() } = {}) {
   const verdict = (v, reason, evidence = {}) => ({ verdict: v, reason, evidence, limits: LIMITS });
   if (platform !== 'linux') return verdict('UNKNOWN', 'platform-not-measured');
@@ -101,17 +88,60 @@ function observeRunner(work, { procDir = '/proc', platform = process.platform, n
   return verdict('NOT_OBSERVED_WITH_EVIDENCE', 'root-and-group-absent', evidence);
 }
 
+/* Every runner a Work is known to have left behind: the columns (first child, spawn time) plus every `juqodeProcess` signal (the
+ * first child's, written after its first event, and each resume child's). Judged ALL together: one live runner is LIVE_CONFIRMED
+ * however the others ended; a Work that must have more runners than were recorded (one per permission grant / answer, plus the
+ * first) is UNKNOWN unless a live one is found. Nothing is invented for a runner that left no identity. */
+function runnersOf(db, work) {
+  const list = [];
+  if (Number.isInteger(work.runner_pid) && work.runner_started_at) list.push({ runner_pid: work.runner_pid, runner_started_at: work.runner_started_at });
+  for (const row of db.prepare(`select payload from work_signal where work_id = ? and source = 'juqode' and kind = 'raw' order by seq`).all(work.id)) {
+    try {
+      const p = JSON.parse(row.payload ?? '')?.juqodeProcess;
+      if (Number.isInteger(p?.pid) && p.startedAt && !list.some((r) => r.runner_pid === p.pid)) {
+        list.push({ runner_pid: p.pid, runner_started_at: p.startedAt, identity_from_signal: true });
+      }
+    } catch { /* not that kind of signal */ }
+  }
+  return list;
+}
+
+function observeWork(work, db, opts) {
+  const runners = runnersOf(db, work);
+  const resumes = db.prepare(`select count(*) n from work_signal where work_id = ? and ((source = 'juqode' and kind = 'permission_granted') or (source = 'user' and kind = 'answer'))`).get(work.id).n;
+  const expected = 1 + resumes;
+  if (!runners.length) return { verdict: 'UNKNOWN', reason: 'no-runner-identity', evidence: { expected }, limits: LIMITS };
+  const seen = runners.map((r) => observeRunner(r, opts));
+  const evidence = { expected, recorded: runners.length, runners: seen.map((o, n) => ({ pid: runners[n].runner_pid, verdict: o.verdict, reason: o.reason })) };
+  const live = seen.find((o) => o.verdict === 'LIVE_CONFIRMED');
+  if (live) return { ...live, evidence };
+  const unknown = seen.find((o) => o.verdict === 'UNKNOWN');
+  if (unknown) return { ...unknown, evidence };
+  if (runners.length < expected) return { verdict: 'UNKNOWN', reason: 'runner-identities-incomplete', evidence, limits: LIMITS };
+  return { verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: seen.length > 1 ? 'all-recorded-runners-absent' : seen[0].reason, evidence, limits: LIMITS };
+}
+
+/* Is this ended_unknown Work's Writer Hold released? Only by a confirmation recorded WITH an observation, or by a user statement
+ * (everything recorded before the observer existed) that the runner's CURRENT observation does not contradict. A statement is never
+ * promoted: the row stays as it is, and a live or unobservable runner keeps the hold. */
+function holdReleased(db, row, observe = observeWork) {
+  const kind = repo.stopAcknowledgementKind(db, row.id);
+  if (kind === 'observed') return true;
+  if (kind !== 'statement') return false;
+  try { return observe(row, db)?.verdict === 'NOT_OBSERVED_WITH_EVIDENCE'; } catch { return false; }
+}
+
 /* The ONE way a stopped-by-the-user acknowledgement is recorded. The user's confirmation is necessary and never
  * enough: a live runner, or one that cannot be observed, appends nothing. An acknowledgement that already exists
  * is returned as it is (no second record, no second probe). */
-function acknowledgeAfterObservation(db, projectId, workId, observe = observeRunner) {
+function acknowledgeAfterObservation(db, projectId, workId, observe = observeWork) {
   const work = db.prepare('select * from work where id = ?').get(workId);
   if (!work || work.project_id !== projectId || work.status !== 'ended' || work.outcome !== 'ended_unknown') {
     return { ok: false, reason: 'not-unknown-work' };
   }
-  if (repo.hasStoppedProcessAcknowledgement(db, workId)) return { ok: true, existing: true };
+  if (repo.stopAcknowledgementKind(db, workId) === 'observed') return { ok: true, existing: true };
   let obs;
-  try { obs = observe(withStoredIdentity(db, work)); } catch { obs = verdictFailed(); }
+  try { obs = observe(work, db); } catch { obs = verdictFailed(); }
   if (obs?.verdict !== 'NOT_OBSERVED_WITH_EVIDENCE') {
     return { ok: false, reason: 'prior-process-may-still-live',
       detail: { observation: obs?.verdict === 'LIVE_CONFIRMED' ? 'LIVE_CONFIRMED' : 'UNKNOWN', why: obs?.reason ?? 'no-verdict' } };
@@ -120,20 +150,19 @@ function acknowledgeAfterObservation(db, projectId, workId, observe = observeRun
 }
 const verdictFailed = () => ({ verdict: 'UNKNOWN', reason: 'observer-failed' });
 
-function unknownTaskRunWithLiveRunner(db, projectId, acknowledgedWorkId = null) {
+function unknownTaskRunWithLiveRunner(db, projectId, acknowledgedWorkId = null, observe = observeWork) {
   const unknown = db.prepare(`select * from work
     where project_id = ? and status = 'ended' and outcome = 'ended_unknown'
     order by started_at desc, rowid desc`).all(projectId);
-  return unknown.find((row) => row.id !== acknowledgedWorkId &&
-    !repo.hasStoppedProcessAcknowledgement(db, row.id)) ?? null;
+  return unknown.find((row) => row.id !== acknowledgedWorkId && !holdReleased(db, row, observe)) ?? null;
 }
 
 function unresolvedLegacyUnknownWorks(db, projectId) {
   return db.prepare(`select * from work where project_id = ? and task_id is null
     and status = 'ended' and outcome = 'ended_unknown' order by started_at desc, rowid desc`)
     .all(projectId)
-    .filter((row) => !repo.hasStoppedProcessAcknowledgement(db, row.id))
+    .filter((row) => !holdReleased(db, row))
     .map((row) => ({ id: row.id, started_at: row.started_at }));
 }
 
-module.exports = { observeRunner, acknowledgeAfterObservation, runnerMayBeAlive, unknownTaskRunWithLiveRunner, unresolvedLegacyUnknownWorks };
+module.exports = { observeRunner, observeWork, holdReleased, acknowledgeAfterObservation, runnerMayBeAlive, unknownTaskRunWithLiveRunner, unresolvedLegacyUnknownWorks };

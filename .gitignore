@@ -7,3 +7,4 @@ tmp-visual-*/
 
 # mutation sweep worker copies (scripts/mutate)
 .mutate-work/
+tmp-agent-picker/

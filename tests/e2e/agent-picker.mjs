@@ -19,7 +19,7 @@ import { launchArgs, killTree, WIN } from './launch.mjs';
 sweepDisplays();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const { DB, USER_DATA, SEED, SEED2, FAKE_CLI } = await import('./fixture.mjs');
-const OUT = path.resolve(process.env.JUQODE_E2E_SHOT_DIR || path.join(ROOT, 'tmp-agent-picker'));
+const OUT = path.resolve(process.env.JUQODE_E2E_SHOT_DIR || path.join(process.env.TMPDIR || os.tmpdir(), 'juqode-agent-picker-shots'));
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const step = (m) => process.stderr.write(`  · ${m}\n`);
