@@ -368,3 +368,49 @@ test('F2/source: supervisor records each resume child (permission grant retry an
   const sup = src.code('app/main/work/supervisor.js');
   assert.strictEqual((sup.match(/recordChild\(db, workId, c\)/g) ?? []).length, 2);
 });
+
+/* ── an observation written by the EARLIER single-runner observer (no `scope`) is not an every-runner observation ── */
+const V1_OBSERVED = (db, project, w) => repo.acknowledgeUnknownProcessStopped(db, project.id, w.id, { verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'root-and-group-absent', limits: [] });
+
+test('older single-runner observed ACK + the EARLIER runner group still alive: every start path stays held, rows unchanged, read-only status still works', { skip: !LINUX }, async () => {
+  const early = spawnOwned('sh', ['-c', 'sleep 300 & wait']);
+  await until(() => cp.spawnSync('pgrep', ['-g', String(early.pid), '-x', 'sleep']).status === 0);
+  const earlyAt = iso(); process.kill(early.pid, 'SIGKILL');            // root gone, child alive
+  const late = spawnOwned('sleep', ['300']); const lateAt = iso(); killGroup(late.pid);   // the LAST runner ended: what the old observer looked at
+  await rig(async ({ db, project, task, h, unknownWork }) => {
+    const w = unknownWork({ taskId: task.id, idempotencyKey: 'v1ack' }, { pid: late.pid, startedAt: lateAt });
+    addRunner(db, w, early.pid, earlyAt);
+    repo.addSignal(db, w.id, { seq: repo.nextSeq(db, w.id), source: 'juqode', kind: 'permission_granted', payload: '{}' });
+    V1_OBSERVED(db, project, w);
+    assert.strictEqual(repo.stopAcknowledgementKind(db, w.id), 'statement', 'a scope-less observation was trusted');
+    const before = rows(db);
+    assert.strictEqual((await h['juqode:work-start'](null, project.id, 'new')).reason, HELD);
+    const retry = await h['juqode:task-retry'](null, task.id, w.id, 'again', 'k-v1', true);
+    assert.deepStrictEqual([retry.ok, retry.reason, retry.detail?.observation], [false, HELD, 'LIVE_CONFIRMED']);
+    assert.strictEqual((await h['juqode:qc-run'](null, project.id, 'qc.build', 'b')).reason, 'prior-run-unknown');
+    assert.strictEqual(rows(db), before, 'the old ACK row was touched or a refusal wrote');
+    assert.notStrictEqual((await h['juqode:qc-run'](null, project.id, 'qc.git.status', 's')).reason, 'prior-run-unknown', 'read-only status must stay usable');
+    killGroup(early.pid);
+    assert.ok(await until(() => require(path.join(R, 'app/main/work/runner-liveness.js')).observeWork(repo.getWork(db, w.id), db).verdict === 'NOT_OBSERVED_WITH_EVIDENCE'));
+    const ok = await h['juqode:task-retry'](null, task.id, w.id, 'again', 'k-v1b', true);
+    assert.strictEqual(ok.reason, 'claude-unavailable', 'all runners observed, none unrecorded: the hold lifts');
+    assert.strictEqual(acks(db, w.id).length, 2, 'old row kept, new every-runner row appended');
+    assert.strictEqual(repo.stopAcknowledgementKind(db, w.id), 'observed');
+  });
+  killGroup(early.pid); killGroup(late.pid);
+});
+
+test('older single-runner observed ACK with an unrecorded resume (incomplete identities) stays held; a new every-runner ACK records scope and runner count', async () => {
+  await rig(async ({ db, project, task, h, unknownWork, mk }) => {
+    const dead = { pid: 2_000_000_001, startedAt: iso() };
+    const w = unknownWork({}, dead);
+    repo.addSignal(db, w.id, { seq: repo.nextSeq(db, w.id), source: 'user', kind: 'answer', payload: 'x' });
+    V1_OBSERVED(db, project, w);
+    assert.strictEqual((await h['juqode:work-start'](null, project.id, 'n')).reason, HELD);
+    const ok = unknownWork({}, dead);
+    const hh = mk({ observeRunner: undefined });
+    const r = hh['juqode:legacy-unknown-ack'](null, project.id, ok.id, true);
+    // pid 2_000_000_001 is absent on Linux: observed gone
+    if (LINUX) { assert.strictEqual(r.ok, true); const o = JSON.parse(acks(db, ok.id)[0].payload).juqodeProcess.observation; assert.deepStrictEqual([o.scope, o.runners], ['all-runners', 1]); }
+  });
+});

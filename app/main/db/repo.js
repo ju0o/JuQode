@@ -559,7 +559,9 @@ function stopAcknowledgementKind(db, workId) {
     try {
       const process = JSON.parse(row.payload ?? '')?.juqodeProcess;
       if (process?.stoppedConfirmedByUser !== true || process?.workId !== workId) continue;
-      if (process.observation?.verdict === 'NOT_OBSERVED_WITH_EVIDENCE') return 'observed';
+      /* 'observed' = recorded by the every-runner observer (scope 'all-runners'). An observation written by the earlier single-runner
+       * observer carries no scope: it saw one runner, so it is a statement again until the CURRENT observation says otherwise. */
+      if (process.observation?.verdict === 'NOT_OBSERVED_WITH_EVIDENCE' && process.observation.scope === 'all-runners') return 'observed';
       kind = 'statement';
     } catch { /* not a confirmation */ }
   }

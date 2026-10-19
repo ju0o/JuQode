@@ -146,7 +146,7 @@ function acknowledgeAfterObservation(db, projectId, workId, observe = observeWor
     return { ok: false, reason: 'prior-process-may-still-live',
       detail: { observation: obs?.verdict === 'LIVE_CONFIRMED' ? 'LIVE_CONFIRMED' : 'UNKNOWN', why: obs?.reason ?? 'no-verdict' } };
   }
-  return repo.acknowledgeUnknownProcessStopped(db, projectId, workId, { verdict: obs.verdict, reason: obs.reason, limits: obs.limits });
+  return repo.acknowledgeUnknownProcessStopped(db, projectId, workId, { verdict: obs.verdict, reason: obs.reason, limits: obs.limits, scope: 'all-runners', runners: obs.evidence?.recorded ?? null });
 }
 const verdictFailed = () => ({ verdict: 'UNKNOWN', reason: 'observer-failed' });
 
