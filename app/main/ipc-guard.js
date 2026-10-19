@@ -146,19 +146,46 @@ function scrubString(value) {
   t = mask(safeSnapshot(t).safe).trim();
   return t.length > DETAIL_CAP ? `${t.slice(0, DETAIL_CAP)}…` : t;
 }
-function scrubDetail(value, depth = 0) {
-  if (typeof value === 'string') return scrubString(value);
-  if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
-  if (depth >= 3) return null;
-  if (Array.isArray(value)) return value.slice(0, 50).map((v) => scrubDetail(v, depth + 1));
-  if (typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDetail(v, depth + 1)]));
-  return null;
+/* One bounded walk over anything that leaves the main process: strings go through `fn`, plain objects and
+ * arrays keep their shape, an Error becomes {name, message} (no stack, no cause, no own props), a cycle, a
+ * function, a symbol or anything past the depth / node / array caps becomes null. Fail closed, never throw. */
+const WALK = Object.freeze({ depth: 12, nodes: 20000, array: Infinity });
+function walk(value, fn, caps = WALK) {
+  let nodes = 0;
+  const up = new Set();
+  const go = (v, depth) => {
+    if (typeof v === 'string') return fn(v);
+    if (v == null || typeof v === 'number' || typeof v === 'boolean') return v;
+    if (typeof v !== 'object') return null;
+    if (++nodes > caps.nodes || depth >= caps.depth || up.has(v)) return null;
+    if (v instanceof Error) return { name: safeCode(v.name) ?? 'Error', message: fn(String(v.message ?? '')) };
+    if (v instanceof Date) return v;
+    up.add(v);
+    try {
+      if (Array.isArray(v)) return v.slice(0, caps.array).map((x) => go(x, depth + 1));
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [fn(k), go(x, depth + 1)]));
+    } catch { return null; } finally { up.delete(v); }
+  };
+  return go(value, 0);
 }
-/* `open-project` / `open-path` echo the folder the USER picked (SC-01's technical disclosure);
- * everything else passes through the scrub. */
+const scrubDetail = (value) => walk(value, scrubString, { depth: 3, nodes: 500, array: 50 });
+/* Everything else that leaves: the same masker the Quick Command output already passes (qc/run `mask`), nothing
+ * longer or shorter. Display only - what was STORED or EXECUTED is untouched. */
+const maskOut = (value) => walk(value, mask);
+/* `open-project` / `open-path` echo the folder the USER picked (SC-01's technical disclosure); the Task channels
+ * hand back text the user typed so they can edit it (masking it would overwrite the original on save). */
 const DETAIL_EXEMPT = new Set(['juqode:open-project', 'juqode:open-path']);
-const publicOut = (channel, r) => (r && typeof r === 'object' && r.detail != null && !DETAIL_EXEMPT.has(channel)
-  ? { ...r, detail: scrubDetail(r.detail) } : r);
+const OUT_EXEMPT = new Set([...DETAIL_EXEMPT, 'juqode:task-list', 'juqode:task-detail', 'juqode:task-create', 'juqode:task-update',
+  /* SC-04's explicit raw contract: the diff text is the user's own file content (legacy-read-masking.test.js pins it) */
+  'juqode:work-reader', 'juqode:work-changes']);
+const publicOut = (channel, r) => {
+  if (r == null || typeof r !== 'object') return typeof r === 'string' && !OUT_EXEMPT.has(channel) ? mask(r) : r;
+  let out = OUT_EXEMPT.has(channel) ? r : maskOut(r);
+  if (out && out.detail != null && !DETAIL_EXEMPT.has(channel)) out = { ...out, detail: scrubDetail(r.detail) };
+  return out;
+};
+/* A push (work-update / qc-update / term-update) is a main -> renderer answer without a handler. */
+const publicPush = (payload) => (payload && typeof payload === 'object' ? maskOut(payload) : payload);
 
-module.exports = { idList, scrubString, scrubDetail, publicOut, DETAIL_EXEMPT, LIMITS, text, shellLine, taskInput, shortId, taskErrorCode, TASK_ERRORS, REVIEW_ERRORS, TASK_CODES, safeCode,
+module.exports = { idList, scrubString, scrubDetail, publicOut, publicPush, maskOut, walk, DETAIL_EXEMPT, LIMITS, text, shellLine, taskInput, shortId, taskErrorCode, TASK_ERRORS, REVIEW_ERRORS, TASK_CODES, safeCode,
   overPoints, overBytes };

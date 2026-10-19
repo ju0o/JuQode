@@ -1,4 +1,5 @@
 'use strict';
+const { mask } = require('../qc/run');
 /* WBS-04 · the Brief's narrative layer — `19` §C1 ②, REC-008, D-114.
  *
  * The facts layer (WBS-03, `./answers.js`) answers three of the six questions from things it
@@ -169,7 +170,9 @@ function promptFor({ deterministic, readFiles, facts }) {
     '모르는 것은 그 항목을 빼세요. 지어내지 마세요. 위 목록에 없는 파일을 인용하지 마세요.',
   ].join('\n');
 
-  return body.length > PROMPT_BUDGET ? `${body.slice(0, PROMPT_BUDGET)}\n(생략됨)` : body;
+  /* the README is project text; a token pasted into it must not ride into the model prompt */
+  const safe = mask(body);
+  return safe.length > PROMPT_BUDGET ? `${safe.slice(0, PROMPT_BUDGET)}\n(생략됨)` : safe;
 }
 
 /**
