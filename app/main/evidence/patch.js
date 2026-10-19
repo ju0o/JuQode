@@ -60,14 +60,23 @@ const sideFromManifest = (manifest, read) => ({ files: manifest.files, read });
 
 /* A reader may return, instead of a Buffer, `{ oversize: true, size, sha256 }`: the file is over
  * `maxBytes` and was NOT loaded. sha256 is computed by streaming (bounded memory) for the live
- * directory, and is null where no streaming source exists (Git blobs). computePatch reports it
+ * directory and for Git blobs (git.blobDigestAt). computePatch reports it
  * as too_large with that digest and never diffs it. */
 const oversize = (size, sha256v) => ({ oversize: true, size, sha256: sha256v });
 
-function streamDigest(fd) {
+/* Hashes exactly `size` bytes (the fstat size) in bounded chunks. A file that grew is read only up
+ * to `size`; a file that shrank (fewer bytes than fstat promised) throws `changed-during-read` ->
+ * unavailable, so the reported size and digest always describe the same bytes. */
+function streamDigest(fd, size) {
   const h = crypto.createHash('sha256');
   const chunk = Buffer.allocUnsafe(64 * 1024);
-  for (let n; (n = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0;) h.update(chunk.subarray(0, n));
+  let got = 0;
+  while (got < size) {
+    const n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, size - got), got);
+    if (n <= 0) break;
+    h.update(chunk.subarray(0, n)); got += n;
+  }
+  if (got !== size) throw new Error('changed-during-read');
   return h.digest('hex');
 }
 
@@ -94,13 +103,14 @@ function fsReader(root) {
       throw Object.assign(new Error('sensitive-target'), { code: 'SENSITIVE' });
     }
     /* A link into .git / node_modules / build output etc. is not the user's file. */
+    /* judged on the path RELATIVE to the project root, so a project that lives under /…/build/ is fine */
     if (realRel.split('/').some((s) => SKIP_DIRS.has(s))) throw new Error('skip-dir-target');
     const fd = fs.openSync(r, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
     try {
       const st = fs.fstatSync(fd);
       if (!st.isFile()) throw new Error('not-a-file');
       if (st.nlink > 1) throw new Error('hardlink');
-      if (st.size > maxBytes) return oversize(st.size, streamDigest(fd));
+      if (st.size > maxBytes) return oversize(st.size, streamDigest(fd, st.size));
       const buf = fs.readFileSync(fd);
       return buf.length > maxBytes ? oversize(buf.length, sha256(buf)) : buf;
     } finally { fs.closeSync(fd); }
@@ -108,8 +118,9 @@ function fsReader(root) {
 }
 
 /** Git side over two refs produced by git.capture (JuQode-owned object dir, never the user's index).
- *  `paths` null = every path in the tree. Sensitive names are dropped from the file list AND
- *  guarded in read, so bytesAt/sizeAt are never called for them. Symlink (120000) and
+ *  `paths` null = every path in the tree. Sensitive names ARE listed (so they surface as
+ *  sensitive_excluded rows) but `read` throws SENSITIVE for them before any git call, so
+ *  bytesAt/sizeAt/blobDigestAt are never called for them. Symlink (120000) and
  *  gitlink/submodule (160000) entries are listed but unavailable: their blob is not file content. */
 function sideFromGit(root, store, ref, paths = null, { maxBytes = MAX_SIDE_BYTES } = {}) {
   const modes = gitMod.treeModes(root, store, ref);
@@ -122,7 +133,11 @@ function sideFromGit(root, store, ref, paths = null, { maxBytes = MAX_SIDE_BYTES
     if (modes.special.has(p)) throw new Error('special-mode');
     const size = gitMod.sizeAt(root, store, ref, p);
     if (size === null) throw new Error('unreadable');
-    if (size > max) return oversize(size, null);
+    if (size > max) {
+      const d = gitMod.blobDigestAt(root, store, ref, p);   // streamed, body never held in memory
+      if (!d || d.bytes !== size) throw new Error('unreadable');
+      return oversize(size, d.sha256);
+    }
     const buf = gitMod.bytesAt(root, store, ref, p);
     if (buf === null) throw new Error('unreadable');   // listed in the tree but unreadable: never "absent"
     return buf;

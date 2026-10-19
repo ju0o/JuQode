@@ -471,7 +471,7 @@ test('Git: symlink and submodule/gitlink entries are unavailable, no escape, lin
   assert.ok(blob);
 });
 
-test('Git: oversize blob is refused by size before bytesAt; digest is null (no streaming source)', (t) => {
+test('Git: oversize blob is refused by size before bytesAt; real streamed digest', (t) => {
   const { root, g, w, store } = gitRig();
   w('big.txt', 'a'.repeat(5000)); w('s.txt', 'x\n'); g('add', '-A'); g('commit', '-qm', 'base');
   fs.mkdirSync(path.join(store, 'objects'), { recursive: true });
@@ -479,7 +479,7 @@ test('Git: oversize blob is refused by size before bytesAt; digest is null (no s
   t.mock.method(gitEv, 'bytesAt', (r, s, ref, p) => { asked.push(p); return o(r, s, ref, p); });
   const r = computePatch({ before: { files: [], read: () => null }, after: sideFromGit(root, store, 'HEAD', null, { maxBytes: 1000 }) }, { maxSideBytes: 1000 });
   assert.equal(one(r, 'big.txt').patch_state, 'too_large');
-  assert.equal(one(r, 'big.txt').after_digest, null);
+  assert.equal(one(r, 'big.txt').after_digest, sha('a'.repeat(5000)));
   assert.equal(one(r, 'big.txt').patch_text, null);
   assert.ok(!asked.includes('big.txt'));
   assert.equal(one(r, 's.txt').patch_state, 'stored');
@@ -501,4 +501,96 @@ test('Git: capture leaves the user git config alone (no config writes by sideFro
   const cfg = fs.readFileSync(path.join(root, '.git/config'));
   sideFromGit(root, store, 'HEAD', null).read('a.txt');
   assert.deepEqual(fs.readFileSync(path.join(root, '.git/config')), cfg);
+});
+
+/* ── slice B fix round ───────────────────────────────────────────────────────────────────── */
+test('Git: 2 MiB blob keeps a real sha256 (independent check); chmod-only change is unchanged', () => {
+  const { root, g, w, store } = gitRig();
+  const big = Buffer.alloc(2 * 1024 * 1024, 'q');
+  w('big.bin', big); w('other.txt', 'o\n'); g('add', '-A'); g('commit', '-qm', 'base');
+  const before = gitEv.capture(root, store, 'before');
+  fs.chmodSync(path.join(root, 'big.bin'), 0o755);
+  w('other.txt', 'p\n');
+  const after = gitEv.capture(root, store, 'after');
+  const { before: sb, after: sa } = gitSides(root, store, before.ref, after.ref);
+  const r = computePatch({ before: sb, after: sa });
+  assert.equal(one(r, 'big.bin').patch_state, 'unchanged');
+  assert.equal(one(r, 'big.bin').before_digest, sha(big));
+  assert.equal(one(r, 'other.txt').patch_state, 'stored');
+  // changed oversize: too_large with both real digests
+  const big2 = Buffer.alloc(2 * 1024 * 1024, 'r');
+  w('big.bin', big2);
+  const a3 = gitEv.capture(root, store, 'after2');
+  const g2 = gitSides(root, store, before.ref, a3.ref);
+  const r2 = computePatch(g2);
+  assert.equal(one(r2, 'big.bin').patch_state, 'too_large');
+  assert.equal(one(r2, 'big.bin').before_digest, sha(big));
+  assert.equal(one(r2, 'big.bin').after_digest, sha(big2));
+  assert.equal(one(r2, 'big.bin').patch_text, null);
+  assert.deepEqual(fs.readdirSync(store).filter((n) => n.endsWith('.tmp')), [], 'scratch removed');
+});
+
+test('Git: blob exactly at the cap is stored, one over is too_large', () => {
+  const { root, g, w, store } = gitRig();
+  w('at.txt', 'x'.repeat(99) + '\n'); w('over.txt', 'x'.repeat(100) + '\n'); g('add', '-A'); g('commit', '-qm', 'b');
+  fs.mkdirSync(path.join(store, 'objects'), { recursive: true });
+  const r = computePatch({ before: { files: [], read: () => null }, after: sideFromGit(root, store, 'HEAD', null, { maxBytes: 100 }) }, { maxSideBytes: 100 });
+  assert.equal(one(r, 'at.txt').patch_state, 'stored');
+  assert.equal(one(r, 'over.txt').patch_state, 'too_large');
+});
+
+test('fsReader: a FIFO is unavailable and does not hang (child process with timeout); a directory is unavailable', () => {
+  const root = tempDir('patch-fifo');
+  execFileSync('mkfifo', [path.join(root, 'pipe')]);
+  fs.mkdirSync(path.join(root, 'adir'));
+  const script = `const {fsReader}=require(${JSON.stringify(path.join(__dirname, '..', 'app/main/evidence/patch.js'))});
+    const rd=fsReader(${JSON.stringify(root)}); const out=[];
+    for (const n of ['pipe','adir']) { try { rd(n); out.push('read'); } catch (e) { out.push(e.message); } }
+    console.log(out.join());`;
+  const out = execFileSync(process.execPath, ['-e', script], { timeout: 8000, encoding: 'utf8' }).trim();
+  assert.equal(out, 'not-a-file,not-a-file');
+  assert.equal(fsOne(root, 'adir') .patch_state, 'unavailable');
+});
+
+test('SKIP_DIRS: nested segment, symlinked dir with deeper skip segment; project root under build/ is fine', () => {
+  const root = tempDir('patch-skip2');
+  fs.mkdirSync(path.join(root, 'src/vendor'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src/vendor/x.txt'), 'x\n');
+  fs.symlinkSync('src/vendor/x.txt', path.join(root, 'ln.txt'));
+  fs.symlinkSync('src', path.join(root, 'd'));
+  assert.equal(fsOne(root, 'ln.txt').patch_state, 'unavailable');
+  assert.equal(fsOne(root, 'd/vendor/x.txt').patch_state, 'unavailable');
+  const proj = path.join(tempDir('patch-under'), 'build', 'proj');
+  fs.mkdirSync(proj, { recursive: true });
+  fs.writeFileSync(path.join(proj, 'ok.txt'), 'ok\n');
+  assert.equal(fsOne(proj, 'ok.txt').patch_state, 'stored', 'a build/ ABOVE the root does not count');
+});
+
+test('before side through fsReader gets the same cap pass-through: never loaded whole', (t) => {
+  const a = tempDir('patch-bsA'); const b = tempDir('patch-bsB');
+  fs.writeFileSync(path.join(a, 'f'), Buffer.alloc(5000, 'a'));
+  fs.writeFileSync(path.join(b, 'f'), 'small\n');
+  const orig = fs.readFileSync; let whole = 0;
+  t.mock.method(fs, 'readFileSync', (...x) => { whole++; return orig(...x); });
+  const r = computePatch({ before: fsSide(a, ['f']), after: fsSide(b, ['f']) }, { maxSideBytes: 1000 });
+  assert.equal(one(r, 'f').patch_state, 'too_large');
+  assert.equal(one(r, 'f').before_digest, sha(Buffer.alloc(5000, 'a')));
+  assert.equal(whole, 1, 'only the small after side was read whole');
+});
+
+test('a file that shrinks between fstat and read is unavailable (size and digest never disagree)', (t) => {
+  const root = tempDir('patch-shrink');
+  fs.writeFileSync(path.join(root, 'f'), Buffer.alloc(3000, 'a'));
+  const o = fs.fstatSync;
+  t.mock.method(fs, 'fstatSync', (fd, ...x) => { const st = o(fd, ...x); return Object.create(st, { size: { value: 9000 } }); });
+  assert.equal(fsOne(root, 'f', { maxSideBytes: 1000 }).patch_state, 'unavailable');
+});
+
+test('Git: streamed byte count that disagrees with the blob size is unavailable', (t) => {
+  const { root, g, w, store } = gitRig();
+  w('big.txt', 'a'.repeat(5000)); g('add', '-A'); g('commit', '-qm', 'b');
+  fs.mkdirSync(path.join(store, 'objects'), { recursive: true });
+  t.mock.method(gitEv, 'blobDigestAt', () => ({ sha256: 'f'.repeat(64), bytes: 4999 }));
+  const r = computePatch({ before: { files: [], read: () => null }, after: sideFromGit(root, store, 'HEAD', null, { maxBytes: 1000 }) }, { maxSideBytes: 1000 });
+  assert.equal(one(r, 'big.txt').patch_state, 'unavailable');
 });
