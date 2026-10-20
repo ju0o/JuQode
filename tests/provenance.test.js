@@ -580,3 +580,10 @@ test('bounded cost: 50 MB claim, 1M claims, 1M immutable rows', () => {
   assert.ok(tClaims < 3000, `1M claims ${tClaims}`);
   assert.ok(tImm < 3000, `1M immutable rows ${tImm}`);
 });
+
+test('limitClaim: a pathological combining run is over by code-unit length beyond the bounded prefix (documented)', () => {
+  const heavy = 'e' + '\u0301'.repeat(5000);          // ONE grapheme, 5001 code units
+  const l = limitClaim(heavy);
+  assert.deepStrictEqual([l.truncated, l.full === heavy, l.shown.endsWith('…')], [true, true, true]);
+  assert.strictEqual(limitClaim('e' + '\u0301'.repeat(100)).truncated, false, 'inside the bound it is judged on graphemes');
+});

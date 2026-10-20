@@ -295,7 +295,7 @@ function invariants(s, opts) {
       if (real.changesKnown && real.lowerBound && rep.changesKnown !== false && rep.lowerBound !== true) add('changes_known_overclaim', 'a lower bound shown as an exact count');
       if (real.changesKnown && !real.patchStateKnown && rep.patchStateKnown === true) add('changes_known_overclaim', 'patch availability claimed with no patch_state');
       if (rep.changesKnown === false && hasCount(rep.count)) add('fabricated_count', 'a count shown for changes that are not known');
-      if (hasCount(rep.count) && (typeof cnt !== 'number' || !Number.isFinite(cnt) || cnt < 0 || !Number.isInteger(cnt))) add('count_malformed', 'the shown count is not a non-negative integer');
+      if (hasCount(rep.count) && (!Number.isFinite(cnt) || cnt < 0 || !Number.isInteger(cnt))) add('count_malformed', 'the shown count is not a non-negative integer');
       else if (hasCount(rep.count) && real.changesKnown && rep.changesKnown !== false && !(cnt === 0 && (real.count > 0 || real.lowerBound))) {
         const total = s.changes.files.length;     // a lower bound may be anything between the known count and all files
         if (real.lowerBound ? (cnt < real.count || cnt > total) : cnt !== real.count) add('count_mismatch', `shown ${cnt}, measured ${real.count}${real.lowerBound ? ' (lower bound)' : ''}`);
