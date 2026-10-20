@@ -127,3 +127,15 @@ test('round 9 item 7: curl -b / --cookie with a cookie pair', () => {
   assert.strictEqual(mask('mycmd -b sid=1'), 'mycmd -b sid=1');
   assert.strictEqual(mask('curl -b cookies.txt https://x'), 'curl -b cookies.txt https://x');         // a cookie JAR file name has no '='
 });
+
+test('round 9 survivor pins: CRLF end, mixed escaped/plain quotes in one text, Digest look window, 255-character prefix, escaped Set-Cookie arrays', () => {
+  assert.strictEqual(mask('Cookie: a=b\r\nnext'), 'Cookie: ***\r\nnext');
+  const mixed = `{"Cookie":"a=${C9}1"} and {\\"Cookie\\":\\"c=${C9}2\\"}`;
+  assert.ok(!mask(mixed).includes(C9) && !ss(mixed).includes(C9), mixed);
+  assert.ok(!mask(`Authorization: Digest ${'k'.repeat(4095)}=v\nz`).includes('=v'), 'an = 4095 characters in is inside the window');
+  assert.ok(mask(`Authorization: Digest ${'k'.repeat(4096)}=v\nz`).includes('=v'), 'an = 4096 characters in is not');
+  assert.ok(!mask(`${'A'.repeat(254)}_TOKEN=abc12345`).includes('abc12345'), 'a 255-character prefix');
+  for (let d = 1; d <= 3; d++) { let x = JSON.stringify({ 'Set-Cookie': [`sid=${C9}`] }); for (let i = 1; i < d; i++) x = JSON.stringify(x); for (const out of [mask(x), ss(x)]) assert.ok(!out.includes(C9), `depth ${d}`); }
+  assert.ok(mask('MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN = abc').includes('abc'), 'a spaced assignment needs a credential-looking value');
+  assert.ok(same('const SESSION_COOKIE = "sid";') && same('const MY_COMPANY_BILLING_SERVICE_SESSION_COOKIE = "sid";'));
+});
