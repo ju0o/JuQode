@@ -41,23 +41,30 @@ const TAIL_LINES = 3;
  * counted (q02 §5.6). It reduces what appears on screen; it is NOT a guarantee that nothing
  * leaks, and the original text is still in the user's own terminal and log. Anything that
  * treats this as a containment boundary is wrong. */
-/* A leading `\b` also holds after a JSON escape: in a stored stream line `a\nghp_…` the `n` is a word character, so
- * a plain `\b` never saw the token start. */
-const escB = (re) => (re.source.startsWith('\\b') ? new RegExp(`(?:\\b|(?<=\\\\[nrt]))${re.source.slice(2)}`, re.flags) : re);
+const M = require('../masking');
+const { escB } = M;
+/* Each step is `(text, rep) => text`. The regexes are bounded (no unbounded prefix, no lazy span); the structural
+ * ones (private key, URL credentials, JWT, Authorization header, JSON key/value) are linear scans in ../masking.js,
+ * shared with the write-time masker in work/context.js so the two cannot drift. */
+const re = (r) => (t, rep) => t.replace(r, rep);
 const TOKENISH = [
   /\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{16,}/g,
   /\bsk[-_](?:live|test)?[-_]?[A-Za-z0-9_-]{16,}/g,
   /\bxox[abposr]-[A-Za-z0-9-]{8,}/g,
   /\bAKIA[0-9A-Z]{12,}/g,
-  /* LINEAR on hostile input (`eyJ-eyJ-…` was quadratic: 6.5 s @ 80k chars). A base64url run of 1024+ starting with
-   * `eyJ` is masked WHOLE (no header is that long, so it is not a JWT we can bound - mask-whole beats passing it);
-   * otherwise the header segment is capped at 1024 so no start scans more than that. */
-  /\beyJ[A-Za-z0-9_-]{1024,}(?:\.[A-Za-z0-9_-]*){0,2}/g,
-  /\beyJ[A-Za-z0-9_-]{10,1024}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
-  /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z]+ )?PRIVATE KEY-----|$)/g,
+].map((r) => re(escB(r))).concat([
+  M.maskJwt,
+  M.maskPrivateKeys,
+  M.maskAuthHeaders,
+], [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/g,
-  /\bBasic\s+[A-Za-z0-9._~+/=-]{16,}/g,
-  /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:@/]+:[^\s:@/]+@/g,    // scheme://user:password@host; scheme <= 32 chars keeps the scan linear (it was quadratic on 'a-a-a-…')
+  /\bBasic\s+[A-Za-z0-9+/=.]{16,}/g,
+].map((r) => re(escB(r))), [M.maskUrlCredentials], M.EXTRA.map(re), [
+  /\bnpm_[A-Za-z0-9]{36}\b/g,
+  /\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]{20,}/g,
+  /\bAIza[0-9A-Za-z_-]{35}/g,
+].map((r) => re(escB(r))), [M.maskJsonCredentials], [
+  /\bapi_key[ \t]*=[ \t]*["']?(?=[A-Za-z_-]*\d)[A-Za-z0-9_-]{16,}/g,
   /* An ENV-VAR-SHAPED name and its value, on ONE line.
    *
    * MEASURED before this was narrowed: case-insensitive matching plus `\s*` after the separator
@@ -69,18 +76,13 @@ const TOKENISH = [
    * So: the NAME must look like an environment variable (upper-case, digits, underscores — it
    * is one), and the value must be on the same line. `password:` in an English sentence is not
    * an environment variable and is left alone. */
-  /\bnpm_[A-Za-z0-9]{36}\b/g,
-  /\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]{20,}/g,
-  /\bAIza[0-9A-Za-z_-]{35}/g,
-  /(?<=\\{0,4}"[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|API_?KEY)[A-Z0-9_]{0,32}\\{0,4}"\s{0,4}:\s{0,4}\\{0,4}")[^"\\\s]{12,}(?=\\{0,4}")/g,   // JSON (also JSON-escaped \"): only the quoted VALUE, the document stays valid
-  /\bapi_key[ \t]*=[ \t]*["']?(?=[A-Za-z_-]*\d)[A-Za-z0-9_-]{16,}/g,
-  /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*\S+/g,
-].map(escB);
+  /\b[A-Z0-9_]{0,255}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|COOKIE)[A-Z0-9_]{0,255}[ \t]*[=:][ \t]*\S+/g,
+].map((r) => re(escB(r))));
 
 /** Replace token-shaped runs. See TOKENISH: this is a reduction, never a guarantee. */
 function mask(text) {
   let out = String(text ?? '');
-  for (const re of TOKENISH) out = out.replace(re, '***');
+  for (const step of TOKENISH) out = step(out, '***');
   return out;
 }
 

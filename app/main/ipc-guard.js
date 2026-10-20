@@ -152,14 +152,18 @@ function scrubString(value) {
  * reads `.id` on it gets undefined instead of a TypeError on null), an array cut by `caps.array` ends with TRUNC.
  * Two keys that mask to the same text keep the first and get `~2`, `~3`... for the rest. `keep`: keys whose string
  * values are NOT passed through `fn` (text the user typed or a path the renderer echoes back). Fail closed, never throw. */
-const WALK = Object.freeze({ depth: 12, nodes: 20000, array: Infinity });
+const WALK = Object.freeze({ depth: 12, nodes: 20000, leaves: 200000, array: Infinity });
 const TRUNC = '[truncated]';
 function walk(value, fn, caps = WALK, keep = null) {
   let nodes = 0;
+  let leaves = 0;                                  // strings / numbers / booleans: 1M of them in one array is 2.4 s on the main thread
   const up = new Set();
   const go = (v, depth, kept) => {
-    if (typeof v === 'string') return kept ? v : fn(v);
-    if (v == null || typeof v === 'number' || typeof v === 'boolean') return v;
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      if (++leaves > (caps.leaves ?? WALK.leaves)) return TRUNC;
+      return typeof v === 'string' && !kept ? fn(v) : v;
+    }
+    if (v == null) return v;
     if (typeof v !== 'object') return TRUNC;
     if (++nodes > caps.nodes || depth >= caps.depth || up.has(v)) return TRUNC;
     if (v instanceof Error) {
@@ -193,7 +197,7 @@ function walk(value, fn, caps = WALK, keep = null) {
   };
   return go(value, 0, false);
 }
-const scrubDetail = (value) => walk(value, scrubString, { depth: 3, nodes: 500, array: 50 });
+const scrubDetail = (value) => walk(value, scrubString, { depth: 3, nodes: 500, leaves: 2000, array: 50 });
 /* Everything else that leaves: the same masker the Quick Command output already passes (qc/run `mask`), nothing
  * longer or shorter. Display only - what was STORED or EXECUTED is untouched. */
 /* Keys whose text the renderer sends BACK into a later call or that is the user's own words / a folder: a masked copy

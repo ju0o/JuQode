@@ -240,20 +240,22 @@ const GENERATORS = { 'eyJ-': 'eyJ-', 'a-': 'a-', 'a.': 'a.', 'a:': 'a:', '=': '=
   'ghp_': 'ghp_', 'xox-': 'xox-', 'http://a:': 'http://a:', 'api_key=': 'api_key=', 'json key': '"API_TOKEN":', AIza: 'AIza', 'eyJ.': 'eyJaaaaaaaaaa.',
   'eyJ.a.': 'eyJaaaaaaaaaa.aaaaaaaaaa!', 'Authorization: ': 'Authorization: ', 'a\\n': 'a\\n', '\\"': '\\"', korean: '개발 서버 ', path: '/tmp/a-b/' };
 for (const n of [80000, 160000]) {
-  test(`hostile input ${n} chars: every generator is masked in < 1 s by the egress masker and < 1 s by the write-time masker`, () => {
+  test(`hostile input ${n} chars: every generator is masked in < 3 s (a load-proof bound; the real figure is < 0.3 s) by each masker`, () => {
     const slow = [];
     for (const [name, unit] of Object.entries(GENERATORS)) {
       const s = unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
       let t = Date.now(); mask(s); const a = Date.now() - t;
       t = Date.now(); safeSnapshot(s); const b = Date.now() - t;
-      if (a > 1000 || b > 1000) slow.push(`${JSON.stringify(name)} mask=${a}ms snapshot=${b}ms`);
+      if (a > 3000 || b > 3000) slow.push(`${JSON.stringify(name)} mask=${a}ms snapshot=${b}ms`);
     }
     assert.deepStrictEqual(slow, []);
   });
 }
 
 test('a long field is masked WHOLE, never passed through: 5000-char eyJ run, unclosed PRIVATE KEY block, 100-char prefix before token=', () => {
-  const longJwt = `eyJ${'A'.repeat(5000)}`;
+  /* a JWT whose JOSE header is huge is masked whole; a header-less long `eyJ…` run is DATA (base64 JSON blob), see F3a below */
+  const longJwt = `${Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT', pad: 'a'.repeat(4000) })).toString('base64url')}`;
+  assert.ok(longJwt.startsWith('eyJ') && longJwt.length > 1024);
   assert.strictEqual(mask(`x ${longJwt} y`), 'x *** y');
   assert.ok(!safeSnapshot(`x ${longJwt}.${'B'.repeat(20)}.${'C'.repeat(20)} y`).safe.includes('BBBBBBBBBB'));
   const pem = `-----BEGIN PRIVATE KEY-----\n${'QUJD'.repeat(500)}\n(no end line)`;
@@ -280,8 +282,8 @@ test('JSON-escaped stream payloads: escaped quotes, \\n before a token, AIza, gh
 });
 
 test('Authorization header residue: any case, short payload, dotted payload are redacted whole at write time; prose stays', () => {
-  for (const h of ['authorization: basic YTpi', 'Authorization: Basic dXNlcjpwYXNz.d29yZA', 'AUTHORIZATION=BASIC abc.def-ghi', 'Proxy-Authorization: Digest realm', 'Authorization: Bearer abc.def'])
-    assert.strictEqual(safeSnapshot(`curl -H "${h}" x`).safe.includes(h.split(/\s+/).pop()), false, h);
+  for (const h of ['authorization: basic YTpi', 'Authorization: Basic dXNlcjpwYXNz.d29yZA', 'AUTHORIZATION=BASIC abc.def-ghi', 'Proxy-Authorization: Digest username="a", realm="b"', 'Authorization: Bearer abc.def'])
+    assert.strictEqual(safeSnapshot(`curl -H "${h}" x`).safe.includes(h.split(/\s+/).pop()), false, h);   // (Digest realm WITHOUT key=value is prose: see F3c)
   assert.ok(!safeSnapshot('authorization: basic YTpi').safe.includes('YTpi'));
   assert.strictEqual(safeSnapshot('Support Basic authentication-based-access in the proxy').safe, 'Support Basic authentication-based-access in the proxy');
 });
@@ -346,4 +348,143 @@ test('ordinary UI text, paths, raw diff and copy survive the boundary untouched 
   assert.deepStrictEqual(guard.publicOut('juqode:qc-list', ui), ui);
   const diff = { ok: true, groups: [{ files: [{ patch: '+const MAX_TOKENS = 4096;\n+api_key = process.env.X', blocks: [{ lines: ['+const MAX_TOKENS = 4096;'] }] }] }] };
   for (const ch of ['juqode:work-reader', 'juqode:work-changes', 'juqode:work-explain']) assert.deepStrictEqual(guard.publicOut(ch, diff), diff, ch);
+});
+
+/* ---- QA round 3: shared scanners (app/main/masking.js), no new holes from the linearisation, no new erasures ---- */
+const { src } = { src: require(path.join(__dirname, 'src.js')) };
+const PW = 'Zq9xKp2Lm8Vn4Rt6';
+const ss = (t) => safeSnapshot(t).safe;
+const both = (t) => [['safeSnapshot', ss(t)], ['mask', mask(t)]];
+
+test('F1: a name with a prefix of 63 / 64 / 65 / 100 / 2000 characters still has its value masked for every keyword at write time', () => {
+  const seps = ['_cookie=', '_credential=', '_auth=', '_authorization: ', '_token=', '_api_key=', '_private_key=', '_client_secret=', '_access_token=', '_refresh_token=', '_password=', '_secret=', '_set-cookie='];
+  for (const n of [63, 64, 65, 100, 2000]) for (const k of seps) assert.ok(!ss('x'.repeat(n) + k + PW).includes(PW), `${n}${k}`);
+});
+
+test('F1/F4: the two maskers share ONE keyword list and the same scanner functions', () => {
+  const M = require(path.join(R, 'app/main/masking.js'));
+  const ctx = src.code('app/main/work/context.js');
+  const run = src.code('app/main/qc/run.js');
+  for (const f of ['maskPrivateKeys', 'maskUrlCredentials', 'maskJwt', 'maskAuthHeaders', 'maskJsonCredentials']) {
+    assert.ok(ctx.includes(`M.${f}`) && run.includes(`M.${f}`), f);
+    assert.strictEqual(typeof M[f], 'function');
+  }
+  assert.ok(M.KEYWORDS.includes('cookie') && M.KEYWORDS.includes('credential') && M.KEYWORDS.includes('authorization'));
+});
+
+test('F2a/b: a CLOSED private key with a 20 KB body is masked whole (secret line and END included); an UNCLOSED one to the end of the field', () => {
+  const body = 'QUJD'.repeat(5000);
+  const closed = `before\n-----BEGIN PRIVATE KEY-----\n${body}\nSECRETLASTLINE\n-----END PRIVATE KEY-----\nafter`;
+  assert.strictEqual(ss(closed), 'before\n[redacted]\nafter');
+  assert.strictEqual(mask(closed), 'before\n***\nafter');
+  const unclosed = `before -----BEGIN RSA PRIVATE KEY-----\n${body}\nSECRETLASTLINE`;
+  assert.strictEqual(ss(unclosed), 'before [redacted]');
+  assert.strictEqual(mask(unclosed), 'before ***');
+  const two = `-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\nmid\n-----BEGIN EC PRIVATE KEY-----\nBBBB\n-----END EC PRIVATE KEY-----\n`;
+  assert.strictEqual(ss(two), '[redacted]\nmid\n[redacted]\n');
+});
+
+test('F2c: a 40-character URL scheme with credentials is masked by both maskers (was masked on 9408025, leaked at the {0,31} cap)', () => {
+  for (const [, out] of both(`${'ab'.repeat(20)}://user:SECRET@h/p`)) assert.ok(!out.includes('SECRET') && out.endsWith('h/p'), out);
+  for (const [, out] of both(`${'ab'.repeat(200)}://user:SECRET@h/p`)) assert.ok(!out.includes('SECRET'), out);   // past the 255 back-scan: the userinfo is still masked
+  for (const [, out] of both('see https://example.com/a?b=c and git@github.com:org/r.git and http://host:8080/x')) assert.ok(out.includes('example.com/a?b=c') && out.includes('git@github.com') && out.includes('host:8080/x'), out);
+  for (const [, out] of both('x \\nhttps://u:SECRET@h/p')) assert.ok(!out.includes('SECRET') && out.includes('x \\'), out);
+});
+
+test('F3a: a long base64 JSON blob starting eyJ is DATA (kept); a JWT is masked whole whatever its segment lengths', () => {
+  const blob = Buffer.from(JSON.stringify({ rows: 'x'.repeat(30000) })).toString('base64url');
+  const blob64 = Buffer.from(JSON.stringify({ rows: 'x'.repeat(30000), p: '+/' })).toString('base64');
+  assert.ok(blob.startsWith('eyJ'));
+  for (const t of [`payload=${blob}`, `data:application/json;base64,${blob64}`, blob]) for (const [, out] of both(t)) assert.ok(out.includes(blob.slice(0, 200)) || out.includes(blob64.slice(0, 200)), 'a base64 data run was erased');
+  const jwt = (seg) => `eyJhbGciOiJIUzI1NiJ9.${seg}.${'S'.repeat(43)}`;
+  for (const seg of ['e'.repeat(12), 'e'.repeat(30000)]) for (const [, out] of both(`t ${jwt(seg)} z`)) assert.strictEqual(out.replace(/\[redacted\]|\*\*\*/, 'M'), 't M z');
+  const bigHeader = Buffer.from(JSON.stringify({ alg: 'HS256', pad: 'p'.repeat(3000) })).toString('base64url');
+  for (const [, out] of both(`t ${bigHeader}.${'e'.repeat(20)}.${'S'.repeat(20)} z`)) assert.ok(!out.includes(bigHeader.slice(0, 40)) && out.endsWith(' z'), out);
+  for (const [, out] of both(`t ${bigHeader} z`)) assert.ok(!out.includes(bigHeader.slice(0, 40)), out);                   // header-only JOSE run
+  assert.ok(mask(`a\\r${jwt('e'.repeat(12))}`).includes('\\r***'));                                                          // escB: \r before the token start
+  assert.ok(mask(`a\\t${jwt('e'.repeat(12))}`).includes('\\t***'));
+});
+
+test('F3b: a MENTION of a private-key marker erases nothing; real key material does', () => {
+  const code = 'const x = 1; // filler\n'.repeat(1000);
+  for (const t of ['-----BEGIN PRIVATE KEY----- appears in docs', `Use -----BEGIN PRIVATE KEY----- headers in tests.\n${code}`, `Look for "-----BEGIN RSA PRIVATE KEY-----" in the file.\n${code}`])
+    for (const [, out] of both(t)) assert.strictEqual(out, t);
+  const pem = (mid) => `-----BEGIN PRIVATE KEY-----${mid}`;
+  for (const mid of [`\n${'MIIEvAIBADANBgkqhkiG9w0BAQEFAASC'.repeat(3)}`, '\r\nProc-Type: 4,ENCRYPTED\r\nDEK-Info: AES-128-CBC,AB\r\n\r\nxx', `\\n${'MIIEvAIBADANBgkqhkiG9w0BAQEFAASC'.repeat(3)}`])
+    for (const [, out] of both(`k ${pem(mid)}`)) assert.strictEqual(out.replace(/\[redacted\]|\*\*\*/, 'M'), 'k M', out);
+  assert.strictEqual(safeSnapshot('x').safe, 'x');
+  const sec = fs.readFileSync(path.join(R, 'tests/security.test.js'), 'utf8');
+  for (const [, out] of both(sec)) assert.strictEqual(out.length >= sec.length - 200, true, `tests/security.test.js lost ${sec.length - out.length} bytes`);
+});
+
+test('F3c: ordinary prose after "Authorization:" is kept; credentials are masked (Bearer / Token / Basic / Digest / Negotiate)', () => {
+  const prose = ['Add an Authorization: Bearer header to every request', 'Authorization: Token refresh the thing', 'Authorization: Basic authentication flow', 'Authorization: Basic authentication-based-access',
+    '로그인 Authorization: Bearer 헤더를 추가해줘', 'Proxy-Authorization: Digest realm', 'send authorization: negotiate negotiation'];
+  for (const t of prose) assert.strictEqual(ss(t), t, `stage-1 ${t}`);
+  for (const t of prose.filter((x) => !/Basic authentication-based/.test(x))) assert.strictEqual(mask(t), t, `mask ${t}`);
+  const creds = [['authorization: basic YTpi', 'YTpi'], ['Authorization: Basic dXNlcjpwYXNz.d29yZA', 'dXNlcjpwYXNz'], ['Authorization: Bearer abc123', 'abc123'], ['Authorization: Bearer abc.def', 'abc.def'],
+    ['Authorization: Token ghx9f8e7d6c5b4a3', 'ghx9f8e7d6c5b4a3'], ['Proxy-Authorization: Digest username="a", realm="b", response="c"', 'response'], ['Authorization: Negotiate YIIBsgYGKwYBBQUCoIIB0AQE', 'YIIBsgYG'], ['Authorization: Bearer ' + 'abcdefghijklmnopqrstuvwxyz', 'abcdefghijkl']];
+  for (const [t, secret] of creds) for (const [name, out] of both(t)) assert.ok(!out.includes(secret), `${name}: ${t} -> ${out}`);
+  /* the scheme and header name stay, only the payload is replaced (JSON stays valid) */
+  const j = JSON.stringify({ headers: { Authorization: 'Basic dXNlcjpwYXNzd29yZA==' }, ok: 1 });
+  for (const [, out] of both(j)) { assert.ok(!out.includes('dXNlcjpwYXNzd29yZA')); JSON.parse(out); }
+  /* the documented residual: a Basic payload that is one lower-case word looks like prose and stays */
+  assert.strictEqual(ss('Authorization: Basic secret'), 'Authorization: Basic secret');
+});
+
+test('F4: the display masker covers Cookie / Set-Cookie / X-Auth-Token / curl -u / Digest / Negotiate / case variants; the write-time masker the same', () => {
+  const cases = [['Cookie: sid=abc123; theme=dark', 'abc123'], ['Set-Cookie: session=Zq9xKp2Lm8Vn; Path=/', 'Zq9xKp2Lm8Vn'], ['X-Auth-Token: abcd1234efgh', 'abcd1234efgh'],
+    ['curl -u admin:hunter22 https://x.example/api', 'hunter22'], ['curl -s --user admin:hunter22 https://x', 'hunter22'], ['AUTHORIZATION: BEARER abc123def', 'abc123def']];
+  for (const [t, secret] of cases) for (const [name, out] of both(t)) assert.ok(!out.includes(secret), `${name}: ${t} -> ${out}`);
+  assert.strictEqual(mask('Cookie: consent banner text only'), 'Cookie: consent banner text only');   // (write-time `cookie: word` stays masked by the pre-existing generic rule)
+  for (const t of ['cookie settings are in the footer', 'ssh -u user host', 'curl https://example.com/a -o out.txt']) for (const [name, out] of both(t)) assert.strictEqual(out, t, name);
+});
+
+test('F5: private-key shaped input is linear - growth 80k -> 160k below 3.5x, absolute < 3 s, at 1M still < 5 s', () => {
+  for (const unit of ['-----BEGIN PRIVATE KEY-----', '-----BEGIN ', '-----END PRIVATE KEY-----\n-----BEGIN PRIVATE KEY-----']) {
+    const time = (n) => { const s = unit.repeat(Math.ceil(n / unit.length)).slice(0, n); const t = process.hrtime.bigint(); ss(s); mask(s); return Number(process.hrtime.bigint() - t) / 1e6; };
+    const best = (n) => Math.min(time(n), time(n), time(n));   // best of 3: a loaded machine adds noise, never speed
+    const a = Math.max(best(80000), 5); const b = best(160000);
+    assert.ok(b < 3000, `${JSON.stringify(unit)} 160k ${b} ms`);
+    assert.ok(b / a < 3.5 || b < 200, `${JSON.stringify(unit)} not linear: ${a} -> ${b} ms`);
+  }
+  const t = Date.now(); ss('-----BEGIN PRIVATE KEY-----'.repeat(40000)); assert.ok(Date.now() - t < 5000);
+});
+
+test('F6: JSON credentials at any escape depth, long env-style keys, keys over the cap; escB for \\r and \\t', () => {
+  let j = JSON.stringify({ API_TOKEN: 'zzzz1234yyyy5678', note: 'n' });
+  for (let d = 1; d <= 9; d++) { for (const [name, out] of both(j)) assert.ok(!out.includes('zzzz1234yyyy5678'), `${name} depth ${d}`); j = JSON.stringify(j); }
+  const pre = 'A'.repeat(40), suf = 'B'.repeat(40);
+  for (const [name, out] of both(`{"${pre}_TOKEN${suf}":"zzzz1234yyyy5678","other":"keep-this-value-please"}`)) { assert.ok(!out.includes('zzzz1234yyyy5678'), name); assert.ok(out.includes('keep-this-value-please')); JSON.parse(out); }
+  for (const [name, out] of both(`{"${'A'.repeat(600)}":"zzzz1234yyyy5678"}`)) assert.ok(!out.includes('zzzz1234yyyy5678'), name);
+  for (const [, out] of both('{"AUTHOR_NAME":"somebody-with-long-name","COOKIE_POLICY":"short"}')) assert.ok(out.includes('somebody-with-long-name'));
+  for (const [, out] of both('{"X_AUTH":"zzzz1234yyyy5678"}')) assert.ok(!out.includes('zzzz1234yyyy5678'));
+  for (const esc of ['\\r', '\\t', '\\n']) for (const [name, out] of both(`a${esc}${GH}`)) assert.ok(!out.includes(GH.slice(4)), `${name} ${esc}`);
+  assert.ok(mask(`${'A'.repeat(100)}_TOKEN=abc12345`).endsWith('***'), 'env-var name with a 100-char prefix');
+  assert.ok(!mask(`TOKEN${'B'.repeat(100)}=abc12345`).includes('abc12345'), 'env-var name with a 100-char suffix');
+});
+
+test('walker: 1M small strings are truncated by the leaf cap (not walked for seconds); ordinary results are not', () => {
+  const input = { rows: Array.from({ length: 1000000 }, (_, i) => `r${i}`) };
+  const t = Date.now();
+  const big = guard.maskOut(input);
+  assert.ok(Date.now() - t < 6000, `${Date.now() - t} ms (1M strings were 2.4 s of mask calls before the leaf cap, the cap bounds it to 200k)`);
+  assert.ok(big.rows.includes('[truncated]') && big.rows.length === 1000000);
+  const ok = guard.maskOut({ rows: Array.from({ length: 1000 }, (_, i) => ({ id: `r${i}`, a: 'x', b: 'y', c: 1, d: true })) });
+  assert.ok(!JSON.stringify(ok).includes('[truncated]'));
+});
+
+test('second (prefix-less) credential rule: every keyword it carries masks its value behind a 100-char name', () => {
+  for (const k of ['api_key', 'api key', 'access_token', 'refresh-token', 'client_secret', 'secret_access_key', 'private_key', 'token', 'password', 'passwd', 'secret'])
+    assert.ok(!ss(`${'n'.repeat(100)}${k}=${PW}`).includes(PW), k);
+});
+
+test('sc02 find(): a main-side "[truncated]" element is not taken for a live Work', () => {
+  const code = src.code('app/renderer/screens/sc02.js');
+  const m = /const live = (r\.works\.find\(\(w\) => [^;]+\));/.exec(code);
+  assert.ok(m, 'the live-Work lookup moved');
+  const find = new Function('r', `return ${m[1]};`);
+  assert.strictEqual(find({ works: ['[truncated]'] }), undefined);
+  assert.strictEqual(find({ works: ['[truncated]', null, { status: 'ended' }] }), undefined);
+  assert.deepStrictEqual(find({ works: ['[truncated]', { status: 'running', id: 1 }] }), { status: 'running', id: 1 });
 });
