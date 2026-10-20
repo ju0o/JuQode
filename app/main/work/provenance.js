@@ -128,8 +128,6 @@ function limitClaim(text, limit = CLAIM_LIMIT) {
 
 /* ── (3) truth invariants ───────────────────────────────────────────────────────────────── */
 
-const NOT_SUCCESS = new Set(['ended_unknown', 'interrupted', 'cancelled_partial', 'cancelled_nochange', 'failed', 'partial']);
-
 /**
  * @param {object} s snapshot (every part optional):
  *  work      {status, outcome, finishObserved:boolean}
@@ -146,8 +144,8 @@ function checkTruthInvariants(s = {}) {
   const w = s.work ?? {}; const d = s.display ?? {};
 
   if (w.outcome === 'complete' && w.finishObserved !== true) add('complete_without_finish', 'outcome complete but no observed finish');
-  if (NOT_SUCCESS.has(w.outcome) && d.tone === 'success') add('non_success_shown_success', `${w.outcome} rendered as success`);
-  if (w.status === 'interrupted' && d.tone === 'success') add('non_success_shown_success', 'interrupted rendered as success');
+  /* success needs the one outcome that is success: unknown/interrupted/cancelled/failed/partial/still-open are not */
+  if (d.tone === 'success' && w.outcome !== 'complete') add('non_success_shown_success', `${w.outcome ?? w.status} rendered as success`);
 
   /* changes 0 vs unknown */
   if (s.changes) {
