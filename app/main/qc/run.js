@@ -76,7 +76,7 @@ const TOKENISH = [
    * So: the NAME must look like an environment variable (upper-case, digits, underscores — it
    * is one), and the value must be on the same line. `password:` in an English sentence is not
    * an environment variable and is left alone. */
-  /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*\S+/g,
+  /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*(?:"[^"\r\n]{0,4096}"|'[^'\r\n]{0,4096}'|\S+)/g,   // a quoted value is masked whole, spaces included
 ].map((r) => re(escB(r))), M.ENV_LONG.map((r) => re(escB(r))));
 
 /** Replace token-shaped runs. See TOKENISH: this is a reduction, never a guarantee. */

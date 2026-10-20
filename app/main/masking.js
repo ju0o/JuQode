@@ -30,7 +30,7 @@ function breakAt(text, i) {
 
 /** End of the logical line starting at `from` (at most `lim`): a real newline / CR, or a JSON-escaped break at ANY depth. A backslash run is
  * crossed ONCE (never rescanned per position - a run of n backslashes must cost O(n), not O(n^2)); `stopAt(c)` ends the scan at a character. */
-function scanLine(text, from, lim, stopAt) {
+function scanLine(text, from, lim, stopAt, tabBreaks = true) {
   let end = from;
   while (end < lim) {
     const c = text[end];
@@ -39,7 +39,7 @@ function scanLine(text, from, lim, stopAt) {
       let j = end;
       while (text[j] === '\\') j++;
       const f = text[j];
-      if (f === 'n' || f === 'r' || f === 't') break;
+      if (f === 'n' || f === 'r' || (tabBreaks && f === 't')) break;
       end = j;
       continue;
     }
@@ -66,10 +66,18 @@ const ASSIGNMENT_LONG_NAME = new RegExp(`(?:${KEYWORDS})\\b${VALUE}`, 'gi');
  * looks like a credential (12+ / 16+ characters mixing letters and digits, no '.' or '-' separated words, not followed by `;` or a type bracket).
  * A quoted value is masked WITH both quotes, so no stray quote is left behind. */
 const ENV_KW = 'TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|COOKIE';
+/* a name whose LAST word says it is configuration, not a secret (COOKIE_SECURE, COOKIE_DOMAIN, TOKEN_TTL, SESSION_COOKIE_NAME, SECRET_..._CSV) */
+const ENV_BENIGN = 'SECURE|DOMAIN|TTL|NAME|PATH|FILE|URL|ID|MODE|ENABLED|TIMEOUT|AGE|CSV|DIR|HOST|PORT|EXPIRES|VERSION|LENGTH|SIZE|COUNT|LIMIT|TYPE|ALGORITHM|HEADER|PREFIX|SUFFIX';
+const ENV_NAME = `\\b[A-Z0-9_]{0,255}(?:${ENV_KW})(?![A-Z0-9_]*_(?:${ENV_BENIGN})(?![A-Z0-9_]))[A-Z0-9_]{0,255}`;
+const SP = '(?:[ \\t]|\\\\+t)';                      // a space, a tab, or a JSON-escaped tab
+const Q = '(?:\\\\*["\'])';                          // a quote, also backslash-escaped at any depth
+/* `NAME=value`: the value is a whole quoted string (spaces allowed) or a token that ends at whitespace, a quote, ; ) , or a backslash - never a
+ * bare \S+ that swallows the code after it. Booleans, numbers, paths and dotted domains are configuration, not secrets. */
+const ENV_VALUE = `(?!(?:true|false|null|undefined|\\d+)(?![A-Za-z0-9_])|\\.{0,2}/|~|\\.[A-Za-z])(?:"[^"\\r\\n]{0,4096}"|'[^'\\r\\n]{0,4096}'|\\\\{1,8}"(?:(?!\\\\{1,8}")[^\\r\\n]){0,4096}\\\\{1,8}"|[^\\s"'\`;),\\\\]+)`;
 const ENV_LONG = [
-  new RegExp(`\\b[A-Z0-9_]{0,255}(?:${ENV_KW})[A-Z0-9_]{0,255}=\\S+`, 'g'),
-  new RegExp(`\\b[A-Z0-9_]{0,255}(?:${ENV_KW})[A-Z0-9_]{0,255}[ \\t]+=[ \\t]+["']?(?=[A-Za-z+/=_]*\\d)(?=[0-9+/=_]*[A-Za-z])[A-Za-z0-9+/=_]{16,}["']?`, 'g'),
-  new RegExp(`\\b[A-Z0-9_]{0,255}(?:${ENV_KW})[A-Z0-9_]{0,255}[ \\t]*:[ \\t]*["']?(?=[^\\s"';<>()\\[\\]]*\\d)(?=[^\\s"';<>()\\[\\]]*[A-Za-z])[^\\s"';<>()\\[\\],]{12,}(?=[\\s"',]|$)`, 'g'),
+  new RegExp(`${ENV_NAME}=${ENV_VALUE}`, 'g'),
+  new RegExp(`${ENV_NAME}${SP}+=${SP}+${Q}?(?=[A-Za-z+/=_]*\\d)(?=[0-9+/=_]*[A-Za-z])[A-Za-z0-9+/=_]{16,}${Q}?`, 'g'),
+  new RegExp(`${ENV_NAME}${SP}*:${SP}*${Q}?(?=[^\\s"';<>()\\[\\]\\\\,]*\\d)(?=[^\\s"';<>()\\[\\]\\\\,]*[A-Za-z])[^\\s"';<>()\\[\\]\\\\,]{12,}(?=[\\s"',\\\\]|$)${Q}?`, 'g'),
 ];
 
 /* Header-ish shapes the generic rules miss. Bounded quantifiers only. */
@@ -81,7 +89,7 @@ const EXTRA_RE = [
 /* The header name is a header only when the character before it does not continue an identifier (`SSL_OP_COOKIE_EXCHANGE`,
  * `HTTP2_HEADER_COOKIE`); an escaped break (`\\n`, `\\r`, `\\t`) or a `%XX` before it counts as a boundary. The separator is `:` (HTTP header),
  * `=` (`Cookie=sid=x`) or `,` (`setHeader('Cookie', 'sid=x')`, `.append("Cookie", "...")`), the name may be quoted, even escaped. */
-const COOKIE_NAME = /(?:(?<![A-Za-z0-9_])|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))((?:set-)?cookie)(\\*["']?)[ \t]*[:=,][ \t]*/gi;
+const COOKIE_NAME = /(?:(?<![A-Za-z0-9_])|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))((?:set-)?cookie)(?:(\\*["'])[ \t]*[:=,]|[ \t]*:|=)[ \t]*/gi;
 const COMPARE_OP = /^(?:=>|==|===|<=|>=|!=|!==)$/;
 /** end of the operator when the `=` at `eq` is part of a SPACED comparison / arrow (` => `, ` == `, ` <= `…), else 0 */
 function spacedOperatorEnd(text, eq) {
@@ -90,6 +98,13 @@ function spacedOperatorEnd(text, eq) {
   let e = eq + 1;
   while (e < text.length && e - eq < 3 && '=>'.includes(text[e])) e++;
   return COMPARE_OP.test(text.slice(s, e)) && text[s - 1] === ' ' && text[e] === ' ' ? e : 0;
+}
+/** The `=` at `eq` is NOT a cookie-pair separator when it is a spaced comparison / arrow, or a spaced assignment of a plain default literal
+ * (`cookie: str = ""`, `maxAge = 7`, `= undefined`, `= {}`): code and prose, not a credential. */
+const DEFAULT_LITERAL = /^(?:""|''|``|\{\}|\[\]|(?:undefined|null|true|false)(?![A-Za-z0-9_])|\d{1,3}(?![A-Za-z0-9_]))/;
+function benignEq(text, eq) {
+  if (spacedOperatorEnd(text, eq)) return true;
+  return text[eq - 1] === ' ' && text[eq + 1] === ' ' && DEFAULT_LITERAL.test(text.slice(eq + 2, eq + 14));
 }
 /** Once the header NAME is recognised the WHOLE value is masked - no cookie pair has to be parsed, so `sid = x`, `a=>b; sid=x`,
  * `=x; sid=x`, `sid==x` and a `\t` inside the value all go. What keeps ordinary code and prose safe is only this: the value must contain an
@@ -106,6 +121,27 @@ function maskCookieHeaders(text, rep) {
   let eqFrom = -1;
   let eqAt = -1;
   const nextEq = (i) => { if (eqFrom >= 0 && i >= eqFrom && (eqAt < 0 || eqAt >= i)) return eqAt; eqFrom = i; eqAt = text.indexOf('=', i); return eqAt; };
+  /* first `=` at or after i that is a pair separator (not a comparison / default literal): computed once per scan, not per match */
+  let ceFrom = -1;
+  let ceAt = -1;
+  const nextCredEq = (i) => {
+    if (ceFrom >= 0 && i >= ceFrom && (ceAt < 0 || ceAt >= i)) return ceAt;
+    ceFrom = i;
+    let e = text.indexOf('=', i);
+    while (e >= 0 && benignEq(text, e)) e = text.indexOf('=', e + 1);
+    ceAt = e;
+    return e;
+  };
+  let naFrom = -1;
+  let naAt = -1;
+  const NON_ASCII = /[^\x00-\x7f]/g;
+  const nextNonAscii = (i) => {
+    if (naFrom >= 0 && i >= naFrom && (naAt < 0 || naAt >= i)) return naAt;
+    naFrom = i; NON_ASCII.lastIndex = i;
+    const r = NON_ASCII.exec(text);
+    naAt = r ? r.index : -1;
+    return naAt;
+  };
   const valueEnd = (start, term, escTerm) => {
     const key = `${term || ''}${escTerm ? 'e' : ''}`;
     const c = endCache.get(key);
@@ -151,14 +187,10 @@ function maskCookieHeaders(text, rep) {
       const e0 = nextEq(vs);
       if (text[j] === term && text[j + 1] === '=' && (e0 < 0 || e0 >= end)) { term = null; vs = q0; end = valueEnd(vs, null, false); }
     }
-    /* is there an `=` that is not a spaced comparison / arrow? look at no more than 64 of them */
-    let eq = nextEq(vs);
-    let credential = false;
-    for (let t = 0; t < 64 && eq >= 0 && eq < end; t++) {
-      const opEnd = spacedOperatorEnd(text, eq);
-      if (!opEnd) { credential = true; break; }
-      eq = text.indexOf('=', opEnd);
-    }
+    /* the value is credential-like when it holds a pair-separator `=` and no prose (non-ASCII words) comes before it */
+    const eq = nextCredEq(vs);
+    const na = nextNonAscii(vs);
+    const credential = eq >= 0 && eq < end && !(na >= 0 && na < eq);
     if (credential && end > vs) { out += text.slice(pos, vs) + rep; pos = end; re.lastIndex = Math.max(end, re.lastIndex); }
     else re.lastIndex = Math.max(vs, re.lastIndex);
   }
@@ -167,7 +199,8 @@ function maskCookieHeaders(text, rep) {
 /* `curl … -u user:secret`: the option is found first (linear), then `curl` must stand on the same line within the 512 characters before it. */
 function maskCurlUser(text, rep) {
   if (!text.includes('curl')) return text;
-  const re = /[ \t](?:-u|--user)(?:[ =]|[ \t]+)["']?[^\s:'"]+:[^\s'"]+/g;
+  /* `-u user:pass` / `--user user:pass`, and the cookie options `-b "sid=…"` / `--cookie "sid=…"` (a value holding an `=`) */
+  const re = /[ \t](?:-u|--user)(?:[ =]|[ \t]+)["']?[^\s:'"]+:[^\s'"]+|[ \t](?:-b|--cookie)(?:[ =]|[ \t]+)["']?[^\s'"=]*=[^\s'"]*["']?/g;
   let out = '';
   let pos = 0;
   let m;
@@ -341,7 +374,7 @@ function maskAuthHeaders(text, rep) {
   const nextEq = (i) => { if (eqFrom >= 0 && i >= eqFrom && (eqAt < 0 || eqAt >= i)) return eqAt; eqFrom = i; eqAt = text.indexOf('=', i); return eqAt; };
   let leFrom = -1;
   let leAt = -1;
-  const lineEndFrom = (i) => { if (leFrom >= 0 && i >= leFrom && i <= leAt) return leAt; leFrom = i; leAt = scanLine(text, i, n); return leAt; };
+  const lineEndFrom = (i) => { if (leFrom >= 0 && i >= leFrom && i <= leAt) return leAt; leFrom = i; leAt = scanLine(text, i, n, null, false); return leAt; };
   let out = '';
   let pos = 0;
   let m;
