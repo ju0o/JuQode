@@ -104,8 +104,8 @@ function passVerdict(criteria, evidence) {
     const latest = mine.at(-1);              // the LATEST row first - a stale one is not a fallback
     let out = { ...base, status: 'unverified', reason: latest ? null : 'no_review' };
     if (latest) {
-      const current = present(spec) && latest.task_spec_digest === spec && present(latest.criterion_digest) &&
-        latest.criterion_digest === sha(c.text);
+      const current = present(spec) && latest.task_spec_digest === spec &&
+        latest.criterion_digest === sha(c.text); // a missing digest never equals a sha
       if (!current) out = { ...out, reason: 'stale_or_missing_digest' };
       else if (latest.verdict === 'fail') out = { ...out, status: 'failed', provenance: P.HUMAN_CONFIRMED };
       else if (latest.verdict === 'pass') out = { ...out, status: 'human_pass', provenance: P.HUMAN_CONFIRMED, work_id: latest.work_id, work_outcome: latest.work_outcome };
@@ -115,12 +115,11 @@ function passVerdict(criteria, evidence) {
   });
 
   /* whole-Task bar (repo.currentTaskVerdict): one Run, outcome complete */
-  const anyFail = rows.some((r) => r.status === 'failed');
   const humanRows = rows.filter((r) => r.status === 'human_pass');
   const runs = new Set(humanRows.map((r) => r.work_id));
   const runOk = humanRows.length === rows.length && rows.length > 0 && runs.size === 1 && present(humanRows[0].work_id) &&
     humanRows.every((r) => r.work_outcome === 'complete');
-  const pass = !anyFail && runOk;
+  const pass = runOk; // a current fail is never a human_pass row, so runOk already excludes it
   const runId = pass ? humanRows[0].work_id : null;
 
   /* supporting test evidence: the SAME Run only, repo order (observed_at, rowid) */
