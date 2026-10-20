@@ -68,16 +68,20 @@ const ASSIGNMENT_LONG_NAME = new RegExp(`(?:${KEYWORDS})\\b${VALUE}`, 'gi');
 const ENV_KW = 'TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|COOKIE';
 /* a name whose LAST word says it is configuration, not a secret (COOKIE_SECURE, COOKIE_DOMAIN, TOKEN_TTL, SESSION_COOKIE_NAME, SECRET_..._CSV) */
 const ENV_BENIGN = 'SECURE|DOMAIN|TTL|NAME|PATH|FILE|URL|ID|MODE|ENABLED|TIMEOUT|AGE|CSV|DIR|HOST|PORT|EXPIRES|VERSION|LENGTH|SIZE|COUNT|LIMIT|TYPE|ALGORITHM|HEADER|PREFIX|SUFFIX';
-const ENV_NAME = `\\b[A-Z0-9_]{0,255}(?:${ENV_KW})(?![A-Z0-9_]*_(?:${ENV_BENIGN})(?![A-Z0-9_]))[A-Z0-9_]{0,255}`;
+const ENV_NAME_ANY = `\\b[A-Z0-9_]{0,255}(?:${ENV_KW})[A-Z0-9_]{0,255}`;
+const ENV_NAME = `\\b[A-Z0-9_]{0,255}(?:${ENV_KW})(?![A-Z0-9_]*_(?:${ENV_BENIGN})(?![A-Z0-9_]))[A-Z0-9_]{0,255}`;   // (a configuration name: only a benign VALUE is exempt, see ENV_LONG)
 const SP = '(?:[ \\t]|\\\\+t)';                      // a space, a tab, or a JSON-escaped tab
 const Q = '(?:\\\\*["\'])';                          // a quote, also backslash-escaped at any depth
 /* `NAME=value`: the value is a whole quoted string (spaces allowed) or a token that ends at whitespace, a quote, ; ) , or a backslash - never a
  * bare \S+ that swallows the code after it. Booleans, numbers, paths and dotted domains are configuration, not secrets. */
-const ENV_VALUE = `(?!(?:true|false|null|undefined|\\d+)(?![A-Za-z0-9_])|\\.{0,2}/|~|\\.[A-Za-z])(?:"[^"\\r\\n]{0,4096}"|'[^'\\r\\n]{0,4096}'|\\\\{1,8}"(?:(?!\\\\{1,8}")[^\\r\\n]){0,4096}\\\\{1,8}"|[^\\s"'\`;),\\\\]+)`;
+const ENV_VALUE = `(?!(?:true|false|null|undefined|\\d+)(?![A-Za-z0-9_])|\\.{0,2}/|~|\\.[A-Za-z])(?:"[^"\\r\\n]{0,4096}"|'[^'\\r\\n]{0,4096}'|(\\\\{1,255})"(?:(?!\\1")[^\\r\\n]){0,4096}\\1"|[^\\s"'\`;),\\\\]+)`;
+/* a credential-LOOKING value (16+ plain characters mixing letters and digits, optionally quoted): masked whatever the name says */
+const CRED_LOOKING = `${Q}?(?=[^\\s"';,)\\\\]*\\d)(?=[^\\s"';,)\\\\]*[A-Za-z])(?=([A-Za-z0-9+/=_-]{16,}))\\1(?![.][A-Za-z])${Q}?`;   // (atomic: a value that continues as `.csv` / `.example.com` is a file or a host, not a token)
 const ENV_LONG = [
-  new RegExp(`${ENV_NAME}=${ENV_VALUE}`, 'g'),
-  new RegExp(`${ENV_NAME}${SP}+=${SP}+${Q}?(?=[A-Za-z+/=_]*\\d)(?=[0-9+/=_]*[A-Za-z])[A-Za-z0-9+/=_]{16,}${Q}?`, 'g'),
-  new RegExp(`${ENV_NAME}${SP}*:${SP}*${Q}?(?=[^\\s"';<>()\\[\\]\\\\,]*\\d)(?=[^\\s"';<>()\\[\\]\\\\,]*[A-Za-z])[^\\s"';<>()\\[\\]\\\\,]{12,}(?=[\\s"',\\\\]|$)${Q}?`, 'g'),
+  new RegExp(`${ENV_NAME}=${ENV_VALUE}`, 'g'),                                  // a: dotenv, configuration names exempt for a benign value
+  new RegExp(`${ENV_NAME_ANY}=${CRED_LOOKING}`, 'g'),                            // a2: ... but never for a credential-looking one (TOKEN_ID=Zq7Xk9..., SESSION_TYPE=...)
+  new RegExp(`${ENV_NAME_ANY}${SP}+=${SP}+${Q}?(?=[A-Za-z+/=_]*\\d)(?=[0-9+/=_]*[A-Za-z])(?=([A-Za-z0-9+/=_]{16,}))\\1(?![.][A-Za-z])${Q}?`, 'g'),
+  new RegExp(`${ENV_NAME_ANY}${SP}*:${SP}*${Q}?(?=[^\\s"';<>()\\[\\]\\\\,]*\\d)(?=[^\\s"';<>()\\[\\]\\\\,]*[A-Za-z])[^\\s"';<>()\\[\\]\\\\,]{12,}(?=[\\s"',\\\\]|$)${Q}?`, 'g'),
 ];
 
 /* Header-ish shapes the generic rules miss. Bounded quantifiers only. */
@@ -89,7 +93,7 @@ const EXTRA_RE = [
 /* The header name is a header only when the character before it does not continue an identifier (`SSL_OP_COOKIE_EXCHANGE`,
  * `HTTP2_HEADER_COOKIE`); an escaped break (`\\n`, `\\r`, `\\t`) or a `%XX` before it counts as a boundary. The separator is `:` (HTTP header),
  * `=` (`Cookie=sid=x`) or `,` (`setHeader('Cookie', 'sid=x')`, `.append("Cookie", "...")`), the name may be quoted, even escaped. */
-const COOKIE_NAME = /(?:(?<![A-Za-z0-9_])|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))((?:set-)?cookie)(?:(\\*["'])[ \t]*[:=,]|[ \t]*:|=)[ \t]*/gi;
+const COOKIE_NAME = /(?:(?<![A-Za-z0-9_])|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))((?:set-)?cookie)(?:(\\*["'])[ \t]*[:=,]|[ \t]*:|=|[ \t]*(,))[ \t]*/gi;
 const COMPARE_OP = /^(?:=>|==|===|<=|>=|!=|!==)$/;
 /** end of the operator when the `=` at `eq` is part of a SPACED comparison / arrow (` => `, ` == `, ` <= `…), else 0 */
 function spacedOperatorEnd(text, eq) {
@@ -121,17 +125,21 @@ function maskCookieHeaders(text, rep) {
   let eqFrom = -1;
   let eqAt = -1;
   const nextEq = (i) => { if (eqFrom >= 0 && i >= eqFrom && (eqAt < 0 || eqAt >= i)) return eqAt; eqFrom = i; eqAt = text.indexOf('=', i); return eqAt; };
-  /* first `=` at or after i that is a pair separator (not a comparison / default literal): computed once per scan, not per match */
-  let ceFrom = -1;
-  let ceAt = -1;
-  const nextCredEq = (i) => {
-    if (ceFrom >= 0 && i >= ceFrom && (ceAt < 0 || ceAt >= i)) return ceAt;
-    ceFrom = i;
-    let e = text.indexOf('=', i);
-    while (e >= 0 && benignEq(text, e)) e = text.indexOf('=', e + 1);
-    ceAt = e;
-    return e;
+  /* first `=` at or after i that satisfies pred, computed once per scan (the answer for a later start inside the scanned range is the same) */
+  const memoNext = (pred) => {
+    let from = -1;
+    let at = -1;
+    return (i) => {
+      if (from >= 0 && i >= from && (at < 0 || at >= i)) return at;
+      from = i;
+      let e = text.indexOf('=', i);
+      while (e >= 0 && !pred(e)) e = text.indexOf('=', e + 1);
+      at = e;
+      return e;
+    };
   };
+  const nextCredEq = memoNext((e) => !benignEq(text, e));                                              // a pair separator
+  const nextPairEq = memoNext((e) => !benignEq(text, e) && e > 0 && !isSpace(text.charCodeAt(e - 1)) && !isSpace(text.charCodeAt(e + 1)));   // ... written `name=value`, no spaces
   let naFrom = -1;
   let naAt = -1;
   const NON_ASCII = /[^\x00-\x7f]/g;
@@ -187,10 +195,14 @@ function maskCookieHeaders(text, rep) {
       const e0 = nextEq(vs);
       if (text[j] === term && text[j + 1] === '=' && (e0 < 0 || e0 >= end)) { term = null; vs = q0; end = valueEnd(vs, null, false); }
     }
-    /* the value is credential-like when it holds a pair-separator `=` and no prose (non-ASCII words) comes before it */
+    /* credential-like: a pair-separator `=` with no prose (non-ASCII words) before it, OR a `name=value` pair written without spaces anywhere in the
+     * value (prose before it does not protect it: `Cookie: 한글 sid=x`). A spaced `=` after prose (`Cookie: 만료 = 7일`) stays prose. */
     const eq = nextCredEq(vs);
     const na = nextNonAscii(vs);
-    const credential = eq >= 0 && eq < end && !(na >= 0 && na < eq);
+    const pe = nextPairEq(vs);
+    let credential = (eq >= 0 && eq < end && !(na >= 0 && na < eq)) || (pe >= 0 && pe < end);
+    /* an UNQUOTED header name before a comma (`fn(Cookie, "sid=x")`, `Cookie, sid=x`) only counts when a pair (not `secure = false`) follows */
+    if (credential && m[3] === ',' && !/^["'\\]*[^\s"'=,;]+=[^\s=]/.test(text.slice(vs, vs + 600))) credential = false;
     if (credential && end > vs) { out += text.slice(pos, vs) + rep; pos = end; re.lastIndex = Math.max(end, re.lastIndex); }
     else re.lastIndex = Math.max(vs, re.lastIndex);
   }
@@ -200,7 +212,7 @@ function maskCookieHeaders(text, rep) {
 function maskCurlUser(text, rep) {
   if (!text.includes('curl')) return text;
   /* `-u user:pass` / `--user user:pass`, and the cookie options `-b "sid=…"` / `--cookie "sid=…"` (a value holding an `=`) */
-  const re = /[ \t](?:-u|--user)(?:[ =]|[ \t]+)["']?[^\s:'"]+:[^\s'"]+|[ \t](?:-b|--cookie)(?:[ =]|[ \t]+)["']?[^\s'"=]*=[^\s'"]*["']?/g;
+  const re = /[ \t](?:-u|--user)(?:[ =]|[ \t]+)["']?[^\s:'"]+:[^\s'"]+|[ \t](?:-b|--cookie)(?:[ =]|[ \t]+)(?:"(?=[^"\r\n]{0,4096}=)[^"\r\n]{0,4096}"|'(?=[^'\r\n]{0,4096}=)[^'\r\n]{0,4096}'|[^\s'"=]*=[^\s'"]*)/g;
   let out = '';
   let pos = 0;
   let m;

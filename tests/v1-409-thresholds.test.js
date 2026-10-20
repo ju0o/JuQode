@@ -82,10 +82,9 @@ const C9 = 'ZQ9XKP2LM8VN4RT6';
 const PROSE_AND_CODE = [
   'function parse(cookie, options = {}) {', 'const { cookie, ...rest } = opts;', 'cookie, secure = false,', 'this.cookie = cookie || ""; let a = b;', 'cookie: str = ""', 'cookie: Cookie | undefined = undefined;',
   'c.cookie, err = req.Cookie("sid")', 'document.cookie = "theme=dark; path=/";', 'Set the cookie, then reload (a=1).', 'let cookie = `${name}=${value}`;',
-  '로그인 후 cookie, maxAge = 7일로 설정해줘', 'Cookie: 만료 = 7일', 'fix cookie, session = null bug', 'Set-Cookie: 헤더 관련해서 a=b 처럼 처리',
-];
+  '로그인 후 cookie, maxAge = 7일로 설정해줘', 'Cookie: 만료 = 7일', 'fix cookie, session = null bug'];
 const SNAPSHOT_SAFE = ['function parse(cookie, options = {}) {', 'const { cookie, ...rest } = opts;', 'cookie, secure = false,', 'c.cookie, err = req.Cookie("sid")', 'Set the cookie, then reload (a=1).',
-  '로그인 후 cookie, maxAge = 7일로 설정해줘', 'Cookie: 만료 = 7일', 'fix cookie, session = null bug', 'Set-Cookie: 헤더 관련해서 a=b 처럼 처리', 'cookie: str = ""'];
+  '로그인 후 cookie, maxAge = 7일로 설정해줘', 'Cookie: 만료 = 7일', 'fix cookie, session = null bug', 'cookie: str = ""'];
 test('round 9 item 1: "cookie," is not a header; defaults, destructuring and Korean prose are untouched (display masker and write-time masker)', () => {
   for (const t of PROSE_AND_CODE) assert.strictEqual(mask(t), t, `mask: ${t}`);
   for (const t of SNAPSHOT_SAFE) assert.strictEqual(ss(t), t, `snapshot: ${t}`);
