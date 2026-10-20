@@ -73,8 +73,9 @@ function toSignal(event) {
         apiErrorStatus: event.api_error_status ?? null,
         /* MEASURED: a run whose tool was denied still reports `is_error: false`. A denial can
          * never be detected from this field, or from the process exit code. */
-        isError: event.is_error === true,
-        denials: (event.permission_denials ?? []).map((d) => ({
+        /* anything but an absent or literal `false` is not evidence of success: a malformed flag must not read as 완료 */
+        isError: event.is_error != null && event.is_error !== false,
+        denials: (Array.isArray(event.permission_denials) ? event.permission_denials : []).filter((d) => d && typeof d === 'object').map((d) => ({
           tool: d.tool_name, toolUseId: d.tool_use_id, input: d.tool_input,
         })),
         text: typeof event.result === 'string' ? event.result : null,
@@ -85,7 +86,7 @@ function toSignal(event) {
   return { kind: KIND.RAW, payload: { type: t ?? null, subtype: st ?? null } };
 }
 
-const blocks = (e) => (Array.isArray(e?.message?.content) ? e.message.content : []);
+const blocks = (e) => (Array.isArray(e?.message?.content) ? e.message.content.filter((b) => b && typeof b === 'object') : []);
 const text = (e) => blocks(e).filter((b) => b.type === 'text').map((b) => b.text).join('') || null;
 
 /** The state a Work is in, as far as observed signals justify. */
@@ -104,14 +105,16 @@ const initial = () => ({
 let denialSeq = 0;
 
 function reduce(state, signal, at = null) {
+  if (!signal || typeof signal.kind !== 'string') return state;   // not a signal: nothing observed, nothing changes
   const s = { ...state };
   s.lastObserved = { kind: signal.kind, at };
 
   /* An ended Work is ended. A late or stray signal must not reopen it — measured: a stray
    * grant moved a completed Work back to `running` while keeping `outcome: 'complete'`, which
    * both contradicts itself and re-occupies the D-117 slot. Only reconciliation may speak
-   * about a Work that has already ended, and it only ever confirms it. */
-  if (state.status === 'ended' && signal.kind !== KIND.RECONCILED) return s;
+   * about a Work that has already ended, and it only ever confirms it (so: it changes nothing —
+   * V1-104: it used to overwrite `complete` with `ended_unknown`). */
+  if (state.status === 'ended') return s;
 
   switch (signal.kind) {
     case KIND.SESSION_START:
@@ -130,8 +133,11 @@ function reduce(state, signal, at = null) {
        * Denials are a LIST, not one slot. q04b experiment D measured two in a single turn, and
        * keeping only the most recent one meant the earlier refusal lost its card entirely —
        * the user could not answer a question they were never shown. */
-      s.denials = [...s.denials, { ...signal.payload, resolved: false, id: `d${denialSeq++}` }];
-      s.status = 'permission_waiting';
+      /* The same refusal delivered twice (same tool_use_id, still unanswered) is one card (V1-104: idempotent). Once
+         * answered, the same id denied AGAIN by the resumed run is a new refusal (loop.test 'denial with exit 0'). */
+      if (!signal.payload?.toolUseId || !s.denials.some((d) => !d.resolved && d.toolUseId === signal.payload.toolUseId)) {
+        s.denials = [...s.denials, { ...signal.payload, resolved: false, id: `d${denialSeq++}` }];
+      }
       break;
 
     case KIND.PERMISSION_GRANTED: {
@@ -176,6 +182,8 @@ function reduce(state, signal, at = null) {
 
     case KIND.FINISH: {
       s.finish = signal.payload;
+      /* cancel is sticky: a hydrated entry has the status but not the flag (V1-104) */
+      const cancelled = s.cancelRequested || state.status === 'cancel_requested';
       const denials = signal.payload?.denials ?? [];
       if (denials.length) s.denials = mergeDenials(s.denials, denials);
 
@@ -184,12 +192,12 @@ function reduce(state, signal, at = null) {
        * would throw away the thing the card is for. */
       if (s.denials.some((d) => !d.resolved)) {
         /* …unless the user asked to stop. Then the refusal is moot and the Work ends. */
-        if (!s.cancelRequested) { s.status = 'permission_waiting'; break; }
+        if (!cancelled) { s.status = 'permission_waiting'; break; }
       }
 
       /* A cancelled Work does not become 완료 because the turn happened to report success.
        * `07` §8.1: a cancelled child exits 0 and `result.is_error` is just as blind to it. */
-      if (s.cancelRequested) {
+      if (cancelled) {
         s.status = 'ended';
         s.outcome = s.toolsUsed > 0 ? 'cancelled_partial' : 'cancelled_nochange';
         break;
@@ -218,6 +226,14 @@ function reduce(state, signal, at = null) {
 
     default:
       break;                       // observed, recorded, and it justifies no state change
+  }
+  /* V1-104 · the status is a function of what is open, not of the last signal's case: a stop request
+   * is only left by ending (a late question/grant/init must not reopen it), and an unanswered
+   * refusal outranks a question. A stray grant must not clear a pending question. */
+  if (s.status !== 'ended') {
+    if (s.cancelRequested || state.status === 'cancel_requested') s.status = 'cancel_requested';
+    else if (s.denials.some((d) => !d.resolved)) s.status = 'permission_waiting';
+    else if (s.inputRequest && s.status === 'running') s.status = 'input_waiting';
   }
   return s;
 }
