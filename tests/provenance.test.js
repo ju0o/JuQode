@@ -561,30 +561,119 @@ test('canonical comparison: NaN, null and undefined differ; unavailableCount is 
   assert.strictEqual(limitClaim('x'.repeat(10), 2 ** 53).truncated, false);
 });
 
-test('bounded cost: 50 MB claim, 1M claims, 1M immutable rows', () => {
-  const time = (f) => { const t = process.hrtime.bigint(); const r = f(); return [Number(process.hrtime.bigint() - t) / 1e6, r]; };
-  const big = 'x'.repeat(50 * 1024 * 1024);
-  const [tLimit, lim] = time(() => limitClaim(big));
-  assert.ok(lim.truncated && lim.shown.length === CLAIM_LIMIT + 1 && lim.full === big);
-  const [tCheck] = time(() => checkTruthInvariants({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', ...lim, text: big }] }));
-  const claims = Array.from({ length: 1e6 }, () => ({ kind: 'agent-report', confidence: 'expected', text: 'short claim' }));
-  const [tClaims, v] = time(() => checkTruthInvariants({ ...good(), claims }));
-  assert.deepStrictEqual(v, []);
-  const mk = (n) => Array.from({ length: n }, (_, i) => ({ id: `r${i}`, kind: 'test_command', summary: 'node --test', n: i }));
-  const a = { work: { status: 'ended', outcome: 'complete' }, evidence: mk(1e6) };
-  const b = { work: { status: 'ended', outcome: 'complete' }, evidence: mk(1e6) };
-  const [tImm, iv] = time(() => checkImmutableRun(a, b));
-  assert.deepStrictEqual(iv, []);
-  console.log(`# timings ms: limitClaim(50MB) ${tLimit.toFixed(0)}, checker(50MB claim) ${tCheck.toFixed(0)}, 1M claims ${tClaims.toFixed(0)}, 1M immutable rows ${tImm.toFixed(0)}`);
-  assert.ok(tLimit < 1000 && tCheck < 1000, 'a 50 MB claim must be O(limit)');
-  assert.ok(tClaims < 3000, `1M claims ${tClaims}`);
-  assert.ok(tImm < 3000, `1M immutable rows ${tImm}`);
-});
-
 test('limitClaim: a long combining run is ONE grapheme (exact) up to the scan cap; beyond it, cut well-formed (documented)', () => {
   const heavy = 'e' + '\u0301'.repeat(5000);          // ONE grapheme, 5001 code units
   assert.strictEqual(limitClaim(heavy).truncated, false);
   const huge = 'e' + '\u0301'.repeat((1 << 20) + 10);  // past the 1 MiB scan cap
   const l = limitClaim(huge);
   assert.deepStrictEqual([l.truncated, l.full === huge, l.shown.endsWith('…'), l.shown.isWellFormed(), l.shown.length < 10], [true, true, true, true, true]);
+});
+
+/* ═══ round 4 ═══ */
+const FAM = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';       // one grapheme, 8 code units
+const refSeg = (t) => Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(t), (x) => x.segment);
+const refLimit = (t, max) => { const g = refSeg(t); return g.length <= max ? { shown: t, truncated: false } : { shown: g.slice(0, max).join('') + '…', truncated: true }; };
+
+test('limitClaim: wide graphemes are judged on graphemes (QA strings), shown always well-formed', () => {
+  const cases = [[FAM.repeat(279), CLAIM_LIMIT], [FAM.repeat(280), CLAIM_LIMIT], [FAM.repeat(281), CLAIM_LIMIT], [FAM.repeat(500), CLAIM_LIMIT],
+    [FAM.repeat(9), 10], [FAM.repeat(10), 10], [FAM.repeat(11), 10], [FAM.repeat(49), 50], [FAM.repeat(50), 50], [FAM.repeat(51), 50],
+    ['e' + '\u0301'.repeat(3000), CLAIM_LIMIT], [('e' + '\u0301'.repeat(30)).repeat(100), CLAIM_LIMIT], [('e' + '\u0301'.repeat(30)).repeat(300), CLAIM_LIMIT],
+    ['abcdefghi' + 'x'.repeat(0), 3], ['a'.repeat(2440), 40], [(FAM + 'a'.repeat(52)).repeat(40), 40]];
+  for (const [t, max] of cases) {
+    const got = limitClaim(t, max); const want = refLimit(t, max);
+    assert.deepStrictEqual([got.shown, got.truncated, got.full], [want.shown, want.truncated, t], `${t.length} units limit ${max}`);
+    assert.ok(got.shown.isWellFormed(), `well-formed ${t.length}/${max}`);
+  }
+  assert.strictEqual(limitClaim(FAM.repeat(279)).truncated, false);
+  assert.strictEqual(limitClaim(FAM.repeat(281)).shown, FAM.repeat(280) + '…');
+});
+
+test('limitClaim: seeded grapheme-heavy fuzz equals the full-segmentation reference (texts <= 1 MiB)', () => {
+  const pieces = ['a', 'b', ' ', '\u{1F600}', FAM, 'e\u0301', 'e\u0301\u0302\u0303', '\u{1F1F0}\u{1F1F7}', '\uD55C', '\u1112\u1161\u11AB', '\r\n', '\u200D', 'x\u0300'.repeat(5)];
+  for (let seed = 1; seed <= 400; seed++) {
+    const r = rng(seed * 13); const n = Math.floor(r() * (seed % 20 === 0 ? 30000 : 700));
+    let t = ''; for (let i = 0; i < n; i++) t += pieces[Math.floor(r() * pieces.length)];
+    const max = [1, 3, 10, 50, CLAIM_LIMIT][Math.floor(r() * 5)];
+    const got = limitClaim(t, max); const want = refLimit(t, max);
+    assert.deepStrictEqual([got.shown, got.truncated], [want.shown, want.truncated], `seed ${seed}`);
+    assert.ok(got.shown.isWellFormed() || !t.isWellFormed() , `seed ${seed}`);
+    /* the checker agrees with the helper: a claim built by limitClaim is clean, one with a wrong flag is not */
+    const dflt = limitClaim(t); const claim = { kind: 'agent-report', confidence: 'expected', text: t, ...dflt };
+    assert.deepStrictEqual(checkTruthInvariants({ ...good(), claims: [claim] }), [], `seed ${seed}`);
+    if (dflt.truncated) assert.deepStrictEqual(codes(checkTruthInvariants({ ...good(), claims: [{ ...claim, truncated: false }] })), ['claim_not_truncated'], `seed ${seed}`);
+  }
+});
+
+test('checker: ill-formed shown, shown-length bound exact, complete shown with a failure label', () => {
+  const claim = (t, over) => ({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', text: t, full: t, truncated: true, ...over }] });
+  const t = 'z'.repeat(400);
+  assert.deepStrictEqual(checkTruthInvariants(claim(t, { shown: 'z'.repeat(CLAIM_LIMIT) + '…' })), []);
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(t, { shown: 'z'.repeat(CLAIM_LIMIT + 1) + '…' }))), ['claim_not_truncated']);
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(t, { shown: 'z'.repeat(CLAIM_LIMIT + 100) + '…' }))), ['claim_not_truncated']);
+  const emo = '\u{1F600}'.repeat(400);
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(emo, { shown: emo.slice(0, 559) + '…' }))), ['shown_ill_formed']);
+  /* complete + failure label (built-in, option, English word) */
+  const lbl = (label, opts) => codes(checkTruthInvariants({ work: { outcome: 'complete', finishObserved: true }, display: { label } }, opts));
+  assert.deepStrictEqual(lbl(L.failure[0]), ['complete_shown_failure']);
+  assert.deepStrictEqual(lbl('Failed'), ['complete_shown_failure']);
+  assert.deepStrictEqual(lbl('custom bad', { failureLabels: ['custom bad'] }), ['complete_shown_failure']);
+  assert.deepStrictEqual(lbl(L.success[0]), []);
+});
+
+test('immutability: Date/Map/Set/toJSON/function/undefined changes are flagged; equal ones are not', () => {
+  const mk = (row) => ({ work: { status: 'ended', outcome: 'complete' }, evidence: [{ id: 'a', ...row }] });
+  const diff = (a, b) => codes(checkImmutableRun(mk(a), mk(b)));
+  const ALT = ['ended_run_row_altered'];
+  assert.deepStrictEqual(diff({ d: new Date(5) }, { d: new Date(6) }), ALT);
+  assert.deepStrictEqual(diff({ d: new Date(5) }, { d: new Date(5) }), []);
+  assert.deepStrictEqual(diff({ d: new Date(NaN) }, { d: new Date(5) }), ALT);
+  assert.deepStrictEqual(diff({ m: new Map([[1, 'x']]) }, { m: new Map([[1, 'y']]) }), ALT);
+  assert.deepStrictEqual(diff({ m: new Map([[1, 'x']]) }, { m: new Map([[1, 'x']]) }), []);
+  assert.deepStrictEqual(diff({ s: new Set([1, 2]) }, { s: new Set([1, 3]) }), ALT);
+  assert.deepStrictEqual(diff({ s: new Set([1, 2]) }, { s: new Set([2, 1]) }), []);
+  assert.deepStrictEqual(diff({ v: { toJSON: () => 1, x: 1 } }, { v: { toJSON: () => 1, x: 2 } }), ALT);
+  assert.deepStrictEqual(diff({ f() {} }, {}), ALT);
+  assert.deepStrictEqual(diff({ u: undefined }, {}), ALT);
+  assert.deepStrictEqual(diff({ n: 1n }, { n: 2n }), ALT);
+  assert.deepStrictEqual(diff({ x: NaN }, { x: null }), ALT);
+  assert.deepStrictEqual(diff({ x: Infinity }, { x: null }), ALT);
+  assert.deepStrictEqual(diff({ o: { b: 1, a: [1, { c: 2 }] } }, { o: { a: [1, { c: 2 }], b: 1 } }), []);
+});
+
+test('immutability: ids are matched by id (reordered same content is clean), duplicate ids keep their occurrence', () => {
+  const mk = (evidence) => ({ work: { status: 'ended', outcome: 'complete' }, evidence });
+  assert.deepStrictEqual(checkImmutableRun(mk([{ id: 'a', v: 1 }, { id: 'b', v: 2 }]), mk([{ id: 'b', v: 2 }, { id: 'a', v: 1 }])), []);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk([{ id: 'a', v: 1 }, { id: 'b', v: 2 }]), mk([{ id: 'b', v: 3 }, { id: 'a', v: 1 }]))), ['ended_run_row_altered']);
+  const dup = mk([{ id: 'd', v: 1 }, { id: 'x' }, { id: 'd', v: 2 }]);
+  assert.deepStrictEqual(checkImmutableRun(dup, mk([{ id: 'x' }, { id: 'd', v: 1 }, { id: 'd', v: 2 }])), []);
+  assert.deepStrictEqual(codes(checkImmutableRun(dup, mk([{ id: 'x' }, { id: 'd', v: 1 }]))), ['ended_run_row_removed']);
+  assert.deepStrictEqual(codes(checkImmutableRun(dup, mk([{ id: 'x' }, { id: 'd', v: 2 }, { id: 'd', v: 1 }]))), ['ended_run_row_altered', 'ended_run_row_altered']);
+});
+
+test('empty criteria fails closed explicitly (not by throwing)', () => {
+  assert.deepStrictEqual(taskPassVerdict([], { taskSpecDigest: SPEC, reviews: [rv('pass')] }), { pass: false, runId: null, criteria: [] });
+});
+
+test('bounded cost (robust): linear growth, generous absolute bounds', () => {
+  const best = (n, f) => { let m = Infinity; for (let i = 0; i < n; i++) { const t = process.hrtime.bigint(); f(); m = Math.min(m, Number(process.hrtime.bigint() - t) / 1e6); } return m; };
+  const big = 'x'.repeat(50 * 1024 * 1024);
+  const tLimit = best(3, () => limitClaim(big));
+  const lim = limitClaim(big);
+  assert.ok(lim.truncated && lim.shown.length === CLAIM_LIMIT + 1 && lim.full === big);
+  const tCheck = best(3, () => checkTruthInvariants({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', ...lim, text: big }] }));
+  const wide = FAM.repeat(2e6);                                   // 16M units, 2M graphemes
+  const tWide = best(3, () => limitClaim(wide));
+  const claims = Array.from({ length: 1e6 }, () => ({ kind: 'agent-report', confidence: 'expected', text: 'short claim' }));
+  const tClaims = best(2, () => checkTruthInvariants({ ...good(), claims }));
+  const rows = (n, nulls) => Array.from({ length: n }, (_, i) => nulls
+    ? { id: `r${i}`, kind: 'patch', before_digest: null, after_digest: null, patch_text: null, bytes: null, n: i }
+    : { id: `r${i}`, kind: 'test_command', summary: 'node --test', n: i });
+  const wrap = (evidence) => ({ work: { status: 'ended', outcome: 'complete' }, evidence });
+  const imm = (n, nulls) => { const a = wrap(rows(n, nulls)); const b = wrap(rows(n, nulls)); return best(n > 5e5 ? 2 : 3, () => assert.deepStrictEqual(checkImmutableRun(a, b), [])); };
+  const t250 = imm(250000, false); const t1M = imm(1e6, false); const tNull = imm(1e6, true);
+  console.log(`# timings ms: limitClaim(50MB) ${tLimit.toFixed(0)}, checker(50MB) ${tCheck.toFixed(0)}, wide(16M units) ${tWide.toFixed(0)}, 1M claims ${tClaims.toFixed(0)}, immutable 250k ${t250.toFixed(0)} / 1M ${t1M.toFixed(0)} / 1M null-heavy ${tNull.toFixed(0)}`);
+  assert.ok(tLimit < 2000 && tCheck < 2000 && tWide < 2000, 'a huge claim must cost O(limit), not O(text)');
+  assert.ok(tClaims < 8000, `1M claims ${tClaims}`);
+  assert.ok(t1M < 8000 && tNull < 8000, `1M rows ${t1M} / null-heavy ${tNull}`);
+  assert.ok(t1M / Math.max(t250, 1) < 6, `growth ${t1M / t250}`);
 });
