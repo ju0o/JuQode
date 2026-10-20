@@ -94,14 +94,16 @@ test(`regression matrix: ${Object.keys(CLASSES).length} classes x ${Object.keys(
   assert.deepStrictEqual(leaking, []);
 });
 
+const INTENTS = ['Rename MAX_TOKENS = 4096 to MAX_CONTEXT', 'Set PASSWORD_MIN_LENGTH = 8 in the form', 'Support Basic authentication-based-access in the proxy', 'Add sk_render_pipeline_configuration_value to docs',
+  'Raise TOKEN_LIMIT to 4096', 'Read SECRET_FILE from the vault folder', "SyntaxError: Unexpected token: '}' at line 12", 'Send the Bearer token in the header', '개발 서버를 켜고 로그인 토큰 만료를 확인해 주세요'];
 test('data-loss guard: non-secret text stays byte-identical through the display masker, the write-time masker and the boundary', () => {
   const blob = Buffer.from(JSON.stringify({ rows: 'x'.repeat(30000), p: '+/' })).toString('base64');
   const keep = [
     'const HTTP2_HEADER_COOKIE: string;', 'const SSL_OP_COOKIE_EXCHANGE: number;', 'HTTP2_HEADER_SET_COOKIE: string;', "'set-cookie': ['foo=bar', 'a=b']",
     'const HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: string;', 'Add an Authorization: Bearer header to every request', 'Authorization: Token refresh the thing',
     'Authorization: Basic authentication flow', '로그인 Authorization: Bearer 헤더를 추가해줘',
-    'Rename MAX_TOKENS = 4096 to MAX_CONTEXT'.replace('MAX_TOKENS = 4096', 'the limit'), 'Support Basic authentication-based-access in the proxy'.replace('Basic authentication-based-access', 'basic access'),
-    'Add sk_render_pipeline_configuration_value to docs'.replace('sk_render_pipeline_configuration_value', 'a docs page'), 'Raise TOKEN_LIMIT to 4096'.replace('TOKEN_LIMIT', 'the limit'),
+    'cb: (err: Error | null, cookie: unknown) => void) & x', 'Cookie: please = accept', 'set cookie: yes => no', 'const SESSION_COOKIE = "sid";', 'process.env.X_COOKIE = value;',
+    'export const METRIC_GEN_AI_SERVER_TIME_PER_OUTPUT_TOKEN = "gen_ai.server.time";', 'const DEEP_HEADER_SET_COOKIE = {', '쿠키 COOKIE_MAX_AGE = 3600 으로 변경',
     '개발 서버를 켜고 로그인 만료를 확인해 주세요', '/home/u/proj/src/app.ts:14:2', '+const x = 4096;', 'https://example.com/a?b=c', 'ssh git@github.com:org/r.git',
     `data:application/json;base64,${blob}`, `{"version":3,"mappings":"${'AAAA,CAAC;'.repeat(2000)}"}`, `payload=${blob}`, 'ba1cb02f1e0b6a8c7d5e4f3a2b1c0d9e8f7a6b5c',
     'Use -----BEGIN PRIVATE KEY----- headers in tests.\n' + 'const x = 1;\n'.repeat(1000),
@@ -110,7 +112,13 @@ test('data-loss guard: non-secret text stays byte-identical through the display 
     assert.strictEqual(mask(t), t, `mask: ${t.slice(0, 60)}`);
     assert.strictEqual(JSON.stringify(guard.publicOut('juqode:x', { a: [t] })), JSON.stringify({ a: [t] }), `publicOut: ${t.slice(0, 60)}`);
   }
+  /* the REAL nine intent strings: a Work intent is stored through safeSnapshot and echoed back through the boundary - both must be byte-identical */
+  for (const t of INTENTS) {
+    assert.strictEqual(safeSnapshot(t).safe, t, `stored: ${t}`);
+    assert.strictEqual(guard.publicOut('juqode:work-get', { ok: true, work: { intent: t } }).work.intent, t, `echoed: ${t}`);
+    assert.strictEqual(guard.publicPush({ work: { intent: t } }).work.intent, t, `pushed: ${t}`);
+  }
   /* write-time masker: the stored form of a declaration must not be erased (the old rule stored `const [redacted];`) */
-  for (const t of ['const HTTP2_HEADER_COOKIE: string;', 'const SSL_OP_COOKIE_EXCHANGE: number;', 'HTTP2_HEADER_SET_COOKIE: string;', "'set-cookie': ['foo=bar']", 'Add an Authorization: Bearer header to every request', ...keep.slice(14, 16), `data:application/json;base64,${blob}`])
+  for (const t of ['const HTTP2_HEADER_COOKIE: string;', 'const SSL_OP_COOKIE_EXCHANGE: number;', 'HTTP2_HEADER_SET_COOKIE: string;', "'set-cookie': ['foo=bar']", 'Add an Authorization: Bearer header to every request', `data:application/json;base64,${blob}`])
     assert.strictEqual(safeSnapshot(t).safe, t, `safeSnapshot: ${t.slice(0, 60)}`);
 });

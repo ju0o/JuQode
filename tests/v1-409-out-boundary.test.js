@@ -651,3 +651,66 @@ test('round 5: boundary pins (%XX before a token, PEM body size, scan windows, d
   for (const k of ['x-api-key', 'X-Auth-Token', 'x-access-token', 'x-csrf-token', 'Proxy-Authorization', 'Set-Cookie']) for (const [name, out] of both(`{"${k}":"CanaryHeaderVal12345"}`)) assert.ok(!out.includes('CanaryHeaderVal12345'), `${name} ${k}`);
   assert.ok(mask('{"x-trace-id":"CanaryHeaderVal12345"}').includes('CanaryHeaderVal12345'));
 });
+
+/* ---- QA round 7 ---- */
+const BS_PREFIXES = ['Cookie: a=b', 'Set-Cookie: a=b', '{"Cookie":"a=b', 'Cookie: a=b;', '>Cookie: a=b', 'Cookie: ', 'Authorization: Digest a=b', 'Authorization: Digest ', 'Proxy-Authorization: Digest a=b', 'Authorization: Negotiate Ab1',
+  'Authorization: Token Ab12', 'Authorization: Basic Yt12', 'Authorization: Bearer Ab12', 'curl -u a:b', 'x-api-key: ', '-----BEGIN PRIVATE KEY-----\\n', '-----BEGIN PRIVATE KEY-----\n', 'https://u:p', 'a'.repeat(20) + '://u:p',
+  'eyJhbGciOiJIUzI1NiJ9.', 'API_TOKEN=', 'MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN=', 'password: string', '"API_TOKEN":"'];
+const BS_UNITS = ['\\', '\\\\n', '\\x', '\\\\\\\\', '\\n\\', '\\"', ' \\ '];
+test('backslash-run adversarial suffixes: every prefix class x every suffix unit is linear (time(120k)/time(60k) < 3, < 1 s at 120k)', () => {
+  const bad = [];
+  const best = (f, s) => { let m = Infinity; for (let i = 0; i < 3; i++) { const t = process.hrtime.bigint(); f(s); m = Math.min(m, Number(process.hrtime.bigint() - t) / 1e6); } return m; };
+  for (const pre of BS_PREFIXES) for (const unit of BS_UNITS) {
+    const mk = (n) => pre + unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+    for (const [sn, f] of [['mask', mask], ['safeSnapshot', safeSnapshot]]) {
+      const a = best(f, mk(60000)), b = best(f, mk(120000));
+      if (b >= 1000 || (b / Math.max(a, 1) >= 3 && b > 250)) bad.push(`${JSON.stringify(pre)} x ${JSON.stringify(unit)} ${sn}: ${a.toFixed(0)} -> ${b.toFixed(0)} ms`);
+    }
+  }
+  for (const pre of ['Cookie: a=b', 'Authorization: Digest a=b', 'Authorization: Token Ab12', '"API_TOKEN":"']) for (const unit of ['\\', '\\\\n', '\\"']) {
+    const s = pre + unit.repeat(Math.ceil(120000 / unit.length)).slice(0, 120000);
+    for (const [sn, f] of [['scrubString', guard.scrubString], ['scrubDetail', (x) => guard.scrubDetail({ a: x })], ['publicOut', (x) => guard.publicOut('juqode:x', { a: { b: [x] } })]]) {
+      const b = best(f, s);
+      if (b >= 1500) bad.push(`${JSON.stringify(pre)} x ${JSON.stringify(unit)} ${sn}: ${b.toFixed(0)} ms @120k`);
+    }
+  }
+  assert.deepStrictEqual(bad, []);
+});
+
+test('round 7 F3: "=>" / "==" / prose around "=" are not cookie pairs', () => {
+  for (const t of ['cb: (err: Error | null, cookie: unknown) => void) & x', 'Cookie: please = accept', 'set cookie: yes => no', 'cookie: a == b', 'cookie: a <= b', '쿠키: 이름 = 값 으로 설정', 'Cookie: =x'])
+    for (const [name, out] of both(t)) if (name === 'mask') assert.strictEqual(out, t, t);
+  assert.ok(!mask('Cookie: sid =Zq9x').includes('Zq9x'));          // a gap before '=' is fine when no gap follows
+  assert.ok(!mask('Cookie: sid    =Zq9x').includes('Zq9x'));      // 4 spaces
+  assert.ok(mask('Cookie: sid     =Zq9x').includes('Zq9x'));      // 5 spaces: prose
+  assert.strictEqual(mask('Cookie: a:b'), 'Cookie: a:b');         // ':' is not a pair separator
+});
+
+test('round 7 F4/F1: long names - structure decides (dotenv NAME=value, credential-looking values), not the name', () => {
+  const keep = ['export const METRIC_GEN_AI_SERVER_TIME_PER_OUTPUT_TOKEN = "gen_ai.server.time";', 'const SESSION_COOKIE = "sid";', 'const DEEP_HEADER_SET_COOKIE = {', 'process.env.X_COOKIE = value;',
+    '쿠키 COOKIE_MAX_AGE = 3600 으로 변경', 'export const MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: string;', 'MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: Record<string, X>;',
+    'const MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: Uint8Array;', 'MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: {', 'HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: string;'];
+  for (const t of keep) assert.strictEqual(mask(t), t, t);
+  for (const t of ['MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN=abc12345XYZ', 'HTTP_COOKIE=sid=abc12345XYZ', 'MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: Zq7abc1234567xyz',
+    'MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN = "Zq7abc1234567xyzQQ"', `${'A'.repeat(100)}_TOKEN=abc12345`]) assert.ok(!/abc12345|Zq7abc/.test(mask(t)), t);
+  assert.ok(!mask('MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: Zq7abc123456').includes('Zq7abc'));
+  assert.strictEqual(mask('MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: Zq7abc123456;'), 'MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: Zq7abc123456;');   // followed by ';': typing context
+});
+
+test('round 7 F2: JSON Set-Cookie arrays, escaped cookie JSON, 100 spaces after the colon, inner quotes', () => {
+  for (const t of ['{"Set-Cookie":["sid=Zq9xKp2L"]}', '{"cookie": "a=1; sid=Zq9xKp2L"}', `Cookie:${' '.repeat(100)}sid=Zq9xKp2L`, 'x"Cookie: sid="Zq9xKp2L""', 'curl -H "Cookie: sid="Zq9xKp2L"" x', nest({ cookie: 'a=1; sid=Zq9xKp2L' }, 1), nest({ cookie: 'a=1; sid=Zq9xKp2L' }, 3)])
+    for (const [name, out] of both(t)) assert.ok(!out.includes('Zq9xKp2L'), `${name} ${t}`);
+  assert.strictEqual(mask("'set-cookie': ['foo=bar', 'a=b']"), "'set-cookie': ['foo=bar', 'a=b']");   // a JS array of single-quoted strings is code
+});
+
+test('round 7 mutation survivors', () => {
+  assert.strictEqual(mask('Cookie: a=b\\nnext'), 'Cookie: ***\\nnext');                         // value ends at an escaped break
+  assert.strictEqual(mask('Cookie: a=b\\tnext'), 'Cookie: ***\\tnext');
+  assert.strictEqual(mask("'Cookie: a=b' tail"), "'Cookie: ***' tail");                          // quote before the name ends the value
+  assert.strictEqual(mask('"Cookie: a=b" tail'), '"Cookie: ***" tail');
+  assert.ok(!ss('password: stringsXX9').includes('stringsXX9'), 'only a BARE type word is exempt');
+  assert.strictEqual(ss('password: string;'), 'password: string;');
+  for (const [name, out] of both(`-----BEGIN PRIVATE KEY-----\\t${'A'.repeat(40)}`)) assert.ok(!out.includes('AAAAAAAAAA'), `${name} escaped tab before the key body`);
+  assert.strictEqual(mask(`curlx -u user:${PW} x`).includes(PW), true);                         // \b after curl
+  assert.strictEqual(mask('Cookie: a=b=c'), 'Cookie: ***');
+});
