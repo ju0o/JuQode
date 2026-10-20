@@ -148,3 +148,68 @@ test('round 9 survivor pins (2): PRIVATE_KEY long names, escaped array shape, de
   assert.ok(!mask('Cookie: sid= 12').includes('12'), 'a default literal needs a space on BOTH sides of the =');
   assert.strictEqual(mask("PGPASSWORD='my awesome password' x"), '*** x');
 });
+
+/* ---- round 10 ---- */
+const CRED = 'Zq7Xk9Lm2Pw4Rt8Vb3Nc6';
+test('round 10 item 2: a configuration-looking name exempts only a configuration-looking VALUE (each benign word, display and write-time)', () => {
+  for (const w of ['SECURE', 'DOMAIN', 'TTL', 'NAME', 'PATH', 'FILE', 'URL', 'ID', 'MODE', 'ENABLED', 'TIMEOUT', 'AGE', 'CSV', 'DIR', 'HOST', 'PORT', 'EXPIRES', 'VERSION', 'LENGTH', 'SIZE', 'COUNT', 'LIMIT', 'TYPE', 'ALGORITHM', 'HEADER', 'PREFIX', 'SUFFIX']) {
+    const name = `MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN_${w}`;
+    assert.ok(!mask(`${name}=${CRED}`).includes(CRED), `display: ${w} + credential`);
+    assert.ok(!ss(`${name}=${CRED}`).includes(CRED), `write-time: ${w} + credential`);
+    assert.strictEqual(mask(`${name}=true`), `${name}=true`, `display: ${w} + true`);
+    assert.strictEqual(mask(`${name}=/run/secrets/x`), `${name}=/run/secrets/x`, `display: ${w} + path`);
+    assert.strictEqual(ss(`${name}=3600`), `${name}=3600`, `write-time: ${w} + number`);
+  }
+  for (const n of ['TOKEN_ID', 'API_KEY_ID', 'SECRET_NAME', 'PASSWORD_FILE', 'API_KEY_PATH', 'GITHUB_TOKEN_SECURE', 'MY_API_KEY_HEADER', 'AUTH_TOKEN_PREFIX', 'PASSWORD_HOST', 'DB_PASSWORD_VERSION', 'SECRET_MODE', 'API_KEY_ENABLED', 'JWT_SECRET_FILE', 'CLIENT_SECRET_ID', 'PASSWORD_URL', 'TOKEN_LIMIT'])
+    for (const out of [mask(`${n}=${CRED}`), ss(`${n}=${CRED}`)]) assert.ok(!out.includes(CRED), n);
+  for (const t of ['DB_PASSWORD_FILE=/run/secrets/x', 'COOKIE_SECURE=true', 'COOKIE_DOMAIN=.example.com', 'SESSION_COOKIE_NAME=connect.sid', 'GOOGLE_APPLICATION_CREDENTIALS=/path/to/config.json'])
+    assert.strictEqual(ss(t), t, t);
+  /* the word must END the name: TOKEN_IDENTIFIER is not "..._ID" */
+  assert.ok(!ss('MY_COMPANY_BILLING_SERVICE_TOKEN_IDENTIFIER=secretvalue1234').includes('secretvalue1234'));
+  assert.ok(!mask('MY_COMPANY_BILLING_SERVICE_TOKEN_IDENTIFIER=secretvalue1234').includes('secretvalue1234'));
+  /* a value that continues as a file name / host is not a token */
+  assert.strictEqual(mask(`MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN_ID=${CRED}.csv`), `MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN_ID=${CRED}.csv`);
+});
+
+test('round 10 item 3: prose before a name=value pair does not protect it; an unquoted Cookie before a comma needs a pair after it', () => {
+  for (const t of [`Cookie: 한글 sid=${CRED}`, `Set-Cookie: 가=1; sid=${CRED}`, `Cookie:한글sid=${CRED}`, `Cookie: 토큰${CRED}=1`, `headers.set(Cookie, sid=${CRED})`, `res.setHeader(Cookie, "sid=${CRED}")`, `Cookie, sid=${CRED}`, `cookie , sid=${CRED}`])
+    for (const out of [mask(t), ss(t)]) assert.ok(!out.includes(CRED), t);
+  for (const t of ['Cookie: 만료 = 7일', 'fix cookie, session = null bug', 'cookie, secure = false,', 'function parse(cookie, options = {}) {', '로그인 후 cookie, maxAge = 7일로 설정해줘']) {
+    assert.strictEqual(mask(t), t, t);
+  }
+  /* decision: a spaced '=' after prose is prose; an UNSPACED a=b after prose is a pair (Set-Cookie: 헤더 관련해서 a=b 처럼 처리 is masked) */
+  assert.strictEqual(mask('Set-Cookie: 헤더 관련해서 a=b 처럼 처리'), 'Set-Cookie: ***');
+  /* a Latin-1 / Latin letter is ASCII-adjacent prose too: it does not hide a pair */
+  assert.ok(!mask(`Cookie: café sid=${CRED}`).includes(CRED));
+  /* two headers on two lines are two decisions */
+  assert.strictEqual(mask('Cookie: a=b\nCookie: please accept the terms'), 'Cookie: ***\nCookie: please accept the terms');
+  assert.strictEqual(mask('Cookie: please accept the terms\nCookie: a=b'), 'Cookie: please accept the terms\nCookie: ***');
+});
+
+test('round 10 item 4: curl -b / --cookie consume the whole quoted argument', () => {
+  for (const t of [`curl -b 'a=1; sid=${CRED}' https://x`, `curl -b "a=1; sid=${CRED}" https://x`, `curl --cookie "a=1; sid=${CRED}" https://x`, `curl --cookie='a=1; sid=${CRED}' https://x`.replace("='", " '"), `curl -b sid=${CRED} https://x`])
+    for (const out of [mask(t), ss(t)]) assert.ok(!out.includes(CRED) && out.endsWith(' https://x'), `${t} -> ${out}`);
+  assert.strictEqual(mask('curl -b cookies.txt https://x'), 'curl -b cookies.txt https://x');
+  assert.strictEqual(mask('curl -b "cookies.txt" https://x'), 'curl -b "cookies.txt" https://x');
+  assert.strictEqual(mask("curl -b 'my jar.txt' https://x"), "curl -b 'my jar.txt' https://x");
+  assert.ok(mask(`curl -b a=b -H "X: y" https://x`).includes('-H "X: y"'));
+});
+
+test('round 10 item 6: escaped quotes with any practical depth of backslashes in dotenv values', () => {
+  let q = `X_TOKEN="${CRED}"`;
+  for (let d = 1; d <= 9; d++) { q = JSON.stringify(q); for (const out of [mask(q), ss(q)]) assert.ok(!out.includes(CRED), `depth ${d}`); }
+});
+
+test('round 10 item 7: assorted scan details', () => {
+  assert.strictEqual(mask('cookie: x = false'), 'cookie: x = false');
+  assert.strictEqual(mask('cookie: x = `a`'.replace('`a`', '``')), 'cookie: x = ``');
+  assert.strictEqual(mask('cookie: x = {}'), 'cookie: x = {}');
+  assert.strictEqual(mask('cookie: x = []'), 'cookie: x = []');
+  assert.strictEqual(mask('cookie: x = null'), 'cookie: x = null');
+  assert.strictEqual(mask("cookie: x = ''"), "cookie: x = ''");
+  assert.ok(!mask('cookie: x = nullish1').includes('nullish1'), 'null must end at a word boundary');
+  assert.ok(!mask('cookie: x = 1234').includes('1234'), 'four digits are not a small default');
+  for (const v of ['~/jars/x', './x', '../x', '/abs', '.example.com']) assert.strictEqual(mask(`MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN=${v}`), `MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN=${v}`, v);
+  assert.strictEqual(ss('foo(MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN=abcd1234, x)'), 'foo([redacted], x)');   // a comma ends an unquoted value
+  assert.strictEqual(ss('foo(MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN=abcd1234`)'), 'foo([redacted]`)');      // a backtick ends it too
+});

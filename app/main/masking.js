@@ -74,7 +74,7 @@ const SP = '(?:[ \\t]|\\\\+t)';                      // a space, a tab, or a JSO
 const Q = '(?:\\\\*["\'])';                          // a quote, also backslash-escaped at any depth
 /* `NAME=value`: the value is a whole quoted string (spaces allowed) or a token that ends at whitespace, a quote, ; ) , or a backslash - never a
  * bare \S+ that swallows the code after it. Booleans, numbers, paths and dotted domains are configuration, not secrets. */
-const ENV_VALUE = `(?!(?:true|false|null|undefined|\\d+)(?![A-Za-z0-9_])|\\.{0,2}/|~|\\.[A-Za-z])(?:"[^"\\r\\n]{0,4096}"|'[^'\\r\\n]{0,4096}'|(\\\\{1,255})"(?:(?!\\1")[^\\r\\n]){0,4096}\\1"|[^\\s"'\`;),\\\\]+)`;
+const ENV_VALUE = `(?!(?:true|false|null|undefined|\\d+)(?![A-Za-z0-9_])|\\.{0,2}/|~|\\.[A-Za-z])(?:"[^"\\r\\n]{0,4096}"|'[^'\\r\\n]{0,4096}'|(\\\\{1,1023})"(?:(?!\\1")[^\\r\\n]){0,4096}\\1"|[^\\s"'\`;),\\\\]+)`;
 /* a credential-LOOKING value (16+ plain characters mixing letters and digits, optionally quoted): masked whatever the name says */
 const CRED_LOOKING = `${Q}?(?=[^\\s"';,)\\\\]*\\d)(?=[^\\s"';,)\\\\]*[A-Za-z])(?=([A-Za-z0-9+/=_-]{16,}))\\1(?![.][A-Za-z])${Q}?`;   // (atomic: a value that continues as `.csv` / `.example.com` is a file or a host, not a token)
 const ENV_LONG = [
@@ -212,7 +212,7 @@ function maskCookieHeaders(text, rep) {
 function maskCurlUser(text, rep) {
   if (!text.includes('curl')) return text;
   /* `-u user:pass` / `--user user:pass`, and the cookie options `-b "sid=…"` / `--cookie "sid=…"` (a value holding an `=`) */
-  const re = /[ \t](?:-u|--user)(?:[ =]|[ \t]+)["']?[^\s:'"]+:[^\s'"]+|[ \t](?:-b|--cookie)(?:[ =]|[ \t]+)(?:"(?=[^"\r\n]{0,4096}=)[^"\r\n]{0,4096}"|'(?=[^'\r\n]{0,4096}=)[^'\r\n]{0,4096}'|[^\s'"=]*=[^\s'"]*)/g;
+  const re = /[ \t](?:-u|--user)(?:[ =]|[ \t]+)["']?[^\s:'"]+:[^\s'"]+|[ \t](?:-b|--cookie)(?:[ =]|[ \t]+)(?:"(?=[^"\r\n]{0,4096}=)[^"\r\n]{0,4096}"|'(?=[^'\r\n]{0,4096}=)[^'\r\n]{0,4096}'|(\\{1,1023})"(?=[^\r\n]{0,4096}=)(?:(?!\1")[^\r\n]){0,4096}\1"|[^\s'"=]*=[^\s'"]*)/g;   // the quoted argument is consumed to its closing quote (escaped quotes too)
   let out = '';
   let pos = 0;
   let m;

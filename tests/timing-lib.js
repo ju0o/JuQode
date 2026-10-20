@@ -7,7 +7,7 @@ const { mask } = require(path.join(R, 'app/main/qc/run.js'));
 const { safeSnapshot } = require(path.join(R, 'app/main/work/context.js'));
 const guard = require(path.join(R, 'app/main/ipc-guard.js'));
 
-const HOSTILE = ['Authorization: Digest ', 'Proxy-Authorization: Digest ', 'Cookie: ', 'Cookie: aaaa ', 'Set-Cookie: ', 'Authorization: Basic ', 'Authorization: Bearer ', 'Authorization: Token ', 'Authorization: Negotiate ',
+const HOSTILE = ['curl -b ' + '\\'.repeat(300) + '"=', 'X_TOKEN=' + '\\'.repeat(300) + '"', 'Cookie: 한글 ', 'Cookie, ', 'curl -b \'a=1; ', 'MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN = ', 'MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: ', 'Authorization: Digest ', 'Proxy-Authorization: Digest ', 'Cookie: ', 'Cookie: aaaa ', 'Set-Cookie: ', 'Authorization: Basic ', 'Authorization: Bearer ', 'Authorization: Token ', 'Authorization: Negotiate ',
   'curl -u ', 'curl -s --user ', 'a\\ncurl -u ', 'curl -u a:b\\n', 'Cookie: a=b\\n', 'Cookie: a="b ', '>Cookie: ', 'Authorization: Token x\\n', 'Authorization: Negotiate Ab1\\n', 'HTTP_COOKIE=', 'A_TOKEN=', 'X-Api-Key: ', 'eyJ-', 'eyJaaaaaaaaaa.', 'a-', 'a.', 'a://', 'a://u:', '-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\nAAAA\n', '-----BEGIN ', 'token=', 'API_TOKEN=', '"API_TOKEN":', '\\"', 'a\\n', '%20', 'AKIA', 'sk-', 'ghp_', 'Bearer ', 'Basic ', '\n', ' '];
 const GUARD_UNITS = ['Authorization: Digest ', 'Cookie: ', 'Cookie: aaaa ', 'Authorization: Bearer ', 'curl -u ', 'eyJ-', 'a-', 'a://u:', '-----BEGIN PRIVATE KEY-----', '"API_TOKEN":', 'a\\n', '%20'];
 const SURFACES = {

@@ -14,10 +14,12 @@ const { safeSnapshot } = require(path.join(R, 'app/main/work/context.js'));
 const guard = require(path.join(R, 'app/main/ipc-guard.js'));
 
 const C = 'ZQ9XKP2LM8VN4RT6';                          // the canary core: every probe carries it
+/* a class is a string (its probe is the canary C) or [text, probe] when the secret appears in another form (base64) */
+const PAY = Buffer.from(`user:${C}`).toString('base64');
 const CLASSES = {
   gh: `ghp_${C}${'a1B2'.repeat(5)}`,
   ant: `sk-ant-api03-${C}${'aB3_'.repeat(4)}`,
-  akia: `AKIA${C.slice(0, 12)}${C.slice(0, 4)}`,
+  akia: `AKIA${C}`,
   npm: `npm_${C}${'aB3d'.repeat(5)}`,
   aiza: `AIza${C}${'aB3_-'.repeat(4)}`,
   slack: `https://hooks.slack.com/services/T0000000/B0000000/${C}XXXXXXXX`,
@@ -27,8 +29,8 @@ const CLASSES = {
   httpcookie: `HTTP_COOKIE=sid=${C}`,
   bearer: `Authorization: Bearer ${C}`,
   bearerlow: `authorization: bearer ${C}`,
-  basic: `Authorization: Basic ${Buffer.from(`user:${C}`).toString('base64')}`,
-  basicdot: `Authorization: Basic ${Buffer.from(`user:${C}`).toString('base64')}.x`,
+  basic: [`Authorization: Basic ${PAY}`, PAY],
+  basicdot: [`Authorization: Basic ${PAY}.x`, PAY],
   digest: `Proxy-Authorization: Digest username="u", response="${C}"`,
   negotiate: `Authorization: Negotiate ${C}${'Ab1'.repeat(3)}`,
   token: `Authorization: Token ${C}1`,
@@ -65,6 +67,9 @@ const CLASSES = {
   digestSpaced: `Authorization: Digest username = "u", response="${C}"`,
   exportLong: `export TOKEN_FOO_BAR_BAZ_${'Q'.repeat(30)}=${C}`,
   envLongColon: `ENV_LONG_NAME_FOR_THE_API_SECRET_VALUE: ${C}`,
+  tokenId: `TOKEN_ID=${C}`, apiKeyId: `API_KEY_ID=${C}`, secretName: `SECRET_NAME=${C}`, passwordFile: `PASSWORD_FILE=${C}`, jwtSecretFile: `JWT_SECRET_FILE=${C}`, tokenLimit: `TOKEN_LIMIT=${C}`,
+  cookieNonAscii: `Cookie: 한글 sid=${C}`, setCookieNonAscii: `Set-Cookie: 가=1; sid=${C}`, cookieGlued: `Cookie:한글sid=${C}`, cookieBareComma: `Cookie, sid=${C}`, cookieCall: `headers.set(Cookie, sid=${C})`, cookieCallQuoted: `res.setHeader(Cookie, "sid=${C}")`,
+  curlBQuoted: `curl -b 'a=1; sid=${C}' https://x`, curlBDouble: `curl --cookie "a=1; sid=${C}" https://x`, envEscaped: `X_TOKEN="${C}"`,
   assign: `client_secret = ${C}`,
   assignlong: `${'x'.repeat(80)}_password=${C}`,
 };
@@ -100,11 +105,12 @@ const isOpen = (key) => KNOWN_OPEN.some((g) => new RegExp(`^${g.replace(/[.+?^${
 function evaluate(surfaces) {
   const leaking = [];
   let cells = 0;
-  for (const [cn, secret] of Object.entries(CLASSES)) for (const [xn, ctx] of Object.entries(CONTEXTS)) for (const [sn, surf] of Object.entries(surfaces)) {
+  for (const [cn, spec] of Object.entries(CLASSES)) for (const [xn, ctx] of Object.entries(CONTEXTS)) for (const [sn, surf] of Object.entries(surfaces)) {
     cells++;
     const key = `${cn}|${xn}|${sn}`;
+    const [secret, probe] = Array.isArray(spec) ? spec : [spec, C];
     const out = surf(ctx(secret));
-    if (out.includes(C)) { if (!isOpen(key)) leaking.push(key); } else if (isOpen(key)) leaking.push(`${key} (is masked now - delete it from KNOWN_OPEN)`);
+    if (out.includes(probe)) { if (!isOpen(key)) leaking.push(key); } else if (isOpen(key)) leaking.push(`${key} (is masked now - delete it from KNOWN_OPEN)`);
   }
   return { cells, leaking };
 }
@@ -113,6 +119,16 @@ test(`regression matrix: ${Object.keys(CLASSES).length} classes x ${Object.keys(
   const { cells, leaking } = evaluate(SURFACES);
   assert.ok(cells >= 300, `${cells} cells`);
   assert.deepStrictEqual(leaking, []);
+});
+
+test('no blind classes: with an identity masker EVERY class x context x surface leaks its probe (so a leak in any class would be seen)', () => {
+  const identity = { mask: (t) => t, safeSnapshot: (t) => t, publicOut: (t) => JSON.stringify({ a: [t] }) };
+  const blind = [];
+  for (const [cn, spec] of Object.entries(CLASSES)) for (const [xn, ctx] of Object.entries(CONTEXTS)) for (const [sn, surf] of Object.entries(identity)) {
+    const [secret, probe] = Array.isArray(spec) ? spec : [spec, C];
+    if (!surf(ctx(secret)).includes(probe)) blind.push(`${cn}|${xn}|${sn}`);
+  }
+  assert.deepStrictEqual(blind, []);
 });
 
 test('the guard itself works: a masker mutated IN MEMORY to leak one cell is caught (and an un-mutated one is not)', () => {
