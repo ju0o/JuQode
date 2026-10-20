@@ -131,7 +131,7 @@ function classifyAllowRule(rule, projectPath = null) {
   }
   if (FILE_WRITERS.has(tool)) {
     if (spec === undefined || fileSpecWide(spec) || /[[\]{}!]/.test(spec) || /^\*/.test(spec)) return 'wide';
-    if (/[*?]/.test(spec) || spec.includes('\\') || spec.startsWith('/') || spec.endsWith('/')) return 'unmeasured';
+    if (/[*?:]/.test(spec) || spec.includes('\\') || spec.startsWith('/') || spec.endsWith('/')) return 'unmeasured';
     if (lexicalControl(spec)) return 'unmeasured';
     if (cwd) { const v = projectFileVerdict(cwd, spec); return v === 'ok' ? 'narrow' : (v === 'outside' ? 'wide' : 'unmeasured'); }
     return 'narrow';

@@ -238,6 +238,24 @@ async function startGuarded(db, project, intent, {
   const done = new Promise((res) => { markDone = res; });
   if (runEntry) runEntry.markDone = markDone;
 
+  /* LAST CHECK BEFORE THE SPAWN. The preflight's settings check ran before the evidence capture and the Task row; a settings file written in that window must not start a run.
+   * A reserved Task Run row ends as a failed attempt with an honest reason; a Task-less Work has no row yet. */
+  const late = projectSettingsRefusal(project.path);
+  if (late) {
+    if (workId) {
+      repo.setWorkState(db, workId, { status: 'ended', outcome: 'failed' });
+      repo.setRunFailureReason(db, workId, 'effective-permission-widened-before-spawn');
+      writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW, payload: JSON.stringify({ runFailure: 'effective-permission-widened-before-spawn', detail: late }) });
+      captureAfter(db, workId, project, pre.useGit, evidenceStore);
+      finishResult(db, workId, project, evidenceStore);
+      release(db, workId);
+      onUpdate(snapshot(db, workId));
+      markDone({ ok: false, reason: 'effective-permission-widened' });
+      return { ok: false, reason: 'effective-permission-widened', detail: late, workId };
+    }
+    return { ok: false, reason: 'effective-permission-widened', detail: late };
+  }
+
   const first = new Promise((resolve) => {
     let settled = false;
     const settle = (v) => { if (!settled) { settled = true; resolve(v); } };

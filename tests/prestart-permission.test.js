@@ -433,3 +433,182 @@ test('JOB-D fuzz: 4000 seeded settings documents', () => {
   for (const g of garbage) { let v; assert.doesNotThrow(() => { v = C.settingsVerdict(g, root); }); if (g && typeof g === 'object' && !Array.isArray(g)) continue; assert.ok(v !== null && closed.has(v.reason), `garbage root ${JSON.stringify(g)}`); }
   assert.ok(accepted > 100 && refused > 100, `fuzz must exercise both sides (${accepted}/${refused})`);
 });
+
+/* ═══ JOB-D round 2 ═══ */
+const manifest = require(path.join(R, 'app/main/evidence/manifest.js'));
+const CONTROL_FILES = ['.claude/settings.json', '.claude/settings.local.json', '.mcp.json', '.git/hooks/pre-commit', '.git/config', '.husky/pre-commit', '.claude/hooks/run.sh', '.claude/hooks_x/run.sh',
+  '.claude/commands/x.md', '.claude/agents/a.md', '.envrc', '.vscode/tasks.json', '.github/workflows/ci.yml', 'package.json', '.CLAUDE/Settings.json', './.husky/pre-commit'];
+test('F1: a rule that lets a run rewrite its own settings/hooks/commands is never NARROW; scopeOf refuses the same set (package.json: gate only, OPEN)', () => {
+  const root = world();
+  for (const f of CONTROL_FILES) for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) assert.notStrictEqual(C.classifyAllowRule(`${tool}(${f})`, root), 'narrow', `${tool}(${f})`);
+  for (const f of CONTROL_FILES.filter((x) => x !== 'package.json')) assert.deepStrictEqual(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, root), { refusal: 'cannot-scope' }, f);
+  assert.ok(session.scopeOf({ tool: 'Edit', input: { file_path: 'package.json' } }, root).spec, 'package.json stays grantable (ordinary edit target)');
+  assert.ok(C.controlPath('.husky/pre-commit') && C.controlPath('.envrc') && !C.controlPath('src/a.txt') && !C.controlPath('.gitignore'));
+});
+for (const f of ['.claude/settings.json', '.mcp.json', '.git/hooks/pre-commit', '.husky/pre-commit', 'package.json', '.claude/hooks/run.sh', '.claude/commands/x.md', '.claude/agents/a.md', '.envrc', '.vscode/tasks.json', '.github/workflows/ci.yml']) {
+  test(`F1 start(): Edit(${f}) -> refused (unmeasured), 0 rows, 0 children`, async () => {
+    const w = setup({ permissions: { allow: [`Edit(${f})`] } });
+    const r = await w.start();
+    assert.deepStrictEqual([r.ok, r.reason, r.detail.reason], [false, 'effective-permission-widened', 'project-settings-unmeasured-allow']);
+    assert.deepStrictEqual(counts(w.db), [0, 0, 0, 0]);
+    assert.ok(!fs.existsSync(w.marker));
+  });
+}
+
+test('F2: an exact-file rule is judged on the REAL filesystem - links that lead out, dangling links, sibling-prefix folders', { skip: process.platform === 'win32' && 'symlinks' }, async () => {
+  const w = setup();
+  const root = w.root; const out = fs.realpathSync(tempDir('juqode-pre-out2-'));
+  fs.writeFileSync(path.join(out, 'secret'), 'x'); fs.mkdirSync(path.join(out, 'd'));
+  const evil = `${root}-evil`; fs.mkdirSync(evil); fs.writeFileSync(path.join(evil, 'f'), 'x');
+  fs.symlinkSync(path.join(out, 'secret'), path.join(root, 'src/link.txt'));
+  fs.symlinkSync(path.join(out, 'd'), path.join(root, 'dirlink'));
+  fs.symlinkSync(path.join(out, 'd'), path.join(root, 'src/outdir'));
+  fs.symlinkSync(path.join(out, 'nope'), path.join(root, 'dangling'));
+  fs.symlinkSync(evil, path.join(root, 'sib'));
+  fs.symlinkSync(path.join(root, 'src/a.txt'), path.join(root, 'inlink.txt'));
+  for (const spec of ['src/link.txt', 'dirlink/secret', 'dirlink/new.txt', 'src/outdir/secret', 'dangling', 'sib/f']) {
+    for (const tool of ['Edit', 'Write']) assert.notStrictEqual(C.classifyAllowRule(`${tool}(${spec})`, root), 'narrow', `${tool}(${spec})`);
+  }
+  assert.strictEqual(C.classifyAllowRule('Read(src/link.txt)', root), 'wide', 'a read through a link that leads out');
+  assert.strictEqual(C.classifyAllowRule('Edit(inlink.txt)', root), 'narrow', 'a link that stays inside is fine');
+  assert.strictEqual(C.classifyAllowRule('Edit(src/new/deeper.txt)', root), 'narrow', 'a not-yet-existing file resolves through its deepest existing ancestor');
+  fs.writeFileSync(path.join(root, '.claude-x'), ''); // not a control name
+  assert.strictEqual(C.classifyAllowRule('Edit(.claude-x)', root), 'narrow');
+  fs.rmSync(path.join(root, 'src/link.txt'));
+  fs.symlinkSync(path.join(out, 'secret'), path.join(root, 'src/link.txt'));
+  fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude/settings.json'), JSON.stringify({ permissions: { allow: ['Edit(src/link.txt)'] } }));
+  const r = await w.start();
+  assert.deepStrictEqual([r.ok, r.reason], [false, 'effective-permission-widened']);
+  assert.deepStrictEqual(counts(w.db), [0, 0, 0, 0]);
+  assert.ok(!fs.existsSync(w.marker));
+});
+test('F2: a link INSIDE to a control file is control (innocent.json -> .claude/settings.json)', { skip: process.platform === 'win32' && 'symlinks' }, () => {
+  const root = world();
+  fs.mkdirSync(path.join(root, '.claude')); fs.writeFileSync(path.join(root, '.claude/settings.json'), '{}');
+  fs.symlinkSync(path.join(root, '.claude/settings.json'), path.join(root, 'innocent.json'));
+  assert.strictEqual(C.classifyAllowRule('Edit(innocent.json)', root), 'unmeasured');
+});
+
+test('F3: drive-letter, URL, UNC and //?/ paths are out-of-project on every platform (rules and grants)', () => {
+  const root = world();
+  for (const spec of ['C:/x', 'C:', 'c:\\x', 'D:/Users/a', 'file:///etc/passwd', 'http://x/y', '\\\\server\\share', '\\\\?\\C:\\x', '//?/C:/x', '//server/share/x', '/\\']) {
+    for (const tool of ['Edit', 'Write', 'Read']) assert.strictEqual(C.classifyAllowRule(`${tool}(${spec})`, root), 'wide', `${tool}(${spec})`);
+    assert.ok(C.grantRefusal(`Edit(${spec})`), `grant Edit(${spec})`);
+  }
+  assert.strictEqual(C.classifyAllowRule('Edit(src/c.txt)', root), 'narrow', 'a name that merely contains a colon-free c is fine');
+});
+
+function lateSettings(root, doc) {
+  const real = manifest.capture;
+  manifest.capture = (...a) => { fs.mkdirSync(path.join(root, '.claude'), { recursive: true }); fs.writeFileSync(path.join(root, '.claude/settings.json'), JSON.stringify(doc)); return real(...a); };
+  return () => { manifest.capture = real; };
+}
+test('F6 TOCTOU: settings written AFTER the preflight (inside the evidence capture) still refuse - Work: no row; Task Run: reserved row ends failed; never a child', async () => {
+  const w = setup();
+  const restore = lateSettings(w.root, { permissions: { defaultMode: 'bypassPermissions' } });
+  try {
+    const r = await w.start();
+    assert.deepStrictEqual([r.ok, r.reason, r.detail.reason], [false, 'effective-permission-widened', 'project-settings-permissive-mode']);
+    assert.deepStrictEqual(counts(w.db), [0, 0, 0, 0]);
+    assert.ok(!fs.existsSync(w.marker));
+  } finally { restore(); }
+  const t = setup();
+  const project = t.db.prepare('select * from project').get();
+  const task = repo.createTask(t.db, project.id, { goal: 'g' });
+  const restore2 = lateSettings(t.root, { permissions: { defaultMode: 'bypassPermissions' } });
+  try {
+    const r = await supervisor.start(t.db, project, 'do it', { taskId: task.id, evidenceStore: tempDir('juqode-pre-store-'), bin: path.join(t.root, '..', 'juqode-no-such-bin'), detect: async () => ({ available: true, version: '9' }) });
+    assert.strictEqual(r.ok, false);
+  } finally { restore2(); }
+  const row = t.db.prepare('select status, outcome, failure_reason from work').all();
+  assert.ok(row.length <= 1);
+  assert.ok(!fs.existsSync(t.marker));
+});
+test('F6 TOCTOU: with a real fixture binary the Task Run row is reserved, ends failed with an honest reason, and nothing spawns', async () => {
+  const t = setup();
+  const project = t.db.prepare('select * from project').get();
+  const task = repo.createTask(t.db, project.id, { goal: 'g' });
+  const bin = fake.scriptBin(tempDir('juqode-pre-cli4-'), 'ok', `require('fs').writeFileSync(${JSON.stringify(t.marker)}, 'ran'); init(); result(); process.exit(0);`);
+  const restore = lateSettings(t.root, { permissions: { defaultMode: 'bypassPermissions' } });
+  let r;
+  try { r = await supervisor.start(t.db, project, 'do it', { taskId: task.id, evidenceStore: tempDir('juqode-pre-store-'), bin, detect: async () => ({ available: true, version: '9' }) }); } finally { restore(); }
+  assert.deepStrictEqual([r.ok, r.reason], [false, 'effective-permission-widened']);
+  const rows = JSON.parse(JSON.stringify(t.db.prepare('select status, outcome, failure_reason from work').all()));
+  assert.deepStrictEqual(rows, [{ status: 'ended', outcome: 'failed', failure_reason: 'effective-permission-widened-before-spawn' }]);
+  assert.ok(!fs.existsSync(t.marker), 'a child was spawned');
+});
+
+test('F7: a relative or missing project path is UNKNOWN; Edit(existing dir) stays unmeasured, a regular file or a not-yet-existing file is exact', () => {
+  for (const p of ['relative/dir', '.', '..', 'x']) assert.deepStrictEqual(C.projectSettingsRefusal(p), { reason: 'project-path-unknown', source: null }, p);
+  const root = world();
+  fs.mkdirSync(path.join(root, 'newdir'));
+  assert.strictEqual(C.classifyAllowRule('Edit(newdir)', root), 'unmeasured');
+  assert.strictEqual(C.classifyAllowRule('Edit(src/a.txt)', root), 'narrow');
+  assert.strictEqual(C.classifyAllowRule('Edit(src/not-yet.txt)', root), 'narrow', 'edge: a not-yet-existing name is taken as a file (a directory created later is not foreseeable)');
+});
+
+test('F5/over-blocking: key and env names are judged by WORDS', async () => {
+  for (const k of ['perms', 'yolo', 'acceptEdits', 'permit', 'grants', 'tools', 'unrestricted', 'autoMode', 'allowedTools', 'enable_all_project_mcp_servers', 'defaultMode', 'trusted-folders']) {
+    assert.deepStrictEqual(C.settingsVerdict({ [k]: true }, null), { reason: 'project-settings-unknown-key', key: k }, k);
+  }
+  for (const k of ['defaultModel', 'model', 'autoUpdates', 'cleanupPeriodDays', 'statusLine', 'theme', 'includeCoAuthoredBy', 'apiKeyHelper']) assert.strictEqual(C.settingsVerdict({ [k]: 'x' }, null), null, k);
+  for (const e of ['CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_PERMISSION_MODE', 'X_PERMISSION_MODE', 'CLAUDE_SKIP_PERMISSIONS', 'DANGEROUSLY_SKIP_PERMISSIONS', 'YOLO', 'APPROVAL_POLICY', 'SANDBOX_MODE', 'BYPASS_PERMISSIONS']) {
+    assert.strictEqual(C.settingsVerdict({ env: { [e]: '1' } }, null)?.reason, 'project-settings-unknown-key', e);
+  }
+  for (const e of ['DISABLE_AUTOUPDATER', 'DISABLE_AUTO_COMPACT', 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE', 'PERMISSIONS_URL', 'AUTOMATION_LEVEL', 'AUTO_RELOAD', 'SANDBOX_URL', 'NODE_ENV']) assert.strictEqual(C.settingsVerdict({ env: { [e]: '1' } }, null), null, e);
+  const w = setup('\ufeff{}');
+  assert.strictEqual((await w.start()).detail?.reason, 'project-settings-unreadable', 'OPEN: a BOM-prefixed file stays refused (the CLI parse behaviour is UNKNOWN)');
+});
+
+/* QA mutation survivors */
+test('mutation guards: exact shapes of NARROW / not-NARROW', () => {
+  const root = world();
+  assert.strictEqual(C.classifyAllowRule('Read(../x)', root), 'wide');                                    // M3
+  for (const r of ['Edit({a,b}.txt)', 'Edit(a[1].txt)', 'Edit(!x)', 'Write(a[0])', 'Edit(a{b)']) assert.strictEqual(C.classifyAllowRule(r, root), 'wide', r);   // M6
+  for (const r of ['Edit( a.txt)', 'Edit(a.txt )']) assert.notStrictEqual(C.classifyAllowRule(r, root), 'narrow', JSON.stringify(r));   // M26
+  assert.strictEqual(C.settingsVerdict({ permissions: { additionalDirectories: '/' } })?.reason, 'project-settings-additional-directories');   // M32
+  assert.strictEqual(C.settingsVerdict({ permissions: { deny: [1] } })?.reason, 'project-settings-unknown-rule');                               // M43
+  assert.strictEqual(C.settingsVerdict({ permissions: { disableBypassPermissionsMode: 'nope' } })?.reason, 'project-settings-unknown-key');     // M44
+  assert.strictEqual(C.settingsVerdict({ permissions: { disableBypassPermissionsMode: 'disable' } }), null);
+  assert.strictEqual(C.classifyAllowRule('NotebookEdit(nb.ipynb)', root), 'narrow');                                                             // M31
+  assert.strictEqual(C.classifyAllowRule('MultiEdit(src/a.txt)', root), 'narrow');
+});
+
+/* ── independent oracle: tools x specs, labelled BY CONSTRUCTION (no implementation regex, no ROWS table) ── */
+test('independent oracle: 26 tools x 63 specs classify as constructed; 4000 seeded documents are accepted iff every rule is constructed-narrow', () => {
+  const root = world();
+  fs.mkdirSync(path.join(root, 'docs'));
+  const READ = ['Read', 'Glob', 'Grep', 'LS']; const WRITE = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+  const OTHER = ['Bash', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite', 'mcp__a', 'mcp__a__b', 'Frobnicate', 'SlashCommand', 'KillShell', 'BashOutput', 'NotebookRead', 'ExitPlanMode', 'edit', 'EDIT'];
+  const TOOLS = [...READ, ...WRITE, ...OTHER, 'Foo_1', 'X', 'Y'];
+  assert.strictEqual(TOOLS.length, 26);
+  const FILES = ['a.txt', 'src/a.txt', 'src/new.txt', 'docs/readme.md', 'x', 'a_b-c.d', 'src/deeper/ok.ts', 'notes.md', 'npm test'];                       // plain, inside, not control
+  const CONTROL = ['.claude/settings.json', '.mcp.json', '.git/config', '.husky/pre-commit', '.envrc', 'package.json', '.github/workflows/a.yml'];
+  const GLOBS = ['*', '**', '**/*', 'src/**', 'src/*.ts', '*.ts', '?', 'a?', '[a]', '{a,b}', '!a'];
+  const OUT = ['../x', '/etc/passwd', '//etc/passwd', '~/x', '~', 'C:/x', 'file:///x', '\\\\h\\s'];
+  const ODD = ['', ' ', 'a b ', ' a', 'a\tb', 'a\u200bb', 'a\nb', ':', ':*', 'a:*', 'domain:*', 'domain:example.com', 'npm test:*', 'docs', 'src', 'src/', 'a/', '/', '/a', '.', '..', '\\a', 'a\\b', '//'];
+  const SPECS = [undefined, ...FILES, ...CONTROL, ...GLOBS, ...OUT, ...ODD];
+  assert.ok(SPECS.length >= 60, String(SPECS.length));
+  const dirs = new Set(['docs', 'src']);
+  const oracle = (tool, spec) => (READ.includes(tool) ? spec === undefined || FILES.includes(spec) : WRITE.includes(tool) ? FILES.includes(spec) : tool === 'Bash' && FILES.includes(spec));
+  const rule = (tool, spec) => (spec === undefined ? tool : `${tool}(${spec})`);
+  let checked = 0;
+  for (const tool of TOOLS) for (const spec of SPECS) {
+    const got = C.classifyAllowRule(rule(tool, spec), root) === 'narrow';
+    checked += 1;
+    if (READ.includes(tool) && spec !== undefined && !FILES.includes(spec)) { if (OUT.includes(spec)) assert.strictEqual(got, false, rule(tool, spec)); continue; }   // other read specs: read-only, not asserted
+    if (tool === 'Bash' && spec !== undefined && !FILES.includes(spec) && !/[*?]/.test(spec)) continue;                     // other exact commands: not asserted
+    assert.strictEqual(got, oracle(tool, spec), rule(tool, spec));
+  }
+  assert.ok(checked >= 26 * 60);
+  const rand = rng(777); const pick = (a) => a[Math.floor(rand() * a.length)];
+  let ok = 0; let no = 0;
+  for (let i = 0; i < 4000; i += 1) {
+    const n = Math.floor(rand() * 4); const list = []; let allNarrow = true;
+    for (let j = 0; j < n; j += 1) { const t = pick(TOOLS); let sp = pick(SPECS); if ((READ.includes(t) && sp !== undefined && !FILES.includes(sp)) || (t === 'Bash' && sp !== undefined && !FILES.includes(sp) && !/[*?]/.test(sp))) sp = undefined; list.push(rule(t, sp)); if (!oracle(t, sp)) allNarrow = false; }
+    const v = C.settingsVerdict({ permissions: { allow: list } }, root);
+    if (allNarrow) { assert.strictEqual(v, null, JSON.stringify(list)); ok += 1; } else { assert.ok(v, JSON.stringify(list)); no += 1; }
+  }
+  assert.ok(ok > 200 && no > 200, `${ok}/${no}`);
+});
