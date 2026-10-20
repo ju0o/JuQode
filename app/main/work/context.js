@@ -27,6 +27,9 @@ const SECRET_RULES = [
   ['cookie_header', M.EXTRA[0]],
   ['x_auth_header', M.EXTRA[1]],
   ['curl_user', M.EXTRA[2]],
+  ['env_assignment_long', rx(M.escB(M.ENV_LONG[0]))],
+  ['env_assignment_long', rx(M.escB(M.ENV_LONG[1]))],
+  ['env_assignment_long', rx(M.escB(M.ENV_LONG[2]))],
   ['credential_assignment', rx(M.escB(M.ASSIGNMENT))],
   /* a name with a prefix longer than 64 characters: the keyword and its value are still masked (the prefix stays) */
   ['credential_assignment', rx(M.ASSIGNMENT_LONG_NAME)],

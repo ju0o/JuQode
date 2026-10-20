@@ -77,13 +77,7 @@ const TOKENISH = [
    * is one), and the value must be on the same line. `password:` in an English sentence is not
    * an environment variable and is left alone. */
   /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*\S+/g,
-  /* …and a LONG name (up to 255 characters). Structure decides, not the name: `NAME=value` with nothing around the `=` is a shell / dotenv
-   * assignment and is masked; `const NAME = "x"`, `process.env.NAME = v`, `NAME: string;` and `NAME: {` are code and are kept UNLESS the value
-   * itself looks like a credential (12+ characters mixing letters and digits, not followed by `;` or a type bracket). */
-  /\b[A-Z0-9_]{0,255}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|COOKIE)[A-Z0-9_]{0,255}=\S+/g,
-  /\b[A-Z0-9_]{0,255}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|COOKIE)[A-Z0-9_]{0,255}[ \t]+=[ \t]+["']?(?=[^\s"']*\d)(?=[^\s"']*[A-Za-z])[^\s"']{16,}/g,
-  /\b[A-Z0-9_]{0,255}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|COOKIE)[A-Z0-9_]{0,255}[ \t]*:[ \t]*["']?(?=[^\s"';<>()\[\]]*\d)(?=[^\s"';<>()\[\]]*[A-Za-z])[^\s"';<>()\[\],]{12,}(?=[\s"',]|$)/g,
-].map((r) => re(escB(r))));
+].map((r) => re(escB(r))), M.ENV_LONG.map((r) => re(escB(r))));
 
 /** Replace token-shaped runs. See TOKENISH: this is a reduction, never a guarantee. */
 function mask(text) {

@@ -61,6 +61,17 @@ const ASSIGNMENT = new RegExp(`\\b(?:[\\w.-]{0,64}(?:${KEYWORDS}))\\b${VALUE}`, 
 /* …and the same without any prefix, so a name whose prefix is longer still has its keyword and value masked. */
 const ASSIGNMENT_LONG_NAME = new RegExp(`(?:${KEYWORDS})\\b${VALUE}`, 'gi');
 
+/* Long env-style names (up to 255 characters). Structure decides, not the name: `NAME=value` with nothing around the `=` is a shell / dotenv
+ * assignment and is masked; `const NAME = "x"`, `process.env.NAME = v`, `NAME: string;` and `NAME: {` are code and are kept UNLESS the value itself
+ * looks like a credential (12+ / 16+ characters mixing letters and digits, no '.' or '-' separated words, not followed by `;` or a type bracket).
+ * A quoted value is masked WITH both quotes, so no stray quote is left behind. */
+const ENV_KW = 'TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|COOKIE';
+const ENV_LONG = [
+  new RegExp(`\\b[A-Z0-9_]{0,255}(?:${ENV_KW})[A-Z0-9_]{0,255}=\\S+`, 'g'),
+  new RegExp(`\\b[A-Z0-9_]{0,255}(?:${ENV_KW})[A-Z0-9_]{0,255}[ \\t]+=[ \\t]+["']?(?=[A-Za-z+/=_]*\\d)(?=[0-9+/=_]*[A-Za-z])[A-Za-z0-9+/=_]{16,}["']?`, 'g'),
+  new RegExp(`\\b[A-Z0-9_]{0,255}(?:${ENV_KW})[A-Z0-9_]{0,255}[ \\t]*:[ \\t]*["']?(?=[^\\s"';<>()\\[\\]]*\\d)(?=[^\\s"';<>()\\[\\]]*[A-Za-z])[^\\s"';<>()\\[\\],]{12,}(?=[\\s"',]|$)`, 'g'),
+];
+
 /* Header-ish shapes the generic rules miss. Bounded quantifiers only. */
 const EXTRA_RE = [
   /(?<=(?:\b|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))x-(?:auth-token|api-key|access-token|csrf-token)["']?[ \t]{0,4}:[ \t]{0,4}["']?)[^\s"',;]{4,}/gi,   // only the value: the name and a JSON document stay intact
@@ -68,59 +79,81 @@ const EXTRA_RE = [
 
 /* ── Cookie / Set-Cookie headers ───────────────────────────────────────────────────────────────── */
 /* The header name is a header only when the character before it does not continue an identifier (`SSL_OP_COOKIE_EXCHANGE`,
- * `HTTP2_HEADER_COOKIE`); an escaped break (`\\n`, `\\r`, `\\t`) or a `%XX` before it counts as a boundary. Anything else - `>`, `[`, `=`,
- * `|`, `/`, `-`, a quote, a bracket, a non-ASCII character - may precede a real header. */
-const COOKIE_NAME = /(?:(?<![A-Za-z0-9_])|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))((?:set-)?cookie)(\\*["']?)[ \t]*:[ \t]*/gi;
-const COOKIE_NAME_STOP = /[\s;,"'`:=]/;
-/** Only a real HEADER is masked: its value starts like a cookie pair (`name=`, spaces allowed before the `=`, name up to 512
- * characters, no quote or separator inside it). An unquoted header runs to the end of the line - quotes inside the value
- * (`sid="x"`) are part of it; inside a quoted context (`"Cookie": "a=b"`, `cookie: 'a=b'`, `-H "Cookie: a=b"`) it stops at the closing quote.
- * Each match is looked at once, so the scan is linear however many `Cookie:` the text repeats. */
+ * `HTTP2_HEADER_COOKIE`); an escaped break (`\\n`, `\\r`, `\\t`) or a `%XX` before it counts as a boundary. The separator is `:` (HTTP header),
+ * `=` (`Cookie=sid=x`) or `,` (`setHeader('Cookie', 'sid=x')`, `.append("Cookie", "...")`), the name may be quoted, even escaped. */
+const COOKIE_NAME = /(?:(?<![A-Za-z0-9_])|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))((?:set-)?cookie)(\\*["']?)[ \t]*[:=,][ \t]*/gi;
+const COMPARE_OP = /^(?:=>|==|===|<=|>=|!=|!==)$/;
+/** end of the operator when the `=` at `eq` is part of a SPACED comparison / arrow (` => `, ` == `, ` <= `…), else 0 */
+function spacedOperatorEnd(text, eq) {
+  let s = eq;
+  while (s > 0 && eq - s < 2 && '<>!='.includes(text[s - 1])) s--;
+  let e = eq + 1;
+  while (e < text.length && e - eq < 3 && '=>'.includes(text[e])) e++;
+  return COMPARE_OP.test(text.slice(s, e)) && text[s - 1] === ' ' && text[e] === ' ' ? e : 0;
+}
+/** Once the header NAME is recognised the WHOLE value is masked - no cookie pair has to be parsed, so `sid = x`, `a=>b; sid=x`,
+ * `=x; sid=x`, `sid==x` and a `\t` inside the value all go. What keeps ordinary code and prose safe is only this: the value must contain an
+ * `=` that is not a spaced comparison / arrow (` => `, ` == `, ` <= `…). So `cookie: unknown) => void`, `cookie: string;` and
+ * `Cookie: please accept the terms` stay; `Cookie: please = accept` is masked (a documented trade-off). The value ends at the end of the
+ * line (real, or a JSON-escaped \n / \r - NOT \t, which is value content) or, inside a quoted context, at the closing quote (an escaped
+ * quote does not close it). Per-line and per-quote end positions and the next `=` are memoized, so the scan is linear in the text however
+ * many `Cookie:` it repeats. */
 function maskCookieHeaders(text, rep) {
   if (!/cookie/i.test(text)) return text;
   const re = new RegExp(COOKIE_NAME.source, COOKIE_NAME.flags);
   const n = text.length;
+  const endCache = new Map();                 // key -> [from, end]: the first terminator at or after any start in [from, end]
+  let eqFrom = -1;
+  let eqAt = -1;
+  const nextEq = (i) => { if (eqFrom >= 0 && i >= eqFrom && (eqAt < 0 || eqAt >= i)) return eqAt; eqFrom = i; eqAt = text.indexOf('=', i); return eqAt; };
+  const valueEnd = (start, term, escTerm) => {
+    const key = `${term || ''}${escTerm ? 'e' : ''}`;
+    const c = endCache.get(key);
+    if (c && start >= c[0] && start <= c[1]) return c[1];
+    let end = start;
+    while (end < n) {
+      const ch = text[end];
+      if (ch === '\n' || ch === '\r') break;
+      if (ch === '\\') {
+        let j = end;
+        while (text[j] === '\\') j++;
+        const f = text[j];
+        if (f === 'n' || f === 'r') break;
+        if (term && f === term) { if (escTerm) break; end = j + 1; continue; }
+        end = j;
+        continue;
+      }
+      if (term && ch === term) break;
+      end++;
+    }
+    endCache.set(key, [start, end]);
+    return end;
+  };
   let out = '';
   let pos = 0;
   let m;
   while ((m = re.exec(text)) !== null) {
     const before = m.index > 0 ? text[m.index - 1] : '';
-    let start = m.index + m[0].length;
+    let vs = m.index + m[0].length;
     let term = before === '"' || before === "'" || before === '`' ? before : null;
     let escTerm = false;
-    if (text[start] === '[' && (text[start + 1] === '"' || text[start + 1] === '\\')) start++;   // JSON {"Set-Cookie": ["sid=x"]}; a JS array of single-quoted strings is code and stays
-    const q0 = start;
-    while (text[start] === '\\') start++;
-    if (text[start] === '"' || text[start] === "'") { term = text[start]; escTerm = start > q0; start++; }   // JSON / quoted value, escaped or not
-    else start = q0;
-    let k = start;
-    const lim = Math.min(n, start + 512);
-    while (k < lim && !COOKIE_NAME_STOP.test(text[k])) k++;
-    let eq = k;
-    while (eq < n && eq < k + 4 && (text[eq] === ' ' || text[eq] === '\t')) eq++;
-    /* the pair separator is `=` and nothing else: not `=>`, `==`, `<=`; a gap before it is only allowed when no gap follows (`sid =x`) */
-    if (term && text[eq + 1] === term) term = null;       // `sid="x"` inside a quoted header: the inner quotes belong to the value
-    const gap = eq > k;
-    const sep = text[eq] === '=' && text[eq + 1] !== '>' && text[eq + 1] !== '=' && text[eq + 1] !== '<' && !(gap && (text[eq + 1] === ' ' || text[eq + 1] === '\t'));
-    if (k > start && sep) {
-      let end = eq + 1;
-      while (end < n) {
-        const c = text[end];
-        if (c === '\n' || c === '\r') break;
-        if (c === '\\') {
-          let j = end;
-          while (text[j] === '\\') j++;
-          const f = text[j];
-          if (f === 'n' || f === 'r' || f === 't') break;
-          if (term && f === term) { if (escTerm) break; end = j + 1; continue; }
-          end = j;
-          continue;
-        }
-        if (term && c === term) break;
-        end++;
-      }
-      out += text.slice(pos, start) + rep; pos = end; re.lastIndex = Math.max(end, re.lastIndex);
-    } else re.lastIndex = Math.max(start, re.lastIndex);
+    if (text[vs] === '[' && (text[vs + 1] === '"' || text[vs + 1] === '\\')) vs++;       // JSON {"Set-Cookie": ["sid=x"]}; a JS array of single-quoted strings is code
+    const q0 = vs;
+    while (text[vs] === '\\') vs++;
+    if (text[vs] === '"' || text[vs] === "'") { term = text[vs]; escTerm = vs > q0; vs++; }   // quoted value, escaped or not
+    else vs = q0;
+    let end = valueEnd(vs, term, escTerm);
+    if (term && end > vs && text[end - 1] === '=' && text[end] === term) end = valueEnd(vs, null, false);   // `sid="x"` inside a quoted header: inner quotes belong to the value
+    /* is there an `=` that is not a spaced comparison / arrow? look at no more than 64 of them */
+    let eq = nextEq(vs);
+    let credential = false;
+    for (let t = 0; t < 64 && eq >= 0 && eq < end; t++) {
+      const opEnd = spacedOperatorEnd(text, eq);
+      if (!opEnd) { credential = true; break; }
+      eq = text.indexOf('=', opEnd);
+    }
+    if (credential && end > vs) { out += text.slice(pos, vs) + rep; pos = end; re.lastIndex = Math.max(end, re.lastIndex); }
+    else re.lastIndex = Math.max(vs, re.lastIndex);
   }
   return out + text.slice(pos);
 }
@@ -374,4 +407,4 @@ function maskJsonCredentials(text, rep) {
   return out + text.slice(pos);
 }
 
-module.exports = { escB, KEYWORDS, ASSIGNMENT, ASSIGNMENT_LONG_NAME, EXTRA, maskPrivateKeys, maskUrlCredentials, maskJwt, maskAuthHeaders, maskJsonCredentials, looksLikeCredential };
+module.exports = { ENV_LONG, escB, KEYWORDS, ASSIGNMENT, ASSIGNMENT_LONG_NAME, EXTRA, maskPrivateKeys, maskUrlCredentials, maskJwt, maskAuthHeaders, maskJsonCredentials, looksLikeCredential };

@@ -102,7 +102,7 @@ test('data-loss guard: non-secret text stays byte-identical through the display 
     'const HTTP2_HEADER_COOKIE: string;', 'const SSL_OP_COOKIE_EXCHANGE: number;', 'HTTP2_HEADER_SET_COOKIE: string;', "'set-cookie': ['foo=bar', 'a=b']",
     'const HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: string;', 'Add an Authorization: Bearer header to every request', 'Authorization: Token refresh the thing',
     'Authorization: Basic authentication flow', '로그인 Authorization: Bearer 헤더를 추가해줘',
-    'cb: (err: Error | null, cookie: unknown) => void) & x', 'Cookie: please = accept', 'set cookie: yes => no', 'const SESSION_COOKIE = "sid";', 'process.env.X_COOKIE = value;',
+    'cb: (err: Error | null, cookie: unknown) => void) & x', 'set cookie: yes => no', 'Cookie: please accept the terms', 'cookie: string;', 'const SESSION_COOKIE = "sid";', 'process.env.X_COOKIE = value;',
     'export const METRIC_GEN_AI_SERVER_TIME_PER_OUTPUT_TOKEN = "gen_ai.server.time";', 'const DEEP_HEADER_SET_COOKIE = {', '쿠키 COOKIE_MAX_AGE = 3600 으로 변경',
     '개발 서버를 켜고 로그인 만료를 확인해 주세요', '/home/u/proj/src/app.ts:14:2', '+const x = 4096;', 'https://example.com/a?b=c', 'ssh git@github.com:org/r.git',
     `data:application/json;base64,${blob}`, `{"version":3,"mappings":"${'AAAA,CAAC;'.repeat(2000)}"}`, `payload=${blob}`, 'ba1cb02f1e0b6a8c7d5e4f3a2b1c0d9e8f7a6b5c',

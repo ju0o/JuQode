@@ -535,9 +535,8 @@ test('F3/F4 (round 4): Cookie / Set-Cookie are masked only as HEADERS; identifie
   for (const [t, secret] of hit) for (const [name, out] of both(t)) assert.ok(!out.includes(secret), `${name}: ${t} -> ${out}`);
   assert.strictEqual(mask("  cookie: 'get=cookies; and=attributes'"), "  cookie: '***'");
   /* boundary of the pair-name look: 128 token characters then '=' is a header, 129 is not */
-  /* round 5 widened the pair-name window from 128 to 512 characters */
-  assert.ok(!mask(`Cookie: ${'n'.repeat(512)}=v1`).includes('=v1'));
-  assert.ok(mask(`Cookie: ${'n'.repeat(513)}=v1`).includes('=v1'));
+  /* round 8: once the header name is recognised the whole value is masked - no pair name length limit any more */
+  assert.ok(!mask(`Cookie: ${'n'.repeat(5000)}=v1`).includes('=v1'));
 });
 
 test('F5 (round 4): the leaf cap truncates STRINGS only - numbers, booleans and null keep their truth value after it', () => {
@@ -678,12 +677,14 @@ test('backslash-run adversarial suffixes: every prefix class x every suffix unit
 });
 
 test('round 7 F3: "=>" / "==" / prose around "=" are not cookie pairs', () => {
-  for (const t of ['cb: (err: Error | null, cookie: unknown) => void) & x', 'Cookie: please = accept', 'set cookie: yes => no', 'cookie: a == b', 'cookie: a <= b', '쿠키: 이름 = 값 으로 설정', 'Cookie: =x'])
+  for (const t of ['cb: (err: Error | null, cookie: unknown) => void) & x', 'set cookie: yes => no', 'cookie: a == b', 'cookie: a <= b', 'cookie: a >= b', 'cookie: a != b', 'cookie: a !== b', 'cookie: a === b', '쿠키: 이름 = 값 으로 설정', 'Cookie: please accept the terms', 'cookie: string;', 'Cookie: a:b'])
     for (const [name, out] of both(t)) if (name === 'mask') assert.strictEqual(out, t, t);
-  assert.ok(!mask('Cookie: sid =Zq9x').includes('Zq9x'));          // a gap before '=' is fine when no gap follows
-  assert.ok(!mask('Cookie: sid    =Zq9x').includes('Zq9x'));      // 4 spaces
-  assert.ok(mask('Cookie: sid     =Zq9x').includes('Zq9x'));      // 5 spaces: prose
-  assert.strictEqual(mask('Cookie: a:b'), 'Cookie: a:b');         // ':' is not a pair separator
+  /* round 8: ANY other '=' in the value makes it credential-like, spacing and a bad first pair included */
+  for (const t of ['Cookie: sid = Zq9x', 'Cookie: sid    =Zq9x', 'Cookie: sid       =Zq9x', 'Cookie: please = accept Zq9x', 'Cookie: =x; sid=Zq9x', 'Cookie: a=>b; sid=Zq9x', 'Cookie: sid==Zq9x', 'Set-Cookie: sid = Zq9x; Path=/', 'Cookie: a=1;\\tsid=Zq9x', 'Cookie=sid=Zq9x',
+    "req.setHeader('Cookie','sid=Zq9x')", 'headers.append("Cookie", "sid=Zq9x")', "res.setHeader('Set-Cookie', ['sid=Zq9x'])"])
+    for (const [name, out] of both(t)) assert.ok(!out.includes('Zq9x'), `${name} ${t}`);
+  assert.strictEqual(mask('curl -H "Cookie: a=b" -H "X-Trace: abc" x'), 'curl -H "Cookie: ***" -H "X-Trace: abc" x');   // the closing quote ends the value
+  assert.strictEqual(mask('Cookie: a=b X\nnext'), 'Cookie: ***\nnext');
 });
 
 test('round 7 F4/F1: long names - structure decides (dotenv NAME=value, credential-looking values), not the name', () => {
@@ -705,7 +706,7 @@ test('round 7 F2: JSON Set-Cookie arrays, escaped cookie JSON, 100 spaces after 
 
 test('round 7 mutation survivors', () => {
   assert.strictEqual(mask('Cookie: a=b\\nnext'), 'Cookie: ***\\nnext');                         // value ends at an escaped break
-  assert.strictEqual(mask('Cookie: a=b\\tnext'), 'Cookie: ***\\tnext');
+  assert.strictEqual(mask('Cookie: a=b\\tnext'), 'Cookie: ***');                                // an escaped TAB is value content, not a line break
   assert.strictEqual(mask("'Cookie: a=b' tail"), "'Cookie: ***' tail");                          // quote before the name ends the value
   assert.strictEqual(mask('"Cookie: a=b" tail'), '"Cookie: ***" tail');
   assert.ok(!ss('password: stringsXX9').includes('stringsXX9'), 'only a BARE type word is exempt');
