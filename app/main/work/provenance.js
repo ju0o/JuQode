@@ -213,22 +213,29 @@ function summarizeChanges(changes) {   // + unavailableCount: how many files had
 /* ── (V1-307) long claims: grapheme/code-point safe ─────────────────────────────────────── */
 
 const segmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
-const units = (text) => (segmenter ? Array.from(segmenter.segment(text), (s) => s.segment) : Array.from(text));
+function* graphemes(text) { if (segmenter) for (const g of segmenter.segment(text)) yield g.segment; else yield* text; }
 
-/* O(max), not O(length): only a bounded prefix is ever segmented.
- *  length <= max code units  -> never over (graphemes <= code units): exact, no segmentation.
- *  otherwise segment the first max*8+16 code units: more than `max` graphemes there -> over: exact.
- *  If that prefix holds <= max graphemes (a pathological >8-code-unit-per-grapheme run, e.g. combining
- *  marks) the text is treated as over by CODE-UNIT length - documented, conservative, still bounded. */
-const PREFIX_FACTOR = 8;
+/* Lazy, exact decision: segment ONE grapheme at a time and stop at the (max+1)-th - cost is
+ * O(max graphemes), never O(text). `over` = a (max+1)-th grapheme exists; `head` = the first max
+ * graphemes (always well-formed). SAFETY CAP: at most SCAN_CAP (1 MiB of code units) is ever
+ * scanned; a text longer than that whose scanned part holds <= max graphemes (only possible with
+ * ~4000+ code units per grapheme) is treated as over, cut at the last complete grapheme boundary
+ * found. Texts up to SCAN_CAP are decided exactly. */
+const SCAN_CAP = 1 << 20;
 function cut(text, max) {
-  if (text.length <= max) return { over: false, head: null };
-  const head = units(text.length > max * PREFIX_FACTOR + 16 ? text.slice(0, max * PREFIX_FACTOR + 16) : text);
-  return { over: head.length > max || text.length > max * PREFIX_FACTOR + 16, head };
+  if (text.length <= max) return { over: false, head: null };      // graphemes <= code units: exact
+  const capped = text.length > SCAN_CAP;
+  const head = []; let over = false;
+  for (const g of graphemes(capped ? text.slice(0, SCAN_CAP) : text)) {
+    if (head.length === max) { over = true; break; }
+    head.push(g);
+  }
+  if (!over && capped) { over = true; head.pop(); }                // the last scanned grapheme may be cut by the cap
+  return { over, head };
 }
 const isOver = (text, max) => cut(text, max).over;
 
-/** Shown text is at most `limit` graphemes + the mark and is a prefix of `full`; `full` stays retrievable.
+/** Shown text is the first `limit` graphemes + the mark: well-formed, a prefix of `full`; `full` stays retrievable.
  * A lone surrogate already INSIDE the input is kept as is; a limit that is not a positive integer
  * means the default; a limit beyond the text length simply never truncates. */
 function limitClaim(text, limit = CLAIM_LIMIT) {
@@ -236,13 +243,14 @@ function limitClaim(text, limit = CLAIM_LIMIT) {
   const max = Number.isInteger(limit) && limit > 0 ? limit : CLAIM_LIMIT;
   const { over, head } = cut(full, max);
   if (!over) return { shown: full, truncated: false, full };
-  return { shown: head.slice(0, max).join('') + TRUNCATION_MARK, truncated: true, full };
+  return { shown: head.join('') + TRUNCATION_MARK, truncated: true, full };
 }
 
 /* ── (3) truth invariants ───────────────────────────────────────────────────────────────── */
 
 const SUCCESS_WORDS = ['success', 'succeeded', 'complete', 'completed', 'done', 'ok', 'passed', 'pass', 'task complete', 'task completed', ...SUCCESS_LABELS];
 const OTHER_WORDS = ['neutral', 'failure', 'failed', 'fail', 'error', 'unknown', 'warning', 'partial', 'cancelled', 'canceled', 'pending', 'info', ...FAILURE_LABELS, ...NEUTRAL_LABELS];
+const FAILURE_WORDS = ['failure', 'failed', 'fail', 'error'];
 const wordSet = (...lists) => new Set(lists.flat().filter((x) => typeof x === 'string').map(norm));
 const NO_WORDS = new Set(['', 'false', 'no', 'n', '0', 'null', 'undefined']);
 const truthy = (x) => (typeof x === 'string' ? !NO_WORDS.has(norm(x)) : Boolean(x));
@@ -281,6 +289,8 @@ function invariants(s, opts) {
 
   const words = [d.tone, d.status, d.label, d.outcome].filter((x) => typeof x === 'string').map(norm);
   const shownSuccess = words.some((x) => success.has(x)) || truthy(d.success) && d.success !== undefined;
+  const failure = wordSet(FAILURE_WORDS, FAILURE_LABELS, opts.failureLabels ?? []);
+  if (w.outcome === 'complete' && words.some((x) => failure.has(x))) add('complete_shown_failure', 'a complete Work rendered with a failure label');
   if (shownSuccess && w.outcome !== 'complete') add('non_success_shown_success', `${w.outcome ?? w.status} rendered as success`);
   if (!shownSuccess && w.outcome !== 'complete' && words.some((x) => x !== '' && !known.has(x))) add('unknown_display_tone', 'unrecognised tone on a non-complete Work');
 
@@ -322,6 +332,7 @@ function invariants(s, opts) {
     if (typeof text === 'string' && isOver(text, CLAIM_LIMIT)) {
       if (c.truncated !== true || typeof c.shown !== 'string' || isOver(c.shown, CLAIM_LIMIT + TRUNCATION_MARK.length) ||
           c.full !== text) add('claim_not_truncated', `${c.kind} of ${text.length} chars shown without limit/marker/full text`);
+      else if (c.shown.isWellFormed && !c.shown.isWellFormed()) add('shown_ill_formed', `${c.kind} shown text ends in a lone surrogate`);
       else if (!text.startsWith(c.shown.endsWith(TRUNCATION_MARK) ? c.shown.slice(0, -TRUNCATION_MARK.length) : c.shown)) add('shown_not_prefix', `${c.kind} shown text is not the start of the full text`);
     }
   }
@@ -338,23 +349,43 @@ function invariants(s, opts) {
 
 /* ── immutability ───────────────────────────────────────────────────────────────────────── */
 
-/** Canonical JSON: sorted keys; NaN, undefined, null stay distinct; throws on cycles. */
+/** Canonical JSON: sorted keys; NaN, undefined, null, absent stay distinct; Date by time (invalid distinct);
+ * Map/Set by entries; throws on cycles. */
 function canon(x, seen = new Set()) {
   if (x === null) return 'null';
   if (typeof x !== 'object') return typeof x === 'string' ? JSON.stringify(x) : `${typeof x}:${String(x)}`;
   if (seen.has(x)) throw new TypeError('cycle');
   seen.add(x);
-  const out = Array.isArray(x) ? `[${x.map((y) => canon(y, seen)).join(',')}]`
-    : `{${Object.keys(x).sort().map((k) => `${JSON.stringify(k)}:${canon(x[k], seen)}`).join(',')}}`;
+  let out;
+  if (x instanceof Date) out = `date:${x.getTime()}`;
+  else if (x instanceof Map) out = `map:[${[...x].map(([k, v]) => `${canon(k, seen)}=>${canon(v, seen)}`).sort().join(',')}]`;
+  else if (x instanceof Set) out = `set:[${[...x].map((v) => canon(v, seen)).sort().join(',')}]`;
+  else if (Array.isArray(x)) out = `[${x.map((y) => canon(y, seen)).join(',')}]`;
+  else out = `{${Object.keys(x).sort().map((k) => `${JSON.stringify(k)}:${canon(x[k], seen)}`).join(',')}}`;
   seen.delete(x);
   return out;
 }
 
-/** Same content? Native JSON text first (fast); only a difference, or a 'null' (NaN also prints as null),
- * pays for the canonical comparison. Throws on cycles. */
+/** Plain JSON data only: string/boolean/finite number/null, plain objects and arrays, no toJSON, no
+ * undefined/function/symbol/bigint/Date/Map/Set. Depth-limited (a cycle just reads as "not plain"). */
+function plain(x, depth = 0) {
+  if (x === null) return true;
+  const t = typeof x;
+  if (t === 'string' || t === 'boolean') return true;
+  if (t === 'number') return Number.isFinite(x);
+  if (t !== 'object' || depth > 64) return false;
+  if (Array.isArray(x)) { for (let i = 0; i < x.length; i++) if (!plain(x[i], depth + 1)) return false; return true; }
+  const proto = Object.getPrototypeOf(x);
+  if ((proto !== Object.prototype && proto !== null) || 'toJSON' in x) return false;
+  for (const k in x) if (!plain(x[k], depth + 1)) return false;
+  return true;
+}
+
+/** Same content? Plain-JSON rows with equal native JSON text are equal (fast, measured below);
+ * a difference, or any non-plain row, goes to the canonical comparison (key order, Date, Map/Set...).
+ * Measured alone, 1M id'd rows: ~1.7 s plain, null-heavy ~see tests. Throws on cycles. */
 function sameRow(a, b) {
-  const x = JSON.stringify(a); const y = JSON.stringify(b);
-  if (x === y && x !== undefined && !x.includes('null')) return true;
+  if (plain(a) && plain(b) && JSON.stringify(a) === JSON.stringify(b)) return true;
   return canon(a) === canon(b);
 }
 

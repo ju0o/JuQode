@@ -441,7 +441,7 @@ test('property (seed 1..300): the checker flags exactly the Task-pass claims the
     assert.strictEqual(has, claimsPass, `seed ${seed}`);
     const o = pick(['complete', 'partial', 'failed', 'cancelled_partial', 'cancelled_nochange', 'ended_unknown']); const tone = pick(['success', 'neutral', 'failure', 'unknown']);
     const hit = checkTruthInvariants({ work: { outcome: o, finishObserved: true }, display: { tone } }).length > 0;
-    assert.strictEqual(hit, o !== 'complete' && tone === 'success', `seed ${seed}`);
+    assert.strictEqual(hit, (o !== 'complete' && tone === 'success') || (o === 'complete' && tone === 'failure'), `seed ${seed}`);
   }
 });
 
@@ -581,9 +581,10 @@ test('bounded cost: 50 MB claim, 1M claims, 1M immutable rows', () => {
   assert.ok(tImm < 3000, `1M immutable rows ${tImm}`);
 });
 
-test('limitClaim: a pathological combining run is over by code-unit length beyond the bounded prefix (documented)', () => {
+test('limitClaim: a long combining run is ONE grapheme (exact) up to the scan cap; beyond it, cut well-formed (documented)', () => {
   const heavy = 'e' + '\u0301'.repeat(5000);          // ONE grapheme, 5001 code units
-  const l = limitClaim(heavy);
-  assert.deepStrictEqual([l.truncated, l.full === heavy, l.shown.endsWith('…')], [true, true, true]);
-  assert.strictEqual(limitClaim('e' + '\u0301'.repeat(100)).truncated, false, 'inside the bound it is judged on graphemes');
+  assert.strictEqual(limitClaim(heavy).truncated, false);
+  const huge = 'e' + '\u0301'.repeat((1 << 20) + 10);  // past the 1 MiB scan cap
+  const l = limitClaim(huge);
+  assert.deepStrictEqual([l.truncated, l.full === huge, l.shown.endsWith('…'), l.shown.isWellFormed(), l.shown.length < 10], [true, true, true, true, true]);
 });
