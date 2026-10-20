@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const R = path.resolve(__dirname, '..');
-const { classify, isKnownClaudeEvent, CLASSES, RECOVERIES } = require(path.join(R, 'app/main/provider/failure.js'));
+const { classify, isKnownClaudeEvent, eventKind, RECORDED_EVENTS, REDUCER_ONLY_EVENTS, CLASSES, RECOVERIES } = require(path.join(R, 'app/main/provider/failure.js'));
 const { scriptBin } = require('./fakecli.js');
 const { code: productCode } = require('./src.js');
 
@@ -19,24 +19,58 @@ test('table: every recorded Claude shape maps to a fixed class / recovery / reas
   const T = [
     [{ source: 'detect', code: 'not-installed' }, ['cli-missing', false, 'install-or-fix-path', 'detect-not-installed']],
     [{ source: 'detect', code: 'no-response' }, ['cli-interrupted', true, 'recheck', 'detect-no-response']],
-    [{ source: 'detect', code: 'logged-out' }, ['auth-expired', false, 'reauth-in-cli', 'detect-logged-out']],
+    [{ source: 'detect', code: 'logged-out' }, ['auth-expired', false, 'reauth-in-cli', 'detect-login-required']],
     [{ source: 'detect', code: 'unreadable-auth' }, ['unknown', false, 'recheck', 'detect-unreadable-auth']],
     [{ source: 'detect', code: 'error' }, ['cli-broken', false, 'recheck', 'detect-error']],
     [{ source: 'preflight', code: 'binary-not-found' }, ['cli-missing', false, 'install-or-fix-path', 'preflight-cli-missing']],
     [{ source: 'preflight', code: 'version-changed' }, ['version-drift', false, 'recheck', 'preflight-version-drift']],
-    [{ source: 'preflight', code: 'binary-changed' }, ['version-drift', false, 'recheck', 'preflight-version-drift']],
-    [{ source: 'preflight', code: 'not-the-recorded-binary' }, ['version-drift', false, 'recheck', 'preflight-version-drift']],
+    [{ source: 'preflight', code: 'binary-changed' }, ['binary-changed', false, 'none', 'preflight-binary-changed']],
+    [{ source: 'preflight', code: 'not-the-recorded-binary' }, ['binary-changed', false, 'none', 'preflight-binary-changed']],
+    [{ source: 'preflight', code: 'path-changed' }, ['binary-changed', false, 'none', 'preflight-binary-changed']],
+    [{ source: 'preflight', code: 'not-found' }, ['cli-missing', false, 'install-or-fix-path', 'preflight-cli-missing']],
+    [{ source: 'preflight', code: 'not-a-file' }, ['cli-broken', false, 'install-or-fix-path', 'preflight-cli-broken']],
+    [{ source: 'preflight', code: 'no-recorded-identity' }, ['version-drift', false, 'recheck', 'preflight-version-drift']],
+    [{ source: 'preflight', code: 'version-unreadable' }, ['cli-broken', false, 'recheck', 'preflight-cli-broken']],
+    [{ source: 'preflight', code: 'changed-while-hashing' }, ['cli-broken', false, 'recheck', 'preflight-cli-broken']],
+    [{ source: 'preflight', code: 'identity-unverifiable:script-shim-not-a-binary' }, ['cli-broken', false, 'install-or-fix-path', 'preflight-cli-broken']],
+    [{ source: 'preflight', code: 'identity-unverifiable:binary-not-found' }, ['cli-missing', false, 'install-or-fix-path', 'preflight-cli-missing']],
+    [{ source: 'preflight', code: 'identity-unverifiable:not-an-absolute-path' }, ['unknown', false, 'none', 'preflight-config-error']],
+    [{ source: 'preflight', code: 'identity-unverifiable:whatever' }, ['cli-broken', false, 'recheck', 'preflight-cli-broken']],
+    [{ source: 'preflight', code: 'identity-unverifiable:binary-changed' }, ['cli-broken', false, 'recheck', 'preflight-cli-broken']],
+    [{ source: 'preflight', code: 'not-an-absolute-path' }, ['unknown', false, 'none', 'preflight-config-error']],
+    [{ source: 'preflight', code: 'bad-tools' }, ['unknown', false, 'none', 'preflight-safety-stop']],
+    [{ source: 'preflight', code: 'bad-session-id' }, ['unknown', false, 'none', 'preflight-safety-stop']],
+    [{ source: 'preflight', code: 'unscoped-grant' }, ['unknown', false, 'none', 'preflight-safety-stop']],
+    [{ source: 'preflight', code: 'never-heard-of-it' }, ['unknown', false, 'recheck', 'preflight-unrecognized']],
     [{ source: 'preflight', code: 'identity-unverifiable:binary-unreadable' }, ['cli-broken', false, 'recheck', 'preflight-cli-broken']],
     [{ source: 'preflight', code: 'script-shim-not-a-binary' }, ['cli-broken', false, 'install-or-fix-path', 'preflight-cli-broken']],
-    [{ source: 'preflight', code: 'safety-unattested' }, ['unknown', false, 'none', 'preflight-refused']],
-    [{ source: 'preflight', code: 'permissive-arg:--yolo' }, ['unknown', false, 'none', 'preflight-refused']],
+    [{ source: 'preflight', code: 'safety-unattested' }, ['unknown', false, 'none', 'preflight-safety-stop']],
+    [{ source: 'preflight', code: 'permissive-arg:--yolo' }, ['unknown', false, 'none', 'preflight-safety-stop']],
     [{ source: 'exit', exitCode: 1 }, ['cli-broken', true, 'retry-same', 'exit-nonzero']],
     [{ source: 'exit', exitCode: null, signal: 'SIGKILL' }, ['cli-interrupted', true, 'retry-same', 'exit-signal']],
     [{ source: 'exit', exitCode: 137, signal: 'SIGTERM' }, ['cli-interrupted', true, 'retry-same', 'exit-signal']],
     [{ source: 'exit', exitCode: 0 }, ['unknown', false, 'none', 'exit-no-failure-evidence']],
     [{ source: 'stream', unknownEvent: { type: 'brand_new_event' } }, ['protocol-drift', false, 'recheck', 'stream-unknown-event']],
     [{ source: 'stream', unknownEvent: { type: 'system', subtype: 'brand_new' } }, ['protocol-drift', false, 'recheck', 'stream-unknown-event']],
-    [{ source: 'stream', unknownEvent: { type: 'rate_limit_event' } }, ['unknown', false, 'none', 'stream-event-is-known']],
+    [{ source: 'stream', unknownEvent: { type: 'rate_limit_event' } }, ['unknown', false, 'none', 'stream-event-recorded']],
+    [{ source: 'stream', unknownEvent: { type: 'system', subtype: 'status' } }, ['unknown', false, 'none', 'stream-event-reducer-only']],
+    [{ source: 'stream', unknownEvent: { type: 'result', subtype: 'success', is_error: true } }, ['unknown', false, 'none', 'stream-result-failed']],
+    [{ source: 'stream', unknownEvent: { type: 'result', subtype: 'error_max_turns' } }, ['unknown', false, 'none', 'stream-result-failed']],
+    [{ source: 'stream', unknownEvent: { type: 'result', subtype: 'success', is_error: false } }, ['unknown', false, 'none', 'stream-event-recorded']],
+    [{ source: 'stream', unknownEvent: { type: 'result', subtype: 'success' }, apiErrorStatus: 529 }, ['unknown', false, 'recheck', 'api-error-status-unmeasured']],
+    [{ source: 'stream', unknownEvent: { type: 'result', subtype: 'success', api_error_status: 500 } }, ['unknown', false, 'recheck', 'api-error-status-unmeasured']],
+    [{ source: 'stream', unknownEvent: { type: 'system', subtype: 'status' }, apiErrorStatus: 1 }, ['unknown', false, 'recheck', 'api-error-status-unmeasured']],
+    [{ source: 'version', expectedVersion: '', actualVersion: '' }, ['unknown', false, 'recheck', 'version-unreadable']],
+    [{ source: 'version', expectedVersion: '1' }, ['unknown', false, 'recheck', 'version-unreadable']],
+    [{ source: 'exit', exitCode: 2, signal: ' ' }, ['cli-broken', true, 'retry-same', 'exit-nonzero']],
+    [{ source: 'exit', exitCode: 2, signal: 'sigkill' }, ['cli-broken', true, 'retry-same', 'exit-nonzero']],
+    [{ source: 'exit', exitCode: 0, signal: 'KILL' }, ['unknown', false, 'none', 'exit-no-failure-evidence']],
+    [{ source: 'exit', signal: 'SIGKILL', stoppedByProduct: 'cancel' }, ['unknown', false, 'none', 'exit-stopped-by-product']],
+    [{ source: 'exit', exitCode: 1, stoppedByProduct: 'timeout' }, ['unknown', false, 'none', 'exit-stopped-by-product']],
+    [{ source: 'exit', exitCode: 1, stoppedByProduct: 'mismatch' }, ['unknown', false, 'none', 'exit-stopped-by-product']],
+    [{ source: 'exit', exitCode: 1, stoppedByProduct: true }, ['unknown', false, 'none', 'exit-stopped-by-product']],
+    [{ source: 'exit', exitCode: 1, stoppedByProduct: 'anything-else' }, ['unknown', false, 'none', 'exit-stopped-by-product']],
+    [{ source: 'exit', exitCode: 1, stoppedByProduct: false }, ['cli-broken', true, 'retry-same', 'exit-nonzero']],
     [{ source: 'stream', apiErrorStatus: null }, ['unknown', false, 'none', 'stream-no-failure-evidence']],
     [{ source: 'stream', apiErrorStatus: 401 }, ['unknown', false, 'recheck', 'api-error-status-unmeasured']],
     [{ source: 'stream', apiErrorStatus: 429 }, ['unknown', false, 'recheck', 'api-error-status-unmeasured']],
@@ -50,7 +84,7 @@ test('table: every recorded Claude shape maps to a fixed class / recovery / reas
 
 test('malformed / boundary inputs fail closed: unknown, never retryable, no throw', () => {
   const BAD = [undefined, null, 0, 1, '', 'exit', [], [{ source: 'exit', exitCode: 1 }], () => {}, {}, { source: 'nope' }, { source: 'exit' },
-    { source: 'exit', exitCode: '1' }, { source: 'exit', exitCode: 1.5 }, { source: 'exit', exitCode: NaN }, { source: 'exit', signal: '' }, { source: 'exit', signal: 9 },
+    { source: 'exit', exitCode: '1' }, { source: 'exit', exitCode: 1.5 }, { source: 'exit', exitCode: 1, signal: 'sigkill', stoppedByProduct: undefined, provider: 'x' }, { source: 'exit', exitCode: NaN }, { source: 'exit', signal: '' }, { source: 'exit', signal: 9 },
     { source: 'detect' }, { source: 'detect', code: 'logged_out' }, { source: 'detect', code: '__proto__' }, { source: 'detect', code: 'toString' },
     { source: 'preflight' }, { source: 'preflight', code: '' }, { source: 'preflight', code: '__proto__' }, { source: 'preflight', code: 'constructor:x' },
     { source: 'stream' }, { source: 'stream', unknownEvent: 'x' }, { source: 'version' }, { source: 'version', expectedVersion: 1, actualVersion: 2 }];
@@ -61,8 +95,20 @@ test('malformed / boundary inputs fail closed: unknown, never retryable, no thro
     assert.strictEqual(r.autoFallback, false);
     assert.ok(['recheck', 'none'].includes(r.recovery));
   }
-  /* a getter that throws is the caller's bug, not a silent success */
-  assert.throws(() => classify({ get source() { throw new Error('x'); } }));
+  /* never throws: a throwing getter or a revoked Proxy is the fail-closed unknown, not an exception and not a success */
+  const { proxy, revoke } = Proxy.revocable({ source: 'exit', exitCode: 1 }, {}); revoke();
+  assert.deepStrictEqual(shape(classify({ get source() { throw new Error('x'); } })), ['unknown', false, 'none', 'unknown-source']);   // accessors are never invoked
+  for (const o of [proxy, new Proxy({}, { getOwnPropertyDescriptor() { throw new Error('y'); } }),
+    { source: 'stream', unknownEvent: new Proxy({}, { getOwnPropertyDescriptor() { throw new Error('z'); } }) }]) {
+    assert.deepStrictEqual(shape(classify(o)), ['unknown', false, 'none', 'bad-observation']);
+  }
+  /* inherited / accessor values do not count */
+  assert.deepStrictEqual(shape(classify(Object.create({ source: 'exit', exitCode: 1 }))), ['unknown', false, 'none', 'unknown-source']);
+  assert.strictEqual(classify({ source: 'exit', get exitCode() { return 1; } }).class, 'unknown');
+  assert.strictEqual(isKnownClaudeEvent(Object.create({ type: 'result' })), false);
+  assert.strictEqual(classify({ source: 'stream', unknownEvent: Object.create({ type: 'result' }) }).class, 'protocol-drift');
+  assert.strictEqual(isKnownClaudeEvent({ get type() { return 'result'; } }), false);
+  assert.strictEqual(isKnownClaudeEvent(new Proxy({}, { getOwnPropertyDescriptor() { throw new Error('q'); } })), false);
 });
 
 test('stderr is never interpreted and never echoed (huge, unicode, secret-looking)', () => {
@@ -101,19 +147,50 @@ test('other providers: nothing about Codex / OpenCode is interpreted', () => {
   assert.strictEqual(classify({ source: 'stream', unknownEvent: { type: 'turn.failed' } }).class, 'protocol-drift');   // unknown to Claude's table: drift, not a Codex reading
 });
 
+test('event table: pinned exactly; prototype-key types are not events (hasOwn, not in)', () => {
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(RECORDED_EVENTS)), { system: ['init', 'permission_denied', 'hook_started', 'hook_response', 'thinking_tokens'], assistant: null, user: null, result: null, rate_limit_event: null });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(REDUCER_ONLY_EVENTS)), { system: ['status'] });
+  for (const type of ['toString', 'constructor', '__proto__', 'hasOwnProperty', 'valueOf', 'error', 'turn.failed', 'stream_event', 'message', 'item.completed', 'bogus', '', 'System', 'RESULT', 1, null, {}]) {
+    assert.strictEqual(isKnownClaudeEvent({ type }), false, String(type));
+    assert.strictEqual(classify({ source: 'stream', unknownEvent: { type } }).class, 'protocol-drift', String(type));
+  }
+  for (const subtype of ['toString', '__proto__', 'bogus', '', undefined, null, 'Init']) assert.strictEqual(isKnownClaudeEvent({ type: 'system', subtype }), false, String(subtype));
+  assert.strictEqual(eventKind({ type: 'system', subtype: 'status' }), 'reducer-only');
+  assert.strictEqual(eventKind({ type: 'system', subtype: 'init' }), 'recorded');
+  assert.strictEqual(eventKind({ type: 'system', subtype: 'hook_started' }), 'recorded');
+});
+
+test('wording guard: no class / recovery / reasonCode implies a free slot, a released hold, a stopped process, or another Agent', () => {
+  const BAD = /slot|hold|releas|\bfree\b|stopped(?!-by-product)|gone|dead|success|ok\b|complete|fallback|switch|codex|opencode|another|substitut/i;
+  for (const w of [...CLASSES, ...RECOVERIES]) assert.ok(!BAD.test(w), w);
+  const obs = [{ source: 'detect', code: 'no-response' }, { source: 'exit', exitCode: 1 }, { source: 'exit', signal: 'SIGKILL' }, { source: 'exit', signal: 'SIGTERM', stoppedByProduct: 'cancel' },
+    { source: 'preflight', code: 'binary-changed' }, { source: 'preflight', code: 'bad-tools' }, { source: 'stream', unknownEvent: { type: 'result', is_error: true } }, { source: 'stream', unknownEvent: { type: 'x' } },
+    { source: 'version', expectedVersion: 'a', actualVersion: 'b' }, { source: 'detect', code: 'logged-out' }];
+  for (const o of obs) for (const v of Object.values(classify(o))) assert.ok(!BAD.test(String(v)), `${JSON.stringify(o)} ${v}`);
+  assert.ok(!/expired/.test(classify({ source: 'detect', code: 'logged-out' }).reasonCode), 'logged-out must not claim expiry');
+  /* a signal / nonzero exit is retry-same at most; with stoppedByProduct it is never retryable */
+  for (const stoppedByProduct of [true, 'cancel', 'timeout', 'mismatch']) {
+    for (const o of [{ exitCode: 1 }, { signal: 'SIGKILL' }, { exitCode: 143, signal: 'SIGTERM' }]) {
+      const r = classify({ source: 'exit', ...o, stoppedByProduct });
+      assert.deepStrictEqual([r.class, r.retryable, r.recovery], ['unknown', false, 'none']);
+    }
+  }
+});
+
 test('property: autoFallback is always false, result is closed-set, frozen, never names another Agent, unknown never retryable', () => {
   let seed = 7; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const junk = () => pick([undefined, null, 0, 1, -1, 137, 1.5, NaN, '', 'x', 'SIGTERM', 'logged-out', 'version-changed', '인증', 'a'.repeat(1000), [], {}, { type: 'result' }, { type: 'zzz' }, true]);
   const SRC = ['detect', 'preflight', 'exit', 'stream', 'version', 'bogus', undefined];
   for (let i = 0; i < 20000; i += 1) {
-    const o = { source: pick(SRC), code: junk(), exitCode: junk(), signal: junk(), apiErrorStatus: junk(), stderrTail: junk(), expectedVersion: junk(), actualVersion: junk(), unknownEvent: junk(), provider: rnd() < 0.8 ? undefined : junk() };
+    const o = { source: pick(SRC), code: junk(), exitCode: junk(), signal: junk(), stoppedByProduct: junk(), apiErrorStatus: junk(), stderrTail: junk(), expectedVersion: junk(), actualVersion: junk(), unknownEvent: junk(), provider: rnd() < 0.8 ? undefined : junk() };
     const r = classify(o);
     assert.strictEqual(r.autoFallback, false);
     assert.ok(CLASSES.includes(r.class) && RECOVERIES.includes(r.recovery));
     assert.ok(Object.isFrozen(r));
     assert.deepStrictEqual(Object.keys(r).sort(), ['autoFallback', 'class', 'reasonCode', 'recovery', 'retryable']);
     assert.ok(!FALLBACK_WORDS.test(r.reasonCode));
+    if (r.class === 'binary-changed') assert.ok(!r.retryable && r.recovery === 'none');
     if (r.class === 'unknown') { assert.strictEqual(r.retryable, false); assert.ok(r.recovery !== 'retry-same'); }
     if (r.retryable) assert.strictEqual(r.recovery === 'retry-same' || r.recovery === 'recheck', true);
     assert.ok(!['offline', 'rate-limited'].includes(r.class), 'unreachable classes became reachable without a measured shape');
@@ -131,7 +208,7 @@ test('fixtures: every recorded Claude event is known; replayed streams carry no 
     const ev = fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
     assert.ok(ev.length > 5, f);
     for (const e of ev) {
-      assert.ok(isKnownClaudeEvent(e), `${path.basename(f)}: ${e.type}/${e.subtype}`);
+      assert.strictEqual(eventKind(e), 'recorded', `${path.basename(f)}: ${e.type}/${e.subtype}`);
       assert.strictEqual(classify({ source: 'stream', unknownEvent: e }).class, 'unknown');
     }
     const res = ev.find((e) => e.type === 'result');
@@ -145,6 +222,7 @@ test('fixtures: every recorded Claude event is known; replayed streams carry no 
   /* protocol drift: the same recording with one event renamed is caught */
   const ev = fs.readFileSync(files[0], 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const drifted = ev.map((e) => (e.type === 'rate_limit_event' ? { ...e, type: 'rate_limit_event_v2' } : e)).filter((e) => !isKnownClaudeEvent(e));
+  assert.ok(!ev.some((e) => e.type === 'system' && e.subtype === 'status'), 'system/status is not in any recorded stream (reducer-only)');
   assert.strictEqual(drifted.length, 1);
   assert.strictEqual(classify({ source: 'stream', unknownEvent: drifted[0] }).class, 'protocol-drift');
 });
@@ -167,8 +245,8 @@ test('fakecli failure modes: real exit codes / signals / detect reasons classify
     assert.strictEqual(classify({ source: 'stream', unknownEvent: odd[0] }).class, 'protocol-drift');
 
     /* detect() reasons from real fake binaries */
-    const detectWith = (bin, ms = '5000') => {
-      const r = spawnSync(process.execPath, ['-e', `process.env.JUQODE_CLAUDE_BIN=${JSON.stringify(bin)};require(${JSON.stringify(path.join(R, 'app/main/claude-detect.js'))}).detect().then(r=>console.log(JSON.stringify(r)))`],
+    const detectWith = (bin, ms = '3000') => {
+      const r = spawnSync(process.execPath, ['-e', `process.env.JUQODE_CLAUDE_BIN=${JSON.stringify(bin)};require(${JSON.stringify(path.join(R, 'app/main/claude-detect.js'))}).detect().then(r=>{console.log(JSON.stringify(r));process.exit(0)})`],
         { encoding: 'utf8', env: { ...process.env, JUQODE_CLAUDE_TIMEOUT_MS: ms } });
       return JSON.parse(r.stdout);
     };
@@ -180,7 +258,7 @@ test('fakecli failure modes: real exit codes / signals / detect reasons classify
       [scriptBin(dir, 'hang', 'setInterval(()=>{},1000)'), 'no-response', 'cli-interrupted'],
     ];
     for (const [bin, reason, cls] of cases) {
-      const d = detectWith(bin, reason === 'no-response' ? '400' : '5000');
+      const d = detectWith(bin, reason === 'no-response' ? '400' : '3000');
       assert.strictEqual(d.available, false); assert.strictEqual(d.reason, reason);
       const c = classify({ source: 'detect', code: d.reason });
       assert.strictEqual(c.class, cls, reason);
@@ -193,7 +271,7 @@ test('product contracts the classifier mirrors: preflight reasons come from the 
   const src = productCode('app/main/provider/claude-contract.js') + productCode('app/main/provider/identity.js');
   for (const code of ['binary-not-found', 'binary-changed', 'version-changed', 'not-the-recorded-binary', 'no-recorded-identity', 'binary-unreadable', 'changed-while-hashing', 'script-shim-not-a-binary', 'path-changed']) {
     assert.ok(src.includes(`'${code}'`), `${code} no longer exists in the product; the classifier table is stale`);
-    assert.notStrictEqual(classify({ source: 'preflight', code }).reasonCode, 'preflight-refused', code);
+    assert.ok(!['preflight-unrecognized', 'preflight-safety-stop'].includes(classify({ source: 'preflight', code }).reasonCode), code);
   }
   const own = productCode('app/main/provider/failure.js');
   assert.ok(!/require\(['"](node:)?(child_process|net|http|https|dns|fs)/.test(own), 'classifier must stay pure');
