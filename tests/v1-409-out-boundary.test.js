@@ -460,11 +460,12 @@ test('F6: JSON credentials at any escape depth, long env-style keys, keys over t
   for (const [, out] of both('{"AUTHOR_NAME":"somebody-with-long-name","COOKIE_POLICY":"short"}')) assert.ok(out.includes('somebody-with-long-name'));
   for (const [, out] of both('{"X_AUTH":"zzzz1234yyyy5678"}')) assert.ok(!out.includes('zzzz1234yyyy5678'));
   for (const esc of ['\\r', '\\t', '\\n']) for (const [name, out] of both(`a${esc}${GH}`)) assert.ok(!out.includes(GH.slice(4)), `${name} ${esc}`);
-  /* the env-var name keeps its 32-character prefix / suffix window: widening it to 255 erased TypeScript declarations such as
-   * `HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: string;` (24 file diffs in a 6.8k-file node_modules corpus). A longer name is OPEN. */
-  assert.ok(mask(`${'A'.repeat(31)}_TOKEN=abc12345`).endsWith('***'), 'env-var name with a 32-char prefix');
+  /* an ASSIGNMENT (`=` straight after the name) may carry a 255-character name; a declaration `NAME: type;` keeps the 32-character window and is untouched */
+  assert.ok(!mask(`${'A'.repeat(100)}_TOKEN=abc12345`).includes('abc12345'), 'env-var name with a 100-char prefix');
+  assert.ok(!mask(`TOKEN${'B'.repeat(100)}=abc12345`).includes('abc12345'), 'env-var name with a 100-char suffix');
+  assert.ok(!mask('MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN=abc12345XYZ').includes('abc12345XYZ'));
+  assert.ok(!mask('HTTP_COOKIE=sid=abc12345XYZ').includes('abc12345XYZ'));
   assert.strictEqual(mask('const HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: string;'), 'const HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: string;');
-  assert.ok(!mask(`TOKEN${'B'.repeat(32)}=abc12345`).includes('abc12345'), 'env-var name with a 32-char suffix');
 });
 
 test('walker: 1M small strings are truncated by the leaf cap (not walked for seconds); ordinary results are not', () => {
@@ -549,7 +550,7 @@ test('F5 (round 4): the leaf cap truncates STRINGS only - numbers, booleans and 
 
 /* tight growth-based bounds, best of 5, for every hostile generator, on every surface */
 const HOSTILE = ['Authorization: Digest ', 'Proxy-Authorization: Digest ', 'Cookie: ', 'Cookie: aaaa ', 'Set-Cookie: ', 'Authorization: Basic ', 'Authorization: Bearer ', 'Authorization: Token ', 'Authorization: Negotiate ',
-  'curl -u ', 'curl -s --user ', 'X-Api-Key: ', 'eyJ-', 'eyJaaaaaaaaaa.', 'a-', 'a.', 'a://', 'a://u:', '-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\nAAAA\n', '-----BEGIN ', 'token=', 'API_TOKEN=', '"API_TOKEN":', '\\"', 'a\\n', '%20', 'AKIA', 'sk-', 'ghp_', 'Bearer ', 'Basic ', '\n', ' '];
+  'curl -u ', 'curl -s --user ', 'a\\ncurl -u ', 'curl -u a:b\\n', 'Cookie: a=b\\n', 'Cookie: a="b ', '>Cookie: ', 'Authorization: Token x\\n', 'Authorization: Negotiate Ab1\\n', 'HTTP_COOKIE=', 'A_TOKEN=', 'X-Api-Key: ', 'eyJ-', 'eyJaaaaaaaaaa.', 'a-', 'a.', 'a://', 'a://u:', '-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\nAAAA\n', '-----BEGIN ', 'token=', 'API_TOKEN=', '"API_TOKEN":', '\\"', 'a\\n', '%20', 'AKIA', 'sk-', 'ghp_', 'Bearer ', 'Basic ', '\n', ' '];
 const GUARD_UNITS = ['Authorization: Digest ', 'Cookie: ', 'Cookie: aaaa ', 'Authorization: Bearer ', 'curl -u ', 'eyJ-', 'a-', 'a://u:', '-----BEGIN PRIVATE KEY-----', '"API_TOKEN":', 'a\\n', '%20'];
 const SURFACES = {
   mask: (s) => mask(s), safeSnapshot: (s) => safeSnapshot(s),
@@ -601,4 +602,51 @@ test('threshold boundaries (min-1 / min / min+1) are pinned', () => {
   assert.ok(mask(`curl ${'x '.repeat(300)}-u user:hunter22`).includes('hunter22'));
   /* mixed-case JSON header keys, raw token without a scheme */
   for (const [name, out] of both('{"Authorization":"rawtoken1234567890","Cookie":"a=b","author":"somebodylongname12345"}')) { assert.ok(!out.includes('rawtoken1234567890'), name); assert.ok(out.includes('somebodylongname12345'), name); JSON.parse(out); }
+});
+
+/* ---- QA round 5: boundaries, escaped breaks, cookie prefixes, survivors ---- */
+test('round 5: curl after an escaped break / %XX is found; "mycurl" is not curl', () => {
+  for (const pre of ['a\\n', 'a\\r', 'a\\t', 'a\\\\n', 'a\\\\\\\\n', 'a%0A', '%41']) for (const [name, out] of both(`${pre}curl -u admin:${PW} https://x`)) assert.ok(!out.includes(PW), `${name} ${pre}`);
+  for (const [name, out] of both(`mycurl -u admin:${PW} x`)) assert.ok(out.includes(PW), `${name}: \\b before curl`);
+  for (const [name, out] of both(`curl\n-u admin:${PW}`)) assert.ok(out.includes(PW), `${name}: a different line`);
+});
+
+test('round 5: Cookie headers after any non-identifier character; identifiers and declarations untouched', () => {
+  const secret = 'CanaryCookieValue9';
+  for (const pre of ['>', '[', '=', '|', '/', '<', '*', '-', '\\', '\u{1F600}', '\0', '%41', 'a\\n', 'a\\t', '(', '{', ',', ';', '"', "'"]) for (const [name, out] of both(`${pre}Cookie: sid=${secret}`)) assert.ok(!out.includes(secret), `${name} prefix ${JSON.stringify(pre)}`);
+  for (const t of [`Cookie:        sid=${secret}`, `Cookie: a[0]@=${secret}`, `Cookie: sid =${secret}`, `Cookie: sid="${secret}"`, `Cookie: a=b; c="x ${secret}"`, `Cookie: ${'n'.repeat(300)}=${secret}`])
+    for (const [name, out] of both(t)) assert.ok(!out.includes(secret), `${name} ${t.slice(0, 40)}`);
+  for (const t of ['SSL_OP_COOKIE_EXCHANGE: number;', 'HTTP2_HEADER_COOKIE: string;', 'xCookie: a=b', "'set-cookie': ['foo=bar']", '_Cookie: a=b', '9Cookie: a=b'])
+    assert.strictEqual(mask(t), t, t);
+  assert.ok(mask('Cookie: 123=abc9').endsWith('***'));                               // a digit may start the cookie name
+  assert.strictEqual(mask('x\\tCookie: sid=v1'), 'x\\tCookie: ***');
+  assert.strictEqual(ss('const HTTP2_HEADER_COOKIE: string;'), 'const HTTP2_HEADER_COOKIE: string;');   // a declaration is not stored as `const [redacted];`
+  assert.strictEqual(ss('password: string'), 'password: string');
+  assert.ok(!ss('password: strings9x').includes('strings9x'));                         // only the bare type words are exempt
+});
+
+test('round 5: a scheme token ends at an escaped break or any backslash; Digest lines end at escaped breaks and CRLF', () => {
+  for (const sch of ['Negotiate', 'Token', 'Bearer', 'Basic']) for (const brk of ['\\n', '\\r', '\\t', '\\\\n', '\\\\\\"']) {
+    const tok = sch === 'Basic' ? 'Q2FuYXJ5VmFsdWU5eA==' : 'Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8';
+    for (const [name, out] of both(`Authorization: ${sch} ${tok}${brk}end`)) assert.ok(!out.includes(tok) && (name === 'safeSnapshot' || out.endsWith(`${brk}end`)), `${name} ${sch} ${brk} -> ${out}`);   // (write-time Bearer is also caught by the older bearer rule, which may swallow the rest)
+  }
+  assert.strictEqual(mask('Authorization: Digest a="b"\r\nnext'), 'Authorization: Digest ***\r\nnext');
+  assert.strictEqual(mask('Authorization: Digest a="b"\\nnext'), 'Authorization: Digest ***\\nnext');
+  assert.ok(mask(`Authorization: Digest ${'k'.repeat(5000)}=v\nz`).includes('=v'), 'a token longer than 4096 characters is prose');
+});
+
+test('round 5: boundary pins (%XX before a token, PEM body size, scan windows, detail cap)', () => {
+  const g = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
+  for (const pre of ['%0A', '%41', '%2F']) for (const [name, out] of both(`x${pre}${g}`)) assert.ok(!out.includes(g.slice(4)), `${name} ${pre}`);
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlc2lnbmF0dXJl';
+  for (const pre of ['%0A', '%41']) for (const [name, out] of both(`x${pre}${jwt}`)) assert.ok(!out.includes('c2lnbmF0'), `${name} ${pre}`);
+  /* unclosed PEM: 30 base64 characters is a mention, 40 is key material */
+  for (const [n, masked] of [[30, false], [39, false], [40, true]]) for (const [name, out] of both(`-----BEGIN PRIVATE KEY-----\n${'A'.repeat(n)}`)) assert.strictEqual(!out.includes('A'.repeat(n)), masked, `${name} body ${n}`);
+  /* the 40 characters may be spread over a long stretch of line breaks (window 400) */
+  for (const [name, out] of both(`-----BEGIN PRIVATE KEY-----\n${'A\n\n\n\n\n'.repeat(40)}`)) assert.ok(!out.includes('A\n'), `${name} spread body`);
+  for (const [name, out] of both(`-----BEGIN PRIVATE KEY-----\n  \n\t\n${'A'.repeat(40)}`)) assert.ok(!out.includes('A'.repeat(40)), `${name} whitespace before the body`);
+  assert.strictEqual(guard.scrubString('x'.repeat(600)).length, 501);
+  /* header-style JSON key names */
+  for (const k of ['x-api-key', 'X-Auth-Token', 'x-access-token', 'x-csrf-token', 'Proxy-Authorization', 'Set-Cookie']) for (const [name, out] of both(`{"${k}":"CanaryHeaderVal12345"}`)) assert.ok(!out.includes('CanaryHeaderVal12345'), `${name} ${k}`);
+  assert.ok(mask('{"x-trace-id":"CanaryHeaderVal12345"}').includes('CanaryHeaderVal12345'));
 });

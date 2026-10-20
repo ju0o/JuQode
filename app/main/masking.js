@@ -18,6 +18,15 @@ const isB64u = (c) => isAlpha(c) || isDigit(c) || c === 45 || c === 95;
 const isB64 = (c) => isAlpha(c) || isDigit(c) || c === 43 || c === 47 || c === 61;
 const isScheme = (c) => isAlpha(c) || isDigit(c) || c === 43 || c === 46 || c === 45;
 const isSpace = (c) => c === 32 || (c >= 9 && c <= 13);
+/** length of a line break at i - real, or JSON-escaped at ANY depth (`\n`, `\\n`, `\\\\n`, also `\r` `\t`) - else 0 */
+function breakAt(text, i) {
+  const c = text[i];
+  if (c === '\n' || c === '\r') return 1;
+  if (c !== '\\') return 0;
+  let j = i;
+  while (text[j] === '\\') j++;
+  return text[j] === 'n' || text[j] === 'r' || text[j] === 't' ? j - i + 1 : 0;
+}
 
 /** A leading `\b` that also holds after a JSON escape: in a stored stream line `a\nghp_…` the `n` is a word
  * character, so a plain `\b` never saw the token start. */
@@ -25,7 +34,7 @@ const escB = (re) => (re.source.startsWith('\\b') ? new RegExp(`(?:\\b|(?<=\\\\[
 
 /* One keyword list for both maskers' `name = value` rules (the env-var rule of qc/run.js is upper-case on purpose). */
 const KEYWORDS = 'api[\\s_-]?key|access[\\s_-]?token|refresh[\\s_-]?token|auth(?:orization)?[\\s_-]?(?:token)?(?!\\b\\s*[:=]\\s*["\']?(?:basic|bearer|digest|negotiate|token)\\b)|proxy[\\s_-]?authorization(?!\\b\\s*[:=]\\s*["\']?(?:basic|bearer|digest|negotiate|token)\\b)|cookie|set[\\s_-]?cookie|credential|token|password|passwd|secret(?:[\\s_-]?access[\\s_-]?key)?|private[\\s_-]?key|client[\\s_-]?secret';
-const VALUE = '\\s*[:=]\\s*["\']?[^\\s"\',;]{4,}["\']?';
+const VALUE = '\\s*[:=]\\s*["\']?(?!(?:string|number|boolean|any|unknown|void|never|object|bigint|symbol|undefined|null)\\b)[^\\s"\',;]{4,}["\']?';   // `HTTP2_HEADER_COOKIE: string;` is a declaration, not an assignment
 /* …with a name prefix of at most 64 characters (a longer prefix would make the scan quadratic) … */
 const ASSIGNMENT = new RegExp(`\\b(?:[\\w.-]{0,64}(?:${KEYWORDS}))\\b${VALUE}`, 'gi');
 /* …and the same without any prefix, so a name whose prefix is longer still has its keyword and value masked. */
@@ -33,15 +42,19 @@ const ASSIGNMENT_LONG_NAME = new RegExp(`(?:${KEYWORDS})\\b${VALUE}`, 'gi');
 
 /* Header-ish shapes the generic rules miss. Bounded quantifiers only. */
 const EXTRA_RE = [
-  /(?<=(?:\b|(?<=\\[nrt]))x-(?:auth-token|api-key|access-token|csrf-token)["']?[ \t]{0,4}:[ \t]{0,4}["']?)[^\s"',;]{4,}/gi,   // only the value: the name and a JSON document stay intact
+  /(?<=(?:\b|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))x-(?:auth-token|api-key|access-token|csrf-token)["']?[ \t]{0,4}:[ \t]{0,4}["']?)[^\s"',;]{4,}/gi,   // only the value: the name and a JSON document stay intact
 ].map((r) => (r.source.startsWith('\\b') ? escB(r) : r));
 
 /* ── Cookie / Set-Cookie headers ───────────────────────────────────────────────────────────────── */
-const COOKIE_NAME = /(^|[\s"'`{(,;]|\\[nrt])((?:set-)?cookie)(["']?)[ \t]{0,4}:[ \t]{0,4}/gim;
-const isCookieTokenChar = (c) => isAlpha(c) || isDigit(c) || '!#$%&\'*+.^_`|~-'.includes(String.fromCharCode(c));
-/** Only a real HEADER is masked: the name stands alone (line start, whitespace or a quote before it - `COOKIE_EXCHANGE: number`
- * and `HTTP2_HEADER_COOKIE: string` are identifiers) and its value starts like a cookie pair (`name=`). The value runs to the end of
- * the line or the closing quote. Each match is looked at once, so the scan is linear however many `Cookie:` the text repeats. */
+/* The header name is a header only when the character before it does not continue an identifier (`SSL_OP_COOKIE_EXCHANGE`,
+ * `HTTP2_HEADER_COOKIE`); an escaped break (`\\n`, `\\r`, `\\t`) or a `%XX` before it counts as a boundary. Anything else - `>`, `[`, `=`,
+ * `|`, `/`, `-`, a quote, a bracket, a non-ASCII character - may precede a real header. */
+const COOKIE_NAME = /(?:(?<![A-Za-z0-9_])|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))((?:set-)?cookie)(["']?)[ \t]{0,64}:[ \t]{0,64}/gi;
+const COOKIE_NAME_STOP = /[\s;,"'`:=]/;
+/** Only a real HEADER is masked: its value starts like a cookie pair (`name=`, spaces allowed before the `=`, name up to 512
+ * characters, no quote or separator inside it). An unquoted header runs to the end of the line - quotes inside the value
+ * (`sid="x"`) are part of it; inside a quoted context (`"Cookie": "a=b"`, `cookie: 'a=b'`, `-H "Cookie: a=b"`) it stops at the closing quote.
+ * Each match is looked at once, so the scan is linear however many `Cookie:` the text repeats. */
 function maskCookieHeaders(text, rep) {
   if (!/cookie/i.test(text)) return text;
   const re = new RegExp(COOKIE_NAME.source, COOKIE_NAME.flags);
@@ -50,14 +63,18 @@ function maskCookieHeaders(text, rep) {
   let pos = 0;
   let m;
   while ((m = re.exec(text)) !== null) {
+    const before = m.index > 0 ? text[m.index - 1] : '';
     let start = m.index + m[0].length;
-    if (text[start] === '"' || text[start] === "'") start++;       // JSON / quoted: "Cookie": "a=b"
+    let term = before === '"' || before === "'" || before === '`' ? before : null;
+    if (text[start] === '"' || text[start] === "'") { term = text[start]; start++; }       // JSON / quoted value
     let k = start;
-    const lim = Math.min(n, start + 128);
-    while (k < lim && isCookieTokenChar(text.charCodeAt(k))) k++;
-    if (k > start && text[k] === '=') {
-      let end = k;
-      while (end < n) { const c = text[end]; if (c === '\n' || c === '\r' || c === '"' || c === "'" || c === '`') break; end++; }
+    const lim = Math.min(n, start + 512);
+    while (k < lim && !COOKIE_NAME_STOP.test(text[k])) k++;
+    let eq = k;
+    while (eq < n && eq < k + 4 && (text[eq] === ' ' || text[eq] === '\t')) eq++;
+    if (k > start && text[eq] === '=') {
+      let end = eq;
+      while (end < n) { const c = text[end]; if (c === '\n' || c === '\r' || (term && c === term && text[end - 1] !== '\\')) break; if (c === '\\' && breakAt(text, end)) break; end++; }
       out += text.slice(pos, start) + rep; pos = end; re.lastIndex = Math.max(end, re.lastIndex);
     } else re.lastIndex = Math.max(start, re.lastIndex);
   }
@@ -66,7 +83,7 @@ function maskCookieHeaders(text, rep) {
 /* `curl … -u user:secret`: the option is found first (linear), then `curl` must stand on the same line within the 512 characters before it. */
 function maskCurlUser(text, rep) {
   if (!text.includes('curl')) return text;
-  const re = /\s(?:-u|--user)(?:[ =]|\s+)["']?[^\s:'"]+:[^\s'"]+/g;
+  const re = /[ \t](?:-u|--user)(?:[ =]|[ \t]+)["']?[^\s:'"]+:[^\s'"]+/g;
   let out = '';
   let pos = 0;
   let m;
@@ -74,7 +91,7 @@ function maskCurlUser(text, rep) {
     const from = Math.max(pos, m.index - 512);
     const win = text.slice(from, m.index);
     const nl = Math.max(win.lastIndexOf('\n'), win.lastIndexOf('\r')) + 1;
-    const at = win.slice(nl).search(/\bcurl\b/);
+    const at = win.slice(nl).search(/(?:\b|(?<=\\[nrt]|%[0-9A-Fa-f]{2}))curl\b/);
     if (at >= 0) { out += text.slice(pos, from + nl + at) + rep; pos = m.index + m[0].length; }
   }
   return out + text.slice(pos);
@@ -97,15 +114,7 @@ function pemLabelEnd(text, i) {
  * characters (line breaks, real or JSON-escaped, allowed between) or a Proc-Type / DEK-Info header. A MENTION of the
  * marker in prose or code is not a key and masks nothing. */
 function keyBodyFollows(text, h) {
-  /** length of a line break at i (real, or JSON-escaped at ANY depth: `\n`, `\\n`, `\\\\n`…), 0 if none */
-  const brk = (i) => {
-    const c = text[i];
-    if (c === '\n' || c === '\r') return 1;
-    if (c !== '\\') return 0;
-    let j = i;
-    while (text[j] === '\\') j++;
-    return text[j] === 'n' || text[j] === 'r' || text[j] === 't' ? j - i + 1 : 0;
-  };
+  const brk = (i) => breakAt(text, i);
   let i = h;
   for (;;) {
     const b = brk(i);
@@ -255,11 +264,11 @@ function maskAuthHeaders(text, rep) {
       /* the first token (at most DIGEST_LOOK characters) must hold `key=value`; only then is the rest of the line the credential.
        * The token scan stops at the first space, so repeated `Authorization: Digest ` costs a few characters each. */
       const lim = Math.min(n, start + DIGEST_LOOK);
-      while (end < lim && !isSpace(text.charCodeAt(end)) && text[end] !== ',') end++;
+      while (end < lim && !isSpace(text.charCodeAt(end)) && text[end] !== ',' && !breakAt(text, end)) end++;
       credential = end > start && text.slice(start, end).includes('=');
-      if (credential) { end = text.indexOf('\n', end); if (end < 0) end = n; else if (text[end - 1] === '\r') end--; }
+      if (credential) { while (end < n && !breakAt(text, end)) end++; }
     } else {
-      while (end < n) { const c = text[end]; if (isSpace(c.charCodeAt(0)) || c === '"' || c === "'" || c === ',' || c === ';') break; end++; }
+      while (end < n) { const c = text[end]; if (isSpace(c.charCodeAt(0)) || c === '"' || c === "'" || c === ',' || c === ';' || c === '\\') break; end++; }   // a backslash (escape, at any JSON depth) never belongs to a credential
       credential = end > start && looksLikeCredential(scheme, text.slice(start, end));
     }
     if (credential) { out += text.slice(pos, start) + rep; pos = end; re.lastIndex = Math.max(end, re.lastIndex); }

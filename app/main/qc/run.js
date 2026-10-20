@@ -77,6 +77,8 @@ const TOKENISH = [
    * is one), and the value must be on the same line. `password:` in an English sentence is not
    * an environment variable and is left alone. */
   /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*\S+/g,
+  /* …and an ASSIGNMENT (`=` straight after the name, never `NAME: type;`) may carry a name of up to 255 characters, COOKIE included */
+  /\b[A-Z0-9_]{0,255}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|COOKIE)[A-Z0-9_]{0,255}[ \t]*=[ \t]*\S+/g,
 ].map((r) => re(escB(r))));
 
 /** Replace token-shaped runs. See TOKENISH: this is a reduction, never a guarantee. */
