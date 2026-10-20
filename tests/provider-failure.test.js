@@ -10,6 +10,7 @@ const { spawnSync } = require('node:child_process');
 const R = path.resolve(__dirname, '..');
 const { classify, isKnownClaudeEvent, CLASSES, RECOVERIES } = require(path.join(R, 'app/main/provider/failure.js'));
 const { scriptBin } = require('./fakecli.js');
+const { code: productCode } = require('./src.js');
 
 const shape = (r) => [r.class, r.retryable, r.recovery, r.reasonCode];
 const FALLBACK_WORDS = /codex|opencode|gemini|other agent|another agent|fallback|switch/i;
@@ -166,9 +167,9 @@ test('fakecli failure modes: real exit codes / signals / detect reasons classify
     assert.strictEqual(classify({ source: 'stream', unknownEvent: odd[0] }).class, 'protocol-drift');
 
     /* detect() reasons from real fake binaries */
-    const detectWith = (bin) => {
+    const detectWith = (bin, ms = '5000') => {
       const r = spawnSync(process.execPath, ['-e', `process.env.JUQODE_CLAUDE_BIN=${JSON.stringify(bin)};require(${JSON.stringify(path.join(R, 'app/main/claude-detect.js'))}).detect().then(r=>console.log(JSON.stringify(r)))`],
-        { encoding: 'utf8', env: { ...process.env, JUQODE_CLAUDE_TIMEOUT_MS: '400' } });
+        { encoding: 'utf8', env: { ...process.env, JUQODE_CLAUDE_TIMEOUT_MS: ms } });
       return JSON.parse(r.stdout);
     };
     const cases = [
@@ -179,7 +180,7 @@ test('fakecli failure modes: real exit codes / signals / detect reasons classify
       [scriptBin(dir, 'hang', 'setInterval(()=>{},1000)'), 'no-response', 'cli-interrupted'],
     ];
     for (const [bin, reason, cls] of cases) {
-      const d = detectWith(bin);
+      const d = detectWith(bin, reason === 'no-response' ? '400' : '5000');
       assert.strictEqual(d.available, false); assert.strictEqual(d.reason, reason);
       const c = classify({ source: 'detect', code: d.reason });
       assert.strictEqual(c.class, cls, reason);
@@ -189,12 +190,12 @@ test('fakecli failure modes: real exit codes / signals / detect reasons classify
 });
 
 test('product contracts the classifier mirrors: preflight reasons come from the real modules, and no app code fills in another Agent', () => {
-  const src = fs.readFileSync(path.join(R, 'app/main/provider/claude-contract.js'), 'utf8') + fs.readFileSync(path.join(R, 'app/main/provider/identity.js'), 'utf8');
+  const src = productCode('app/main/provider/claude-contract.js') + productCode('app/main/provider/identity.js');
   for (const code of ['binary-not-found', 'binary-changed', 'version-changed', 'not-the-recorded-binary', 'no-recorded-identity', 'binary-unreadable', 'changed-while-hashing', 'script-shim-not-a-binary', 'path-changed']) {
     assert.ok(src.includes(`'${code}'`), `${code} no longer exists in the product; the classifier table is stale`);
     assert.notStrictEqual(classify({ source: 'preflight', code }).reasonCode, 'preflight-refused', code);
   }
-  const own = fs.readFileSync(path.join(R, 'app/main/provider/failure.js'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const own = productCode('app/main/provider/failure.js');
   assert.ok(!/require\(['"](node:)?(child_process|net|http|https|dns|fs)/.test(own), 'classifier must stay pure');
   assert.ok(!/process\.env|spawn|exec/.test(own));
 });
