@@ -233,6 +233,12 @@ function scopeOf(denial, cwd) {
     /* the project's OWN control files: settings, MCP config and git internals decide what later runs may do (hooks run code), so no one-file grant is offered for them */
     const protectedPath = (x) => /^(\.claude\/settings(\.local)?\.json|\.mcp\.json|\.git(\/.*)?)$/i.test(x);
     if (protectedPath(rel) || protectedPath(rr.split(path.sep).join('/'))) return { refusal: 'cannot-scope' };
+    /* the same files reached through a symlinked `.claude` / `.git` that stays inside the project (cfg/settings.json IS .claude/settings.json) */
+    const lc = (x) => x.toLowerCase();
+    for (const prot of ['.claude/settings.json', '.claude/settings.local.json', '.mcp.json', '.git']) {
+      const pr = realTarget(path.join(realRoot, prot));
+      if (pr !== null && (lc(real) === lc(pr) || lc(real).startsWith(lc(pr) + path.sep))) return { refusal: 'cannot-scope' };
+    }
     return grantOrRefusal(`${tool}(${rel})`);
   }
 

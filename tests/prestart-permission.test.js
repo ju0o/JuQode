@@ -291,3 +291,144 @@ test('F1: both screens route the result of workAllow and workAnswer through refu
     assert.ok(!/^\s*await api\.workAllow\(/m.test(code), `${f}: a workAllow result is discarded`);
   }
 });
+
+/* ═══ JOB-D · UNMEASURED effective-scope patterns fail closed ═══
+ * CLASSIFICATION (PROVEN-NARROW is the only class attested; project settings are never shown on any JuQode screen, so "looks scoped" is not evidence):
+ *   NARROW      bare Read/Glob/Grep/LS; Read-family specs inside the project (read-only); exact-file Edit/Write; exact Bash command
+ *   WIDE        bare Edit/Write/Bash/WebFetch; Edit(**), (**\/*), (/**), (//**), (./**), (**\/[a-z]*), (**\/*[!.]), (**\/{a,b}), (**\/*.ts), out-of-project Edit(//x, ~, ..); Bash(*)/Bash(:*); WebFetch(domain:*);
+ *               defaultMode acceptEdits / bypassPermissions / auto; additionalDirectories (non-empty)
+ *   UNMEASURED  Edit(dir) / Edit(src/**) / Edit(src/*.ts); Bash(prefix:*) (any arguments - the card shows the prefix only); WebFetch(domain:x); WebSearch; mcp__*; Task; TodoWrite
+ *   UNKNOWN     any other tool name / rule shape / type, any other defaultMode string, unknown permissions.* key, permission-like top-level key, permission-like env name,
+ *               a settings file that is unreadable, empty, or resolves outside the project; user + managed settings and CLAUDE_CONFIG_DIR (never read: UNKNOWN by design)
+ * Refused = everything except NARROW. */
+const ROWS = [
+  ['Read', 'narrow'], ['Glob', 'narrow'], ['Grep', 'narrow'], ['LS', 'narrow'], ['Read(./src/**)', 'narrow'], ['Edit(src/a.txt)', 'narrow'], ['Write(notes.md)', 'narrow'], ['Bash(npm test)', 'narrow'],
+  ['Edit', 'wide'], ['Write', 'wide'], ['Bash', 'wide'], ['WebFetch', 'wide'], ['Edit(**)', 'wide'], ['Edit(**/*)', 'wide'], ['Edit(/**)', 'wide'], ['Edit(//**)', 'wide'], ['Edit(./**)', 'wide'],
+  ['Edit(**/[a-z]*)', 'wide'], ['Edit(**/*[!.])', 'wide'], ['Edit(**/{a,b})', 'wide'], ['Edit(**/*.ts)', 'wide'], ['Edit(//etc/x)', 'wide'], ['Edit(~/x)', 'wide'], ['Edit(../x)', 'wide'],
+  ['Bash(*)', 'wide'], ['Bash(:*)', 'wide'], ['WebFetch(domain:*)', 'wide'], ['Read(//etc/**)', 'wide'],
+  ['Edit(src/**)', 'unmeasured'], ['Edit(src/*.ts)', 'unmeasured'], ['Edit(src)', 'unmeasured'], ['Bash(npm test:*)', 'unmeasured'], ['Bash(npm run *)', 'unmeasured'], ['WebFetch(domain:example.com)', 'unmeasured'],
+  ['WebSearch', 'unmeasured'], ['mcp__server', 'unmeasured'], ['mcp__server__tool', 'unmeasured'], ['Task', 'unmeasured'], ['TodoWrite', 'unmeasured'],
+  ['Frobnicate', 'unknown'], ['Edit(a.txt) ', 'unknown'], [' Edit(a.txt)', 'unknown'], ['Edit(a​.txt)', 'unknown'], ['', 'unknown'], ['(', 'unknown'], [7, 'unknown'], [null, 'unknown'], [{}, 'unknown'], [['Read'], 'unknown'],
+];
+const REASON_FOR = { wide: 'project-settings-unscoped-allow', unmeasured: 'project-settings-unmeasured-allow', unknown: 'project-settings-unknown-rule' };
+
+test('JOB-D table: every allow-rule class is classified as listed (src/ exists so Edit(src) is a directory)', () => {
+  const root = world();
+  for (const [rule, cls] of ROWS) assert.strictEqual(C.classifyAllowRule(rule, root), cls, JSON.stringify(rule));
+});
+for (const [rule, cls] of ROWS) {
+  test(`JOB-D start(): allow ${JSON.stringify(rule)} (${cls}) -> ${cls === 'narrow' ? 'starts' : 'refused, 0 rows, 0 children'}`, async () => {
+    const w = setup({ permissions: { allow: [rule] } });
+    const r = await w.start();
+    if (cls === 'narrow') { assert.strictEqual(r.ok, true, JSON.stringify(r)); await r.done; return; }
+    assert.deepStrictEqual([r.ok, r.reason, r.detail.reason], [false, 'effective-permission-widened', REASON_FOR[cls]], JSON.stringify(rule));
+    assert.deepStrictEqual(counts(w.db), [0, 0, 0, 0]);
+    assert.ok(!fs.existsSync(w.marker), 'a child was spawned');
+  });
+}
+
+const KEY_ROWS = [
+  ['defaultMode default', { permissions: { defaultMode: 'default' } }, null], ['defaultMode plan', { permissions: { defaultMode: 'plan' } }, null], ['defaultMode dontAsk', { permissions: { defaultMode: 'dontAsk' } }, null],
+  ['defaultMode acceptEdits', { permissions: { defaultMode: 'acceptEdits' } }, 'project-settings-permissive-mode'], ['defaultMode bypassPermissions', { permissions: { defaultMode: 'bypassPermissions' } }, 'project-settings-permissive-mode'],
+  ['defaultMode auto', { permissions: { defaultMode: 'auto' } }, 'project-settings-permissive-mode'], ['defaultMode unknown string', { permissions: { defaultMode: 'turbo' } }, 'project-settings-unknown-mode'],
+  ['defaultMode different case of a safe mode', { permissions: { defaultMode: 'PLAN' } }, 'project-settings-unknown-mode'], ['defaultMode number', { permissions: { defaultMode: 1 } }, 'project-settings-permissive-mode'],
+  ['additionalDirectories empty', { permissions: { additionalDirectories: [] } }, null], ['additionalDirectories one', { permissions: { additionalDirectories: ['../x'] } }, 'project-settings-additional-directories'],
+  ['unknown permissions.* key', { permissions: { skipEverything: true } }, 'project-settings-unknown-key'], ['deny/ask lists (narrowing)', { permissions: { deny: ['Read(./.env)'], ask: ['Bash(rm:*)'] } }, null],
+  ['deny of the wrong type', { permissions: { deny: 'Bash' } }, 'project-settings-unknown-rule'], ['permission-like top-level key', { permissionMode: 'bypass' }, 'project-settings-unknown-key'],
+  ['skipDangerousModePermissionPrompt', { skipDangerousModePermissionPrompt: true }, 'project-settings-unknown-key'], ['enableAllProjectMcpServers', { enableAllProjectMcpServers: true }, 'project-settings-unknown-key'],
+  ['sandbox key', { sandbox: { enabled: false } }, 'project-settings-unknown-key'], ['env CLAUDE_CONFIG_DIR', { env: { CLAUDE_CONFIG_DIR: '/x' } }, 'project-settings-unknown-key'],
+  ['env permission-mode name', { env: { SOME_PERMISSION_MODE: 'x' } }, 'project-settings-unknown-key'], ['env ordinary', { env: { NODE_ENV: 'test' } }, null], ['env of the wrong type', { env: [] }, 'project-settings-unknown-key'],
+  ['permissions of the wrong type', { permissions: 'all' }, 'project-settings-unreadable'],
+];
+for (const [name, doc, why] of KEY_ROWS) {
+  test(`JOB-D start(): ${name} -> ${why ? `refused (${why}), 0 rows, 0 children` : 'starts'}`, async () => {
+    const w = setup(doc);
+    const r = await w.start();
+    if (!why) { assert.strictEqual(r.ok, true, JSON.stringify(r)); await r.done; return; }
+    assert.deepStrictEqual([r.ok, r.reason, r.detail.reason], [false, 'effective-permission-widened', why]);
+    assert.deepStrictEqual(counts(w.db), [0, 0, 0, 0]);
+    assert.ok(!fs.existsSync(w.marker));
+  });
+}
+
+test('JOB-D: .claude reached through a symlink - out of the project is refused; an in-project one is judged by its content', { skip: process.platform === 'win32' && 'symlinks' }, async () => {
+  const outside = fs.realpathSync(tempDir('juqode-pre-out-'));
+  fs.writeFileSync(path.join(outside, 'settings.json'), '{}');           // harmless content: the SOURCE is what is refused
+  const w = setup();
+  fs.symlinkSync(outside, path.join(w.root, '.claude'));
+  const r = await w.start();
+  assert.deepStrictEqual([r.ok, r.reason, r.detail.reason], [false, 'effective-permission-widened', 'project-settings-symlink']);
+  assert.deepStrictEqual(counts(w.db), [0, 0, 0, 0]);
+  assert.ok(!fs.existsSync(w.marker));
+  const w2 = setup();
+  fs.mkdirSync(path.join(w2.root, 'cfg'));
+  fs.writeFileSync(path.join(w2.root, 'cfg/settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }));
+  fs.symlinkSync(path.join(w2.root, 'cfg'), path.join(w2.root, '.claude'));
+  assert.strictEqual((await w2.start()).detail?.reason, 'project-settings-permissive-mode', 'an in-project link is followed and judged');
+});
+test('JOB-D: cfg/settings.json is not grantable when .claude is a symlink to cfg (judged by realpath)', { skip: process.platform === 'win32' && 'symlinks' }, () => {
+  const root = world();
+  fs.mkdirSync(path.join(root, 'cfg'));
+  fs.writeFileSync(path.join(root, 'cfg/settings.json'), '{}');
+  fs.symlinkSync(path.join(root, 'cfg'), path.join(root, '.claude'));
+  for (const f of ['cfg/settings.json', '.claude/settings.json']) assert.deepStrictEqual(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, root), { refusal: 'cannot-scope' }, f);
+  assert.ok(session.scopeOf({ tool: 'Edit', input: { file_path: 'cfg/other.json' } }, root).spec, 'a sibling file in the linked folder is not protected');
+});
+test('JOB-D grants: wildcard domain and glob-class file wildcards are refused by the launch gate', () => {
+  for (const g of ['WebFetch(domain:*)', 'Edit(**/[a-z]*)', 'Edit(**/*[!.])', 'Edit(**/{a,b})', 'Edit(**/*.ts)', 'WebFetch(*)']) assert.strictEqual(C.grantRefusal(g), 'unscoped-grant', g);
+  assert.strictEqual(C.grantRefusal('WebFetch(domain:example.com)'), null, 'characterization: a single domain is a launchable grant shape (OPEN: not attested for project settings)');
+});
+test('JOB-D characterization (OPEN): a Bash denial is still offered as Bash(cmd:*) - any arguments - because existing tests pin it; protected mode refuses every privileged retry before a grant record', () => {
+  assert.strictEqual(session.scopeOf({ tool: 'Bash', input: { command: 'npm test' } }, world()).spec, 'Bash(npm test:*)');
+  assert.strictEqual(C.classifyAllowRule('Bash(npm test:*)'), 'unmeasured');
+});
+
+/* ── seeded fuzz: total, closed reason set, unknown permission-like input refused, nothing WIDE/unmeasured/bypass accepted ── */
+function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+test('JOB-D fuzz: 4000 seeded settings documents', () => {
+  const root = world();
+  const rand = rng(20261020);
+  const pick = (a) => a[Math.floor(rand() * a.length)];
+  const rules = ROWS.map(([r, c]) => [r, c]);
+  const garbage = [0, 1.5, true, null, undefined, 'x', '', [], {}, [[]], { a: 1 }, 'Edit(a)\u0000', '‮Read', 'ＥＤＩＴ'];
+  const topKeys = ['model', 'env', 'permissions', 'hooks', 'statusLine', 'permissionMode', 'allowedTools', 'enableAllProjectMcpServers', 'sandbox', 'includeCoAuthoredBy', 'autoAcceptEdits', 'bypass', 'trustedFolders', 'mcpServers', 'theme'];
+  const closed = new Set(C.SETTINGS_REASONS);
+  const modes = ['default', 'plan', 'dontAsk', 'acceptEdits', 'bypassPermissions', 'auto', 'BYPASSPERMISSIONS', 'turbo', '', 3, null];
+  let accepted = 0; let refused = 0;
+  for (let i = 0; i < 4000; i += 1) {
+    const doc = {}; let expectOk = true;
+    for (const k of topKeys) {
+      if (rand() < 0.25) {
+        if (k === 'permissions') {
+          const perm = {}; doc.permissions = rand() < 0.04 ? pick(garbage) : perm;
+          if (doc.permissions !== perm) { const g = doc.permissions; if (g != null && !(typeof g === 'object' && !Array.isArray(g) && !Object.keys(g).length)) expectOk = false; continue; }
+          if (rand() < 0.5) { const m = pick(modes); perm.defaultMode = m; if (m !== null && !['default', 'plan', 'dontAsk'].includes(m)) expectOk = false; }
+          if (rand() < 0.3) { const d = rand() < 0.5 ? [] : [pick(['x', '/', 3])]; perm.additionalDirectories = d; if (d.length) expectOk = false; }
+          if (rand() < 0.7) {
+            const n = Math.floor(rand() * 4); const list = [];
+            for (let j = 0; j < n; j += 1) { if (rand() < 0.1) { const g = pick(garbage); list.push(g); expectOk = false; } else { const [r, c] = pick(rules); list.push(r); if (c !== 'narrow') expectOk = false; } }
+            perm.allow = list;
+          }
+          if (rand() < 0.1) { perm[pick(['skipAll', 'bypass', 'autoApprove'])] = true; expectOk = false; }
+          if (rand() < 0.1) { perm.deny = pick([['Bash'], 'Bash', [3]]); if (typeof perm.deny === 'string' || perm.deny.some((x) => typeof x !== 'string')) expectOk = false; }
+        } else if (k === 'env') {
+          const nm = pick(['NODE_ENV', 'CLAUDE_CONFIG_DIR', 'X_PERMISSION_MODE', 'FOO']); doc.env = { [nm]: '1' }; if (nm === 'CLAUDE_CONFIG_DIR' || nm === 'X_PERMISSION_MODE') expectOk = false;
+        } else {
+          doc[k] = pick([true, 'x', {}, 1]);
+          if (/permission|allow|deny|bypass|dangerous|sandbox|approv|trust|auto.?accept|default.?mode|mcp/i.test(k)) expectOk = false;
+        }
+      }
+    }
+    let v;
+    assert.doesNotThrow(() => { v = C.settingsVerdict(doc, root); }, JSON.stringify(doc));
+    if (v) { assert.ok(closed.has(v.reason), `reason outside the closed set: ${v.reason}`); refused += 1; } else accepted += 1;
+    assert.strictEqual(v === null, expectOk, JSON.stringify(doc));
+    if (v === null) {                                   // an accepted document: nothing wide, unmeasured or bypassing
+      const p = doc.permissions ?? {};
+      assert.ok(![ 'acceptedits', 'bypasspermissions', 'auto' ].includes(String(p.defaultMode ?? '').toLowerCase()));
+      for (const r of p.allow ?? []) assert.strictEqual(C.classifyAllowRule(r, root), 'narrow');
+    }
+  }
+  for (const g of garbage) { let v; assert.doesNotThrow(() => { v = C.settingsVerdict(g, root); }); if (g && typeof g === 'object' && !Array.isArray(g)) continue; assert.ok(v !== null && closed.has(v.reason), `garbage root ${JSON.stringify(g)}`); }
+  assert.ok(accepted > 100 && refused > 100, `fuzz must exercise both sides (${accepted}/${refused})`);
+});

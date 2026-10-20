@@ -99,7 +99,7 @@ const allowRuleWidens = (rule, projectPath = null) => classifyAllowRule(rule, pr
 const REASONS = Object.freeze(['project-path-unknown', 'project-settings-unreadable', 'project-settings-symlink', 'project-settings-permissive-mode', 'project-settings-unknown-mode',
   'project-settings-additional-directories', 'project-settings-unscoped-allow', 'project-settings-unmeasured-allow', 'project-settings-unknown-rule', 'project-settings-unknown-key']);
 /* A top-level key that LOOKS permission-related but is not in this table is refused, and so is a permission-like env name: a new key is not "harmless" by being new. */
-const PERMISSION_LIKE = /permission|allow|deny|bypass|dangerous|sandbox|approv|trust|auto.?accept|default.?mode|mcp|ask/i;
+const PERMISSION_LIKE = /permission|allow|deny|bypass|dangerous|sandbox|approv|trust|auto.?accept|default.?mode|mcp/i;
 const ENV_PERMISSION_LIKE = /permission|approv|sandbox|bypass|config.?dir|auto|dangerous|yolo|trust/i;
 const KNOWN_PERMISSION_KEYS = new Set(['allow', 'deny', 'ask', 'defaultMode', 'additionalDirectories', 'disableBypassPermissionsMode']);
 
