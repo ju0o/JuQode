@@ -460,8 +460,11 @@ test('F6: JSON credentials at any escape depth, long env-style keys, keys over t
   for (const [, out] of both('{"AUTHOR_NAME":"somebody-with-long-name","COOKIE_POLICY":"short"}')) assert.ok(out.includes('somebody-with-long-name'));
   for (const [, out] of both('{"X_AUTH":"zzzz1234yyyy5678"}')) assert.ok(!out.includes('zzzz1234yyyy5678'));
   for (const esc of ['\\r', '\\t', '\\n']) for (const [name, out] of both(`a${esc}${GH}`)) assert.ok(!out.includes(GH.slice(4)), `${name} ${esc}`);
-  assert.ok(mask(`${'A'.repeat(100)}_TOKEN=abc12345`).endsWith('***'), 'env-var name with a 100-char prefix');
-  assert.ok(!mask(`TOKEN${'B'.repeat(100)}=abc12345`).includes('abc12345'), 'env-var name with a 100-char suffix');
+  /* the env-var name keeps its 32-character prefix / suffix window: widening it to 255 erased TypeScript declarations such as
+   * `HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: string;` (24 file diffs in a 6.8k-file node_modules corpus). A longer name is OPEN. */
+  assert.ok(mask(`${'A'.repeat(31)}_TOKEN=abc12345`).endsWith('***'), 'env-var name with a 32-char prefix');
+  assert.strictEqual(mask('const HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: string;'), 'const HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: string;');
+  assert.ok(!mask(`TOKEN${'B'.repeat(32)}=abc12345`).includes('abc12345'), 'env-var name with a 32-char suffix');
 });
 
 test('walker: 1M small strings are truncated by the leaf cap (not walked for seconds); ordinary results are not', () => {
@@ -487,4 +490,115 @@ test('sc02 find(): a main-side "[truncated]" element is not taken for a live Wor
   assert.strictEqual(find({ works: ['[truncated]'] }), undefined);
   assert.strictEqual(find({ works: ['[truncated]', null, { status: 'ended' }] }), undefined);
   assert.deepStrictEqual(find({ works: ['[truncated]', { status: 'running', id: 1 }] }), { status: 'running', id: 1 });
+});
+
+/* ---- QA round 4: single-pass scanners, PEM at any escape depth, Cookie only as a header, tight growth bounds, threshold boundaries ---- */
+const nest = (v, d) => { let x = v; for (let i = 0; i < d; i++) x = JSON.stringify(x); return x; };
+const CANARY = 'ZQ9XKP2LM8VN4RT6ABCDEFGH';
+
+test('F2 (round 4): a private key inside JSON strings of ANY nesting depth 1..9 is masked, closed and unclosed, by both maskers', () => {
+  const body = `MIIEvQIBADANBgkqhkiG9w0BAQEFAASC${CANARY}`;
+  const shapes = {
+    open: `-----BEGIN PRIVATE KEY-----\n${body}\ntail`,
+    openCR: `-----BEGIN RSA PRIVATE KEY-----\r\n${body}\r\ntail`,
+    closed: `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\ntail`,
+    closed2: `x -----BEGIN EC PRIVATE KEY-----\n${'AAAA'.repeat(10)}${body}\n-----END EC PRIVATE KEY-----`,
+    openTab: `-----BEGIN PRIVATE KEY-----\t\n${body}`,
+  };
+  for (const [shape, plain] of Object.entries(shapes)) for (let d = 1; d <= 9; d++) {
+    const wrapped = nest({ line: plain }, d);
+    for (const [name, out] of both(wrapped)) assert.ok(!out.includes(CANARY), `${shape} depth ${d} ${name}`);
+  }
+  /* a mention at any depth still erases nothing */
+  for (let d = 1; d <= 5; d++) { const t = nest({ line: `see -----BEGIN PRIVATE KEY----- in docs ${'x'.repeat(300)}` }, d); for (const [, out] of both(t)) assert.strictEqual(out, t); }
+});
+
+test('F1 (round 4): a repeated "Authorization: Digest " is linear in every surface (mask, safeSnapshot, scrubString, scrubDetail, publicOut)', () => {
+  for (const unit of ['Authorization: Digest ', 'Proxy-Authorization: Digest ', 'Authorization: Digest x,']) {
+    const s = unit.repeat(Math.ceil(160000 / unit.length));
+    const t = Date.now(); mask(s); ss(s); guard.scrubString(s); guard.scrubDetail({ a: s, b: [s] }); guard.publicOut('juqode:x', { a: { b: [s] } });
+    assert.ok(Date.now() - t < 2500, `${JSON.stringify(unit)} ${Date.now() - t} ms`);
+  }
+  assert.strictEqual(mask('Authorization: Digest username="a", realm="b"\nnext'), 'Authorization: Digest ***\nnext');
+  assert.strictEqual(mask('Authorization: Digest realm only\nnext'), 'Authorization: Digest realm only\nnext');
+  /* the first token is looked at for at most 4096 characters: key=value inside it is masked, beyond it the line is prose */
+  assert.ok(!mask(`Authorization: Digest ${'k'.repeat(4000)}=v\nz`).includes('=v'));
+});
+
+test('F3/F4 (round 4): Cookie / Set-Cookie are masked only as HEADERS; identifiers, declarations and object keys are untouched', () => {
+  const keep = ['const SSL_OP_COOKIE_EXCHANGE: number;', 'const HTTP2_HEADER_COOKIE: string;', 'const HTTP2_HEADER_SET_COOKIE: string;', "'set-cookie': ['foo=bar', 'a=b']",
+    "headers.get('set-cookie')", 'Parses the `Cookie` header and returns a list', '## `Cookie` interface', 'Cookie: consent banner'.replace('Cookie: ', 'the Cookie '), 'cookie_policy = true'];
+  for (const t of keep) assert.strictEqual(mask(t), t, t);
+  const hit = [['Cookie: sid=abc123; theme=dark', 'abc123'], ['Set-Cookie: session=Zq9xKp2Lm8Vn; Path=/', 'Zq9xKp2Lm8Vn'], ['curl -H "Cookie: a=Zq9xKp2Lm8Vn" x', 'Zq9xKp2Lm8Vn'], ['{"Cookie":"a=Zq9xKp2Lm8Vn"}', 'Zq9xKp2Lm8Vn'],
+    ["  cookie: 'get=Zq9xKp2Lm8Vn; and=b'", 'Zq9xKp2Lm8Vn'], ['a\\nSet-Cookie: s=Zq9xKp2Lm8Vn', 'Zq9xKp2Lm8Vn']];
+  for (const [t, secret] of hit) for (const [name, out] of both(t)) assert.ok(!out.includes(secret), `${name}: ${t} -> ${out}`);
+  assert.strictEqual(mask("  cookie: 'get=cookies; and=attributes'"), "  cookie: '***'");
+  /* boundary of the pair-name look: 128 token characters then '=' is a header, 129 is not */
+  assert.ok(!mask(`Cookie: ${'n'.repeat(128)}=v1`).includes('=v1'));
+  assert.ok(mask(`Cookie: ${'n'.repeat(129)}=v1`).includes('=v1'));
+});
+
+test('F5 (round 4): the leaf cap truncates STRINGS only - numbers, booleans and null keep their truth value after it', () => {
+  const out = guard.maskOut({ rows: Array.from({ length: 250000 }, (_, i) => `r${i}`), ok: false, count: 5, flag: true, none: null, status: 'ended' });
+  assert.strictEqual(out.ok, false); assert.strictEqual(out.count, 5); assert.strictEqual(out.flag, true); assert.strictEqual(out.none, null);
+  assert.strictEqual(out.rows.filter((x) => x === '[truncated]').length, 50000);
+  assert.strictEqual(out.status, '[truncated]');           // a string after the cap: marked, never passed
+  const nums = guard.maskOut({ rows: Array.from({ length: 250000 }, (_, i) => i), last: 7 });
+  assert.strictEqual(nums.rows[249999], 249999); assert.strictEqual(nums.last, 7);
+});
+
+/* tight growth-based bounds, best of 5, for every hostile generator, on every surface */
+const HOSTILE = ['Authorization: Digest ', 'Proxy-Authorization: Digest ', 'Cookie: ', 'Cookie: aaaa ', 'Set-Cookie: ', 'Authorization: Basic ', 'Authorization: Bearer ', 'Authorization: Token ', 'Authorization: Negotiate ',
+  'curl -u ', 'curl -s --user ', 'X-Api-Key: ', 'eyJ-', 'eyJaaaaaaaaaa.', 'a-', 'a.', 'a://', 'a://u:', '-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\nAAAA\n', '-----BEGIN ', 'token=', 'API_TOKEN=', '"API_TOKEN":', '\\"', 'a\\n', '%20', 'AKIA', 'sk-', 'ghp_', 'Bearer ', 'Basic ', '\n', ' '];
+const GUARD_UNITS = ['Authorization: Digest ', 'Cookie: ', 'Cookie: aaaa ', 'Authorization: Bearer ', 'curl -u ', 'eyJ-', 'a-', 'a://u:', '-----BEGIN PRIVATE KEY-----', '"API_TOKEN":', 'a\\n', '%20'];
+const SURFACES = {
+  mask: (s) => mask(s), safeSnapshot: (s) => safeSnapshot(s),
+  scrubString: (s) => guard.scrubString(s), scrubDetail: (s) => guard.scrubDetail({ a: s, b: [s] }),
+  publicOut: (s) => guard.publicOut('juqode:x', { ok: true, a: { b: [s] }, detail: { x: s } }),
+};
+test('hostile input: for every generator and surface time(160k)/time(80k) < 3 and time(160k) < 1 s (best of 5)', () => {
+  const bad = [];
+  for (const unit of HOSTILE) for (const [sn, f] of Object.entries(SURFACES)) {
+    if ((sn === 'scrubString' || sn === 'scrubDetail' || sn === 'publicOut') && !GUARD_UNITS.includes(unit)) continue;   // the scrub path runs both maskers + path rewrites: a representative subset keeps the file fast
+    const best = (n) => { const s = unit.repeat(Math.ceil(n / unit.length)).slice(0, n); let m = Infinity; for (let i = 0; i < 5; i++) { const t = process.hrtime.bigint(); f(s); m = Math.min(m, Number(process.hrtime.bigint() - t) / 1e6); } return m; };
+    const a = best(80000), b = best(160000);
+    if (b >= 1000 || (b / Math.max(a, 1) >= 3 && b > 250)) bad.push(`${JSON.stringify(unit)} ${sn}: ${a.toFixed(0)} -> ${b.toFixed(0)} ms`);
+  }
+  assert.deepStrictEqual(bad, []);
+});
+
+test('threshold boundaries (min-1 / min / min+1) are pinned', () => {
+  const seg = (n) => 'a'.repeat(n);
+  /* JWT: every segment needs 10+ characters (the header counts after eyJ) */
+  for (const [h, p, sg, masked] of [[9, 10, 10, false], [10, 10, 10, true], [11, 10, 10, true], [10, 9, 10, false], [10, 10, 9, false], [10, 11, 11, true]])
+    for (const [name, out] of both(`x eyJ${seg(h)}.${seg(p)}.${seg(sg)} y`)) assert.strictEqual(out !== `x eyJ${seg(h)}.${seg(p)}.${seg(sg)} y`, masked, `${name} ${h}.${p}.${sg}`);
+  /* a header-less 1023 vs 1024 character JOSE-looking run, no dots: data below the threshold, masked from it */
+  const josePad = (n) => { const b = Buffer.from(JSON.stringify({ alg: 'HS256', p: 'x'.repeat(4000) })).toString('base64url'); return b.slice(0, n); };
+  for (const [n, masked] of [[1023, false], [1024, true], [1025, true]]) for (const [name, out] of both(`t ${josePad(n)} z`)) assert.strictEqual(out.includes(josePad(n).slice(0, 30)), !masked, `${name} run ${n}`);
+  /* trailing segments after a long JOSE header: 0, 1, 2 are all masked, a 3rd is not part of it */
+  const H = josePad(1500);
+  for (const [name, out] of both(`t ${H}.AAAA1111.BBBB2222.CCCC3333 z`)) assert.ok(!out.includes('AAAA1111') && !out.includes('BBBB2222') && out.includes('CCCC3333'), `${name} ${out}`);
+  /* JSON key words: COOKIE alone is enough, AUTHOR is not */
+  for (const [name, out] of both('{"SESSION_COOKIE":"zzzz1234yyyy5678"}')) assert.ok(!out.includes('zzzz1234yyyy5678'), name);
+  for (const [name, out] of both('{"AUTHOR_NAME":"zzzz1234yyyy5678"}')) assert.ok(out.includes('zzzz1234yyyy5678'), name);
+  /* JSON value 11 vs 12 characters */
+  for (const [name, a] of both('{"API_TOKEN":"abcdefghijk"}')) assert.ok(a.includes('abcdefghijk'), name);
+  for (const [name, a] of both('{"API_TOKEN":"abcdefghijkl"}')) assert.ok(!a.includes('abcdefghijkl'), name);
+  /* Authorization payloads: Bearer 5 vs 6, Basic 3 vs 4, Negotiate 15 vs 16 (digits keep them off the prose list) */
+  assert.strictEqual(ss('Authorization: Bearer ab123'), 'Authorization: Bearer ab123');
+  assert.strictEqual(ss('Authorization: Bearer ab1234'), 'Authorization: Bearer [redacted]');
+  assert.strictEqual(ss('Authorization: Basic Yt1'), 'Authorization: Basic Yt1');
+  assert.strictEqual(ss('Authorization: Basic Yt12'), 'Authorization: Basic [redacted]');
+  assert.strictEqual(ss(`Authorization: Negotiate ${'Ab1'.repeat(5)}`), `Authorization: Negotiate ${'Ab1'.repeat(5)}`);
+  assert.strictEqual(ss(`Authorization: Negotiate ${'Ab1'.repeat(5)}x`), 'Authorization: Negotiate [redacted]');
+  assert.strictEqual(ss(`Authorization: Token ${'a'.repeat(23)}`), `Authorization: Token ${'a'.repeat(23)}`);   // 23 plain letters: a word
+  assert.strictEqual(ss(`Authorization: Token ${'a'.repeat(23)}1`), 'Authorization: Token [redacted]');
+  /* name prefix before a keyword: 30 is inside the 64-character cap and is replaced WITH the prefix, 70 only keyword and value */
+  assert.strictEqual(ss(`${'x'.repeat(30)}_token=abcd1234`), '[redacted]');
+  assert.strictEqual(ss(`${'x'.repeat(70)}_token=abcd1234`), `${'x'.repeat(70)}_[redacted]`);
+  /* curl -u far from `curl` (200 characters) and past the 512 span */
+  assert.ok(!mask(`curl ${'x '.repeat(100)}-u user:hunter22`).includes('hunter22'));
+  assert.ok(mask(`curl ${'x '.repeat(300)}-u user:hunter22`).includes('hunter22'));
+  /* mixed-case JSON header keys, raw token without a scheme */
+  for (const [name, out] of both('{"Authorization":"rawtoken1234567890","Cookie":"a=b","author":"somebodylongname12345"}')) { assert.ok(!out.includes('rawtoken1234567890'), name); assert.ok(out.includes('somebodylongname12345'), name); JSON.parse(out); }
 });

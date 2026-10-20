@@ -21,7 +21,7 @@ const isSpace = (c) => c === 32 || (c >= 9 && c <= 13);
 
 /** A leading `\b` that also holds after a JSON escape: in a stored stream line `a\nghp_…` the `n` is a word
  * character, so a plain `\b` never saw the token start. */
-const escB = (re) => (re.source.startsWith('\\b') ? new RegExp(`(?:\\b|(?<=\\\\[nrt]))${re.source.slice(2)}`, re.flags) : re);
+const escB = (re) => (re.source.startsWith('\\b') ? new RegExp(`(?:\\b|(?<=\\\\[nrt]|%[0-9A-Fa-f]{2}))${re.source.slice(2)}`, re.flags) : re);
 
 /* One keyword list for both maskers' `name = value` rules (the env-var rule of qc/run.js is upper-case on purpose). */
 const KEYWORDS = 'api[\\s_-]?key|access[\\s_-]?token|refresh[\\s_-]?token|auth(?:orization)?[\\s_-]?(?:token)?(?!\\b\\s*[:=]\\s*["\']?(?:basic|bearer|digest|negotiate|token)\\b)|proxy[\\s_-]?authorization(?!\\b\\s*[:=]\\s*["\']?(?:basic|bearer|digest|negotiate|token)\\b)|cookie|set[\\s_-]?cookie|credential|token|password|passwd|secret(?:[\\s_-]?access[\\s_-]?key)?|private[\\s_-]?key|client[\\s_-]?secret';
@@ -34,11 +34,10 @@ const ASSIGNMENT_LONG_NAME = new RegExp(`(?:${KEYWORDS})\\b${VALUE}`, 'gi');
 /* Header-ish shapes the generic rules miss. Bounded quantifiers only. */
 const EXTRA_RE = [
   /(?<=(?:\b|(?<=\\[nrt]))x-(?:auth-token|api-key|access-token|csrf-token)["']?[ \t]{0,4}:[ \t]{0,4}["']?)[^\s"',;]{4,}/gi,   // only the value: the name and a JSON document stay intact
-  /\bcurl\b[^\r\n]{0,512}?\s(?:-u|--user)(?:[ =]|\s+)["']?[^\s:'"]+:[^\s'"]+/g,
 ].map((r) => (r.source.startsWith('\\b') ? escB(r) : r));
 
 /* ── Cookie / Set-Cookie headers ───────────────────────────────────────────────────────────────── */
-const COOKIE_NAME = /(^|[\s"'`{(,;])((?:set-)?cookie)(["']?)[ \t]{0,4}:[ \t]{0,4}/gim;
+const COOKIE_NAME = /(^|[\s"'`{(,;]|\\[nrt])((?:set-)?cookie)(["']?)[ \t]{0,4}:[ \t]{0,4}/gim;
 const isCookieTokenChar = (c) => isAlpha(c) || isDigit(c) || '!#$%&\'*+.^_`|~-'.includes(String.fromCharCode(c));
 /** Only a real HEADER is masked: the name stands alone (line start, whitespace or a quote before it - `COOKIE_EXCHANGE: number`
  * and `HTTP2_HEADER_COOKIE: string` are identifiers) and its value starts like a cookie pair (`name=`). The value runs to the end of
@@ -58,13 +57,29 @@ function maskCookieHeaders(text, rep) {
     while (k < lim && isCookieTokenChar(text.charCodeAt(k))) k++;
     if (k > start && text[k] === '=') {
       let end = k;
-      while (end < n) { const c = text[end]; if (c === '\n' || c === '\r' || c === '"') break; end++; }
+      while (end < n) { const c = text[end]; if (c === '\n' || c === '\r' || c === '"' || c === "'" || c === '`') break; end++; }
       out += text.slice(pos, start) + rep; pos = end; re.lastIndex = Math.max(end, re.lastIndex);
     } else re.lastIndex = Math.max(start, re.lastIndex);
   }
   return out + text.slice(pos);
 }
-const EXTRA = [maskCookieHeaders, ...EXTRA_RE.map((r) => (t, rep) => t.replace(r, rep))];
+/* `curl … -u user:secret`: the option is found first (linear), then `curl` must stand on the same line within the 512 characters before it. */
+function maskCurlUser(text, rep) {
+  if (!text.includes('curl')) return text;
+  const re = /\s(?:-u|--user)(?:[ =]|\s+)["']?[^\s:'"]+:[^\s'"]+/g;
+  let out = '';
+  let pos = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const from = Math.max(pos, m.index - 512);
+    const win = text.slice(from, m.index);
+    const nl = Math.max(win.lastIndexOf('\n'), win.lastIndexOf('\r')) + 1;
+    const at = win.slice(nl).search(/\bcurl\b/);
+    if (at >= 0) { out += text.slice(pos, from + nl + at) + rep; pos = m.index + m[0].length; }
+  }
+  return out + text.slice(pos);
+}
+const EXTRA = [maskCookieHeaders, ...EXTRA_RE.map((r) => (t, rep) => t.replace(r, rep)), maskCurlUser];
 
 /* ── private keys ──────────────────────────────────────────────────────────────────────────────── */
 const BEGIN = '-----BEGIN ';
@@ -184,7 +199,7 @@ function maskJwt(text, rep) {
   let pos = 0;
   while (i >= 0) {
     const prev = i > 0 ? text.charCodeAt(i - 1) : 0;
-    const ok = i === 0 || !isWord(prev) || ('nrt'.includes(text[i - 1]) && text[i - 2] === '\\');
+    const ok = i === 0 || !isWord(prev) || ('nrt'.includes(text[i - 1]) && text[i - 2] === '\\') || (i >= 3 && text[i - 3] === '%' && /^[0-9A-Fa-f]{2}$/.test(text.slice(i - 2, i)));
     if (!ok) { i = text.indexOf('eyJ', i + 3); continue; }
     let e = i + 3;
     while (e < n && isB64u(text.charCodeAt(e))) e++;

@@ -16,7 +16,7 @@ const SECRET_RULES = [
   ['provider_token', rx(M.escB(/\b(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{8,}|sk-ant-[A-Za-z0-9_-]{20,}|sk_(?:live|test)_[A-Za-z0-9]{16,})\b/g))],
   ['openai_key', rx(M.escB(/\bsk-[A-Za-z0-9_-]{20,}\b/g))],
   ['aws_access_key', rx(M.escB(/\bAKIA[0-9A-Z]{16}\b/g))],
-  ['npm_token', rx(M.escB(/\bnpm_[A-Za-z0-9]{36}\b/g))],
+  ['npm_token', rx(M.escB(/\bnpm_[A-Za-z0-9]{36,}\b/g))],
   ['google_api_key', rx(M.escB(/\bAIza[0-9A-Za-z_-]{35}/g))],
   ['slack_webhook', rx(M.escB(/\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]{20,}/g))],
   ['json_credential_value', M.maskJsonCredentials],
