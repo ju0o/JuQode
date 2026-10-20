@@ -535,8 +535,9 @@ test('F3/F4 (round 4): Cookie / Set-Cookie are masked only as HEADERS; identifie
   for (const [t, secret] of hit) for (const [name, out] of both(t)) assert.ok(!out.includes(secret), `${name}: ${t} -> ${out}`);
   assert.strictEqual(mask("  cookie: 'get=cookies; and=attributes'"), "  cookie: '***'");
   /* boundary of the pair-name look: 128 token characters then '=' is a header, 129 is not */
-  assert.ok(!mask(`Cookie: ${'n'.repeat(128)}=v1`).includes('=v1'));
-  assert.ok(mask(`Cookie: ${'n'.repeat(129)}=v1`).includes('=v1'));
+  /* round 5 widened the pair-name window from 128 to 512 characters */
+  assert.ok(!mask(`Cookie: ${'n'.repeat(512)}=v1`).includes('=v1'));
+  assert.ok(mask(`Cookie: ${'n'.repeat(513)}=v1`).includes('=v1'));
 });
 
 test('F5 (round 4): the leaf cap truncates STRINGS only - numbers, booleans and null keep their truth value after it', () => {
