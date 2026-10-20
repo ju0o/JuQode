@@ -434,6 +434,44 @@ function bytesAt(root, store, ref, filePath) {
   catch { return null; }
 }
 
+/** Size in bytes of one file's blob at a basis, or null when it is absent. Lets a caller refuse
+ *  an oversize blob BEFORE `bytesAt` buffers it. */
+function sizeAt(root, store, ref, filePath) {
+  const env = {
+    GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
+  };
+  try { const n = Number(git(['cat-file', '-s', `${ref}:${filePath}`], { cwd: root, env })); return Number.isFinite(n) ? n : null; }
+  catch { return null; }
+}
+
+/** sha256 + byte count of one file's blob at a basis WITHOUT holding it in memory: `cat-file blob`
+ *  writes into a scratch file inside the JuQode-owned store (never the project), which is then
+ *  hashed in 64 KiB chunks and deleted. Sync on purpose (computePatch is sync). null = unreadable. */
+function blobDigestAt(root, store, ref, filePath) {
+  const env = {
+    GIT_OBJECT_DIRECTORY: path.join(store, 'objects'),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(gitDir(root), 'objects'),
+  };
+  const scratch = path.join(store, `blob.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+  let out;
+  try {
+    out = fs.openSync(scratch, 'w');
+    execFileSync('git', ['--no-optional-locks', '-c', 'core.splitIndex=false', 'cat-file', 'blob', `${ref}:${filePath}`],
+      { cwd: root, env: { ...baseEnv(), ...env }, stdio: ['ignore', out, 'pipe'] });
+    fs.closeSync(out); out = null;
+    const fd = fs.openSync(scratch, 'r');
+    try {
+      const h = crypto.createHash('sha256');
+      const chunk = Buffer.allocUnsafe(64 * 1024);
+      let bytes = 0;
+      for (let n; (n = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0;) { h.update(chunk.subarray(0, n)); bytes += n; }
+      return { sha256: h.digest('hex'), bytes };
+    } finally { fs.closeSync(fd); }
+  } catch { return null; }
+  finally { if (out !== null && out !== undefined) try { fs.closeSync(out); } catch { /* already closed */ } try { fs.rmSync(scratch, { force: true }); } catch { /* best effort */ } }
+}
+
 /** `path → mode` for one tree. `-z` because a path with a non-ASCII name — the ordinary case
  *  for this product — is C-quoted by the default output and would not match the worktree. */
 function treeModes(root, store, ref) {
@@ -550,4 +588,4 @@ function restore(root, store, beforeRef, afterRef) {
   return done;
 }
 
-module.exports = { capture, diff, changedPaths, fileAt, bytesAt, restore, worktreeDirty, hasIdentity, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };
+module.exports = { capture, diff, changedPaths, fileAt, bytesAt, sizeAt, blobDigestAt, treeModes, restore, worktreeDirty, hasIdentity, refusal, treePaths, isGitRepo, nestedRepos, ignoredPaths, REFUSE, DEFAULT_MAX_BYTES };
