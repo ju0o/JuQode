@@ -111,7 +111,7 @@ test('start(): a settings.local.json is judged the same way', async () => {
   assert.deepStrictEqual([r.ok, r.reason, r.detail.source], [false, 'effective-permission-widened', 'settings.local.json']);
   assert.ok(!fs.existsSync(w.marker));
 });
-for (const [name, settings] of [['no .claude folder', undefined], ['empty settings', {}], ['scoped allow rules and plan mode', { permissions: { defaultMode: 'plan', allow: ['Bash(npm test:*)', 'Read(./src/**)'], deny: ['Read(./.env)'] } }], ['unrelated keys', { model: 'x', env: { A: '1' } }]]) {
+for (const [name, settings] of [['no .claude folder', undefined], ['empty settings', {}], ['scoped allow rules and plan mode', { permissions: { defaultMode: 'plan', allow: ['Bash(npm test)', 'Read(./src/**)'], deny: ['Read(./.env)'] } }], ['unrelated keys', { model: 'x', env: { A: '1' } }]]) {
   test(`start(): ${name} -> still starts (normal Work is not blocked)`, async () => {
     const w = setup(settings);
     const r = await w.start();
@@ -174,18 +174,21 @@ test('mutation guard: the comma-joined second grant is refused by the launch gat
 });
 
 test('F3/F4: project allow rules - bare READ tools pass, bare write/exec tools and pattern-everywhere file rules are refused', () => {
-  for (const r of ['Read', 'Glob', 'Grep', 'LS', 'Read(./src/**)', 'Bash(npm test:*)', 'Edit(src/a.txt)', 'WebFetch(domain:example.com)', 'Edit(src/**)']) assert.strictEqual(C.allowRuleWidens(r), false, r);
+  for (const r of ['Read', 'Glob', 'Grep', 'LS', 'Read(./src/**)', 'Bash(npm test)', 'Edit(src/a.txt)']) assert.strictEqual(C.allowRuleWidens(r), false, r);
   for (const r of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch', 'mcp__x', 'mcp__x__tool', 'Bash(*)', 'Bash()', 'Bash(:*)', 'Edit(**)', 'Edit(**/*)', 'Edit(//**)', 'Edit(/**)',
-    'Edit(./**)', 'Write(**/*)', 'MultiEdit(**)', 'NotebookEdit(**)', 'Edit(//etc/**)', 'Edit(~/x)', 'Edit(../x)', 7, null, '', '(']) assert.strictEqual(C.allowRuleWidens(r), true, String(r));
+    'Edit(./**)', 'Write(**/*)', 'MultiEdit(**)', 'NotebookEdit(**)', 'Edit(//etc/**)', 'Edit(~/x)', 'Edit(../x)', 7, null, '', '(', 'Bash(npm test:*)', 'WebFetch(domain:example.com)', 'Edit(src/**)']) assert.strictEqual(C.allowRuleWidens(r), true, String(r));
 });
-for (const [name, allow, ok] of [['bare Read/Glob/Grep/LS', ['Read', 'Glob', 'Grep', 'LS'], true], ['bare WebSearch (OPEN: refused, risk unmeasured)', ['WebSearch'], false],
-  ['bare mcp__x (OPEN: refused, risk unmeasured)', ['mcp__x'], false], ['Edit(**/*)', ['Edit(**/*)'], false], ['Edit(//**)', ['Edit(//**)'], false],
-  ['Edit(src/**) (OPEN: directory pattern characterized, not judged)', ['Edit(src/**)'], true], ['allow is not a list', 'Read', false]]) {
+for (const [name, allow, ok, why] of [['bare Read/Glob/Grep/LS', ['Read', 'Glob', 'Grep', 'LS'], true],
+  ['bare WebSearch (UNMEASURED: refused)', ['WebSearch'], false, 'project-settings-unmeasured-allow'],
+  ['bare mcp__x (UNMEASURED: refused)', ['mcp__x'], false, 'project-settings-unmeasured-allow'], ['Edit(**/*)', ['Edit(**/*)'], false, 'project-settings-unscoped-allow'],
+  ['Edit(//**)', ['Edit(//**)'], false, 'project-settings-unscoped-allow'],
+  ['Edit(src/**) (UNMEASURED: directory pattern, refused)', ['Edit(src/**)'], false, 'project-settings-unmeasured-allow'],
+  ['allow is not a list', 'Read', false, 'project-settings-unknown-rule']]) {
   test(`start(): project allow ${name} -> ${ok ? 'starts' : 'refused before any row or child'}`, async () => {
     const w = setup({ permissions: { allow } });
     const r = await w.start();
     if (ok) { assert.strictEqual(r.ok, true, JSON.stringify(r)); await r.done; return; }
-    assert.deepStrictEqual([r.ok, r.reason, r.detail.reason], [false, 'effective-permission-widened', 'project-settings-unscoped-allow']);
+    assert.deepStrictEqual([r.ok, r.reason, r.detail.reason], [false, 'effective-permission-widened', why]);
     assert.deepStrictEqual(counts(w.db), [0, 0, 0, 0]);
     assert.ok(!fs.existsSync(w.marker));
   });

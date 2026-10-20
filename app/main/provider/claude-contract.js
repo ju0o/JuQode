@@ -58,35 +58,107 @@ function buildArgs({ sessionId, resume = false, allowedTools = [], tools = null 
  * resume. A file that exists but cannot be read or parsed is UNKNOWN, and unknown is refused. Scoped allow rules are NOT judged here (product decision, see OPEN). The user's
  * and managed settings are never read by JuQode: they stay UNKNOWN (containment().permissions). */
 const PERMISSIVE_MODES = new Set(['bypasspermissions', 'acceptedits', 'auto']);
-/* bare tool names that only READ the project: a bare allow rule for them does not widen what a run may WRITE or execute. Anything else bare (Edit, Write, Bash, NotebookEdit,
- * WebFetch, WebSearch, mcp__*) is refused; WebSearch / mcp__* are refused only because their risk is not measured (OPEN). */
-const READ_ONLY_BARE = new Set(['Read', 'Glob', 'Grep', 'LS']);
-function allowRuleWidens(rule) {
-  const m = typeof rule === 'string' ? /^\s*([A-Za-z][A-Za-z0-9_]*)\s*(?:\(([\s\S]*)\))?\s*$/.exec(rule) : null;
-  if (!m) return true;
+const SAFE_MODES = new Set(['default', 'plan', 'dontAsk']);      // ask / read-only planning / deny-unless-allowed: none of them removes a check
+/* ── allow-rule classes. A rule is attested ONLY when it is NARROW; JuQode's screens say nothing about project settings, so a rule whose authority is not proven by a measurement
+ * is never "probably fine" because its text looks scoped:
+ *   narrow     bare Read/Glob/Grep/LS and Read-family specs that stay inside the project (they cannot change anything); an exact-file write rule (no glob, not a directory); an exact Bash command.
+ *   wide       bare write/exec/network tool, wildcard-only or glob-everywhere write rule, anything reaching out of the project, WebFetch(domain:*), Bash with an empty or wildcard-only prefix.
+ *   unmeasured a directory/glob write rule (`Edit(src)`, `Edit(src/**)`), `Bash(prefix:*)` (any arguments; the card shows only the prefix), `WebFetch(domain:x)`, WebSearch, mcp__*, Task, TodoWrite.
+ *   unknown    a tool name, shape or type this table does not contain.
+ * Everything but `narrow` is refused. Evidence per class: tests/prestart-permission.test.js (table test). */
+const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS']);
+const BAD_CHARS = /[\p{Cc}\p{Cf}]/u;
+function classifyAllowRule(rule, projectPath = null) {
+  if (typeof rule !== 'string' || !rule || rule !== rule.trim() || BAD_CHARS.test(rule)) return 'unknown';
+  const m = /^([A-Za-z][A-Za-z0-9_]*)(?:\(([\s\S]*)\))?$/.exec(rule);
+  if (!m) return 'unknown';
   const [, tool, inner] = m;
-  if (inner === undefined) return !READ_ONLY_BARE.has(tool);
-  const spec = inner.trim();
-  if (/^[*?:\s]*$/.test(spec)) return true;                 // `Bash()`, `Bash(*)`, `Bash(:*)`
-  return FILE_WRITERS.has(tool) && fileSpecWide(spec);       
+  const spec = inner === undefined ? undefined : inner.trim();
+  if (spec !== undefined && (spec !== inner || !spec)) return /^[*?:\s]*$/.test(inner) && tool !== 'WebSearch' ? 'wide' : 'unknown';
+  if (READ_TOOLS.has(tool)) {
+    if (spec === undefined) return 'narrow';
+    if (/^[*?:]*$/.test(spec) || /^(\/\/|~)/.test(spec) || spec.split(/[\\/]/).includes('..') || spec.includes('\\')) return 'wide';
+    return 'narrow';
+  }
+  if (FILE_WRITERS.has(tool)) {
+    if (spec === undefined || fileSpecWide(spec) || /[[\]{}!]/.test(spec) || /^\*/.test(spec)) return 'wide';
+    if (/[*?]/.test(spec) || spec.includes('\\') || spec.startsWith('/') || spec.endsWith('/')) return 'unmeasured';
+    if (projectPath) { try { if (fs.statSync(path.resolve(projectPath, spec)).isDirectory()) return 'unmeasured'; } catch { /* does not exist: a file to be created */ } }
+    return 'narrow';
+  }
+  if (tool === 'Bash') {
+    if (spec === undefined || /^[*?:]*$/.test(spec)) return 'wide';
+    if (/^[^*?]+:\*$/.test(spec)) return spec.startsWith(':') ? 'wide' : 'unmeasured';
+    return /[*?]/.test(spec) ? 'unmeasured' : 'narrow';
+  }
+  if (tool === 'WebFetch') return spec === undefined || /domain:\s*[*?]*$|domain:\s*\*/.test(spec) || /^[*?:]*$/.test(spec) ? 'wide' : 'unmeasured';
+  if (tool === 'WebSearch' || tool.startsWith('mcp__') || tool === 'Task' || tool === 'TodoWrite') return 'unmeasured';
+  return 'unknown';
 }
+const allowRuleWidens = (rule, projectPath = null) => classifyAllowRule(rule, projectPath) !== 'narrow';
+const REASONS = Object.freeze(['project-path-unknown', 'project-settings-unreadable', 'project-settings-symlink', 'project-settings-permissive-mode', 'project-settings-unknown-mode',
+  'project-settings-additional-directories', 'project-settings-unscoped-allow', 'project-settings-unmeasured-allow', 'project-settings-unknown-rule', 'project-settings-unknown-key']);
+/* A top-level key that LOOKS permission-related but is not in this table is refused, and so is a permission-like env name: a new key is not "harmless" by being new. */
+const PERMISSION_LIKE = /permission|allow|deny|bypass|dangerous|sandbox|approv|trust|auto.?accept|default.?mode|mcp|ask/i;
+const ENV_PERMISSION_LIKE = /permission|approv|sandbox|bypass|config.?dir|auto|dangerous|yolo|trust/i;
+const KNOWN_PERMISSION_KEYS = new Set(['allow', 'deny', 'ask', 'defaultMode', 'additionalDirectories', 'disableBypassPermissionsMode']);
+
+/** The verdict on ONE parsed settings document. Pure and total: any value, never throws. @returns {{reason:string}|null} */
+function settingsVerdict(doc, projectPath = null) {
+  try {
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { reason: 'project-settings-unreadable' };
+    for (const k of Object.keys(doc)) {
+      if (k === 'permissions' || k === 'env') continue;
+      if (PERMISSION_LIKE.test(k)) return { reason: 'project-settings-unknown-key', key: k };
+    }
+    if (doc.env != null) {
+      if (typeof doc.env !== 'object' || Array.isArray(doc.env)) return { reason: 'project-settings-unknown-key', key: 'env' };
+      for (const k of Object.keys(doc.env)) if (ENV_PERMISSION_LIKE.test(k)) return { reason: 'project-settings-unknown-key', key: `env.${k}` };
+    }
+    const perm = doc.permissions;
+    if (perm == null) return null;
+    if (typeof perm !== 'object' || Array.isArray(perm)) return { reason: 'project-settings-unreadable' };
+    for (const k of Object.keys(perm)) if (!KNOWN_PERMISSION_KEYS.has(k)) return { reason: 'project-settings-unknown-key', key: `permissions.${k}` };
+    const dm = perm.defaultMode;
+    if (dm != null) {
+      if (typeof dm !== 'string' || PERMISSIVE_MODES.has(dm.trim().toLowerCase())) return { reason: 'project-settings-permissive-mode' };
+      if (!SAFE_MODES.has(dm)) return { reason: 'project-settings-unknown-mode' };
+    }
+    if (perm.additionalDirectories != null && (!Array.isArray(perm.additionalDirectories) || perm.additionalDirectories.length)) return { reason: 'project-settings-additional-directories' };
+    for (const k of ['deny', 'ask']) if (perm[k] != null && (!Array.isArray(perm[k]) || perm[k].some((r) => typeof r !== 'string'))) return { reason: 'project-settings-unknown-rule', key: k };
+    if (perm.disableBypassPermissionsMode != null && perm.disableBypassPermissionsMode !== 'disable') return { reason: 'project-settings-unknown-key', key: 'permissions.disableBypassPermissionsMode' };
+    if (perm.allow != null) {
+      if (!Array.isArray(perm.allow)) return { reason: 'project-settings-unknown-rule', key: 'allow' };
+      for (const r of perm.allow) {
+        const c = classifyAllowRule(r, projectPath);
+        if (c === 'wide') return { reason: 'project-settings-unscoped-allow' };
+        if (c === 'unmeasured') return { reason: 'project-settings-unmeasured-allow' };
+        if (c !== 'narrow') return { reason: 'project-settings-unknown-rule' };
+      }
+    }
+    return null;
+  } catch { return { reason: 'project-settings-unreadable' }; }
+}
+
 function projectSettingsRefusal(projectPath) {
   /* an unknown project folder is not "no settings" */
   if (typeof projectPath !== 'string' || !projectPath) return { reason: 'project-path-unknown', source: null };
+  let realRoot = null;
+  try { realRoot = fs.realpathSync(projectPath); } catch { /* judged below as unreadable only if a settings file exists */ }
   for (const name of ['settings.json', 'settings.local.json']) {
     const file = path.join(String(projectPath), '.claude', name);
     let doc;
-    try { doc = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
+    try {
+      /* a settings source that resolves OUTSIDE the project is a source JuQode did not scope: refused, not followed */
+      const real = fs.realpathSync(file);
+      if (!realRoot || (real !== realRoot && !real.startsWith(realRoot + path.sep))) return { reason: 'project-settings-symlink', source: name };
+      doc = JSON.parse(fs.readFileSync(real, 'utf8'));
+    } catch (e) {
       if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue;
       return { reason: 'project-settings-unreadable', source: name };
     }
-    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { reason: 'project-settings-unreadable', source: name };
-    const perm = doc.permissions;
-    if (perm == null) continue;
-    if (typeof perm !== 'object' || Array.isArray(perm)) return { reason: 'project-settings-unreadable', source: name };
-    if (perm.defaultMode != null && (typeof perm.defaultMode !== 'string' || PERMISSIVE_MODES.has(perm.defaultMode.trim().toLowerCase()))) return { reason: 'project-settings-permissive-mode', source: name };
-    if (perm.additionalDirectories != null && (!Array.isArray(perm.additionalDirectories) || perm.additionalDirectories.length)) return { reason: 'project-settings-additional-directories', source: name };
-    if (perm.allow != null && (!Array.isArray(perm.allow) || perm.allow.some(allowRuleWidens))) return { reason: 'project-settings-unscoped-allow', source: name };
+    const v = settingsVerdict(doc, projectPath);
+    if (v) return { ...v, source: name };
   }
   return null;
 }
@@ -361,4 +433,4 @@ function problems(s, ctx) {
   return p;
 }
 
-module.exports = { projectSettingsRefusal, grantRefusal, allowRuleWidens, EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
+module.exports = { projectSettingsRefusal, settingsVerdict, classifyAllowRule, SETTINGS_REASONS: REASONS, grantRefusal, allowRuleWidens, EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
