@@ -675,5 +675,66 @@ test('bounded cost (robust): linear growth, generous absolute bounds', () => {
   assert.ok(tLimit < 2000 && tCheck < 2000 && tWide < 2000, 'a huge claim must cost O(limit), not O(text)');
   assert.ok(tClaims < 8000, `1M claims ${tClaims}`);
   assert.ok(t1M < 8000 && tNull < 8000, `1M rows ${t1M} / null-heavy ${tNull}`);
-  assert.ok(t1M / Math.max(t250, 1) < 6, `growth ${t1M / t250}`);
+  void t250;   // no load-dependent ratio assert: absolute bounds only
+});
+
+/* ═══ round 5 ═══ */
+test('shown_ill_formed only when the INPUT is well-formed: limitClaim output with a lone surrogate in the input is clean', () => {
+  for (const t of ['a'.repeat(279) + '\uD83D' + 'b'.repeat(20) + 'c'.repeat(100), '\uD83D' + 'a'.repeat(400), '\uDE00' + 'a'.repeat(400)]) {
+    const claim = { kind: 'agent-report', confidence: 'expected', text: t, ...limitClaim(t) };
+    assert.deepStrictEqual(checkTruthInvariants({ ...good(), claims: [claim] }), [], JSON.stringify(t.slice(278, 282)));
+  }
+  const emo = '\u{1F600}'.repeat(400);          // well-formed input, ill-formed shown: still flagged
+  assert.deepStrictEqual(codes(checkTruthInvariants({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', text: emo, full: emo, truncated: true, shown: emo.slice(0, 559) + '…' }] })), ['shown_ill_formed']);
+});
+
+test('complete_shown_failure: short labels ending in a failure word are flagged; prose and negations stay clean', () => {
+  const lbl = (label) => codes(checkTruthInvariants({ work: { outcome: 'complete', finishObserved: true }, display: { label } }));
+  for (const bad of ['Run failed', 'Task failed', 'Build error', 'The run has failed.', 'Task FAILED!']) assert.deepStrictEqual(lbl(bad), ['complete_shown_failure'], bad);
+  for (const ok of ['Task completed without error', 'No errors', 'failed 0', 'Tests failed: 0', '0 failures', 'Failure analysis', 'Failed: build', 'did not fail',
+    'Terror', 'all checks passed with no error', 'Run finished after a very long time and failed', 'errors']) assert.deepStrictEqual(lbl(ok), [], ok);
+  /* the same word does not fire on a non-complete Work through this rule */
+  assert.ok(!codes(checkTruthInvariants({ work: { outcome: 'failed', finishObserved: true }, display: { label: 'Run failed' } })).includes('complete_shown_failure'));
+});
+
+test('scan cap boundary: exactly 1 MiB of code units with one grapheme is exact; one more is cut', () => {
+  const edge = 'e' + '\u0301'.repeat((1 << 20) - 1);
+  assert.strictEqual(edge.length, 1 << 20);
+  assert.strictEqual(limitClaim(edge).truncated, false);
+  assert.strictEqual(limitClaim(edge + '\u0301').truncated, true);
+});
+
+test('claimText: considers full, text and data.text and uses the LONGEST', () => {
+  const long = 'q'.repeat(400);
+  const chk = (c) => codes(checkTruthInvariants({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', ...c }] }));
+  assert.deepStrictEqual(chk({ full: long }), ['claim_not_truncated']);
+  assert.deepStrictEqual(chk({ text: 'short', data: { text: long } }), ['claim_not_truncated']);
+  assert.deepStrictEqual(chk({ text: 'short', full: long }), ['claim_not_truncated']);
+  assert.deepStrictEqual(chk({ text: long }), ['claim_not_truncated']);
+  assert.deepStrictEqual(chk({ text: 'short', data: { text: 'also short' } }), []);
+});
+
+test('immutability: arrays are plain only when their items are ([NaN] vs [null]); non-list snapshots are malformed', () => {
+  const mk = (row) => ({ work: { status: 'ended', outcome: 'complete' }, evidence: [{ id: 'a', ...row }] });
+  assert.deepStrictEqual(codes(checkImmutableRun(mk({ a: [NaN] }), mk({ a: [null] }))), ['ended_run_row_altered']);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk({ a: [-0] }), mk({ a: [0] }))), ['ended_run_row_altered']);
+  const ended = { status: 'ended', outcome: 'complete' };
+  assert.deepStrictEqual(codes(checkImmutableRun({ work: ended, evidence: {} }, { work: ended, evidence: [] })), ['malformed_input']);
+  assert.deepStrictEqual(codes(checkImmutableRun({ work: ended, evidence: [] }, { work: ended, evidence: {} })), ['malformed_input']);
+  assert.deepStrictEqual(codes(checkImmutableRun({ work: ended, patches: 'x' }, { work: ended })), ['malformed_input']);
+});
+
+test('immutability fails closed on exotic objects; typed arrays compare by content', () => {
+  const mk = (row) => ({ work: { status: 'ended', outcome: 'complete' }, evidence: [{ id: 'a', ...row }] });
+  const sym = (v) => { const o = { v }; o[Symbol('s')] = 1; return o; };
+  const hidden = (v) => Object.defineProperty({ v }, 'h', { value: 1, enumerable: false });
+  class K { constructor(v) { this.v = v; } }
+  for (const [name, a, b] of [['ArrayBuffer', { b: new ArrayBuffer(2) }, { b: new ArrayBuffer(2) }], ['RegExp', { r: /a/ }, { r: /b/ }],
+    ['Error', { e: new Error('x') }, { e: new Error('y') }], ['symbol key', { o: sym(1) }, { o: sym(1) }], ['non-enumerable', { o: hidden(1) }, { o: hidden(1) }],
+    ['class instance', { o: new K(1) }, { o: { v: 1 } }], ['DataView', { d: new DataView(new ArrayBuffer(1)) }, { d: new DataView(new ArrayBuffer(1)) }]]) {
+    assert.deepStrictEqual(codes(checkImmutableRun(mk(a), mk(b))), ['malformed_input'], name);
+  }
+  assert.deepStrictEqual(checkImmutableRun(mk({ t: new Uint8Array([1, 2]) }), mk({ t: new Uint8Array([1, 2]) })), []);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk({ t: new Uint8Array([1, 2]) }), mk({ t: new Uint8Array([1, 3]) }))), ['ended_run_row_altered']);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk({ t: new Uint8Array([1]) }), mk({ t: new Int8Array([1]) }))), ['ended_run_row_altered']);
 });

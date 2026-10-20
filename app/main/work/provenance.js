@@ -251,6 +251,15 @@ function limitClaim(text, limit = CLAIM_LIMIT) {
 const SUCCESS_WORDS = ['success', 'succeeded', 'complete', 'completed', 'done', 'ok', 'passed', 'pass', 'task complete', 'task completed', ...SUCCESS_LABELS];
 const OTHER_WORDS = ['neutral', 'failure', 'failed', 'fail', 'error', 'unknown', 'warning', 'partial', 'cancelled', 'canceled', 'pending', 'info', ...FAILURE_LABELS, ...NEUTRAL_LABELS];
 const FAILURE_WORDS = ['failure', 'failed', 'fail', 'error'];
+/* A complete Work must not wear a failure label. Rule: the label is a known failure label/word (exact), OR
+ * it is short (<= 4 words) and its LAST whole word is failure/failed/fail/error ('Run failed', 'Task failed')
+ * with no negator in it ('completed without error', 'did not fail', '0 failed'). Not matched on purpose:
+ * a failure word first ('Failure analysis', 'Failed: build') and plurals ('No errors', '0 failures'). */
+const NEGATORS = new Set(['no', 'not', 'without', 'never', 'zero', '0', 'none', 'nothing']);
+function endsWithFailureWord(label) {
+  const w = label.split(' ').map((x) => x.replace(/[^\p{L}\p{N}]+/gu, '')).filter(Boolean);
+  return w.length >= 2 && w.length <= 4 && FAILURE_WORDS.includes(w[w.length - 1]) && !w.some((x) => NEGATORS.has(x));
+}
 const wordSet = (...lists) => new Set(lists.flat().filter((x) => typeof x === 'string').map(norm));
 const NO_WORDS = new Set(['', 'false', 'no', 'n', '0', 'null', 'undefined']);
 const truthy = (x) => (typeof x === 'string' ? !NO_WORDS.has(norm(x)) : Boolean(x));
@@ -290,7 +299,7 @@ function invariants(s, opts) {
   const words = [d.tone, d.status, d.label, d.outcome].filter((x) => typeof x === 'string').map(norm);
   const shownSuccess = words.some((x) => success.has(x)) || truthy(d.success) && d.success !== undefined;
   const failure = wordSet(FAILURE_WORDS, FAILURE_LABELS, opts.failureLabels ?? []);
-  if (w.outcome === 'complete' && words.some((x) => failure.has(x))) add('complete_shown_failure', 'a complete Work rendered with a failure label');
+  if (w.outcome === 'complete' && words.some((x) => failure.has(x) || endsWithFailureWord(x))) add('complete_shown_failure', 'a complete Work rendered with a failure label');
   if (shownSuccess && w.outcome !== 'complete') add('non_success_shown_success', `${w.outcome ?? w.status} rendered as success`);
   if (!shownSuccess && w.outcome !== 'complete' && words.some((x) => x !== '' && !known.has(x))) add('unknown_display_tone', 'unrecognised tone on a non-complete Work');
 
@@ -332,7 +341,7 @@ function invariants(s, opts) {
     if (typeof text === 'string' && isOver(text, CLAIM_LIMIT)) {
       if (c.truncated !== true || typeof c.shown !== 'string' || isOver(c.shown, CLAIM_LIMIT + TRUNCATION_MARK.length) ||
           c.full !== text) add('claim_not_truncated', `${c.kind} of ${text.length} chars shown without limit/marker/full text`);
-      else if (c.shown.isWellFormed && !c.shown.isWellFormed()) add('shown_ill_formed', `${c.kind} shown text ends in a lone surrogate`);
+      else if (c.shown.isWellFormed && text.isWellFormed() && !c.shown.isWellFormed()) add('shown_ill_formed', `${c.kind} shown text ends in a lone surrogate`);
       else if (!text.startsWith(c.shown.endsWith(TRUNCATION_MARK) ? c.shown.slice(0, -TRUNCATION_MARK.length) : c.shown)) add('shown_not_prefix', `${c.kind} shown text is not the start of the full text`);
     }
   }
@@ -353,17 +362,24 @@ function invariants(s, opts) {
  * Map/Set by entries; throws on cycles. */
 function canon(x, seen = new Set()) {
   if (x === null) return 'null';
-  if (typeof x !== 'object') return typeof x === 'string' ? JSON.stringify(x) : `${typeof x}:${String(x)}`;
+  if (typeof x !== 'object') return typeof x === 'string' ? JSON.stringify(x) : `${typeof x}:${Object.is(x, -0) ? '-0' : String(x)}`;
   if (seen.has(x)) throw new TypeError('cycle');
   seen.add(x);
   let out;
   if (x instanceof Date) out = `date:${x.getTime()}`;
   else if (x instanceof Map) out = `map:[${[...x].map(([k, v]) => `${canon(k, seen)}=>${canon(v, seen)}`).sort().join(',')}]`;
   else if (x instanceof Set) out = `set:[${[...x].map((v) => canon(v, seen)).sort().join(',')}]`;
+  else if (ArrayBuffer.isView(x) && !(x instanceof DataView)) out = `typed:${x.constructor.name}:[${Array.from(x, String).join(',')}]`;
   else if (Array.isArray(x)) out = `[${x.map((y) => canon(y, seen)).join(',')}]`;
+  else if (!isPlainObject(x)) throw new TypeError('exotic object'); // ArrayBuffer, RegExp, Error, class instances...: fail closed
   else out = `{${Object.keys(x).sort().map((k) => `${JSON.stringify(k)}:${canon(x[k], seen)}`).join(',')}}`;
   seen.delete(x);
   return out;
+}
+
+function isPlainObject(x) {
+  const proto = Object.getPrototypeOf(x);
+  return (proto === Object.prototype || proto === null) && Reflect.ownKeys(x).length === Object.keys(x).length;
 }
 
 /** Plain JSON data only: string/boolean/finite number/null, plain objects and arrays, no toJSON, no
@@ -372,12 +388,14 @@ function plain(x, depth = 0) {
   if (x === null) return true;
   const t = typeof x;
   if (t === 'string' || t === 'boolean') return true;
-  if (t === 'number') return Number.isFinite(x);
+  if (t === 'number') return Number.isFinite(x) && !Object.is(x, -0);
   if (t !== 'object' || depth > 64) return false;
   if (Array.isArray(x)) { for (let i = 0; i < x.length; i++) if (!plain(x[i], depth + 1)) return false; return true; }
   const proto = Object.getPrototypeOf(x);
   if ((proto !== Object.prototype && proto !== null) || 'toJSON' in x) return false;
-  for (const k in x) if (!plain(x[k], depth + 1)) return false;
+  const keys = Object.keys(x);
+  if (Reflect.ownKeys(x).length !== keys.length) return false;     // symbol keys / non-enumerable props: not plain
+  for (let i = 0; i < keys.length; i++) if (!plain(x[keys[i]], depth + 1)) return false;
   return true;
 }
 
