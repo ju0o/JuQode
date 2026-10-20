@@ -612,3 +612,17 @@ test('independent oracle: 26 tools x 63 specs classify as constructed; 4000 seed
   }
   assert.ok(ok > 200 && no > 200, `${ok}/${no}`);
 });
+
+test('control layers each hold on their own (mutation guards)', { skip: process.platform === 'win32' && 'symlinks' }, () => {
+  const root = world();
+  const real = fs.realpathSync(root);
+  assert.strictEqual(C.classifyAllowRule('Edit(.envrc)'), 'unmeasured', 'lexical only, no project folder known');
+  assert.strictEqual(C.classifyAllowRule('Edit(package.json)'), 'unmeasured');
+  assert.strictEqual(C.isControlTarget(real, '.envrc', path.join(real, 'src/a.txt')), true, 'by its own name');
+  assert.strictEqual(C.isControlTarget(real, 'src/a.txt', path.join(real, 'src/a.txt')), false);
+  fs.writeFileSync(path.join(root, 'package.json'), '{}');
+  fs.symlinkSync(path.join(root, 'package.json'), path.join(root, 'pkg.txt'));
+  assert.strictEqual(C.classifyAllowRule('Edit(pkg.txt)', root), 'unmeasured', 'a link to package.json');
+  fs.symlinkSync(path.join(root, 'src/a.txt'), path.join(root, '.envrc'));
+  assert.strictEqual(C.classifyAllowRule('Edit(.envrc)', root), 'unmeasured', 'a link NAMED like a control file');
+});
