@@ -11,7 +11,8 @@
  * INPUT-SHAPE CONTRACT for the future wiring (the DB rows alone are NOT enough):
  *   reviews  task_criterion_review rows JOINED with `work.outcome AS work_outcome`; needs
  *            criterion_id, criterion_digest, task_spec_digest, work_id, verdict, work_outcome,
- *            reviewed_at (and rowid when available). A row missing any of these does not count
+ *            reviewed_at, and a rowid (SELECT rowid AS rowid_, * - plain `select *` has none and rows that
+ *            tie on reviewed_at with different content then cannot be ordered: unverified). A row missing any of these does not count
  *            (fail closed). Order is by (reviewed_at, rowid), never by array position.
  *   taskSpecDigest  the CURRENT repo.taskSpecDigest(task); required.
  *   tests    run_evidence rows (kind test_command) with work_id, observed_at, rowid.
@@ -34,10 +35,20 @@ const TRUNCATION_MARK = '…';
 const PATCH_STATES = Object.freeze(['stored', 'unchanged', 'binary', 'too_large', 'sensitive_excluded', 'unavailable']);
 
 const sha = (s) => createHash('sha256').update(String(s), 'utf8').digest('hex');
-const norm = (x) => (typeof x === 'string' ? x.trim().toLowerCase() : x);
+/* case/space/trailing-punctuation insensitive: 'Done!' and ' done ' are one word */
+const norm = (x) => (typeof x === 'string' ? x.trim().toLowerCase().replace(/\s+/g, ' ').replace(/[!.\u3002]+$/, '') : x);
 const present = (x) => x !== undefined && x !== null && x !== '';
-const ko = (...cp) => String.fromCharCode(...cp); // Korean words by code point: copy stays in Canon 18, not here
-const DONE_WORD = ko(0xc644, 0xb8cc); // the Canon 18 "complete" label value, compared as a key
+/* Built-in FALLBACK label sets (real Canon 18 values, kept as code points so no Korean literal lives here).
+ * copy.js is a renderer ES module and not require()-able from main: the wiring passes the real set
+ * as opts.successLabels / failureLabels / neutralLabels, and a test derives it from copy.js. */
+const hx = (...words) => words.map((w) => String.fromCodePoint(...w.split(' ').map((c) => parseInt(c, 16))));
+const SUCCESS_LABELS = hx('b05d b0ac c5b4 c694', 'c791 c5c5 c774 20 b05d b0ac c5b4 c694',
+  'b05d b09c 20 ac83 c73c b85c 20 bcfc 20 c218 20 c788 c5b4 c694', 'c644 b8cc', 'c644 b8cc b428',
+  'b9c8 c9c0 b9c9 20 c791 c5c5 c774 20 b05d b0ac c5b4 c694');
+const FAILURE_LABELS = hx('c2e4 d328', 'b05d b0b4 c9c0 20 babb d588 c5b4 c694',
+  'c544 c9c1 20 b05d b09c 20 ac83 c73c b85c 20 bcf4 ae30 20 c5b4 b824 c6cc c694', 'c2e4 d589 c774 20 c2e4 d328 d588 c5b4 c694');
+const NEUTRAL_LABELS = hx('c77c bd80 b9cc 20 b05d b0ac c5b4 c694', 'cde8 c18c d588 c5b4 c694', 'c544 c9c1 20 d655 c778 b418 c9c0 20 c54a c558 c5b4 c694',
+  'c9c0 ae08 c740 20 c0c1 d0dc b97c 20 d655 c778 d560 20 c218 20 c5c6 c5b4 c694', 'b05d b0ac b294 c9c0 20 d655 c778 d560 20 c218 20 c5c6 c5b4 c694');
 
 /* ── (1) classification ─────────────────────────────────────────────────────────────────── */
 
@@ -76,7 +87,8 @@ function classifyClaim(claim) {
 /* ── (2) PASS guard ─────────────────────────────────────────────────────────────────────── */
 
 const byTime = (a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : (a.r - b.r) || (a.i - b.i));
-const orderKey = (row, i, tkey) => ({ row, i, t: String(row?.[tkey] ?? ''), r: Number.isFinite(row?.rowid) ? row.rowid : 0 });
+const seqOf = (row) => [row?.rowid, row?.rowid_, row?.seq].find((x) => Number.isFinite(x));
+const orderKey = (row, i, tkey) => ({ row, i, t: String(row?.[tkey] ?? ''), r: seqOf(row) ?? 0 });
 
 /**
  * @returns {{pass:boolean, runId:string|null, criteria:{id,status:'passed'|'failed'|'tests_confirmed'|'unverified',
@@ -102,6 +114,13 @@ function passVerdict(criteria, evidence) {
     /* ordering is only knowable with reviewed_at; an undated row poisons the criterion */
     if (mine.some((r) => !present(r.reviewed_at))) return { ...base, status: 'unverified', reason: 'unordered_review' };
     const latest = mine.at(-1);              // the LATEST row first - a stale one is not a fallback
+    /* real rows have no rowid unless the caller selects it; rows tied on reviewed_at with no distinct
+     * sequence cannot be ordered, and guessing could disagree with the repo -> unverified */
+    const tied = latest ? mine.filter((r) => r.reviewed_at === latest.reviewed_at) : [];
+    const sig = (r) => [r.verdict, r.criterion_digest, r.task_spec_digest, r.work_id, r.work_outcome].join('\u0001');
+    if (tied.length > 1 && new Set(tied.map(sig)).size > 1 && new Set(tied.map(seqOf)).size < tied.length) {
+      return { ...base, status: 'unverified', reason: 'ambiguous_order' };
+    }
     let out = { ...base, status: 'unverified', reason: latest ? null : 'no_review' };
     if (latest) {
       const current = present(spec) && latest.task_spec_digest === spec &&
@@ -174,49 +193,66 @@ function adaptChangedFilesEvidence(rowOrDetails) {
  *    it is NOT counted and makes the count a LOWER BOUND (changesKnown:true, lowerBound:true).
  *  binary / too_large (assigned only after digests differ) are counted, patchComplete:false.
  */
-function summarizeChanges(changes) {
+function summarizeChanges(changes) {   // + unavailableCount: how many files had patch_state 'unavailable'
   try {
-    const unknown = (reason) => ({ changesKnown: false, patchStateKnown: false, count: null, lowerBound: false, patchComplete: false, reason });
+    const unknown = (reason, unavailableCount = 0) => ({ changesKnown: false, patchStateKnown: false, count: null, lowerBound: false, patchComplete: false, reason, unavailableCount });
     if (changes?.known !== true || !Array.isArray(changes.files)) return unknown('unknown');
     const files = changes.files.map(normFile);
-    if (files.some((f) => f.patchState === 'unavailable' || (f.patchState !== undefined && !PATCH_STATES.includes(f.patchState)))) return unknown('patch_unavailable');
+    if (files.some((f) => f.patchState === 'unavailable' || (f.patchState !== undefined && !PATCH_STATES.includes(f.patchState)))) return unknown('patch_unavailable', files.filter((f) => f.patchState === 'unavailable').length);
     const stateKnown = files.every((f) => f.patchState !== undefined);
     const sensitive = files.filter((f) => f.patchState === 'sensitive_excluded').length;
     const count = files.filter((f) => f.patchState !== 'unchanged' && f.patchState !== 'sensitive_excluded').length;
     const partial = files.some((f) => ['binary', 'too_large'].includes(f.patchState));
     return { changesKnown: true, patchStateKnown: stateKnown, count, lowerBound: sensitive > 0,
       patchComplete: stateKnown && !partial && sensitive === 0,
+      unavailableCount: 0,
       reason: !stateKnown ? 'patch_state_unknown' : sensitive ? 'sensitive_lower_bound' : partial ? 'patch_partial' : null };
-  } catch { return { changesKnown: false, patchStateKnown: false, count: null, lowerBound: false, patchComplete: false, reason: 'malformed_input' }; }
+  } catch { return { changesKnown: false, patchStateKnown: false, count: null, lowerBound: false, patchComplete: false, reason: 'malformed_input', unavailableCount: 0 }; }
 }
 
 /* ── (V1-307) long claims: grapheme/code-point safe ─────────────────────────────────────── */
 
 const segmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
 const units = (text) => (segmenter ? Array.from(segmenter.segment(text), (s) => s.segment) : Array.from(text));
-const unitCount = (text) => units(text).length;
 
-/** Shown text is at most `limit` graphemes + the mark; never ends in a lone surrogate; full stays retrievable. */
+/* O(max), not O(length): only a bounded prefix is ever segmented.
+ *  length <= max code units  -> never over (graphemes <= code units): exact, no segmentation.
+ *  otherwise segment the first max*8+16 code units: more than `max` graphemes there -> over: exact.
+ *  If that prefix holds <= max graphemes (a pathological >8-code-unit-per-grapheme run, e.g. combining
+ *  marks) the text is treated as over by CODE-UNIT length - documented, conservative, still bounded. */
+const PREFIX_FACTOR = 8;
+function cut(text, max) {
+  if (text.length <= max) return { over: false, head: null };
+  const head = units(text.length > max * PREFIX_FACTOR + 16 ? text.slice(0, max * PREFIX_FACTOR + 16) : text);
+  return { over: head.length > max || text.length > max * PREFIX_FACTOR + 16, head };
+}
+const isOver = (text, max) => cut(text, max).over;
+
+/** Shown text is at most `limit` graphemes + the mark and is a prefix of `full`; `full` stays retrievable.
+ * A lone surrogate already INSIDE the input is kept as is; a limit that is not a positive integer
+ * means the default; a limit beyond the text length simply never truncates. */
 function limitClaim(text, limit = CLAIM_LIMIT) {
   const full = typeof text === 'string' ? text : '';
   const max = Number.isInteger(limit) && limit > 0 ? limit : CLAIM_LIMIT;
-  const u = units(full);
-  if (u.length <= max) return { shown: full, truncated: false, full };
-  return { shown: u.slice(0, max).join('') + TRUNCATION_MARK, truncated: true, full };
+  const { over, head } = cut(full, max);
+  if (!over) return { shown: full, truncated: false, full };
+  return { shown: head.slice(0, max).join('') + TRUNCATION_MARK, truncated: true, full };
 }
 
 /* ── (3) truth invariants ───────────────────────────────────────────────────────────────── */
 
-const SUCCESS_WORDS = new Set(['success', 'succeeded', 'complete', 'completed', 'done', 'ok', 'passed', 'pass', DONE_WORD]);
-const KNOWN_TONES = new Set([...SUCCESS_WORDS, 'neutral', 'failure', 'failed', 'fail', 'error', 'unknown', 'warning', 'partial', 'cancelled', 'pending', 'info']);
+const SUCCESS_WORDS = ['success', 'succeeded', 'complete', 'completed', 'done', 'ok', 'passed', 'pass', 'task complete', 'task completed', ...SUCCESS_LABELS];
+const OTHER_WORDS = ['neutral', 'failure', 'failed', 'fail', 'error', 'unknown', 'warning', 'partial', 'cancelled', 'canceled', 'pending', 'info', ...FAILURE_LABELS, ...NEUTRAL_LABELS];
+const wordSet = (...lists) => new Set(lists.flat().filter((x) => typeof x === 'string').map(norm));
 const NO_WORDS = new Set(['', 'false', 'no', 'n', '0', 'null', 'undefined']);
 const truthy = (x) => (typeof x === 'string' ? !NO_WORDS.has(norm(x)) : Boolean(x));
 const asCount = (x) => (typeof x === 'string' && x.trim() !== '' ? Number(x) : x);
 const hasCount = (x) => x !== undefined && x !== null && x !== '';
 
-function claimText(c) {
-  const cands = [c?.full, c?.text, c?.data?.text].filter((x) => typeof x === 'string');
-  return cands.sort((a, b) => b.length - a.length)[0];
+function claimText(c) {   // the longest string the claim carries (no allocation per claim)
+  let best;
+  for (const x of [c.full, c.text, c.data?.text]) if (typeof x === 'string' && (best === undefined || x.length > best.length)) best = x;
+  return best;
 }
 
 /**
@@ -227,13 +263,16 @@ function claimText(c) {
  *  baseline  {dirtyFiles:[{path,digest}]}  (legacy; a dirty list is not persisted today)
  *  claims    [{kind, confidence, text|data.text, shown, truncated, full}]
  *  task      {status, verdict, criteria, evidence}   evidence per taskPassVerdict's contract
+ * @param opts {successLabels, failureLabels, neutralLabels}: copy-derived label values (see the label note above)
  * @returns {{code, detail}[]}  never throws (malformed -> malformed_input)
  */
-function checkTruthInvariants(s) {
-  try { return invariants(s); } catch { return [{ code: 'malformed_input', detail: 'snapshot could not be read' }]; }
+function checkTruthInvariants(s, opts = {}) {
+  try { return invariants(s, opts ?? {}); } catch { return [{ code: 'malformed_input', detail: 'snapshot could not be read' }]; }
 }
 
-function invariants(s) {
+function invariants(s, opts) {
+  const success = wordSet(SUCCESS_WORDS, opts.successLabels ?? []);
+  const known = wordSet(SUCCESS_WORDS, OTHER_WORDS, opts.successLabels ?? [], opts.failureLabels ?? [], opts.neutralLabels ?? []);
   if (!s || typeof s !== 'object') return [{ code: 'malformed_input', detail: 'snapshot is not an object' }];
   const v = []; const add = (code, detail) => v.push({ code, detail });
   const w = s.work ?? {}; const d = s.display ?? {};
@@ -241,9 +280,9 @@ function invariants(s) {
   if (w.outcome === 'complete' && w.finishObserved !== true) add('complete_without_finish', 'outcome complete but no observed finish');
 
   const words = [d.tone, d.status, d.label, d.outcome].filter((x) => typeof x === 'string').map(norm);
-  const shownSuccess = words.some((x) => SUCCESS_WORDS.has(x)) || truthy(d.success) && d.success !== undefined;
+  const shownSuccess = words.some((x) => success.has(x)) || truthy(d.success) && d.success !== undefined;
   if (shownSuccess && w.outcome !== 'complete') add('non_success_shown_success', `${w.outcome ?? w.status} rendered as success`);
-  if (!shownSuccess && w.outcome !== 'complete' && words.some((x) => x !== '' && !KNOWN_TONES.has(x))) add('unknown_display_tone', 'unrecognised tone on a non-complete Work');
+  if (!shownSuccess && w.outcome !== 'complete' && words.some((x) => x !== '' && !known.has(x))) add('unknown_display_tone', 'unrecognised tone on a non-complete Work');
 
   if (s.changes) {
     const real = summarizeChanges(s.changes);
@@ -256,6 +295,11 @@ function invariants(s) {
       if (real.changesKnown && real.lowerBound && rep.changesKnown !== false && rep.lowerBound !== true) add('changes_known_overclaim', 'a lower bound shown as an exact count');
       if (real.changesKnown && !real.patchStateKnown && rep.patchStateKnown === true) add('changes_known_overclaim', 'patch availability claimed with no patch_state');
       if (rep.changesKnown === false && hasCount(rep.count)) add('fabricated_count', 'a count shown for changes that are not known');
+      if (hasCount(rep.count) && (typeof cnt !== 'number' || !Number.isFinite(cnt) || cnt < 0 || !Number.isInteger(cnt))) add('count_malformed', 'the shown count is not a non-negative integer');
+      else if (hasCount(rep.count) && real.changesKnown && rep.changesKnown !== false && !(cnt === 0 && (real.count > 0 || real.lowerBound))) {
+        const total = s.changes.files.length;     // a lower bound may be anything between the known count and all files
+        if (real.lowerBound ? (cnt < real.count || cnt > total) : cnt !== real.count) add('count_mismatch', `shown ${cnt}, measured ${real.count}${real.lowerBound ? ' (lower bound)' : ''}`);
+      }
     }
     /* dirty baseline, realistic form: a changed row whose before and after digest are the same
      * content was already there before the Run (sensitive_excluded is labelled before digests). */
@@ -275,9 +319,10 @@ function invariants(s) {
     if (classifyClaim(c) === P.AGENT_SAID && conf === 'confirmed') add('agent_said_confirmed', `${c.kind} carries a confirmed chip`);
     if (classifyClaim(c) === P.UNKNOWN && conf === 'confirmed') add('unknown_confirmed', `${c.kind} confirmed with no known provenance`);
     const text = claimText(c);
-    if (typeof text === 'string' && unitCount(text) > CLAIM_LIMIT) {
-      if (c.truncated !== true || typeof c.shown !== 'string' || unitCount(c.shown) > CLAIM_LIMIT + unitCount(TRUNCATION_MARK) ||
+    if (typeof text === 'string' && isOver(text, CLAIM_LIMIT)) {
+      if (c.truncated !== true || typeof c.shown !== 'string' || isOver(c.shown, CLAIM_LIMIT + TRUNCATION_MARK.length) ||
           c.full !== text) add('claim_not_truncated', `${c.kind} of ${text.length} chars shown without limit/marker/full text`);
+      else if (!text.startsWith(c.shown.endsWith(TRUNCATION_MARK) ? c.shown.slice(0, -TRUNCATION_MARK.length) : c.shown)) add('shown_not_prefix', `${c.kind} shown text is not the start of the full text`);
     }
   }
 
@@ -293,9 +338,10 @@ function invariants(s) {
 
 /* ── immutability ───────────────────────────────────────────────────────────────────────── */
 
-/** Canonical JSON: sorted keys; throws on cycles (caught by callers -> malformed_input). */
+/** Canonical JSON: sorted keys; NaN, undefined, null stay distinct; throws on cycles. */
 function canon(x, seen = new Set()) {
-  if (x === null || typeof x !== 'object') return JSON.stringify(x) ?? 'null';
+  if (x === null) return 'null';
+  if (typeof x !== 'object') return typeof x === 'string' ? JSON.stringify(x) : `${typeof x}:${String(x)}`;
   if (seen.has(x)) throw new TypeError('cycle');
   seen.add(x);
   const out = Array.isArray(x) ? `[${x.map((y) => canon(y, seen)).join(',')}]`
@@ -304,13 +350,21 @@ function canon(x, seen = new Set()) {
   return out;
 }
 
+/** Same content? Native JSON text first (fast); only a difference, or a 'null' (NaN also prints as null),
+ * pays for the canonical comparison. Throws on cycles. */
+function sameRow(a, b) {
+  const x = JSON.stringify(a); const y = JSON.stringify(b);
+  if (x === y && x !== undefined && !x.includes('null')) return true;
+  return canon(a) === canon(b);
+}
+
 /** Rows keyed by id (duplicates get an occurrence suffix); an id-less row is keyed by position. */
 function indexRows(rows) {
   const seen = new Map(); const m = new Map();
   rows.forEach((r, i) => {
     const id = r && typeof r === 'object' && present(r.id) ? String(r.id) : null;
     const n = seen.get(id ?? '') ?? 0; seen.set(id ?? '', n + 1);
-    m.set(id === null ? `~pos${i}` : n ? `${id}#${n}` : id, canon(r));
+    m.set(id === null ? `~pos${i}` : n ? `${id}#${n}` : id, r);
   });
   return m;
 }
@@ -330,7 +384,7 @@ function checkImmutableRun(before, after) {
       const now = indexRows(after?.[key] ?? []);
       for (const [k, val] of indexRows(before[key] ?? [])) {
         if (!now.has(k)) v.push({ code: 'ended_run_row_removed', detail: `${key}:${k}` });
-        else if (now.get(k) !== val) v.push({ code: 'ended_run_row_altered', detail: `${key}:${k}` });
+        else if (!sameRow(now.get(k), val)) v.push({ code: 'ended_run_row_altered', detail: `${key}:${k}` });
       }
     }
     return v;
