@@ -176,10 +176,17 @@ function walk(value, fn, caps = WALK, keep = null) {
         return cut ? [...out, TRUNC] : out;
       }
       const out = {};
+      const used = new Map();                      // masked key -> last suffix handed out (one fn(k) per key, no rescans)
       for (const [k, x] of Object.entries(v)) {
-        let key = fn(k);
-        for (let n = 2; Object.hasOwn(out, key); n++) key = `${fn(k)}~${n}`;
-        out[key] = go(x, depth + 1, Boolean(keep && keep.has(k)));
+        const mk = fn(k);
+        let key = mk;
+        if (Object.hasOwn(out, key)) {
+          let n = used.get(mk) ?? 1;
+          do { n += 1; key = `${mk}~${n}`; } while (Object.hasOwn(out, key));
+          used.set(mk, n);
+        }
+        /* defineProperty: a key named `__proto__` must stay a data property, not become the prototype */
+        Object.defineProperty(out, key, { value: go(x, depth + 1, Boolean(keep && keep.has(k))), enumerable: true, writable: true, configurable: true });
       }
       return out;
     } catch { return TRUNC; } finally { up.delete(v); }

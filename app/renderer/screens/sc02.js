@@ -1673,7 +1673,7 @@ async function fillStream(body, stream, api, nav, state, onLive) {
    * claim that nothing is happening — and the store refusing to answer is not evidence for it. */
   if (!r?.ok) { setPresenceMode('unknown'); onLive?.(null); return; }
 
-  const live = r.works.find((w) => w.status !== 'ended');
+  const live = r.works.find((w) => w && typeof w === 'object' && w.status !== 'ended');   // a main-side '[truncated]' marker is not a Work
   if (!live) {
     /* TRUE, and now only said when it is: this project has no Work that has not ended. */
     body.appendChild(el('div', 'sm mut', C.work.empty));

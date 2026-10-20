@@ -233,3 +233,117 @@ test('main.js wires every push channel through publicPush and every handler thro
   assert.match(code, /trustedSender\(e, APP_URL\)/);
   assert.match(code, /APP_URL = pathToFileURL\(RENDERER\)\.href/);
 });
+
+/* ---- final round: hostile-input time bounds, JSON-escaped payloads, stage-1 coverage, walker survivors ---- */
+const GENERATORS = { 'eyJ-': 'eyJ-', 'a-': 'a-', 'a.': 'a.', 'a:': 'a:', '=': '=', AKIA: 'AKIA', begin: '-----BEGIN PRIVATE KEY-----', begin2: '-----BEGIN ',
+  'sk-': 'sk-', 'sk-ant-': 'sk-ant-', 'Bearer ': 'Bearer ', 'Basic ': 'Basic ', space: ' ', newline: '\n', 'token ': 'token ', 'API_TOKEN ': 'API_TOKEN ',
+  'ghp_': 'ghp_', 'xox-': 'xox-', 'http://a:': 'http://a:', 'api_key=': 'api_key=', 'json key': '"API_TOKEN":', AIza: 'AIza', 'eyJ.': 'eyJaaaaaaaaaa.',
+  'eyJ.a.': 'eyJaaaaaaaaaa.aaaaaaaaaa!', 'Authorization: ': 'Authorization: ', 'a\\n': 'a\\n', '\\"': '\\"', korean: '개발 서버 ', path: '/tmp/a-b/' };
+for (const n of [80000, 160000]) {
+  test(`hostile input ${n} chars: every generator is masked in < 1 s by the egress masker and < 1 s by the write-time masker`, () => {
+    const slow = [];
+    for (const [name, unit] of Object.entries(GENERATORS)) {
+      const s = unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+      let t = Date.now(); mask(s); const a = Date.now() - t;
+      t = Date.now(); safeSnapshot(s); const b = Date.now() - t;
+      if (a > 1000 || b > 1000) slow.push(`${JSON.stringify(name)} mask=${a}ms snapshot=${b}ms`);
+    }
+    assert.deepStrictEqual(slow, []);
+  });
+}
+
+test('a long field is masked WHOLE, never passed through: 5000-char eyJ run, unclosed PRIVATE KEY block, 100-char prefix before token=', () => {
+  const longJwt = `eyJ${'A'.repeat(5000)}`;
+  assert.strictEqual(mask(`x ${longJwt} y`), 'x *** y');
+  assert.ok(!safeSnapshot(`x ${longJwt}.${'B'.repeat(20)}.${'C'.repeat(20)} y`).safe.includes('BBBBBBBBBB'));
+  const pem = `-----BEGIN PRIVATE KEY-----\n${'QUJD'.repeat(500)}\n(no end line)`;
+  assert.ok(!safeSnapshot(pem).safe.includes('QUJDQUJD'));
+  assert.ok(!mask(pem).includes('QUJDQUJD'));
+  const longName = `${'a'.repeat(100)}token=${'v1v2v3v4'}`;
+  assert.ok(!safeSnapshot(longName).safe.includes('v1v2v3v4'));
+  assert.ok(!safeSnapshot(`${'a-'.repeat(60)}token=v1v2v3v4`).safe.includes('v1v2v3v4'));
+  /* a closed block still leaves what follows it */
+  assert.strictEqual(safeSnapshot('-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nafter').safe, '[redacted]\nafter');
+});
+
+test('JSON-escaped stream payloads: escaped quotes, \\n before a token, AIza, ghp_, key=value in a real JSON.stringify line', () => {
+  const g = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`, aiza = `AIza${'aB3_-'.repeat(7)}`;
+  const line = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: `{"API_TOKEN": "zzzz1234yyyy5678", "x": 1}\n${aiza}\n${g}\n${AKIA}` }] } });
+  assert.ok(line.includes('\\"API_TOKEN\\"') && line.includes('\\nAIza') && line.includes('\\nghp_'), 'precondition: the line is escaped');
+  for (const [name, f] of [['mask', mask], ['safeSnapshot', (x) => safeSnapshot(x).safe]]) {
+    const out = f(line);
+    for (const c of ['zzzz1234yyyy5678', aiza.slice(4), g.slice(4), AKIA.slice(4)]) assert.ok(!out.includes(c), `${name}: ${c}`);
+    JSON.parse(out);                                  // still one valid JSON document
+  }
+  const twice = JSON.stringify(line);                  // escaped twice (a JSON string inside a JSON string)
+  assert.ok(!mask(twice).includes('zzzz1234yyyy5678'));
+});
+
+test('Authorization header residue: any case, short payload, dotted payload are redacted whole at write time; prose stays', () => {
+  for (const h of ['authorization: basic YTpi', 'Authorization: Basic dXNlcjpwYXNz.d29yZA', 'AUTHORIZATION=BASIC abc.def-ghi', 'Proxy-Authorization: Digest realm', 'Authorization: Bearer abc.def'])
+    assert.strictEqual(safeSnapshot(`curl -H "${h}" x`).safe.includes(h.split(/\s+/).pop()), false, h);
+  assert.ok(!safeSnapshot('authorization: basic YTpi').safe.includes('YTpi'));
+  assert.strictEqual(safeSnapshot('Support Basic authentication-based-access in the proxy').safe, 'Support Basic authentication-based-access in the proxy');
+});
+
+test('stage-1 (write-time) masking covers sk_live_, short ghp/xox, npm_, AIza, Slack hook, JSON values; the intent corpus and Korean/paths/diff survive', () => {
+  const secrets = ['sk_live_' + 'aB3dE5fG7hI9jK1l', 'ghp_' + 'aB3dE5fG7hI9jK1lM', 'xoxb-12345678', `npm_${'aB3'.repeat(12)}`, `AIza${'aB3_-'.repeat(7)}`,
+    'https://hooks.slack.com/services/T0000000/B0000000/XXXXXXXXXXXXXXXXXXXXXXXX', '{"API_TOKEN":"zzzz1234yyyy5678"}'];
+  for (const sct of secrets) {
+    const out = safeSnapshot(`use ${sct} now`).safe;
+    assert.notStrictEqual(out, `use ${sct} now`, sct);
+  }
+  assert.ok(JSON.parse(safeSnapshot('{"API_TOKEN":"zzzz1234yyyy5678","n":1}').safe.replace(/\[redacted\]/, 'R')).n === 1);
+  const keep = [...MASKER_LOOKALIKES, 'Raise TOKEN_LIMIT to 4096', 'Read SECRET_FILE from the vault folder', "SyntaxError: Unexpected token: '}' at line 12", 'Send the Bearer token in the header',
+    '개발 서버를 켜고 로그인 토큰 만료를 확인해 주세요', '/home/u/proj/src/app.ts:14:2', '+const MAX_TOKENS = 4096;', 'git commit -m "fix: token refresh"', 'https://example.com/a?b=c'];
+  for (const t of keep) {
+    const out = safeSnapshot(t).safe;
+    /* the pre-existing stage-1 rules are the baseline; this round must not ADD an erasure */
+    assert.strictEqual(out, safeSnapshotBase(t), t);
+  }
+});
+function safeSnapshotBase(t) {   // the write-time rules that existed at 9408025, for the "no new erasure" comparison
+  return [[/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g], [/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi],
+    [/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{12,}|sk-ant-[A-Za-z0-9_-]{20,})\b/g], [/\bsk-[A-Za-z0-9_-]{20,}\b/g], [/\bAKIA[0-9A-Z]{16}\b/g],
+    [/\bBasic\s+[A-Za-z0-9+/=]{16,}/g],
+    [/\b(?:[\w.-]*(?:api[\s_-]?key|access[\s_-]?token|refresh[\s_-]?token|auth(?:orization)?[\s_-]?(?:token)?|proxy[\s_-]?authorization|cookie|set[\s_-]?cookie|credential|token|password|passwd|secret(?:[\s_-]?access[\s_-]?key)?|private[\s_-]?key|client[\s_-]?secret))\b\s*[:=]\s*["']?[^\s"',;]{4,}["']?/gi],
+    [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g], [/\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/gi]]
+    .reduce((s, [re]) => s.replace(re, '[redacted]'), t);
+}
+
+test('walker: colliding keys are linear and a 3rd/4th collision gets its own suffix; __proto__ stays a data key', () => {
+  const o = {}; for (let i = 0; i < 4000; i++) o[`K_TOKEN=abcd1234efgh5678#${i}`] = i;
+  const t = Date.now(); const m = guard.maskOut(o); const ms = Date.now() - t;
+  assert.ok(ms < 500, `${ms} ms`);
+  assert.strictEqual(Object.keys(m).length, 4000);
+  assert.deepStrictEqual(Object.values(m).sort((a, b) => a - b).slice(0, 5), [0, 1, 2, 3, 4]);
+  const three = guard.walk({ a1: 1, a2: 2, a3: 3, a4: 4 }, (k) => (/^a/.test(k) ? 'a' : k));
+  assert.deepStrictEqual(Object.keys(three), ['a', 'a~2', 'a~3', 'a~4']);
+  const real = guard.walk({ x1: 1, 'x~2': 2, x3: 3 }, (k) => (/^x\d/.test(k) ? 'x' : k));
+  assert.strictEqual(Object.keys(real).length, 3);
+  const proto = guard.maskOut(JSON.parse('{"__proto__":{"p":1},"ok":2}'));
+  assert.deepStrictEqual(Object.keys(proto), ['__proto__', 'ok']);
+  assert.strictEqual(Object.getPrototypeOf(proto), Object.prototype);
+});
+
+test('survivor power: root is kept, task channels are exempt, depth cap marks a canary at depth 30, short values are not masked', () => {
+  assert.strictEqual(guard.publicOut('juqode:x', { root: '/tmp/sk_render_pipeline_configuration_value' }).root, '/tmp/sk_render_pipeline_configuration_value');
+  for (const ch of ['juqode:task-list', 'juqode:task-detail', 'juqode:task-create', 'juqode:task-update'])
+    assert.strictEqual(guard.publicOut(ch, { goal: `use ${GH}` }).goal, `use ${GH}`, ch);
+  let deep = { canary: GH }; for (let i = 0; i < 30; i++) deep = { n: deep };
+  const out = guard.maskOut(deep);
+  assert.ok(!JSON.stringify(out).includes(GH.slice(4)));
+  assert.ok(JSON.stringify(out).includes('[truncated]'));
+  assert.strictEqual(mask('https://hooks.slack.com/services/T1'), 'https://hooks.slack.com/services/T1');
+  assert.strictEqual(mask('{"API_TOKEN":"short"}'), '{"API_TOKEN":"short"}');
+  assert.strictEqual(mask('api_key=abc123'), 'api_key=abc123');
+  assert.strictEqual(mask('http://' + 'a'.repeat(40) + ':b@h').includes('a'.repeat(40)), false);
+  assert.ok(Date.now() > 0);
+});
+
+test('ordinary UI text, paths, raw diff and copy survive the boundary untouched (Korean, folders, SC-04 raw diff, qc output lines)', () => {
+  const ui = { ok: true, copy: '개발 서버를 켜는 중이에요. 잠시만 기다려 주세요.', path: '/home/사용자/내 프로젝트/src/app.ts', lines: ['npm run build', 'src/app.ts:14:2 error TS2304', '  at foo (/x/y.js:1:2)'], sha: 'ba1cb02f1e0b6a8c7d5e4f3a2b1c0d9e8f7a6b5c' };
+  assert.deepStrictEqual(guard.publicOut('juqode:qc-list', ui), ui);
+  const diff = { ok: true, groups: [{ files: [{ patch: '+const MAX_TOKENS = 4096;\n+api_key = process.env.X', blocks: [{ lines: ['+const MAX_TOKENS = 4096;'] }] }] }] };
+  for (const ch of ['juqode:work-reader', 'juqode:work-changes', 'juqode:work-explain']) assert.deepStrictEqual(guard.publicOut(ch, diff), diff, ch);
+});

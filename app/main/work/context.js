@@ -5,18 +5,34 @@ const { createHash, randomUUID } = require('node:crypto');
 const BUILDER_VERSION = 'juqode-context-v1';
 const sha256 = (value) => createHash('sha256').update(value, 'utf8').digest('hex');
 
+/* Every pattern here runs on text a CHILD wrote, on the main thread, so each is LINEAR on hostile input (measured with
+ * 'a-', 'eyJ-', 'xox-', 'a.' x 160k chars: 23-39 s before). Where a pattern needs an unbounded prefix the prefix is capped
+ * and a second, prefix-less rule masks what the cap would otherwise let through (mask-whole, never pass-through). */
+const escB = (re) => (re.source.startsWith('\\b') ? new RegExp(`(?:\\b|(?<=\\\\[nrt]))${re.source.slice(2)}`, re.flags) : re);
 const SECRET_RULES = [
-  ['private_key_block', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g],
+  ['private_key_block', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]{0,16384}?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g],
+  /* an unclosed or over-long block: the BEGIN line and the next 16 KiB are masked (conservative, bounded scan) */
+  ['private_key_block', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]{0,16384}/g],
   ['bearer_token', /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi],
-  ['provider_token', /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{12,}|sk-ant-[A-Za-z0-9_-]{20,})\b/g],
+  ['provider_token', /\b(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{8,}|sk-ant-[A-Za-z0-9_-]{20,}|sk_(?:live|test)_[A-Za-z0-9]{16,})\b/g],
   ['openai_key', /\bsk-[A-Za-z0-9_-]{20,}\b/g],
   ['aws_access_key', /\bAKIA[0-9A-Z]{16}\b/g],
-  /* before credential_assignment: that rule eats `Authorization: Basic` and would leave the payload */
+  ['npm_token', /\bnpm_[A-Za-z0-9]{36}\b/g],
+  ['google_api_key', /\bAIza[0-9A-Za-z_-]{35}/g],
+  ['slack_webhook', /\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]{20,}/g],
+  /* JSON `"API_TOKEN": "value"` (also JSON-escaped `\"`): only the VALUE, the document stays valid */
+  ['json_credential_value', /(?<=\\{0,4}"[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|API_?KEY)[A-Z0-9_]{0,32}\\{0,4}"\s{0,4}:\s{0,4}\\{0,4}")[^"\\\s]{12,}(?=\\{0,4}")/g],
+  ['jwt_long', /\beyJ[A-Za-z0-9_-]{1024,}(?:\.[A-Za-z0-9_-]*){0,2}/g],
+  ['jwt', /\beyJ[A-Za-z0-9_-]{10,1024}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
   ['basic_auth', /\bBasic\s+[A-Za-z0-9+/=]{16,}/g],
-  ['credential_assignment', /\b(?:[\w.-]*(?:api[\s_-]?key|access[\s_-]?token|refresh[\s_-]?token|auth(?:orization)?[\s_-]?(?:token)?|proxy[\s_-]?authorization|cookie|set[\s_-]?cookie|credential|token|password|passwd|secret(?:[\s_-]?access[\s_-]?key)?|private[\s_-]?key|client[\s_-]?secret))\b\s*[:=]\s*["']?[^\s"',;]{4,}["']?/gi],
-  ['jwt', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
-  ['url_credentials', /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/gi],
-];
+  /* before credential_assignment, which would eat `Authorization: Basic` and leave the payload: any scheme, any case, any
+   * payload length or alphabet ('.', short) after an Authorization header name */
+  ['authorization_header', /\b(?:proxy[\s_-]?)?authorization["']?\s{0,8}[:=]\s{0,8}["']?(?:basic|bearer|digest|negotiate|token)\s+[^\s"',;]+/gi],
+  ['credential_assignment', /\b(?:[\w.-]{0,64}(?:api[\s_-]?key|access[\s_-]?token|refresh[\s_-]?token|auth(?:orization)?[\s_-]?(?:token)?|proxy[\s_-]?authorization|cookie|set[\s_-]?cookie|credential|token|password|passwd|secret(?:[\s_-]?access[\s_-]?key)?|private[\s_-]?key|client[\s_-]?secret))\b\s*[:=]\s*["']?[^\s"',;]{4,}["']?/gi],
+  /* a name with a prefix longer than 64 characters: the keyword and its value are still masked (the prefix stays) */
+  ['credential_assignment', /(?:api[\s_-]?key|access[\s_-]?token|refresh[\s_-]?token|client[\s_-]?secret|secret[\s_-]?access[\s_-]?key|private[\s_-]?key|token|password|passwd|secret)\b\s*[:=]\s*["']?[^\s"',;]{4,}["']?/gi],
+  ['url_credentials', /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s/@:]+:[^\s/@]+@/gi],
+].map(([name, re]) => [name, escB(re)]);
 const SECRET_FIELD_NAME = /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|proxy[_-]?authorization|set[_-]?cookie|cookie|credential|client[_-]?secret|token|password|passwd|secret|private[_-]?key)/i;
 
 function safeSnapshot(value) {
