@@ -73,10 +73,13 @@ function run(args) {
  *   reason must NOT fall through to another reason's sentence.
  */
 async function detect() {
-  return Promise.race([
-    probe(),
-    new Promise((r) => setTimeout(() => r({ available: false, reason: 'no-response' }), DEADLINE_MS)),
-  ]);
+  let timer;
+  try {
+    return await Promise.race([
+      probe(),
+      new Promise((r) => { timer = setTimeout(() => r({ available: false, reason: 'no-response' }), DEADLINE_MS); }),
+    ]);
+  } finally { clearTimeout(timer); }   // a settled probe must not leave a 16 s timer behind (it held the process open)
 }
 
 async function probe() {
