@@ -117,6 +117,11 @@ test('PASS guard: human verdicts - latest wins, stale digest and non-complete Ru
   const rv = (verdict, over = {}) => ({ criterion_id: 'h', verdict, criterion_digest: digest, work_outcome: 'complete', ...over });
   assert.deepStrictEqual(taskPassVerdict(c, { reviews: [rv('pass')] }).criteria[0].provenance, P.HUMAN_CONFIRMED);
   assert.strictEqual(taskPassVerdict(c, { reviews: [rv('pass'), rv('fail')] }).pass, false);
+  assert.strictEqual(taskPassVerdict(c, { reviews: [rv('fail')] }).criteria[0].status, 'failed');
+  /* a human FAIL beats a confirmed test run */
+  const u = [{ id: 'u', text: 'unit tests pass' }];
+  const fail = { criterion_id: 'u', verdict: 'fail' };
+  assert.strictEqual(taskPassVerdict(u, { tests: [passing('node --test tests/unit.test.js')], reviews: [fail] }).pass, false);
   assert.strictEqual(taskPassVerdict(c, { reviews: [rv('fail'), rv('pass')] }).pass, true);
   assert.strictEqual(taskPassVerdict(c, { reviews: [rv('pass', { criterion_digest: 'stale' })] }).pass, false);
   assert.strictEqual(taskPassVerdict(c, { reviews: [rv('pass', { work_outcome: 'ended_unknown' })] }).pass, false);
