@@ -139,3 +139,13 @@ test('round 9 survivor pins: CRLF end, mixed escaped/plain quotes in one text, D
   assert.ok(mask('MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN = abc').includes('abc'), 'a spaced assignment needs a credential-looking value');
   assert.ok(same('const SESSION_COOKIE = "sid";') && same('const MY_COMPANY_BILLING_SERVICE_SESSION_COOKIE = "sid";'));
 });
+
+test('round 9 survivor pins (2): PRIVATE_KEY long names, escaped array shape, default-literal spacing, single-quoted values', () => {
+  assert.ok(!mask(`MY_COMPANY_BILLING_SERVICE_ACCOUNT_PRIVATE_KEY=${C9}`).includes(C9), 'display: a long name with PRIVATE_KEY');
+  let x = JSON.stringify(JSON.stringify({ 'Set-Cookie': [`sid=${C9}`] }));
+  assert.strictEqual(mask(x), x.replace(`sid=${C9}`, '***'), 'depth-2 array: only the value changes, the escaped quotes and brackets stay');
+  x = JSON.stringify({ 'Set-Cookie': [`sid=${C9}`] });
+  assert.strictEqual(mask(x), x.replace(`sid=${C9}`, '***'));
+  assert.ok(!mask('Cookie: sid= 12').includes('12'), 'a default literal needs a space on BOTH sides of the =');
+  assert.strictEqual(mask("PGPASSWORD='my awesome password' x"), '*** x');
+});
