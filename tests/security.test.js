@@ -421,3 +421,17 @@ test('the offline guard blocks what leaves and passes what does not', () => {
   assert.strictEqual(read().length, 100, 'the attempt list is unbounded');
   assert.strictEqual(read.count(), 210, 'the count stopped when the list did');
 });
+
+test('only clipboard-sanitized-write (the copy buttons) is granted; every other permission request and check is denied', () => {
+  const { denyPermissions } = require(path.join(R, 'app/main/security.js'));
+  let request = null; let check = null;
+  denyPermissions({ setPermissionRequestHandler: (fn) => { request = fn; }, setPermissionCheckHandler: (fn) => { check = fn; } });
+  assert.strictEqual(typeof request, 'function', 'no permission request handler was registered');
+  assert.strictEqual(typeof check, 'function', 'no permission check handler was registered');
+  const ask = (p) => { let a = null; request({}, p, (ok) => { a = ok; }); return [a, check({}, p)]; };
+  assert.deepStrictEqual(ask('clipboard-sanitized-write'), [true, true], 'the copy buttons would break');
+  for (const p of ['clipboard-read', 'media', 'geolocation', 'notifications', 'openExternal', 'fullscreen', 'midi', 'hid', 'usb', '']) {
+    assert.deepStrictEqual(ask(p), [false, false], `${p} was granted`);
+  }
+  assert.ok(/denyPermissions\(session\.defaultSession\)/.test(read('app/main/main.js')), 'main.js does not apply the permission denial to the window\'s session');
+});
