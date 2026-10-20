@@ -214,7 +214,7 @@ test('F6: the project\'s own settings, MCP config and git internals are never of
   for (const f of ['.claude/settings.json', '.claude/settings.local.json', '.CLAUDE/Settings.json', '.git/hooks/pre-commit', '.git/hooks/new-hook', '.git/config', '.git', '.mcp.json', './.git/hooks/x', 'src/../.git/config', 'innocent.json']) {
     for (const tool of ['Edit', 'Write']) assert.deepStrictEqual(session.scopeOf({ tool, input: { file_path: f } }, root), { refusal: 'cannot-scope' }, `${tool} ${f}`);
   }
-  for (const f of ['.gitignore', '.github/workflows/ci.yml', '.claude/commands/x.md', 'src/a.txt']) assert.ok(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, root).spec, f);
+  for (const f of ['.gitignore', '.github/CODEOWNERS', 'package.json', 'src/a.txt']) assert.ok(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, root).spec, f);
 });
 
 test('F7: an empty / whitespace settings file is UNKNOWN (Claude may read it as {}) and stays refused; an unknown project folder is refused', async () => {
@@ -372,7 +372,8 @@ test('JOB-D: cfg/settings.json is not grantable when .claude is a symlink to cfg
   fs.writeFileSync(path.join(root, 'cfg/settings.json'), '{}');
   fs.symlinkSync(path.join(root, 'cfg'), path.join(root, '.claude'));
   for (const f of ['cfg/settings.json', '.claude/settings.json']) assert.deepStrictEqual(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, root), { refusal: 'cannot-scope' }, f);
-  assert.ok(session.scopeOf({ tool: 'Edit', input: { file_path: 'cfg/other.json' } }, root).spec, 'a sibling file in the linked folder is not protected');
+  assert.deepStrictEqual(session.scopeOf({ tool: 'Edit', input: { file_path: 'cfg/other.json' } }, root), { refusal: 'cannot-scope' }, 'the whole linked .claude folder is the control folder');
+  assert.ok(session.scopeOf({ tool: 'Edit', input: { file_path: 'src/a.txt' } }, root).spec);
 });
 test('JOB-D grants: wildcard domain and glob-class file wildcards are refused by the launch gate', () => {
   for (const g of ['WebFetch(domain:*)', 'Edit(**/[a-z]*)', 'Edit(**/*[!.])', 'Edit(**/{a,b})', 'Edit(**/*.ts)', 'WebFetch(*)']) assert.strictEqual(C.grantRefusal(g), 'unscoped-grant', g);

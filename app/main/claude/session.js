@@ -15,7 +15,7 @@
  *     `--allowedTools Edit` was measured changing a second, unapproved file.
  */
 const { spawn, spawnSync } = require('node:child_process');
-const { preflightLaunch, createIdentityCache, EXECUTION_MODES, normaliseMode, grantRefusal } = require('../provider/claude-contract');
+const { preflightLaunch, createIdentityCache, EXECUTION_MODES, normaliseMode, grantRefusal, isControlTarget, realTarget } = require('../provider/claude-contract');
 
 /* sha256 per file fingerprint; the version is taken from the process's own `init` event (a `--version` spawn per launch would also pollute fixtures and cost time) */
 const identityCache = createIdentityCache();
@@ -175,26 +175,6 @@ function allowSpec(denial, cwd) {
   return r.spec ?? null;
 }
 
-/** Where a file the model names REALLY is: symlinks resolved, and for a file that does not exist yet, the real path of its nearest
- * existing ancestor plus the remaining names. `null` = ambiguous (dangling link, a non-directory in the way, unreadable) and
- * ambiguity is a refusal, never a guess. */
-function realTarget(abs) {
-  const rest = [];
-  let p = abs;
-  for (;;) {
-    let exists = true;
-    try { fs.lstatSync(p); } catch (e) { if (e.code !== 'ENOENT') return null; exists = false; }
-    if (exists) {
-      /* it is there (file, directory or link). A DANGLING link is there too, and realpath refuses it: ambiguous, not "free". */
-      try { return path.join(fs.realpathSync(p), ...rest); } catch { return null; }
-    }
-    const parent = path.dirname(p);
-    if (parent === p) return null;
-    rest.unshift(path.basename(p));
-    p = parent;
-  }
-}
-
 /**
  * What allowing a refused action would grant, or why nothing is offered.
  *
@@ -230,15 +210,9 @@ function scopeOf(denial, cwd) {
     if (real === null) return { refusal: 'cannot-scope' };
     const rr = path.relative(realRoot, real);
     if (!rr || rr.startsWith('..') || path.isAbsolute(rr)) return { refusal: 'outside-project' };
-    /* the project's OWN control files: settings, MCP config and git internals decide what later runs may do (hooks run code), so no one-file grant is offered for them */
-    const protectedPath = (x) => /^(\.claude\/settings(\.local)?\.json|\.mcp\.json|\.git(\/.*)?)$/i.test(x);
-    if (protectedPath(rel) || protectedPath(rr.split(path.sep).join('/'))) return { refusal: 'cannot-scope' };
-    /* the same files reached through a symlinked `.claude` / `.git` that stays inside the project (cfg/settings.json IS .claude/settings.json) */
-    const lc = (x) => x.toLowerCase();
-    for (const prot of ['.claude/settings.json', '.claude/settings.local.json', '.mcp.json', '.git']) {
-      const pr = realTarget(path.join(realRoot, prot));
-      if (pr !== null && (lc(real) === lc(pr) || lc(real).startsWith(lc(pr) + path.sep))) return { refusal: 'cannot-scope' };
-    }
+    /* the project's OWN control files (settings, MCP config, git and husky hooks, .claude hooks/commands/agents, .envrc, tasks.json, workflows) - one list, claude-contract.CONTROL, shared with the settings gate;
+     * checked by name, by real target, and through a symlinked folder that leads there */
+    if (isControlTarget(realRoot, rel, real)) return { refusal: 'cannot-scope' };
     return grantOrRefusal(`${tool}(${rel})`);
   }
 

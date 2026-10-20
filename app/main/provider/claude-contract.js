@@ -19,7 +19,53 @@ const GRANT = /^([A-Za-z][A-Za-z0-9_]*)\((.+)\)$/;
 
 /** A file-tool spec that names a pattern/anywhere rather than one file: wildcard-only (double star, star-slash-star, slash-double-star, dot-slash-star-star, tilde variants), or reaching out of the project (`//abs`, `~`, `..`).
  *  ONE predicate for the launch grant gate and for the project's allow rules. A directory-limited pattern (`src/**`) is not judged here (OPEN: scope semantics unmeasured). */
-const fileSpecWide = (spec) => /^[*?/\\.~]+$/.test(spec) || /^(\/\/|~)/.test(spec) || spec.split(/[\\/]/).includes('..');
+/** A path that leaves the project on ANY platform: `//abs`, `~`, `..`, a drive letter (`C:`), a URL (`file:///`), UNC (`\\\\host`), `//?/`. */
+const reachesOut = (spec) => /^(\/\/|~|\\\\|[A-Za-z]:|[A-Za-z][A-Za-z0-9+.-]*:\/\/)/.test(spec) || spec.split(/[\\/]/).includes('..');
+const fileSpecWide = (spec) => /^[*?/\\.~]+$/.test(spec) || reachesOut(spec);
+
+/* ── the project's CONTROL files: what later runs read as configuration or execute as hooks. One list, used by scopeOf (no one-file grant) and by the settings gate (an allow rule for them
+ * is a self-widening rule). `package.json` runs code through its scripts but is an ordinary edit target, so it is judged only by the gate (OPEN: PM). */
+const CONTROL = /^(\.claude(\/|$)|\.mcp\.json$|\.git(\/|$)|\.husky(\/|$)|\.envrc$|\.vscode\/tasks\.json$|\.github\/workflows(\/|$))/i;
+const CONTROL_ROOTS = ['.claude', '.mcp.json', '.git', '.husky', '.envrc', '.vscode/tasks.json', '.github/workflows'];
+const GATE_ONLY_CONTROL = /^package\.json$/i;
+const posix = (x) => x.split(path.sep).join('/');
+/** Where a file the model/settings names REALLY is: symlinks resolved; a not-yet-existing file resolves through its deepest existing ancestor. null = ambiguous (dangling link, a file in the way, unreadable). */
+function realTarget(abs) {
+  const rest = [];
+  let p = abs;
+  for (;;) {
+    let exists = true;
+    try { fs.lstatSync(p); } catch (e) { if (e.code !== 'ENOENT') return null; exists = false; }
+    if (exists) { try { return path.join(fs.realpathSync(p), ...rest); } catch { return null; } }
+    const parent = path.dirname(p);
+    if (parent === p) return null;
+    rest.unshift(path.basename(p));
+    p = parent;
+  }
+}
+/** Is this REAL target one of the control files (by its own name, or because a symlinked `.claude`/`.git`/... leads there)? */
+function isControlTarget(realRoot, rel, real) {
+  if (CONTROL.test(rel)) return true;
+  const rr = posix(path.relative(realRoot, real));
+  if (CONTROL.test(rr)) return true;
+  const lc = (x) => x.toLowerCase();
+  return CONTROL_ROOTS.some((c) => { const pr = realTarget(path.join(realRoot, c)); return pr !== null && (lc(real) === lc(pr) || lc(real).startsWith(lc(pr) + path.sep)); });
+}
+/** Judge a named file against the project on the real filesystem. @returns {'ok'|'outside'|'ambiguous'|'control'|'file-kind'} */
+function projectFileVerdict(projectPath, spec) {
+  let realRoot;
+  try { realRoot = fs.realpathSync(projectPath); } catch { return 'ambiguous'; }
+  const abs = path.resolve(projectPath, spec);
+  const rel = posix(path.relative(path.resolve(projectPath), abs));
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return 'outside';
+  const real = realTarget(abs);
+  if (real === null) return 'ambiguous';
+  const rr = path.relative(realRoot, real);
+  if (!rr || rr.startsWith('..') || path.isAbsolute(rr)) return 'outside';
+  if (isControlTarget(realRoot, rel, real) || GATE_ONLY_CONTROL.test(rel) || GATE_ONLY_CONTROL.test(posix(rr))) return 'control';
+  try { if (!fs.statSync(real).isFile()) return 'file-kind'; } catch { /* not there yet: a file to be created */ }
+  return 'ok';
+}
 
 /** Why a grant is NOT one tool and one narrow input, or null. A grant that is wider than, or reads differently from, what a card could show is refused here too (the
  *  authoritative gate), not only where the model's path is first turned into a spec. File-ish specs: no wildcard, no `..`, no `~` (Claude expands it to the home folder),
@@ -75,15 +121,19 @@ function classifyAllowRule(rule, projectPath = null) {
   const [, tool, inner] = m;
   const spec = inner === undefined ? undefined : inner.trim();
   if (spec !== undefined && (spec !== inner || !spec)) return /^[*?:\s]*$/.test(inner) && tool !== 'WebSearch' ? 'wide' : 'unknown';
+  const cwd = typeof projectPath === 'string' && path.isAbsolute(projectPath) ? projectPath : null;
+  const lexicalControl = (x) => CONTROL.test(x.replace(/^\.\//, '')) || GATE_ONLY_CONTROL.test(x.replace(/^\.\//, ''));
   if (READ_TOOLS.has(tool)) {
     if (spec === undefined) return 'narrow';
-    if (/^[*?:]*$/.test(spec) || /^(\/\/|~)/.test(spec) || spec.split(/[\\/]/).includes('..') || spec.includes('\\')) return 'wide';
+    if (/^[*?:]*$/.test(spec) || reachesOut(spec) || spec.includes('\\')) return 'wide';
+    if (!/[*?[\]{}!]/.test(spec) && cwd) { const v = projectFileVerdict(cwd, spec); if (v === 'outside') return 'wide'; if (v === 'ambiguous') return 'unmeasured'; }
     return 'narrow';
   }
   if (FILE_WRITERS.has(tool)) {
     if (spec === undefined || fileSpecWide(spec) || /[[\]{}!]/.test(spec) || /^\*/.test(spec)) return 'wide';
     if (/[*?]/.test(spec) || spec.includes('\\') || spec.startsWith('/') || spec.endsWith('/')) return 'unmeasured';
-    if (projectPath) { try { if (fs.statSync(path.resolve(projectPath, spec)).isDirectory()) return 'unmeasured'; } catch { /* does not exist: a file to be created */ } }
+    if (lexicalControl(spec)) return 'unmeasured';
+    if (cwd) { const v = projectFileVerdict(cwd, spec); return v === 'ok' ? 'narrow' : (v === 'outside' ? 'wide' : 'unmeasured'); }
     return 'narrow';
   }
   if (tool === 'Bash') {
@@ -99,8 +149,20 @@ const allowRuleWidens = (rule, projectPath = null) => classifyAllowRule(rule, pr
 const REASONS = Object.freeze(['project-path-unknown', 'project-settings-unreadable', 'project-settings-symlink', 'project-settings-permissive-mode', 'project-settings-unknown-mode',
   'project-settings-additional-directories', 'project-settings-unscoped-allow', 'project-settings-unmeasured-allow', 'project-settings-unknown-rule', 'project-settings-unknown-key']);
 /* A top-level key that LOOKS permission-related but is not in this table is refused, and so is a permission-like env name: a new key is not "harmless" by being new. */
-const PERMISSION_LIKE = /permission|allow|deny|bypass|dangerous|sandbox|approv|trust|auto.?accept|default.?mode|mcp/i;
-const ENV_PERMISSION_LIKE = /permission|approv|sandbox|bypass|config.?dir|auto|dangerous|yolo|trust/i;
+/* Key names are judged by WORDS (camelCase / snake / kebab split), not by substring: `defaultModel` is a model name, `autoUpdates` is not a permission. A top-level key that carries a permission word
+ * is refused unless this table knows it. The word list is a denylist - an allowlist of harmless keys would refuse many ordinary files (OPEN: trade-off). */
+const KEY_WORDS = new Set(['permission', 'permissions', 'perm', 'perms', 'permit', 'allow', 'allowed', 'deny', 'denied', 'bypass', 'dangerous', 'dangerously', 'sandbox', 'approval', 'approvals', 'approve', 'trust', 'trusted',
+  'mcp', 'yolo', 'grant', 'grants', 'tools', 'unrestricted', 'unsafe', 'accept', 'ask']);
+const words = (k) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+function permissionLikeKey(k) {
+  const w = words(k);
+  if (w.some((x) => KEY_WORDS.has(x))) return true;
+  return w.includes('mode') && w.some((x) => ['default', 'auto', 'permission', 'plan', 'accept', 'bypass'].includes(x));
+}
+/* env: only names that change permission behaviour or WHERE settings come from; `PERMISSIONS_URL`, `SANDBOX_URL`, `DISABLE_AUTOUPDATER`, `AUTOMATION_LEVEL` are not. */
+const ENV_PERMISSION_NAME = /(^|_)(PERMISSION_MODE|SKIP_PERMISSIONS?(_PROMPT)?|BYPASS|BYPASS_PERMISSIONS?|DANGEROUS(LY)?(_[A-Z_]+)?|YOLO|APPROVAL_POLICY|SANDBOX_MODE|DEFAULT_MODE|AUTO_APPROVE|AUTO_ACCEPT(_EDITS)?|CONFIG_DIR)(_|$)/;
+const PERMISSION_LIKE = { test: permissionLikeKey };
+const ENV_PERMISSION_LIKE = { test: (k) => ENV_PERMISSION_NAME.test(String(k).toUpperCase()) };
 const KNOWN_PERMISSION_KEYS = new Set(['allow', 'deny', 'ask', 'defaultMode', 'additionalDirectories', 'disableBypassPermissionsMode']);
 
 /** The verdict on ONE parsed settings document. Pure and total: any value, never throws. @returns {{reason:string}|null} */
@@ -142,7 +204,7 @@ function settingsVerdict(doc, projectPath = null) {
 
 function projectSettingsRefusal(projectPath) {
   /* an unknown project folder is not "no settings" */
-  if (typeof projectPath !== 'string' || !projectPath) return { reason: 'project-path-unknown', source: null };
+  if (typeof projectPath !== 'string' || !path.isAbsolute(projectPath)) return { reason: 'project-path-unknown', source: null };
   let realRoot = null;
   try { realRoot = fs.realpathSync(projectPath); } catch { /* judged below as unreadable only if a settings file exists */ }
   for (const name of ['settings.json', 'settings.local.json']) {
@@ -433,4 +495,4 @@ function problems(s, ctx) {
   return p;
 }
 
-module.exports = { projectSettingsRefusal, settingsVerdict, classifyAllowRule, SETTINGS_REASONS: REASONS, grantRefusal, allowRuleWidens, EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
+module.exports = { controlPath: (rel) => CONTROL.test(String(rel).replace(/^\.\//, '')), isControlTarget, realTarget, projectSettingsRefusal, settingsVerdict, classifyAllowRule, SETTINGS_REASONS: REASONS, grantRefusal, allowRuleWidens, EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
