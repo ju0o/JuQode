@@ -64,7 +64,7 @@ const TOKENISH = [
   /\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]{20,}/g,
   /\bAIza[0-9A-Za-z_-]{35}/g,
 ].map((r) => re(escB(r))), [M.maskJsonCredentials], [
-  /\bapi_key[ \t]*=[ \t]*["']?(?=[A-Za-z_-]*\d)[A-Za-z0-9_-]{16,}/g,
+  /\bapi_key[ \t]*=[ \t]*["']?(?=[A-Za-z_-]*\d)[A-Za-z0-9_-]{4,}/g,
   /* An ENV-VAR-SHAPED name and its value, on ONE line.
    *
    * MEASURED before this was narrowed: case-insensitive matching plus `\s*` after the separator

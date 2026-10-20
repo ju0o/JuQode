@@ -50,6 +50,21 @@ const CLASSES = {
   cookiejson: `{"cookie": "a=1; sid=${C}"}`,
   cookie65sp: `Cookie:${' '.repeat(100)}sid=${C}`,
   longcolon: `MY_COMPANY_BILLING_SERVICE_ACCOUNT_API_TOKEN: ${C}1`,
+  cookieEqSp: `Cookie: sid = ${C}`,
+  setcookieEqSp: `Set-Cookie: sid = ${C}; Path=/`,
+  cookieFirstBad1: `Cookie: a=>b; sid=${C}`,
+  cookieFirstBad2: `Cookie: =x; sid=${C}`,
+  cookieFirstBad3: `Cookie: sid==${C}`,
+  cookieTab: `Cookie: a=1;\\tsid=${C}`,
+  cookieSetHeader: `req.setHeader('Cookie','sid=${C}')`,
+  cookieAppend: `headers.append("Cookie", "sid=${C}")`,
+  cookieSetHeaderArr: `res.setHeader('Set-Cookie', ['sid=${C}'])`,
+  cookieEqForm: `Cookie=sid=${C}`,
+  cookieSpaceName: `Cookie: a b=${C}`,
+  cookieQuotedName: `Cookie: "sid"=${C}`,
+  digestSpaced: `Authorization: Digest username = "u", response="${C}"`,
+  exportLong: `export TOKEN_FOO_BAR_BAZ_${'Q'.repeat(30)}=${C}`,
+  envLongColon: `ENV_LONG_NAME_FOR_THE_API_SECRET_VALUE: ${C}`,
   assign: `client_secret = ${C}`,
   assignlong: `${'x'.repeat(80)}_password=${C}`,
 };
@@ -81,17 +96,58 @@ const KNOWN_OPEN = [
 ];
 const isOpen = (key) => KNOWN_OPEN.some((g) => new RegExp(`^${g.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^|]*')}$`).test(key));
 
-test(`regression matrix: ${Object.keys(CLASSES).length} classes x ${Object.keys(CONTEXTS).length} contexts x 3 surfaces - no masked cell may start to leak`, () => {
+/** every leaking cell of the matrix for the given surfaces, minus KNOWN_OPEN; plus KNOWN_OPEN entries that no longer leak */
+function evaluate(surfaces) {
   const leaking = [];
   let cells = 0;
-  for (const [cn, secret] of Object.entries(CLASSES)) for (const [xn, ctx] of Object.entries(CONTEXTS)) for (const [sn, surf] of Object.entries(SURFACES)) {
+  for (const [cn, secret] of Object.entries(CLASSES)) for (const [xn, ctx] of Object.entries(CONTEXTS)) for (const [sn, surf] of Object.entries(surfaces)) {
     cells++;
     const key = `${cn}|${xn}|${sn}`;
     const out = surf(ctx(secret));
     if (out.includes(C)) { if (!isOpen(key)) leaking.push(key); } else if (isOpen(key)) leaking.push(`${key} (is masked now - delete it from KNOWN_OPEN)`);
   }
+  return { cells, leaking };
+}
+
+test(`regression matrix: ${Object.keys(CLASSES).length} classes x ${Object.keys(CONTEXTS).length} contexts x 3 surfaces - no masked cell may start to leak`, () => {
+  const { cells, leaking } = evaluate(SURFACES);
   assert.ok(cells >= 300, `${cells} cells`);
   assert.deepStrictEqual(leaking, []);
+});
+
+test('the guard itself works: a masker mutated IN MEMORY to leak one cell is caught (and an un-mutated one is not)', () => {
+  const leakOneCell = { ...SURFACES, mask: (t) => (t.startsWith('Cookie: sid = ') && !t.includes('\\') ? t : mask(t)) };
+  const { leaking } = evaluate(leakOneCell);
+  assert.ok(leaking.some((k) => k.startsWith('cookieEqSp|plain|mask')), `the mutated cell was not reported: ${leaking.slice(0, 3)}`);
+  assert.deepStrictEqual(evaluate(SURFACES).leaking, []);
+});
+
+/* DOCUMENTED OPEN ITEMS, each with its CURRENT state per surface: `true` = the canary leaks, `false` = masked. Any change in either direction
+ * fails this test, so a fix (or a regression) is noticed and the list is updated on purpose. */
+const OPEN_PROBES = {
+  digestQuoted: [`Authorization: Digest "${C}"`, { mask: true, snap: true }],
+  rawAuth: [`Authorization: ${C}`, { mask: true, snap: false }],
+  rawAuthEq: [`AUTHORIZATION=${C}`, { mask: true, snap: false }],
+  authEq: [`AUTH=${C}`, { mask: true, snap: false }],
+  envOver255: [`${'A'.repeat(300)}_TOKEN=${C}`, { mask: true, snap: false }],
+  jsonLowerToken: [`{"token":"${C}"}`, { mask: true, snap: true }],
+  jsonLowerPassword: [`{"password":"${C}"}`, { mask: true, snap: true }],
+  camelCase: [`apiKey: "${C}"`, { mask: true, snap: false }],
+  flagForm: [`--token ${C}`, { mask: true, snap: true }],
+  urlEncoded: [`token%3D${C}`, { mask: true, snap: true }],
+  lowerAssign: [`client_secret = ${C}`, { mask: true, snap: false }],
+};
+test('documented OPEN items: the recorded state (leaks / masked) still holds on both maskers', () => {
+  const changed = [];
+  for (const [name, [text, want]] of Object.entries(OPEN_PROBES)) {
+    const got = { mask: mask(text).includes(C), snap: safeSnapshot(text).safe.includes(C) };
+    if (got.mask !== want.mask || got.snap !== want.snap) changed.push(`${name}: recorded ${JSON.stringify(want)} now ${JSON.stringify(got)}`);
+  }
+  assert.deepStrictEqual(changed, []);
+  /* known write-time false positives (data erased, not leaked) */
+  assert.strictEqual(safeSnapshot('Cookie: word').safe, '[redacted]');
+  assert.strictEqual(safeSnapshot('x-api-key: header name').safe, '[redacted] name');
+  assert.strictEqual(mask('Cookie: please = accept'), 'Cookie: ***');
 });
 
 const INTENTS = ['Rename MAX_TOKENS = 4096 to MAX_CONTEXT', 'Set PASSWORD_MIN_LENGTH = 8 in the form', 'Support Basic authentication-based-access in the proxy', 'Add sk_render_pipeline_configuration_value to docs',

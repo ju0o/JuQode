@@ -137,13 +137,20 @@ function maskCookieHeaders(text, rep) {
     let vs = m.index + m[0].length;
     let term = before === '"' || before === "'" || before === '`' ? before : null;
     let escTerm = false;
-    if (text[vs] === '[' && (text[vs + 1] === '"' || text[vs + 1] === '\\')) vs++;       // JSON {"Set-Cookie": ["sid=x"]}; a JS array of single-quoted strings is code
+    const sepChar = m[0].trimEnd().slice(-1);
+    if (text[vs] === '[' && (text[vs + 1] === '"' || text[vs + 1] === '\\' || (sepChar === ',' && text[vs + 1] === "'"))) vs++;       // JSON {"Set-Cookie": ["sid=x"]}; a JS array of single-quoted strings is code
     const q0 = vs;
     while (text[vs] === '\\') vs++;
     if (text[vs] === '"' || text[vs] === "'") { term = text[vs]; escTerm = vs > q0; vs++; }   // quoted value, escaped or not
     else vs = q0;
     let end = valueEnd(vs, term, escTerm);
-    if (term && end > vs && text[end - 1] === '=' && text[end] === term) end = valueEnd(vs, null, false);   // `sid="x"` inside a quoted header: inner quotes belong to the value
+    if (term && end > vs && text[end - 1] === '=' && text[end] === term) end = valueEnd(vs, null, false);
+    else if (term && vs > q0) {            // `Cookie: "sid"=x` (also escaped): the quote belonged to the NAME - the value is what follows its closing quote
+      let j = end;
+      while (text[j] === '\\') j++;
+      const e0 = nextEq(vs);
+      if (text[j] === term && text[j + 1] === '=' && (e0 < 0 || e0 >= end)) { term = null; vs = q0; end = valueEnd(vs, null, false); }
+    }
     /* is there an `=` that is not a spaced comparison / arrow? look at no more than 64 of them */
     let eq = nextEq(vs);
     let credential = false;
@@ -329,6 +336,12 @@ function maskAuthHeaders(text, rep) {
   if (!/authorization/i.test(text)) return text;
   const re = new RegExp(AUTH_NAME.source, AUTH_NAME.flags);
   const n = text.length;
+  let eqFrom = -1;
+  let eqAt = -1;
+  const nextEq = (i) => { if (eqFrom >= 0 && i >= eqFrom && (eqAt < 0 || eqAt >= i)) return eqAt; eqFrom = i; eqAt = text.indexOf('=', i); return eqAt; };
+  let leFrom = -1;
+  let leAt = -1;
+  const lineEndFrom = (i) => { if (leFrom >= 0 && i >= leFrom && i <= leAt) return leAt; leFrom = i; leAt = scanLine(text, i, n); return leAt; };
   let out = '';
   let pos = 0;
   let m;
@@ -338,12 +351,12 @@ function maskAuthHeaders(text, rep) {
     let end = start;
     let credential = false;
     if (scheme === 'digest') {
-      /* the first token (at most DIGEST_LOOK characters) must hold `key=value`; only then is the rest of the line the credential.
-       * The token scan stops at the first space, so repeated `Authorization: Digest ` costs a few characters each. */
-      const lim = Math.min(n, start + DIGEST_LOOK);
-      end = scanLine(text, end, lim, (c) => isSpace(c.charCodeAt(0)) || c === ',');
-      credential = end > start && text.slice(start, end).includes('=');
-      if (credential) end = scanLine(text, end, n);
+      /* `key=value` anywhere in the (at most DIGEST_LOOK long) rest of the line makes it a credential; `Digest realm only` is prose.
+       * The next `=` and the end of the line are memoized, so repeated `Authorization: Digest ` costs a few characters each. */
+      const eq = nextEq(start);
+      end = lineEndFrom(start);
+      credential = eq >= 0 && eq < end && eq - start < DIGEST_LOOK;
+      if (!credential) end = start;
     } else {
       while (end < n) { const c = text[end]; if (isSpace(c.charCodeAt(0)) || c === '"' || c === "'" || c === ',' || c === ';' || c === '\\') break; end++; }   // a backslash (escape, at any JSON depth) never belongs to a credential
       credential = end > start && looksLikeCredential(scheme, text.slice(start, end));
