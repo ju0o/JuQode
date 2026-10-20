@@ -381,7 +381,13 @@ function checkImmutableRun(before, after) {
       if ((before[key] !== undefined && !Array.isArray(before[key])) || (after?.[key] !== undefined && !Array.isArray(after[key]))) {
         v.push({ code: 'malformed_input', detail: `${key} is not a list` }); continue;
       }
-      const now = indexRows(after?.[key] ?? []);
+      const was = before[key] ?? []; const later = after?.[key] ?? [];
+      /* fast path (the usual append-only shape): same ids at the same positions -> compare in place */
+      if (later.length >= was.length && was.every((r, i) => r && later[i] && typeof r === 'object' && present(r.id) && r.id === later[i].id)) {
+        was.forEach((r, i) => { if (!sameRow(later[i], r)) v.push({ code: 'ended_run_row_altered', detail: `${key}:${r.id}` }); });
+        continue;
+      }
+      const now = indexRows(later);
       for (const [k, val] of indexRows(before[key] ?? [])) {
         if (!now.has(k)) v.push({ code: 'ended_run_row_removed', detail: `${key}:${k}` });
         else if (!sameRow(now.get(k), val)) v.push({ code: 'ended_run_row_altered', detail: `${key}:${k}` });

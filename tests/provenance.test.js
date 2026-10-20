@@ -444,3 +444,139 @@ test('property (seed 1..300): the checker flags exactly the Task-pass claims the
     assert.strictEqual(hit, o !== 'complete' && tone === 'success', `seed ${seed}`);
   }
 });
+
+/* ═══ round 3: copy-derived labels, wrong counts, ties, bounded cost, survivors ═══ */
+const src = require(path.join(R, 'tests/src.js'));
+const copyC = (() => { // copy.js is an ES module: evaluate its object, never import it
+  const code = src.text('app/renderer/copy.js').replace(/\bexport /g, '');
+  return new (require('node:vm').Script)(`${code};C`).runInNewContext({});
+})();
+const L = {
+  success: [copyC.work.resultTitle.complete, copyC.qc.ok, copyC.gap.task.pass, copyC.gap.task.completeState, copyC.gap.presenceLabel.complete],
+  failure: [copyC.work.resultTitle.failed, copyC.qc.failed, copyC.gap.task.fail, copyC.gap.presenceLabel.failure],
+  neutral: [copyC.work.resultTitle.partial, copyC.work.resultTitle.cancelled_none, copyC.work.resultTitle.cancelled_partial, copyC.work.unknownBody],
+};
+const withLabel = (outcome, label, opts) => checkTruthInvariants({ work: { outcome, finishObserved: true }, display: { label } }, opts);
+
+test('labels: every real success copy value on a non-complete Work is non_success_shown_success (built-in AND copy-derived)', () => {
+  for (const label of [...L.success, 'Done!', 'Task complete', ' DONE ']) {
+    for (const opts of [undefined, { successLabels: L.success }]) {
+      assert.deepStrictEqual(codes(withLabel('failed', label, opts)), ['non_success_shown_success'], label);
+    }
+    assert.deepStrictEqual(withLabel('complete', label), [], label);
+  }
+  /* an option label the built-ins do not know is honoured */
+  assert.deepStrictEqual(codes(withLabel('failed', 'zzz', { successLabels: ['zzz'] })), ['non_success_shown_success']);
+});
+
+test('labels: real failure/neutral copy values are NOT unknown tones; free text still is', () => {
+  for (const label of [...L.failure, L.neutral[0]]) assert.deepStrictEqual(withLabel('failed', label), [], label);   // built-in fallback
+  for (const label of [...L.failure, ...L.neutral.slice(0, 3)]) {
+    assert.deepStrictEqual(withLabel('failed', label, { failureLabels: L.failure, neutralLabels: L.neutral }), [], label);
+  }
+  assert.deepStrictEqual(codes(withLabel('failed', 'celebrate wildly')), ['unknown_display_tone']);
+  assert.deepStrictEqual(codes(withLabel('failed', L.neutral[3])), ['unknown_display_tone'], 'a body sentence is free text unless supplied');
+  assert.deepStrictEqual(withLabel('failed', L.neutral[3], { neutralLabels: L.neutral }), []);
+});
+
+test('count_mismatch / count_malformed: wrong non-zero counts are caught', () => {
+  const three = { known: true, files: ['a', 'b', 'c'].map((p) => ({ path: p, patch_state: 'stored' })) };
+  const chk = (changes, count, extra = {}) => { const s = good(); s.changes = changes; s.display.changes = { changesKnown: true, count, ...extra }; return codes(checkTruthInvariants(s)); };
+  assert.deepStrictEqual(chk(three, 3), []);
+  assert.deepStrictEqual(chk(three, '3'), []);
+  assert.deepStrictEqual(chk(three, 1), ['count_mismatch']);
+  assert.deepStrictEqual(chk(three, 2), ['count_mismatch']);
+  assert.deepStrictEqual(chk(three, 4), ['count_mismatch']);
+  assert.deepStrictEqual(chk({ known: true, files: [] }, 99), ['count_mismatch']);
+  assert.deepStrictEqual(chk({ known: true, files: [] }, 1), ['count_mismatch']);
+  assert.deepStrictEqual(chk({ known: true, files: [] }, 0), []);
+  for (const bad of ['abc', NaN, -1, 1.5, {}, Infinity]) assert.deepStrictEqual(chk(three, bad), ['count_malformed'], String(bad));
+  /* lower bound: known count <= shown <= all files */
+  const lb = { known: true, files: [{ path: 'a', patch_state: 'stored' }, { path: '.env', patch_state: 'sensitive_excluded' }, { path: 'b', patch_state: 'stored' }] };
+  assert.deepStrictEqual(chk(lb, 1, { lowerBound: true }), ['count_mismatch']);
+  assert.deepStrictEqual(chk(lb, 2, { lowerBound: true }), []);
+  assert.deepStrictEqual(chk(lb, 3, { lowerBound: true }), []);
+  assert.deepStrictEqual(chk(lb, 4, { lowerBound: true }), ['count_mismatch']);
+});
+
+test('ties: same reviewed_at, different content, no sequence -> unverified; with rowid, or identical content, resolved', () => {
+  const at = '2026-01-01T00:00:00.000';
+  const mk = (verdict, over = {}) => { const r = rv(verdict, { reviewed_at: at }); delete r.rowid; return { ...r, ...over }; };
+  const g = (reviews) => hv(reviews);
+  assert.deepStrictEqual([g([mk('pass'), mk('fail')]).pass, g([mk('pass'), mk('fail')]).criteria[0].reason], [false, 'ambiguous_order']);
+  assert.strictEqual(g([mk('fail'), mk('pass')]).criteria[0].reason, 'ambiguous_order');
+  assert.strictEqual(g([mk('pass'), mk('pass')]).pass, true, 'identical content is not ambiguous');
+  assert.strictEqual(g([mk('fail', { rowid: 1 }), mk('pass', { rowid: 2 })]).pass, true);
+  assert.strictEqual(g([mk('pass', { rowid_: 2 }), mk('fail', { rowid_: 1 })]).pass, true, 'rowid_ alias');
+  assert.strictEqual(g([mk('pass', { rowid: 1 }), mk('fail', { rowid: 1 })]).pass, false, 'equal sequences still ambiguous');
+  assert.strictEqual(g([mk('pass', { reviewed_at: at + '1' }), mk('fail')]).pass, true, 'distinct times need no sequence');
+  /* ties on a DIFFERENT criterion do not poison this one */
+  const other = mk('fail', { criterion_id: 'zz' }); const other2 = mk('pass', { criterion_id: 'zz' });
+  assert.strictEqual(g([mk('pass'), other, other2]).pass, true);
+});
+
+test('present(spec): a missing taskSpecDigest never matches a row missing its own', () => {
+  const r = rv('pass'); delete r.task_spec_digest;
+  assert.strictEqual(taskPassVerdict(HC, { reviews: [r] }).pass, false);
+  assert.strictEqual(taskPassVerdict(HC, { taskSpecDigest: '', reviews: [{ ...r, task_spec_digest: '' }] }).pass, false);
+});
+
+test('per-criterion status is never passed unless the Run bar holds', () => {
+  const two = [{ id: 'a', text: 'looks right' }, { id: 'b', text: 'is fine' }];
+  const mk = (id, text, wid, out = 'complete') => rv('pass', { criterion_id: id, criterion_digest: sha256(text), work_id: wid, work_outcome: out });
+  for (const reviews of [[mk('a', 'looks right', 'w1'), mk('b', 'is fine', 'w2')], [mk('a', 'looks right', 'w1', 'failed'), mk('b', 'is fine', 'w1', 'failed')], [mk('a', 'looks right', 'w1')]]) {
+    const out = taskPassVerdict(two, { taskSpecDigest: SPEC, reviews });
+    assert.strictEqual(out.pass, false);
+    assert.ok(out.criteria.every((c) => c.status !== 'passed'), JSON.stringify(out.criteria));
+  }
+});
+
+test('checker measures graphemes, not UTF-16 length; shown must be a prefix', () => {
+  const claim = (t, over = {}) => ({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', text: t, ...over }] });
+  const e = '\u{1F600}';                                  // 2 code units, 1 grapheme
+  assert.deepStrictEqual(checkTruthInvariants(claim(e.repeat(CLAIM_LIMIT))), [], '280 graphemes = 560 code units, not over');
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(e.repeat(CLAIM_LIMIT + 1)))), ['claim_not_truncated']);
+  const ok = e.repeat(CLAIM_LIMIT + 1);
+  assert.deepStrictEqual(checkTruthInvariants(claim(ok, limitClaim(ok))), []);
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(ok, { ...limitClaim(ok), shown: 'q'.repeat(CLAIM_LIMIT) + '…' }))), ['shown_not_prefix']);
+  for (const n of [CLAIM_LIMIT - 1, CLAIM_LIMIT, CLAIM_LIMIT + 1]) {
+    const t = 'k'.repeat(n);
+    assert.deepStrictEqual(checkTruthInvariants(claim(t, n > CLAIM_LIMIT ? limitClaim(t) : {})).length, 0, String(n));
+  }
+});
+
+test('testsPassed string branches: false-ish words are not "passed", others are', () => {
+  for (const w of ['false', 'FALSE', 'no', 'n', '0', '', ' ']) assert.deepStrictEqual(checkTruthInvariants({ ...good(), display: { ...good().display, testsPassed: w } }), [], JSON.stringify(w));
+  for (const w of ['yes', 'true', '1', 'passed']) assert.deepStrictEqual(codes(checkTruthInvariants({ ...good(), display: { ...good().display, testsPassed: w } })), ['tests_passed_without_test_run'], w);
+});
+
+test('canonical comparison: NaN, null and undefined differ; unavailableCount is exposed', () => {
+  const mk = (v) => ({ work: { status: 'ended', outcome: 'complete' }, evidence: [{ id: 'e', v }] });
+  assert.deepStrictEqual(codes(checkImmutableRun(mk(NaN), mk(null))), ['ended_run_row_altered']);
+  assert.deepStrictEqual(checkImmutableRun(mk(NaN), mk(NaN)), []);
+  assert.deepStrictEqual(checkImmutableRun(mk(null), mk(null)), []);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk(0), mk(-1))), ['ended_run_row_altered']);
+  const r = summarizeChanges({ known: true, files: [{ path: 'a', patch_state: 'unavailable' }, { path: 'b', patch_state: 'stored' }, { path: 'c', patch_state: 'unavailable' }] });
+  assert.deepStrictEqual([r.changesKnown, r.count, r.unavailableCount], [false, null, 2]);
+  assert.strictEqual(limitClaim('x'.repeat(10), 2 ** 53).truncated, false);
+});
+
+test('bounded cost: 50 MB claim, 1M claims, 1M immutable rows', () => {
+  const time = (f) => { const t = process.hrtime.bigint(); const r = f(); return [Number(process.hrtime.bigint() - t) / 1e6, r]; };
+  const big = 'x'.repeat(50 * 1024 * 1024);
+  const [tLimit, lim] = time(() => limitClaim(big));
+  assert.ok(lim.truncated && lim.shown.length === CLAIM_LIMIT + 1 && lim.full === big);
+  const [tCheck] = time(() => checkTruthInvariants({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', ...lim, text: big }] }));
+  const claims = Array.from({ length: 1e6 }, () => ({ kind: 'agent-report', confidence: 'expected', text: 'short claim' }));
+  const [tClaims, v] = time(() => checkTruthInvariants({ ...good(), claims }));
+  assert.deepStrictEqual(v, []);
+  const mk = (n) => Array.from({ length: n }, (_, i) => ({ id: `r${i}`, kind: 'test_command', summary: 'node --test', n: i }));
+  const a = { work: { status: 'ended', outcome: 'complete' }, evidence: mk(1e6) };
+  const b = { work: { status: 'ended', outcome: 'complete' }, evidence: mk(1e6) };
+  const [tImm, iv] = time(() => checkImmutableRun(a, b));
+  assert.deepStrictEqual(iv, []);
+  console.log(`# timings ms: limitClaim(50MB) ${tLimit.toFixed(0)}, checker(50MB claim) ${tCheck.toFixed(0)}, 1M claims ${tClaims.toFixed(0)}, 1M immutable rows ${tImm.toFixed(0)}`);
+  assert.ok(tLimit < 1000 && tCheck < 1000, 'a 50 MB claim must be O(limit)');
+  assert.ok(tClaims < 3000, `1M claims ${tClaims}`);
+  assert.ok(tImm < 3000, `1M immutable rows ${tImm}`);
+});
