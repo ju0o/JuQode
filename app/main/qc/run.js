@@ -59,7 +59,7 @@ const TOKENISH = [
 ], [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/g,
   /\bBasic\s+[A-Za-z0-9+/=.]{16,}/g,
-].map((r) => re(escB(r))), [M.maskUrlCredentials], M.EXTRA.map(re), [
+].map((r) => re(escB(r))), [M.maskUrlCredentials], M.EXTRA, [
   /\bnpm_[A-Za-z0-9]{36}\b/g,
   /\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]{20,}/g,
   /\bAIza[0-9A-Za-z_-]{35}/g,
@@ -76,7 +76,7 @@ const TOKENISH = [
    * So: the NAME must look like an environment variable (upper-case, digits, underscores — it
    * is one), and the value must be on the same line. `password:` in an English sentence is not
    * an environment variable and is left alone. */
-  /\b[A-Z0-9_]{0,255}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|COOKIE)[A-Z0-9_]{0,255}[ \t]*[=:][ \t]*\S+/g,
+  /\b[A-Z0-9_]{0,255}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|AUTH(?:ORIZATION)?(?![A-Z]))[A-Z0-9_]{0,255}[ \t]*[=:][ \t]*\S+/g,
 ].map((r) => re(escB(r))));
 
 /** Replace token-shaped runs. See TOKENISH: this is a reduction, never a guarantee. */

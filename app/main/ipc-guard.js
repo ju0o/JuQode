@@ -156,14 +156,14 @@ const WALK = Object.freeze({ depth: 12, nodes: 20000, leaves: 200000, array: Inf
 const TRUNC = '[truncated]';
 function walk(value, fn, caps = WALK, keep = null) {
   let nodes = 0;
-  let leaves = 0;                                  // strings / numbers / booleans: 1M of them in one array is 2.4 s on the main thread
+  let leaves = 0;                                  // strings: 1M of them in one array is 2.4 s on the main thread
   const up = new Set();
   const go = (v, depth, kept) => {
-    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-      if (++leaves > (caps.leaves ?? WALK.leaves)) return TRUNC;
-      return typeof v === 'string' && !kept ? fn(v) : v;
+    if (typeof v === 'string') {
+      if (++leaves > (caps.leaves ?? WALK.leaves)) return TRUNC;     // only STRINGS are capped: a number / boolean / null cannot leak and must keep its truth value
+      return kept ? v : fn(v);
     }
-    if (v == null) return v;
+    if (v == null || typeof v === 'number' || typeof v === 'boolean') return v;
     if (typeof v !== 'object') return TRUNC;
     if (++nodes > caps.nodes || depth >= caps.depth || up.has(v)) return TRUNC;
     if (v instanceof Error) {

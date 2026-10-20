@@ -24,9 +24,9 @@ const SECRET_RULES = [
   ['basic_auth', rx(M.escB(/\bBasic\s+[A-Za-z0-9+/=]{16,}/g))],
   /* before credential_assignment, which would eat `Authorization: Basic` and leave the payload */
   ['authorization_header', M.maskAuthHeaders],
-  ['cookie_header', rx(M.EXTRA[0])],
-  ['x_auth_header', rx(M.EXTRA[1])],
-  ['curl_user', rx(M.EXTRA[2])],
+  ['cookie_header', M.EXTRA[0]],
+  ['x_auth_header', M.EXTRA[1]],
+  ['curl_user', M.EXTRA[2]],
   ['credential_assignment', rx(M.escB(M.ASSIGNMENT))],
   /* a name with a prefix longer than 64 characters: the keyword and its value are still masked (the prefix stays) */
   ['credential_assignment', rx(M.ASSIGNMENT_LONG_NAME)],
