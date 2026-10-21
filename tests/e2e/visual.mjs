@@ -2989,19 +2989,38 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     assert.strictEqual(button.type, 'button', `${recovery.name}: button does not submit a form`);
     assert.ok(button.text?.startsWith('▸'), `${recovery.name}: recovery action has its contracted arrow label`);
     assert.ok(button.tabIndex >= 0, `${recovery.name}: recovery button is keyboard reachable`);
-    const traversal = JSON.parse(await evalJs(`(() => {
+    const traversalStart = JSON.parse(await evalJs(`(() => {
+      const start = document.querySelector('.term-toggle');
       const target = document.querySelector(${selector});
-      const candidates = [...document.querySelectorAll('a[href], area[href], button, input:not([type="hidden"]), select, textarea, summary, iframe, object, embed, [tabindex], [contenteditable="true"]')]
-        .filter((n) => n.tabIndex >= 0 && !n.disabled && n.getClientRects().length > 0 && getComputedStyle(n).visibility !== 'hidden' && !n.closest('[hidden], [inert]'));
-      const index = candidates.indexOf(target);
-      const previous = candidates[index - 1];
-      if (!target || index < 1 || !previous) return JSON.stringify({ valid: false, index, count: candidates.length });
-      previous.focus();
-      return JSON.stringify({ valid: document.activeElement === previous, index, previousTag: previous.tagName, previousType: previous.type ?? null,
-        previousText: previous.textContent?.trim() ?? null, previousTabIndex: previous.tabIndex });
+      const candidates = [...document.querySelectorAll('a[href], area[href], button, input:not([type="hidden"]), select, textarea, summary, iframe, object, embed, [tabindex], [contenteditable="true"]')];
+      const visibleStopBound = candidates.filter((n) => n.tabIndex >= 0 && !n.disabled && n.getClientRects().length > 0 &&
+        getComputedStyle(n).visibility !== 'hidden' && !n.closest('[hidden], [inert]')).length;
+      if (!start || !target || start.disabled || !start.getClientRects().length || getComputedStyle(start).visibility === 'hidden') {
+        return JSON.stringify({ valid: false, startFound: Boolean(start), targetFound: Boolean(target), visibleStopBound });
+      }
+      start.focus();
+      return JSON.stringify({ valid: document.activeElement === start, tag: start.tagName, text: start.textContent?.trim() ?? null,
+        tabIndex: start.tabIndex, visibleStopBound });
     })()`));
-    assert.strictEqual(traversal.valid, true, `${recovery.name}: an enabled, visible preceding tab stop was focused`);
-    await pressTab();
+    assert.strictEqual(traversalStart.valid, true, `${recovery.name}: visible top-bar terminal button is a real keyboard start stop`);
+    let previousStop = { tag: traversalStart.tag, text: traversalStart.text, tabIndex: traversalStart.tabIndex, visible: true };
+    let traversal = null;
+    for (let step = 1; step <= traversalStart.visibleStopBound + 1; step += 1) {
+      await pressTab();
+      const current = JSON.parse(await evalJs(`(() => { const a = document.activeElement; const cs = getComputedStyle(a);
+        return JSON.stringify({ isTarget: a === document.querySelector(${selector}), tag: a.tagName, text: a.textContent?.trim() ?? null, tabIndex: a.tabIndex,
+          visible: a.getClientRects().length > 0 && cs.visibility !== 'hidden', focusVisible: a.matches(':focus-visible'),
+          outlineStyle: cs.outlineStyle, outlineWidth: cs.outlineWidth,
+          hasVisibleOutline: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 }); })()`));
+      if (current.isTarget) {
+        traversal = { steps: step, previousStop };
+        break;
+      }
+      previousStop = current;
+    }
+    assert.ok(traversal, `${recovery.name}: dispatched Tab reaches the recovery button within the rendered tab-stop bound`);
+    assert.ok(traversal.previousStop.visible && traversal.previousStop.tabIndex >= 0,
+      `${recovery.name}: preceding stop is a visible, keyboard-reachable element from actual Tab traversal`);
     const focus = JSON.parse(await evalJs(`(() => { const a = document.activeElement; const cs = getComputedStyle(a);
       return JSON.stringify({ isTarget: a === document.querySelector(${selector}), focusVisible: a.matches(':focus-visible'),
         outlineStyle: cs.outlineStyle, outlineWidth: cs.outlineWidth, hasVisibleOutline: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 }); })()`));
