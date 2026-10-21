@@ -1303,7 +1303,7 @@ function renderHumanRead(task, latest) {
     block.appendChild(raw);
   }
   const report = latest.result?.claims?.find((claim) => claim.kind === 'agent-report');
-  if (report?.data?.text) block.appendChild(voice(C.gap.task.humanAgent, report.data.text));
+  if (report?.data?.shown) block.appendChild(voice(C.gap.task.humanAgent, report.data.shown));
   else block.appendChild(voice(C.gap.task.humanAgent, ended ? C.gap.task.humanAgentNone : C.gap.task.humanAgentPending));
   const answer = changedFilesState(latest.runEvidence);
   block.appendChild(voice(C.gap.task.humanObserved, {

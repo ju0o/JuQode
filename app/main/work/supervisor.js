@@ -28,6 +28,7 @@ const explain = require('../change/explain');
 const exclude = require('../evidence/exclude');
 const { buildContextBundle, safeSnapshot, safeStructuredSnapshot, redactionRules, redactionLocations } = require('./context');
 const { unknownTaskRunWithLiveRunner } = require('./runner-liveness');
+const { limitClaim } = require('./provenance');
 
 /** Live state for Works this process started. Nothing here is authoritative — the DB is. */
 const live = new Map();   // workId -> { child, state, sessionId, cwd, projectId }
@@ -769,6 +770,16 @@ function apply(db, workId, sig, onUpdate) {
 /* V1-409: the live state is built from the provider's raw lines (a denied command, a result text). What LEAVES for the
  * renderer is masked; the state itself, and so what a grant acts on, is untouched. */
 const masked = (v) => (v == null ? v : safeStructuredSnapshot(v));
+/* Derived only for renderer presentation. `data.text` remains the stored full Agent report and
+ * the technical detail fold continues to show it; Inspector's human reading uses `shown`. */
+function withClaimPreviews(result) {
+  if (!result || !Array.isArray(result.claims)) return result;
+  return { ...result, claims: result.claims.map((claim) => {
+    if (claim?.kind !== 'agent-report' || typeof claim.data?.text !== 'string') return claim;
+    const { shown, truncated } = limitClaim(claim.data.text);
+    return { ...claim, data: { ...claim.data, shown, truncated } };
+  }) };
+}
 /* What the card shows is the masked copy; what the grant acts on is the raw denial. When they differ, the user is approving
  * something part of which they cannot read. the card offers no allow button and `allow` refuses - in every execution mode (V1-004 §7.8). */
 const hidesArgs = (raw) => JSON.stringify(masked(raw)) !== JSON.stringify(raw);
@@ -812,7 +823,7 @@ function snapshot(db, workId) {
     answerDelivery: answerDeliveryOf(db, workId, entryFor(db, workId)),
     signalCount: repo.nextSeq(db, workId),
     evidence: { before: Boolean(repo.basisFor(db, workId, 'before')), after: Boolean(repo.basisFor(db, workId, 'after')) },
-    result: work.status === 'ended' ? masked(repo.resultFor(db, workId)) : null,
+    result: work.status === 'ended' ? withClaimPreviews(masked(repo.resultFor(db, workId))) : null,
   };
 }
 

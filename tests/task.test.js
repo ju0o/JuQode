@@ -9,6 +9,8 @@ const { DatabaseSync } = require('node:sqlite');
 const R = path.resolve(__dirname, '..');
 const { MIGRATIONS, SCHEMA_FILE, LATEST, openDb } = require(path.join(R, 'app/main/db/db.js'));
 const repo = require(path.join(R, 'app/main/db/repo.js'));
+const supervisor = require(path.join(R, 'app/main/work/supervisor.js'));
+const { CLAIM_LIMIT, limitClaim } = require(path.join(R, 'app/main/work/provenance.js'));
 const { code: sourceCode } = require(path.join(__dirname, 'src.js'));
 const { buildContextBundle } = require(path.join(R, 'app/main/work/context.js'));
 const { windowsRunnerTreeMayBeAlive } = require(path.join(R, 'app/main/claude/session.js'));
@@ -64,6 +66,61 @@ test('Task persistence creates durable, separate Project children with truthful 
     assert.deepStrictEqual(repo.tasksForProject(db, project.id).map((row) => row.id), [task.id]);
     assert.strictEqual(db.prepare('select count(*) n from work').get().n, 0,
       'creating a Task does not create or masquerade as a Work/Run');
+  } finally { db.close(); }
+});
+
+test('V1-307 Inspector preview limits Agent claims by grapheme and preserves the full technical record', () => {
+  const { db, project } = setup();
+  try {
+    const claimSnapshot = (text) => {
+      const task = repo.createTask(db, project.id, { goal: 'Inspect an Agent report' });
+      const work = repo.beginWork(db, project.id, 'Inspect report preview', { taskId: task.id }).work;
+      repo.setWorkState(db, work.id, { status: 'ended', outcome: 'complete' });
+      repo.saveResult(db, work.id, {
+        outcome: 'complete', summary: text, whatFailed: null,
+        claims: [{ kind: 'agent-report', data: { text }, confidence: 'expected', sourceRef: 'claude:result' }],
+        items: [],
+      });
+      const stored = repo.resultFor(db, work.id).claims.find((claim) => claim.kind === 'agent-report');
+      assert.strictEqual(stored.data.text, text, 'the stored report remains byte-for-byte the original');
+      assert.strictEqual(stored.data.shown, undefined, 'the display preview is not written to storage');
+      const snapshot = supervisor.snapshot(db, work.id);
+      return snapshot.result.claims.find((claim) => claim.kind === 'agent-report');
+    };
+
+    const short = '짧은 보고';
+    const shortClaim = claimSnapshot(short);
+    assert.strictEqual(shortClaim.data.shown, short);
+    assert.strictEqual(shortClaim.data.truncated, false);
+    assert.strictEqual(shortClaim.data.text, short);
+
+    const combining = `${'x'.repeat(CLAIM_LIMIT - 1)}e\u0301👩‍💻이어지는 설명`;
+    const combiningClaim = claimSnapshot(combining);
+    assert.strictEqual(combiningClaim.data.shown, limitClaim(combining).shown);
+    assert.strictEqual(combiningClaim.data.truncated, true);
+    assert.ok(combiningClaim.data.shown.endsWith('…'), 'the preview ends with a truncation marker');
+    assert.strictEqual([...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(combiningClaim.data.shown)].length,
+      CLAIM_LIMIT + 1, 'the preview is 280 graphemes plus the marker');
+    assert.ok(combiningClaim.data.shown.includes('e\u0301'), 'a combining sequence at the boundary remains whole');
+    assert.ok(!combiningClaim.data.shown.includes('👩‍💻'), 'the following ZWJ grapheme is omitted as a whole');
+    assert.strictEqual(combiningClaim.data.text, combining);
+
+    const zwjAtLimit = `${'y'.repeat(CLAIM_LIMIT - 1)}👩‍💻 다음 문장`;
+    const zwjClaim = claimSnapshot(zwjAtLimit);
+    assert.strictEqual(zwjClaim.data.shown, limitClaim(zwjAtLimit).shown);
+    assert.ok(zwjClaim.data.shown.includes('👩‍💻'), 'a ZWJ sequence at the limit remains whole');
+    assert.ok(zwjClaim.data.shown.endsWith('…'));
+    assert.strictEqual(zwjClaim.data.text, zwjAtLimit, 'the full Agent claim remains retrievable');
+
+    const source = sourceCode('app/renderer/screens/sc02.js');
+    const humanStart = source.indexOf('function renderHumanRead(');
+    const humanEnd = source.indexOf('\nfunction testStateLabel', humanStart);
+    const humanRead = source.slice(humanStart, humanEnd);
+    assert.match(humanRead, /report\?\.data\?\.shown/, 'the Inspector human reading uses the limited preview');
+    assert.doesNotMatch(humanRead, /report\?\.data\?\.text/, 'the Inspector human reading does not fall back to the full report');
+    const detailStart = source.indexOf('function inspectResult(');
+    const detailEnd = source.indexOf('\nfunction changedFilesOf', detailStart);
+    assert.match(source.slice(detailStart, detailEnd), /report\.data\.text/, 'the technical detail fold still exposes the original report');
   } finally { db.close(); }
 });
 
