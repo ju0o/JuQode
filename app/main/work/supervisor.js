@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const repo = require('../db/repo');
 const claude = require('../claude-detect');
 const session = require('../claude/session');
-const { scopedRetryTools, summarizeRun } = require('../provider/claude-contract');
+const { scopedRetryTools, summarizeRun, projectSettingsRefusal } = require('../provider/claude-contract');
 const gitEvidence = require('../evidence/git');
 const manifest = require('../evidence/manifest');
 const { toSignal, reduce, initial, openPermission, openPermissions, KIND } = require('./reducer');
@@ -83,6 +83,9 @@ async function preflight(db, project, { evidenceStore, detect = claude.detect, t
   if (taskRefusal) return { ok: false, reason: taskRefusal };
   const status = await detect();
   if (!status.available) return { ok: false, reason: 'claude-unavailable', detail: status };
+  /* the project's own Claude settings can widen what the run may do beyond any screen: refused before a row, a basis or a process exists */
+  const widened = projectSettingsRefusal(project.path);
+  if (widened) return { ok: false, reason: 'effective-permission-widened', detail: widened };
 
   const active = repo.activeWork(db, project.id);
   if (active) return { ok: false, reason: 'active-work', detail: active };
@@ -234,6 +237,24 @@ async function startGuarded(db, project, intent, {
   let markDone;
   const done = new Promise((res) => { markDone = res; });
   if (runEntry) runEntry.markDone = markDone;
+
+  /* LAST CHECK BEFORE THE SPAWN. The preflight's settings check ran before the evidence capture and the Task row; a settings file written in that window must not start a run.
+   * A reserved Task Run row ends as a failed attempt with an honest reason; a Task-less Work has no row yet. */
+  const late = projectSettingsRefusal(project.path);
+  if (late) {
+    if (workId) {
+      repo.setWorkState(db, workId, { status: 'ended', outcome: 'failed' });
+      repo.setRunFailureReason(db, workId, 'effective-permission-widened-before-spawn');
+      writeSignal(db, workId, { source: 'juqode', kind: KIND.RAW, payload: JSON.stringify({ runFailure: 'effective-permission-widened-before-spawn', detail: late }) });
+      captureAfter(db, workId, project, pre.useGit, evidenceStore);
+      finishResult(db, workId, project, evidenceStore);
+      release(db, workId);
+      onUpdate(snapshot(db, workId));
+      markDone({ ok: false, reason: 'effective-permission-widened' });
+      return { ok: false, reason: 'effective-permission-widened', detail: late, workId };
+    }
+    return { ok: false, reason: 'effective-permission-widened', detail: late };
+  }
 
   const first = new Promise((resolve) => {
     let settled = false;
@@ -802,7 +823,9 @@ function resumeRefusal(db, entry) {
   const project = entry.projectId ? db.prepare('select path from project where id = ?').get(entry.projectId) : null;
   const v = session.verifyResume(entry.binding, { cwd: entry.cwd, sessionId: entry.sessionId, bin: entry.bin,
     projectPath: project?.path });
-  return v.ok ? null : { ok: false, reason: 'resume-binding-unverified', detail: v.reason };
+  if (!v.ok) return { ok: false, reason: 'resume-binding-unverified', detail: v.reason };
+  const widened = projectSettingsRefusal(project?.path);
+  return widened ? { ok: false, reason: 'effective-permission-widened', detail: widened } : null;
 }
 
 /* The init-cwd check fires after the child is running, so what it may have written before

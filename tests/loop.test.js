@@ -1404,26 +1404,66 @@ test('mismatch with SEVERAL unresolved denials still ends the Work (allow and an
 });
 
 test('resume is refused BEFORE any process exists when the binding cannot be verified', async () => {
-  for (const [name, tamper] of [
+  const cases = [
     ['project folder gone', (e, d) => { fs.rmSync(d, { recursive: true, force: true }); }],
     ['cwd swapped', (e) => { e.cwd = tempDir('juqode-swap-'); }],
     ['binary swapped', (e, d) => { e.bin = cli(d, [INIT, OK], { name: 'other-claude' }); }],
     ['binding missing', (e) => { e.binding = null; }],
-  ]) {
-    const { dir, db, r } = await deniedWork();
-    const file = path.join(dir, 'a.txt');
-    const e = supervisor.live.get(r.workId);
-    const tripwire = cli(dir, [INIT, OK], { name: 'tripwire', edits: [{ path: file, body: 'ran\n' }] });
-    useBin(r.workId, tripwire);
-    tamper(e, dir);
-    const calls = argvLog(dir).length;
-    const before = fs.existsSync(file) ? sha(file) : null;
-    for (const res of [await supervisor.allow(db, r.workId, 'tu_1'), await supervisor.answer(db, r.workId, 'x')]) {
-      assert.strictEqual(res.ok, false, name);
-      assert.strictEqual(res.reason, 'resume-binding-unverified', name);
+  ];
+  for (const [name, tamper] of cases) {
+    for (const via of ['allow', 'answer']) {
+      const { dir, db, r } = await deniedWork();
+      const e = supervisor.live.get(r.workId);
+      const marker = path.join(`${dir}-cli`, `TRIPWIRE-${name.replaceAll(' ', '-')}-${via}`);
+      useBin(r.workId, cli(dir, [INIT, OK], { name: 'tripwire', edits: [{ path: marker, body: 'ran\n' }] }));
+      tamper(e, dir);
+
+      const workRows = db.prepare('select id, project_id, status, outcome from work order by id').all();
+      const signalRows = db.prepare('select work_id, seq, source, kind, payload from work_signal order by work_id, seq').all();
+      const child = e.child;
+      const calls = argvLog(dir).length;
+      const invoke = via === 'allow' ? () => supervisor.allow(db, r.workId, 'tu_1') : () => supervisor.answer(db, r.workId, 'x');
+      const res = await invoke();
+
+      assert.deepStrictEqual([res.ok, res.reason], [false, 'resume-binding-unverified'], `${via}: ${name}`);
+      assert.deepStrictEqual(db.prepare('select id, project_id, status, outcome from work order by id').all(), workRows,
+        `${via}: ${name}: a Work/Run row was created or changed`);
+      assert.deepStrictEqual(db.prepare('select work_id, seq, source, kind, payload from work_signal order by work_id, seq').all(), signalRows,
+        `${via}: ${name}: a signal was recorded (including answer/grant)`);
+      assert.strictEqual(argvLog(dir).length, calls, `${via}: ${name}: a CLI process was started anyway`);
+      assert.strictEqual(e.child, child, `${via}: ${name}: a different child was attached`);
+      assert.ok(!fs.existsSync(marker), `${via}: ${name}: tripwire child ran`);
+      assert.strictEqual(supervisor.live.get(r.workId), e, `${via}: ${name}: the live entry changed`);
     }
-    assert.strictEqual(argvLog(dir).length, calls, `${name}: a CLI process was started anyway`);
-    assert.strictEqual(fs.existsSync(file) ? sha(file) : null, before, `${name}: a file changed`);
+  }
+});
+
+test('a verified resume with widened project permissions refuses allow and answer without effects', async () => {
+  for (const via of ['allow', 'answer']) {
+    const { dir, db, r } = await deniedWork();
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude/settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }));
+    const e = supervisor.live.get(r.workId);
+    const marker = path.join(`${dir}-cli`, `TRIPWIRE-widened-${via}`);
+    useBin(r.workId, cli(dir, [INIT, OK], { name: 'tripwire', edits: [{ path: marker, body: 'ran\n' }] }));
+
+    const workRows = db.prepare('select id, project_id, status, outcome from work order by id').all();
+    const signalRows = db.prepare('select work_id, seq, source, kind, payload from work_signal order by work_id, seq').all();
+    const child = e.child;
+    const calls = argvLog(dir).length;
+    const invoke = via === 'allow' ? () => supervisor.allow(db, r.workId, 'tu_1') : () => supervisor.answer(db, r.workId, 'x');
+    const res = await invoke();
+
+    assert.deepStrictEqual([res.ok, res.reason, res.detail?.reason],
+      [false, 'effective-permission-widened', 'project-settings-permissive-mode'], via);
+    assert.deepStrictEqual(db.prepare('select id, project_id, status, outcome from work order by id').all(), workRows,
+      `${via}: a Work/Run row was created or changed`);
+    assert.deepStrictEqual(db.prepare('select work_id, seq, source, kind, payload from work_signal order by work_id, seq').all(), signalRows,
+      `${via}: a signal was recorded (including answer/grant)`);
+    assert.strictEqual(argvLog(dir).length, calls, `${via}: a CLI process was started anyway`);
+    assert.strictEqual(e.child, child, `${via}: a different child was attached`);
+    assert.ok(!fs.existsSync(marker), `${via}: tripwire child ran`);
+    assert.strictEqual(supervisor.live.get(r.workId), e, `${via}: the live entry changed`);
   }
 });
 

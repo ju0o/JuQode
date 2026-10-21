@@ -8,12 +8,15 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const STATES = ['SUPPORTED', 'LIMITED', 'UNSUPPORTED', 'UNKNOWN'];
-/** flags/values that make a provider write or run without asking: never passed, whatever the caller says */
-const PERMISSIVE = [/^--auto$/, /^--yolo$/, /^--(allow-)?dangerously-/, /^--ask-for-approval=never$/, /^--sandbox=danger-full-access$/,
-  /^--permission-mode=(bypassPermissions|acceptEdits|auto)$/, /^approval_policy\s*=\s*"?never"?$/, /^sandbox_mode\s*=\s*"?danger-full-access"?$/];
+/** flags/values that make a provider write or run without asking, or reach beyond the folder: never passed, whatever the caller says.
+ *  Matched on a NORMALISED token (NFKC, no invisible/control characters, trimmed, case-folded): an unknown spelling must not slip through. */
+const PERMISSIVE = [/^--(auto|yolo)(=.*)?$/, /^--(allow-)?dangerously-/, /^--ask-for-approval=never$/, /^-a=?never$/, /^--sandbox=danger-full-access$/, /^-s=?danger-full-access$/,
+  /^--permission-mode=\s*["']?(bypasspermissions|acceptedits|auto)["']?$/, /^--add-dir(=.*)?$/,
+  /^(-c|--config)?=?\s*(approval_policy|sandbox_mode)\s*=\s*["']?(never|danger-full-access)["']?$/];
 /** option and value as SEPARATE arguments (`--sandbox danger-full-access`, `-a never`, `-c approval_policy=never`) */
-const PERMISSIVE_PAIRS = [[/^(--sandbox|-s)$/, /^danger-full-access$/], [/^(--ask-for-approval|-a)$/, /^never$/],
-  [/^--permission-mode$/, /^(bypassPermissions|acceptEdits|auto)$/], [/^(-c|--config)$/, /^(approval_policy|sandbox_mode)\s*=\s*"?(never|danger-full-access)"?$/]];
+const PERMISSIVE_PAIRS = [[/^(--sandbox|-s)$/, /^["']?danger-full-access["']?$/], [/^(--ask-for-approval|-a)$/, /^["']?never["']?$/],
+  [/^--permission-mode$/, /^["']?(bypasspermissions|acceptedits|auto)["']?$/], [/^(-c|--config)$/, /^(approval_policy|sandbox_mode)\s*=\s*["']?(never|danger-full-access)["']?$/]];
+const fold = (a) => String(a).normalize('NFKC').replace(/[\p{Cc}\p{Cf}]/gu, '').trim().toLowerCase();
 
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
@@ -42,12 +45,13 @@ function guardLaunch(recorded, run) {
 
 /** argv/config values that remove the provider's own permission checks, joined with their option when the value is a separate argument. */
 function permissiveArgs(args) {
-  const list = (Array.isArray(args) ? args : []).map((a) => String(a).trim());
+  const raw = Array.isArray(args) ? args.map(String) : [];
+  const list = raw.map(fold);
   const out = [];
   for (let i = 0; i < list.length; i += 1) {
     const a = list[i];
-    if (PERMISSIVE_PAIRS.some(([opt, val]) => opt.test(a) && i + 1 < list.length && val.test(list[i + 1]))) { out.push(`${a} ${list[i + 1]}`); i += 1; }
-    else if (PERMISSIVE.some((re) => re.test(a))) out.push(a);
+    if (PERMISSIVE_PAIRS.some(([opt, val]) => opt.test(a) && i + 1 < list.length && val.test(list[i + 1]))) { out.push(`${raw[i].trim()} ${raw[i + 1].trim()}`); i += 1; }
+    else if (PERMISSIVE.some((re) => re.test(a))) out.push(raw[i].trim());
   }
   return out;
 }

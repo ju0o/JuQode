@@ -30,7 +30,7 @@ import { contextFacts, changedFilesState } from '../human-read.mjs';
 import { maskForDisplay } from '../path-view.mjs';
 import { fileSummary } from '../file-summary.js';
 import { holdPanel } from '../qc-hold.js';
-import { inputProblem, taskProblem } from '../input-problem.js';
+import { inputProblem, taskProblem, refusalNote } from '../input-problem.js';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
@@ -1121,12 +1121,13 @@ function inspectPermission(snap, api, refresh) {
   if (d.message) raw.appendChild(el('div', 'xs mono mut', d.message));
   panel.appendChild(raw);
   const acts = el('div', 'row-acts');
+  const allowNote = el('div', 'xs mut2');      // a refused allow is shown, never swallowed
   if (d.scopable === false) {
     panel.appendChild(el('div', 'xs mut', d.scopeRefusal === 'outside-project' ? C.gap.workOutsideProject : (d.scopeRefusal === 'args-hidden' ? C.gap.workArgsHiddenRefused : C.gap.workNoScope)));
   } else {
     const allow = btn('btn sm pri', C.gap.board.allowContinue, async () => {
       allow.disabled = true;
-      await api.workAllow(snap.work.id, d.toolUseId ?? null);
+      allowNote.textContent = refusalNote(await api.workAllow(snap.work.id, d.toolUseId ?? null)) ?? '';
       allow.disabled = false;
       await refresh();
     });
@@ -1137,6 +1138,7 @@ function inspectPermission(snap, api, refresh) {
     await refresh();
   }));
   panel.appendChild(acts);
+  panel.appendChild(allowNote);
   panel.appendChild(el('div', 'xs mut', C.gap.permStopNote));
   return panel;
 }
@@ -1159,7 +1161,7 @@ function inspectInput(snap, api) {
   panel.appendChild(box);
   const note = el('div', 'xs mut2');
   panel.appendChild(btn('btn sm pri', C.work.answer, async () => {
-    note.textContent = inputProblem(await api.workAnswer(snap.work.id, box.value)) ?? '';
+    note.textContent = refusalNote(await api.workAnswer(snap.work.id, box.value)) ?? '';
   }));
   panel.appendChild(note);
   return panel;

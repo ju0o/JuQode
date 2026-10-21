@@ -17,3 +17,13 @@ export function inputProblem(res) {
 export function taskProblem(res) {
   return inputProblem(res) ?? (res?.reason === 'invalid-task' ? (T.task[res.detail] ?? C.gap.task.draftFailed) : null);
 }
+
+/** A refused allow/answer (any `ok:false` with a code that is not an input-size problem) -> the EXISTING refusal sentence plus the raw code, so a refusal is never silent.
+ *  No new copy: `C.gap.workRefused` is what the start-refusal card already shows above its code. Null for success or a non-answer. */
+export function refusalNote(res) {
+  const p = inputProblem(res);
+  if (p) return p;
+  if (!res || res.ok || typeof res.reason !== 'string') return null;
+  const d = typeof res.detail === 'string' ? res.detail : res.detail?.reason;
+  return `${C.gap.workRefused} ${res.reason}${typeof d === 'string' && d ? `:${d}` : ''}`;
+}
