@@ -2858,6 +2858,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   step('SC-04 D3 matrix');
   /* real key presses (Enter needs a char event to activate a button) -- shared by the SC-04 and TD-01 blocks below */
   const press = async (k, code, vk) => { await send('Input.dispatchKeyEvent', k === 'Enter' ? { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, text: '\r' } : { type: 'rawKeyDown', key: k, code, windowsVirtualKeyCode: vk }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }); };
+  const pressTab = async () => { await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); };
   out.sc04d3 = {};
   const LONG = '문서/설정/알림 수신 여부를 바꾸면 곧바로 저장되고 다시 열어도 같은 값이 보이도록 고치는 안내 문서입니다.md';
   const SYN = {
@@ -2988,20 +2989,57 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     assert.strictEqual(button.type, 'button', `${recovery.name}: button does not submit a form`);
     assert.ok(button.text?.startsWith('▸'), `${recovery.name}: recovery action has its contracted arrow label`);
     assert.ok(button.tabIndex >= 0, `${recovery.name}: recovery button is keyboard reachable`);
-    await evalJs(`document.querySelector(${selector}).focus()`);
+    const traversal = JSON.parse(await evalJs(`(() => {
+      const target = document.querySelector(${selector});
+      const candidates = [...document.querySelectorAll('a[href], area[href], button, input:not([type="hidden"]), select, textarea, summary, iframe, object, embed, [tabindex], [contenteditable="true"]')]
+        .filter((n) => n.tabIndex >= 0 && !n.disabled && n.getClientRects().length > 0 && getComputedStyle(n).visibility !== 'hidden' && !n.closest('[hidden], [inert]'));
+      const index = candidates.indexOf(target);
+      const previous = candidates[index - 1];
+      if (!target || index < 1 || !previous) return JSON.stringify({ valid: false, index, count: candidates.length });
+      previous.focus();
+      return JSON.stringify({ valid: document.activeElement === previous, index, previousTag: previous.tagName, previousType: previous.type ?? null,
+        previousText: previous.textContent?.trim() ?? null, previousTabIndex: previous.tabIndex });
+    })()`));
+    assert.strictEqual(traversal.valid, true, `${recovery.name}: an enabled, visible preceding tab stop was focused`);
+    await pressTab();
+    const focus = JSON.parse(await evalJs(`(() => { const a = document.activeElement; const cs = getComputedStyle(a);
+      return JSON.stringify({ isTarget: a === document.querySelector(${selector}), focusVisible: a.matches(':focus-visible'),
+        outlineStyle: cs.outlineStyle, outlineWidth: cs.outlineWidth, hasVisibleOutline: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 }); })()`));
+    assert.strictEqual(focus.isTarget, true, `${recovery.name}: one dispatched Tab reaches the recovery button from its preceding tab stop`);
+    assert.strictEqual(focus.focusVisible, true, `${recovery.name}: keyboard traversal applies :focus-visible`);
+    assert.strictEqual(focus.hasVisibleOutline, true,
+      `${recovery.name}: keyboard focus has a non-none outline with positive width (${focus.outlineStyle} ${focus.outlineWidth})`);
     await press('Enter', 'Enter', 13);
     await sleep(220);
     const opened = JSON.parse(await evalJs(`JSON.stringify({ drawer: window.__drawer(), td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')) })`));
     assert.strictEqual(opened.drawer.open, true, `${recovery.name}: Enter opens TD-01`);
     assert.strictEqual(opened.drawer.phrase, 'synthetic recovery draft', `${recovery.name}: Quick Command draft is preserved`);
     assert.strictEqual(opened.td01, true, `${recovery.name}: TD-01 is present in the rendered DOM`);
-    out.sc04recovery[recovery.name] = { button, drawerOpened: opened.drawer.open, td01Rendered: opened.td01, draftPreserved: opened.drawer.phrase === 'synthetic recovery draft' };
-    await evalJs('window.__toggleDrawer(false)');
+    await press('Escape', 'Escape', 27);
+    await sleep(80);
+    const closed = JSON.parse(await evalJs(`JSON.stringify({ drawer: window.__drawer(), td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')),
+      focusReturned: document.activeElement === document.querySelector(${selector}) })`));
+    assert.strictEqual(closed.drawer.open, false, `${recovery.name}: Escape closes TD-01`);
+    assert.strictEqual(closed.td01, false, `${recovery.name}: Escape removes the TD-01 overlay`);
+    assert.strictEqual(closed.drawer.phrase, 'synthetic recovery draft', `${recovery.name}: closing retains the Quick Command draft`);
+    assert.strictEqual(closed.focusReturned, true, `${recovery.name}: Escape returns focus to the recovery button`);
+    out.sc04recovery[recovery.name] = { button, precedingTabStop: traversal, focus, drawerOpened: opened.drawer.open, draftPreserved: opened.drawer.phrase === 'synthetic recovery draft', escapeClosed: !closed.drawer.open, focusReturned: closed.focusReturned };
   }
   await sc04Mount('partial');
   out.sc04recovery.pendingHasNoTerminalAction = await evalJs(`!document.querySelector('[data-group="0"] [data-act="reader-open-terminal"]')`);
   assert.strictEqual(out.sc04recovery.pendingHasNoTerminalAction, true,
     'a not-yet-explained pending group does not claim an explanation failure');
+  await sc04Mount('explained');
+  await evalJs(`window.__openDrawerWith('synthetic topbar draft'); window.__toggleDrawer(false)`);
+  const toggleStart = JSON.parse(await evalJs(`JSON.stringify({ open: window.__drawer().open, phrase: window.__drawer().phrase, button: document.querySelector('.term-toggle')?.tagName ?? null })`));
+  assert.deepStrictEqual(toggleStart, { open: false, phrase: 'synthetic topbar draft', button: 'BUTTON' }, 'the SC-04 top-bar test starts closed with its draft present');
+  await evalJs(`document.querySelector('.term-toggle').click()`);
+  const toggleOpened = JSON.parse(await evalJs(`JSON.stringify({ open: window.__drawer().open, phrase: window.__drawer().phrase, td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')) })`));
+  assert.deepStrictEqual(toggleOpened, { open: true, phrase: 'synthetic topbar draft', td01: true }, 'the first no-argument top-bar click opens TD-01 without clearing the draft');
+  await evalJs(`document.querySelector('.term-toggle').click()`);
+  const toggleClosed = JSON.parse(await evalJs(`JSON.stringify({ open: window.__drawer().open, phrase: window.__drawer().phrase, td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')) })`));
+  assert.deepStrictEqual(toggleClosed, { open: false, phrase: 'synthetic topbar draft', td01: false }, 'the second no-argument top-bar click closes TD-01 and preserves the draft');
+  out.sc04recovery.topbarToggle = { firstClickOpened: toggleOpened.open, secondClickClosed: !toggleClosed.open, draftPreserved: toggleClosed.phrase === 'synthetic topbar draft' };
   /* keyboard-only flow at 1200: pick the 2nd group with Enter, open Raw with Enter, Esc closes it and focus returns to the opener */
   await sc04Mount('explained');
   await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 773, deviceScaleFactor: 1, mobile: false });
