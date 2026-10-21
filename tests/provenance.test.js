@@ -364,7 +364,7 @@ test('checkImmutableRun: altered/removed rows and a rewritten outcome are flagge
   assert.deepStrictEqual(checkImmutableRun(live, alt), []);
 });
 
-test('FINDING: reducer lets a RECONCILED signal overwrite the outcome of an ended Work (checker flags it)', () => {
+test('a RECONCILED signal cannot rewrite the outcome of an ended Work', () => {
   const { toSignal: ts } = require(path.join(R, 'app/main/work/reducer.js'));
   const { reduce, initial, KIND } = require(path.join(R, 'app/main/work/reducer.js'));
   let s = reduce(initial(), { kind: KIND.FINISH, payload: { subtype: 'success', isError: false, terminalReason: 'end_turn', denials: [], text: 'ok' } });
@@ -372,7 +372,8 @@ test('FINDING: reducer lets a RECONCILED signal overwrite the outcome of an ende
   const later = reduce(s, { kind: KIND.RECONCILED, payload: null });
   void ts;
   const v = checkImmutableRun({ work: { status: 'ended', outcome: s.outcome } }, { work: { status: later.status, outcome: later.outcome } });
-  assert.deepStrictEqual(codes(v), ['ended_run_changed'], 'documents current reducer behaviour; supervisor must not feed RECONCILED to an ended Work');
+  assert.deepStrictEqual([later.status, later.outcome], ['ended', 'complete']);
+  assert.deepStrictEqual(v, [], 'reconciliation must leave the ended Run outcome unchanged');
 });
 
 test('checkImmutableRun: key order does not matter; id-less rows are compared by position; duplicate ids do not collide', () => {
