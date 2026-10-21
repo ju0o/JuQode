@@ -4,6 +4,8 @@
  *
  * What can and cannot be known BEFORE the process starts:
  *   - known: the argv we build, the binary identity, that restricted built-in tools come with `--strict-mcp-config`.
+ *   - NOT covered by the settings gate (documented, not hidden): the few synchronous calls between the last pre-spawn settings re-check and `session.run`, and anything written while the run is going;
+ *     code-exec environment / settings (hooks, statusLine, apiKeyHelper, NODE_OPTIONS, BASH_ENV, LD_PRELOAD, PATH, ANTHROPIC_BASE_URL) are UNJUDGED BY DESIGN.
  *   - NOT known: the user's SessionStart hooks and effective permissions. Hooks ran BEFORE the `init` event in every probe call, so nothing read from
  *     `init` can stop them. `containment().attested` is therefore always false and says so; it is never a safety certificate. */
 const path = require('node:path');
@@ -25,9 +27,15 @@ const fileSpecWide = (spec) => /^[*?/\\.~]+$/.test(spec) || reachesOut(spec);
 
 /* ── the project's CONTROL files: what later runs read as configuration or execute as hooks. One list, used by scopeOf (no one-file grant) and by the settings gate (an allow rule for them
  * is a self-widening rule). `package.json` runs code through its scripts but is an ordinary edit target, so it is judged only by the gate (OPEN: PM). */
-const CONTROL = /^(\.claude(\/|$)|\.mcp\.json$|\.git(\/|$)|\.husky(\/|$)|\.envrc$|\.vscode\/tasks\.json$|\.github\/workflows(\/|$))/i;
-const CONTROL_ROOTS = ['.claude', '.mcp.json', '.git', '.husky', '.envrc', '.vscode/tasks.json', '.github/workflows'];
-const GATE_ONLY_CONTROL = /^package\.json$/i;
+const CONTROL = /^((.*\/)?claude\.md$|\.claude(\/|$)|\.claude\.json$|\.mcp\.json$|\.git(\/|$)|\.gitmodules$|\.gitattributes$|\.husky(\/|$)|\.githooks(\/|$)|\.envrc$|\.env(\..*)?$|\.vscode(\/|$)|\.cursor(\/|$)|\.devcontainer(\/|$)|\.github\/workflows(\/|$)|\.npmrc$|\.pre-commit-config\.yaml$|lefthook\.ya?ml$|\.(bashrc|zshrc|profile|bash_profile|zprofile)$)/i;
+const CONTROL_ROOTS = ['.claude', '.claude.json', 'CLAUDE.md', '.mcp.json', '.git', '.gitmodules', '.gitattributes', '.husky', '.githooks', '.envrc', '.env', '.vscode', '.cursor', '.devcontainer', '.github/workflows', '.npmrc',
+  '.pre-commit-config.yaml', 'lefthook.yml', 'lefthook.yaml', '.bashrc', '.zshrc', '.profile', '.bash_profile', '.zprofile'];
+/* Judged by the settings gate ONLY (an allow rule for them is refused; a one-file GRANT stays possible): ordinary edit targets that also run code when something else runs them.
+ * Contentious, kept out of CONTROL on purpose: the false-refusal cost of a Work that edits package.json / a Makefile / a *.config.js is high (OPEN: PM). */
+const GATE_ONLY_CONTROL = /^(package\.json|makefile|[^/]*\.config\.(c|m)?[jt]s)$/i;
+/* Win32 normalises `name.` / `name ` to `name`, has 8.3 short names (`PACKAGE~1.JSO`) and NTFS alternate streams (`name:stream`): compare the NORMALISED form, and treat the aliases as unmeasured, on every platform. */
+const normRel = (rel) => String(rel).replace(/\\/g, '/').split('/').map((x) => (x === '.' || x === '..' ? x : x.replace(/[. ]+$/, ''))).filter((x) => x !== '' && x !== '.').join('/');
+const winAlias = (rel) => String(rel).split(/[\\/]/).some((x) => /~\d/.test(x)) || String(rel).includes(':');
 const posix = (x) => x.split(path.sep).join('/');
 /** Where a file the model/settings names REALLY is: symlinks resolved; a not-yet-existing file resolves through its deepest existing ancestor. null = ambiguous (dangling link, a file in the way, unreadable). */
 function realTarget(abs) {
@@ -45,9 +53,9 @@ function realTarget(abs) {
 }
 /** Is this REAL target one of the control files (by its own name, or because a symlinked `.claude`/`.git`/... leads there)? */
 function isControlTarget(realRoot, rel, real) {
-  if (CONTROL.test(rel)) return true;
+  if (CONTROL.test(normRel(rel))) return true;
   const rr = posix(path.relative(realRoot, real));
-  if (CONTROL.test(rr)) return true;
+  if (CONTROL.test(normRel(rr))) return true;
   const lc = (x) => x.toLowerCase();
   return CONTROL_ROOTS.some((c) => { const pr = realTarget(path.join(realRoot, c)); return pr !== null && (lc(real) === lc(pr) || lc(real).startsWith(lc(pr) + path.sep)); });
 }
@@ -62,8 +70,8 @@ function projectFileVerdict(projectPath, spec) {
   if (real === null) return 'ambiguous';
   const rr = path.relative(realRoot, real);
   if (!rr || rr.startsWith('..') || path.isAbsolute(rr)) return 'outside';
-  if (isControlTarget(realRoot, rel, real) || GATE_ONLY_CONTROL.test(rel) || GATE_ONLY_CONTROL.test(posix(rr))) return 'control';
-  try { if (!fs.statSync(real).isFile()) return 'file-kind'; } catch { /* not there yet: a file to be created */ }
+  if (isControlTarget(realRoot, rel, real) || GATE_ONLY_CONTROL.test(normRel(rel)) || GATE_ONLY_CONTROL.test(normRel(posix(rr))) || winAlias(rel)) return 'control';
+  try { const st = fs.statSync(real); if (!st.isFile()) return 'file-kind'; if (st.nlink > 1) return 'control'; } catch { /* not there yet: a file to be created */ }      // a hardlink may BE a control file under another name
   return 'ok';
 }
 
@@ -122,7 +130,7 @@ function classifyAllowRule(rule, projectPath = null) {
   const spec = inner === undefined ? undefined : inner.trim();
   if (spec !== undefined && (spec !== inner || !spec)) return /^[*?:\s]*$/.test(inner) && tool !== 'WebSearch' ? 'wide' : 'unknown';
   const cwd = typeof projectPath === 'string' && path.isAbsolute(projectPath) ? projectPath : null;
-  const lexicalControl = (x) => CONTROL.test(x.replace(/^\.\//, '')) || GATE_ONLY_CONTROL.test(x.replace(/^\.\//, ''));
+  const lexicalControl = (x) => CONTROL.test(normRel(x)) || GATE_ONLY_CONTROL.test(normRel(x)) || winAlias(x);
   if (READ_TOOLS.has(tool)) {
     if (spec === undefined) return 'narrow';
     if (/^[*?:]*$/.test(spec) || reachesOut(spec) || spec.includes('\\')) return 'wide';
@@ -154,15 +162,22 @@ const REASONS = Object.freeze(['project-path-unknown', 'project-settings-unreada
 const KEY_WORDS = new Set(['permission', 'permissions', 'perm', 'perms', 'permit', 'allow', 'allowed', 'deny', 'denied', 'bypass', 'dangerous', 'dangerously', 'sandbox', 'approval', 'approvals', 'approve', 'trust', 'trusted',
   'mcp', 'yolo', 'grant', 'grants', 'tools', 'unrestricted', 'unsafe', 'accept', 'ask']);
 const words = (k) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+const HAZARD_STEMS = ['mcp', 'permission', 'approv', 'allow', 'deny', 'trust', 'sandbox', 'bypass', 'yolo', 'dangerous', 'autoaccept', 'autoapprove', 'safemode', 'planmode', 'additionaldirector', 'enableall', 'skip'];
 function permissionLikeKey(k) {
   const w = words(k);
   if (w.some((x) => KEY_WORDS.has(x))) return true;
+  const folded = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');           // `enabledMcpjsonServers`, `autoapprove`, `toolAllowlist` carry the stem inside one word
+  if (HAZARD_STEMS.some((st) => folded.includes(st))) return true;
   return w.includes('mode') && w.some((x) => ['default', 'auto', 'permission', 'plan', 'accept', 'bypass'].includes(x));
 }
 /* env: only names that change permission behaviour or WHERE settings come from; `PERMISSIONS_URL`, `SANDBOX_URL`, `DISABLE_AUTOUPDATER`, `AUTOMATION_LEVEL` are not. */
 const ENV_PERMISSION_NAME = /(^|_)(PERMISSION_MODE|SKIP_PERMISSIONS?(_PROMPT)?|BYPASS|BYPASS_PERMISSIONS?|DANGEROUS(LY)?(_[A-Z_]+)?|YOLO|APPROVAL_POLICY|SANDBOX_MODE|DEFAULT_MODE|AUTO_APPROVE|AUTO_ACCEPT(_EDITS)?|CONFIG_DIR)(_|$)/;
+/* names that change permission behaviour or WHERE the CLI reads its settings from (same class as CLAUDE_CONFIG_DIR). Code-exec variables (NODE_OPTIONS, BASH_ENV, LD_PRELOAD, PATH, ANTHROPIC_BASE_URL) are
+ * UNJUDGED BY DESIGN, like hooks / statusLine / apiKeyHelper (OPEN: PM). */
+const ENV_EXACT = new Set(['HOME', 'XDG_CONFIG_HOME', 'IS_SANDBOX', 'NO_PROMPT', 'ASSUME_YES', 'ALWAYS_ALLOW', 'ALLOW_ALL_TOOLS', 'TRUST_ALL', 'AUTO_ALLOW', 'CLAUDE_AUTO_ALLOW', 'CLAUDE_CODE_PERMISSIONS',
+  'CLAUDE_CODE_ALLOW_ALL', 'CLAUDE_CODE_APPROVAL', 'CLAUDE_CODE_SANDBOX', 'CLAUDE_CODE_TRUST_ALL']);
 const PERMISSION_LIKE = { test: permissionLikeKey };
-const ENV_PERMISSION_LIKE = { test: (k) => ENV_PERMISSION_NAME.test(String(k).toUpperCase()) };
+const ENV_PERMISSION_LIKE = { test: (k) => ENV_EXACT.has(String(k).toUpperCase()) || ENV_PERMISSION_NAME.test(String(k).toUpperCase()) };
 const KNOWN_PERMISSION_KEYS = new Set(['allow', 'deny', 'ask', 'defaultMode', 'additionalDirectories', 'disableBypassPermissionsMode']);
 
 /** The verdict on ONE parsed settings document. Pure and total: any value, never throws. @returns {{reason:string}|null} */
@@ -205,6 +220,7 @@ function settingsVerdict(doc, projectPath = null) {
 function projectSettingsRefusal(projectPath) {
   /* an unknown project folder is not "no settings" */
   if (typeof projectPath !== 'string' || !path.isAbsolute(projectPath)) return { reason: 'project-path-unknown', source: null };
+  try { if (!fs.statSync(projectPath).isDirectory()) return { reason: 'project-path-unknown', source: null }; } catch { return { reason: 'project-path-unknown', source: null }; }
   let realRoot = null;
   try { realRoot = fs.realpathSync(projectPath); } catch { /* judged below as unreadable only if a settings file exists */ }
   for (const name of ['settings.json', 'settings.local.json']) {
@@ -216,7 +232,13 @@ function projectSettingsRefusal(projectPath) {
       if (!realRoot || (real !== realRoot && !real.startsWith(realRoot + path.sep))) return { reason: 'project-settings-symlink', source: name };
       doc = JSON.parse(fs.readFileSync(real, 'utf8'));
     } catch (e) {
-      if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue;
+      if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) {
+        /* nothing there - unless something IS there that leads nowhere (a dangling link to the file or to the .claude folder): a source we cannot read, not "no settings" */
+        const present = (x) => { try { fs.lstatSync(x); return true; } catch { return false; } };
+        const folder = path.join(String(projectPath), '.claude');
+        const folderOk = (() => { try { return fs.statSync(folder).isDirectory(); } catch { return false; } })();
+        if (!present(file) && (folderOk || !present(folder))) continue;
+      }
       return { reason: 'project-settings-unreadable', source: name };
     }
     const v = settingsVerdict(doc, projectPath);
@@ -495,4 +517,4 @@ function problems(s, ctx) {
   return p;
 }
 
-module.exports = { controlPath: (rel) => CONTROL.test(String(rel).replace(/^\.\//, '')), isControlTarget, realTarget, projectSettingsRefusal, settingsVerdict, classifyAllowRule, SETTINGS_REASONS: REASONS, grantRefusal, allowRuleWidens, EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };
+module.exports = { controlPath: (rel) => CONTROL.test(normRel(rel)) || winAlias(rel), hardLinked: (real) => { try { const st = fs.statSync(real); return st.isFile() && st.nlink > 1; } catch { return false; } }, isControlTarget, realTarget, projectSettingsRefusal, settingsVerdict, classifyAllowRule, SETTINGS_REASONS: REASONS, grantRefusal, allowRuleWidens, EXECUTION_MODES, normaliseMode, isPrivileged, scopedRetryTools, bashCovered, createIdentityCache, preflightLaunch, preflight, buildArgs, containment, privilegedAllowed, grantPath, coveredByGrant, fileEffect, summarizeRun, FILE_WRITERS };

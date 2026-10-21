@@ -15,7 +15,7 @@
  *     `--allowedTools Edit` was measured changing a second, unapproved file.
  */
 const { spawn, spawnSync } = require('node:child_process');
-const { preflightLaunch, createIdentityCache, EXECUTION_MODES, normaliseMode, grantRefusal, isControlTarget, realTarget } = require('../provider/claude-contract');
+const { preflightLaunch, createIdentityCache, EXECUTION_MODES, normaliseMode, grantRefusal, isControlTarget, realTarget, hardLinked } = require('../provider/claude-contract');
 
 /* sha256 per file fingerprint; the version is taken from the process's own `init` event (a `--version` spawn per launch would also pollute fixtures and cost time) */
 const identityCache = createIdentityCache();
@@ -165,7 +165,7 @@ function baseArgs(sessionId) {
 const UNSAFE_TARGET = /[(),*?[\]{}!\n\r\0]|^\s*$/;
 /* A FILE spec is also refused when it would READ differently from the card: `~` (Claude expands it to the home folder, so `Edit(~/x)` is not the project file `~/x`),
  * a backslash (an escape in the rule grammar, a separator only on Windows - where the path is already normalised), invisible or control characters, edge whitespace. */
-const UNSAFE_FILE_SPEC = /^~|\\|[\p{Cc}\p{Cf}]|^\s|\s$/u;
+const UNSAFE_FILE_SPEC = /^~|\\|:|~\d|[\p{Cc}\p{Cf}]|^\s|\s$/u;
 
 /* ONE predicate for "may this grant be offered" and "may this grant be launched": a spec the launch gate (claude-contract.grantRefusal) would refuse is never offered as a button. */
 const grantOrRefusal = (spec) => (grantRefusal(spec) ? { refusal: 'cannot-scope' } : { spec });
@@ -212,7 +212,7 @@ function scopeOf(denial, cwd) {
     if (!rr || rr.startsWith('..') || path.isAbsolute(rr)) return { refusal: 'outside-project' };
     /* the project's OWN control files (settings, MCP config, git and husky hooks, .claude hooks/commands/agents, .envrc, tasks.json, workflows) - one list, claude-contract.CONTROL, shared with the settings gate;
      * checked by name, by real target, and through a symlinked folder that leads there */
-    if (isControlTarget(realRoot, rel, real)) return { refusal: 'cannot-scope' };
+    if (isControlTarget(realRoot, rel, real) || hardLinked(real)) return { refusal: 'cannot-scope' };
     return grantOrRefusal(`${tool}(${rel})`);
   }
 
