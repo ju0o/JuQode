@@ -626,3 +626,101 @@ test('control layers each hold on their own (mutation guards)', { skip: process.
   fs.symlinkSync(path.join(root, 'src/a.txt'), path.join(root, '.envrc'));
   assert.strictEqual(C.classifyAllowRule('Edit(.envrc)', root), 'unmeasured', 'a link NAMED like a control file');
 });
+
+/* ═══ round 3 ═══ */
+test('F-A: permission-family keys are matched by word AND by hazardous stem inside one word; ordinary keys still start', () => {
+  for (const k of ['enabledMcpjsonServers', 'disabledMcpjsonServers', 'permissions2', 'autoapprove', 'autoaccept', 'allowlist', 'denylist', 'toolAllowlist', 'safeMode', 'planMode2', 'permissionless', 'additionalDirectories',
+    'enableAllProjectMcpServers', 'skipDangerousModePermissionPrompt', 'mcpServers']) assert.strictEqual(C.settingsVerdict({ [k]: true }, null)?.reason, 'project-settings-unknown-key', k);
+  for (const k of ['model', 'defaultModel', 'hooks', 'statusLine', 'outputStyle', 'includeCoAuthoredBy', 'cleanupPeriodDays', 'enabledPlugins', 'apiKeyHelper', 'autoUpdates', 'theme', 'language', 'forceLoginMethod', 'awsAuthRefresh']) {
+    assert.strictEqual(C.settingsVerdict({ [k]: 'x' }, null), null, k);
+  }
+  // F-G, accepted and documented: harmless hypothetical keys that carry a hazard word are refused
+  for (const k of ['planModeEnabled', 'askUserName', 'contextTools']) assert.ok(C.settingsVerdict({ [k]: 1 }, null), k);
+});
+
+test('F-B: a hardlink to a control file is neither a narrow rule nor a grant', { skip: process.platform === 'win32' && 'links' }, async () => {
+  const w = setup();
+  fs.mkdirSync(path.join(w.root, '.claude')); fs.writeFileSync(path.join(w.root, '.claude/settings.json'), '{}');
+  fs.mkdirSync(path.join(w.root, '.git/hooks'), { recursive: true }); fs.writeFileSync(path.join(w.root, '.git/hooks/pre-commit'), '#!/bin/sh\n');
+  fs.linkSync(path.join(w.root, '.claude/settings.json'), path.join(w.root, 'hl.json'));
+  fs.linkSync(path.join(w.root, '.git/hooks/pre-commit'), path.join(w.root, 'src/hook.txt'));
+  for (const f of ['hl.json', 'src/hook.txt']) {
+    assert.notStrictEqual(C.classifyAllowRule(`Edit(${f})`, w.root), 'narrow', f);
+    assert.deepStrictEqual(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, w.root), { refusal: 'cannot-scope' }, f);
+  }
+  assert.ok(session.scopeOf({ tool: 'Edit', input: { file_path: 'src/a.txt' } }, w.root).spec, 'an unlinked file is still offered');
+  fs.writeFileSync(path.join(w.root, '.claude/settings.json'), JSON.stringify({ permissions: { allow: ['Edit(hl.json)'] } }));
+  const r = await w.start();
+  assert.deepStrictEqual([r.ok, r.reason], [false, 'effective-permission-widened']);
+  assert.deepStrictEqual(counts(w.db), [0, 0, 0, 0]);
+  assert.ok(!fs.existsSync(w.marker));
+});
+
+test('F-C: a dangling settings link, a dangling .claude link, a missing or non-directory project path are all refused', { skip: process.platform === 'win32' && 'symlinks' }, async () => {
+  const w = setup(); fs.mkdirSync(path.join(w.root, '.claude'));
+  fs.symlinkSync(path.join(w.root, 'nowhere.json'), path.join(w.root, '.claude/settings.json'));
+  let r = await w.start();
+  assert.deepStrictEqual([r.ok, r.reason, r.detail.reason], [false, 'effective-permission-widened', 'project-settings-unreadable']);
+  assert.deepStrictEqual(counts(w.db), [0, 0, 0, 0]); assert.ok(!fs.existsSync(w.marker));
+  const w2 = setup(); fs.symlinkSync(path.join(w2.root, 'nowhere'), path.join(w2.root, '.claude'));
+  r = await w2.start();
+  assert.strictEqual(r.detail?.reason, 'project-settings-unreadable'); assert.ok(!fs.existsSync(w2.marker));
+  const file = path.join(tempDir('juqode-pre-f-'), 'afile'); fs.writeFileSync(file, '');
+  for (const p of [file, path.join(w.root, 'does-not-exist')]) assert.deepStrictEqual(C.projectSettingsRefusal(p), { reason: 'project-path-unknown', source: null }, p);
+  assert.strictEqual(C.projectSettingsRefusal(world()), null, 'an ordinary project without .claude is fine');
+});
+
+test('F-D: env names that change permission behaviour or where settings are read are refused; the ordinary ones start', () => {
+  for (const e of ['IS_SANDBOX', 'CLAUDE_CODE_PERMISSIONS', 'CLAUDE_CODE_ALLOW_ALL', 'ALLOW_ALL_TOOLS', 'TRUST_ALL', 'AUTO_ALLOW', 'CLAUDE_AUTO_ALLOW', 'CLAUDE_CODE_APPROVAL', 'CLAUDE_CODE_SANDBOX',
+    'CLAUDE_CODE_TRUST_ALL', 'NO_PROMPT', 'ASSUME_YES', 'ALWAYS_ALLOW', 'HOME', 'XDG_CONFIG_HOME', 'DANGEROUS_THING', 'is_sandbox']) assert.strictEqual(C.settingsVerdict({ env: { [e]: '1' } }, null)?.reason, 'project-settings-unknown-key', e);
+  for (const e of ['DISABLE_AUTOUPDATER', 'DISABLE_AUTO_COMPACT', 'DISABLE_TELEMETRY', 'AUTO_RELOAD', 'AUTOMATION_LEVEL', 'PERMISSIONS_URL', 'SANDBOX_URL', 'NODE_ENV', 'NODE_OPTIONS', 'PATH', 'ANTHROPIC_BASE_URL']) {
+    assert.strictEqual(C.settingsVerdict({ env: { [e]: '1' } }, null), null, `${e} (code-exec ones are UNJUDGED BY DESIGN, OPEN)`);
+  }
+});
+
+const WIN_ALIASES = ['.mcp.json.', '.envrc.', '.vscode/tasks.json.', 'package.json.', '.git./config', '.claude./settings.json', '.husky./pre-commit', 'PACKAG~1.JSO', '.GIT~1/config', 'CLAUDE~1/SETTIN~1.JSO', '.claude/settings.json ', '.claude/settings.json:stream', './.claude/settings.json.'];
+test('F-E: Win32 aliases of control files (trailing dot/space, 8.3 short names, alternate streams) are never narrow and never grantable, on every platform', () => {
+  const root = world();
+  for (const f of WIN_ALIASES) {
+    for (const tool of ['Edit', 'Write']) assert.notStrictEqual(C.classifyAllowRule(`${tool}(${f})`, root), 'narrow', `${tool}(${f})`);
+    if (f !== 'package.json.') assert.strictEqual(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, root).spec, undefined, `grant ${f}`);   // package.json is gate-only (OPEN)
+  }
+  assert.strictEqual(C.classifyAllowRule('Edit(src/a.txt)', root), 'narrow');
+});
+
+const MORE_CONTROL = ['.vscode/settings.json', '.vscode/launch.json', 'CLAUDE.md', 'sub/CLAUDE.md', '.claude.json', '.npmrc', '.gitmodules', '.gitattributes', '.pre-commit-config.yaml', 'lefthook.yml', '.githooks/pre-push',
+  '.devcontainer/devcontainer.json', '.env', '.env.local', '.cursor/rules', '.bashrc', '.zshrc', '.profile', '.bash_profile'];
+test('F-F: the shared control list also covers editor/devcontainer/hook-manager/instruction/env/rc files (grant AND rule); Makefile/*.config.js/package.json are gate-only', () => {
+  const root = world();
+  for (const f of MORE_CONTROL) {
+    assert.notStrictEqual(C.classifyAllowRule(`Edit(${f})`, root), 'narrow', f);
+    assert.deepStrictEqual(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, root), { refusal: 'cannot-scope' }, `grant ${f}`);
+  }
+  for (const f of ['Makefile', 'jest.config.js', 'vite.config.ts', 'package.json']) {
+    assert.strictEqual(C.classifyAllowRule(`Edit(${f})`, root), 'unmeasured', f);
+    assert.ok(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, root).spec, `grant ${f} stays possible (OPEN: PM)`);
+  }
+  for (const f of ['.gitignore', '.env-notes.txt'.replace('-', '_'), 'docs/readme.md', 'src/env.ts', '.github/CODEOWNERS']) assert.ok(session.scopeOf({ tool: 'Edit', input: { file_path: f } }, root).spec, f);
+});
+
+test('mutation guards: Read(dangling) is ambiguous', { skip: process.platform === 'win32' && 'symlinks' }, () => {
+  const root = world(); fs.symlinkSync(path.join(root, 'nope'), path.join(root, 'dangling'));
+  assert.strictEqual(C.classifyAllowRule('Read(dangling)', root), 'unmeasured');
+});
+
+test('late block (F6) leaves a COMPLETE, honest end state: no live entry, an after-basis and a result, and the work id in the answer', async () => {
+  const t = setup();
+  const project = t.db.prepare('select * from project').get();
+  const task = repo.createTask(t.db, project.id, { goal: 'g' });
+  const bin = fake.scriptBin(tempDir('juqode-pre-cli5-'), 'ok', `require('fs').writeFileSync(${JSON.stringify(t.marker)}, 'ran'); init(); result(); process.exit(0);`);
+  const restore = lateSettings(t.root, { permissions: { defaultMode: 'bypassPermissions' } });
+  let r;
+  try { r = await supervisor.start(t.db, project, 'do it', { taskId: task.id, evidenceStore: tempDir('juqode-pre-store-'), bin, detect: async () => ({ available: true, version: '9' }) }); } finally { restore(); }
+  assert.strictEqual(r.ok, false);
+  const wid = t.db.prepare('select id from work').get().id;
+  assert.strictEqual(r.workId, wid, 'the answer names the failed attempt');
+  assert.ok(!supervisor.live.has(wid), 'the live map still holds the ended Work');
+  assert.ok(t.db.prepare("select 1 from evidence_basis where work_id = ? and phase = 'after'").get(wid), 'no after-basis');
+  assert.ok(t.db.prepare('select 1 from work_result where work_id = ?').get(wid), 'no result');
+  assert.ok(!fs.existsSync(t.marker));
+});
