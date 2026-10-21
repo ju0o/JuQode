@@ -31,7 +31,7 @@ const state = { project: null, interpretation: null, recent: [], store: { ok: fa
                 rereading: false,
                 /* TD-01 · the drawer and its Quick Command card. It lives OUTSIDE `#root`, so
                  * its state survives every screen render — `15`: 닫으면 화면 상태가 보존된다. */
-                drawerOpen: false, qcPhrase: '', qcCard: null, qcRun: null,
+                drawerOpen: false, drawerOpener: null, qcPhrase: '', qcCard: null, qcRun: null,
                 qcDiscover: null, qcOutputOpen: false, toWork: null, drawerProject: null, termWarn: null,
                 /* WBS-02b · the folder had nothing in it when it was opened. */
                 projectEmpty: false,
@@ -57,6 +57,7 @@ function clearDrawerState() {
   state.qcDiscover = null;
   state.qcOutputOpen = false;
   state.toWork = null;
+  state.drawerOpener = null;
   /* …and the drawer closes with the project, because a drawer left open over SC-01 has no cwd
    * to act in and every control in it would fail on a null project. */
   state.drawerOpen = false;
@@ -177,6 +178,7 @@ drawer = mountDrawer(api, state, () => {
   if (state.toWork && state.project) {
     const intent = state.toWork;
     state.toWork = null;
+    state.drawerOpener = null;
     state.drawerOpen = false;
     drawer.paint();
     nav.toWorkbench(state.project, state.interpretation, { intent });
@@ -203,8 +205,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key !== '`' || !(e.ctrlKey || e.metaKey)) return;
   if (!state.project) return;                 // there is no project cwd to open it in yet
   e.preventDefault();
-  state.drawerOpen = !state.drawerOpen;
-  drawer.paint();
+  window.__toggleDrawer?.();
 });
 
 /* `15` §Keyboard: `Esc` closes TD-01 / the discover panel — and **never cancels a Work.**
@@ -231,6 +232,11 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+function focusDrawerInput() {
+  const input = drawer?.host?.querySelector('[data-screen-overlay="TD-01"] [data-el="qc-input"]');
+  (input ?? drawer?.host?.querySelector('[data-screen-overlay="TD-01"] button'))?.focus?.();
+}
+
 /* The top-bar toggle each screen draws calls this. */
 /* D-134 · `15` SC-02: opening the drawer FROM the request field carries the user's sentence into
  * the Quick Command box, so they do not retype what they already said. */
@@ -247,8 +253,11 @@ window.__openDrawerWith = (phrase) => {
  * Calls without an argument retain the top-bar's existing toggle behavior. */
 window.__toggleDrawer = (open) => {
   if (!state.project) return;
-  state.drawerOpen = typeof open === 'boolean' ? open : !state.drawerOpen;
+  const shouldOpen = typeof open === 'boolean' ? open : !state.drawerOpen;
+  if (shouldOpen && !state.drawerOpen) state.drawerOpener = document.activeElement;
+  state.drawerOpen = shouldOpen;
   drawer.paint();
+  if (shouldOpen) focusDrawerInput();
 };
 
 /* A running session pushes its state here. The screen follows the SIGNALS — it never polls,

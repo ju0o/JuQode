@@ -3011,10 +3011,14 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
       `${recovery.name}: keyboard focus has a non-none outline with positive width (${focus.outlineStyle} ${focus.outlineWidth})`);
     await press('Enter', 'Enter', 13);
     await sleep(220);
-    const opened = JSON.parse(await evalJs(`JSON.stringify({ drawer: window.__drawer(), td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')) })`));
+    const opened = JSON.parse(await evalJs(`JSON.stringify({ drawer: window.__drawer(), td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')),
+      focusInDrawer: document.querySelector('[data-screen-overlay="TD-01"]')?.contains(document.activeElement) ?? false,
+      focusIsQcInput: document.activeElement === document.querySelector('[data-screen-overlay="TD-01"] [data-el="qc-input"]') })`));
     assert.strictEqual(opened.drawer.open, true, `${recovery.name}: Enter opens TD-01`);
     assert.strictEqual(opened.drawer.phrase, 'synthetic recovery draft', `${recovery.name}: Quick Command draft is preserved`);
     assert.strictEqual(opened.td01, true, `${recovery.name}: TD-01 is present in the rendered DOM`);
+    assert.strictEqual(opened.focusInDrawer, true, `${recovery.name}: keyboard activation moves focus into TD-01`);
+    assert.strictEqual(opened.focusIsQcInput, true, `${recovery.name}: focus lands in the Quick Command input`);
     await press('Escape', 'Escape', 27);
     await sleep(80);
     const closed = JSON.parse(await evalJs(`JSON.stringify({ drawer: window.__drawer(), td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')),

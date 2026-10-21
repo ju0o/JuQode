@@ -80,6 +80,20 @@ test('SC-04 terminal recovery actions are buttons and request an open drawer wit
     'an undisplayable raw card offers terminal recovery');
 
   const renderer = fs.readFileSync(path.join(R, 'app/renderer/renderer.js'), 'utf8');
-  assert.match(renderer, /window\.__toggleDrawer = \(open\) => \{[\s\S]*?state\.drawerOpen = typeof open === 'boolean' \? open : !state\.drawerOpen;[\s\S]*?drawer\.paint\(\)/,
-    'the drawer supports idempotent open while preserving the existing no-argument toggle');
+  const toggleStart = renderer.indexOf('window.__toggleDrawer = (open) => {');
+  const toggleEnd = renderer.indexOf('\n};', toggleStart);
+  assert.ok(toggleStart >= 0 && toggleEnd > toggleStart, 'the shared drawer toggle is present');
+  const toggle = renderer.slice(toggleStart, toggleEnd);
+  assert.match(toggle, /const shouldOpen = typeof open === 'boolean' \? open : !state\.drawerOpen/,
+    'the no-argument drawer toggle remains a toggle');
+  assert.match(toggle, /if \(shouldOpen && !state\.drawerOpen\) state\.drawerOpener = document\.activeElement/,
+    'opening stores the control that invoked the drawer');
+  assert.match(toggle, /if \(shouldOpen\) focusDrawerInput\(\)/,
+    'opening hands keyboard focus to TD-01');
+  assert.doesNotMatch(toggle, /qcPhrase\s*=|qcCard\s*=|qcRun\s*=/,
+    'opening does not clear or replace the existing Quick Command');
+
+  const td01 = fs.readFileSync(path.join(R, 'app/renderer/screens/td01.js'), 'utf8');
+  assert.match(td01, /if \(!state\.drawerOpen\) \{\s*const opener = state\.drawerOpener;\s*state\.drawerOpener = null;\s*if \(opener\?\.isConnected\) opener\.focus\?\.\(\);/,
+    'closing TD-01 restores focus to its connected opener');
 });
