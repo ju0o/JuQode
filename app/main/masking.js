@@ -69,21 +69,54 @@ const ENV_KW = 'TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|CO
 /* a name whose LAST word says it is configuration, not a secret (COOKIE_SECURE, COOKIE_DOMAIN, TOKEN_TTL, SESSION_COOKIE_NAME, SECRET_..._CSV) */
 const ENV_BENIGN = 'SECURE|DOMAIN|TTL|NAME|PATH|FILE|URL|ID|MODE|ENABLED|TIMEOUT|AGE|CSV|DIR|HOST|PORT|EXPIRES|VERSION|LENGTH|SIZE|COUNT|LIMIT|TYPE|ALGORITHM|HEADER|PREFIX|SUFFIX';
 const ENV_NAME_ANY = `\\b[A-Z0-9_]{0,255}(?:${ENV_KW})[A-Z0-9_]{0,255}`;
+const ENV_NAME_ANY_BOUNDARY = escB(new RegExp(ENV_NAME_ANY)).source;
 const ENV_NAME = `\\b[A-Z0-9_]{0,255}(?:${ENV_KW})(?![A-Z0-9_]{0,255}_(?:${ENV_BENIGN})(?![A-Z0-9_]))[A-Z0-9_]{0,255}`;   // (a configuration name: only a benign VALUE is exempt, see ENV_LONG)
 const SP = '(?:[ \\t]|\\\\+t)';                      // a space, a tab, or a JSON-escaped tab
 const Q = '(?:\\\\*["\'])';                          // a quote, also backslash-escaped at any depth
+const ENV_SPACED_EQUALS = `${ENV_NAME_ANY_BOUNDARY}${SP}+=${SP}+`;
 /* `NAME=value`: the value is a whole quoted string (spaces allowed) or a token that ends at whitespace, a quote, ; ) , or a backslash - never a
  * bare \S+ that swallows the code after it. Booleans, numbers, paths and dotted domains are configuration, not secrets. */
 const ENV_VALUE = `(?!(?:true|false|null|undefined|\\d+)(?![A-Za-z0-9_])|\\.{0,2}/|~|\\.[A-Za-z])(?:"[^"\\r\\n]{0,4096}"|'[^'\\r\\n]{0,4096}'|(\\\\{1,1023})"(?:(?!\\1")[^\\r\\n]){0,4096}\\1"|[^\\s"'\`;),\\\\]+)`;
-/* every look-ahead below is BOUNDED (512): an unbounded `[^…]*` look-ahead re-scans the rest of the run at every `=` and made the scan quadratic.
- * The letter/digit mix is judged on the first 512 characters of the value.
- * a credential-LOOKING value (16+ plain characters mixing letters and digits, optionally quoted): masked whatever the name says */
-const CRED_LOOKING = `${Q}?(?=[^\\s"';,)\\\\]{0,512}\\d)(?=[^\\s"';,)\\\\]{0,512}[A-Za-z])(?=([A-Za-z0-9+/=_-]{16,}))\\1(?![.][A-Za-z])${Q}?`;   // (atomic: a value that continues as `.csv` / `.example.com` is a file or a host, not a token)
+/* Capture each candidate value once, then inspect its characters in one pass. Bounded look-aheads missed credentials
+ * whose first digit appeared after 512 characters; unbounded look-aheads would rescan long values quadratically. */
+const ENV_CREDENTIAL_CANDIDATES = [
+  [new RegExp(`(${ENV_NAME_ANY_BOUNDARY}=)(${Q}?)([A-Za-z0-9+/=_-]{16,})(${Q}?)`, 'g'), true],
+  [new RegExp(`(${ENV_SPACED_EQUALS})(${Q}?)([A-Za-z0-9+/=_]{16,})(${Q}?)`, 'g'), true],
+  [new RegExp(`(${ENV_NAME_ANY_BOUNDARY}${SP}*:${SP}*)(${Q}?)([^\\s"';<>()\\[\\]\\\\,]{12,})(?=[\\s"',\\\\]|$)(${Q}?)`, 'g'), false],
+];
+function looksLikeMixedCredential(value) {
+  let letter = false;
+  let digit = false;
+  for (let i = 0; i < value.length && !(letter && digit); i++) {
+    const c = code(value[i]);
+    letter ||= isAlpha(c);
+    digit ||= isDigit(c);
+  }
+  return letter && digit;
+}
+function containsDigit(value) {
+  for (let i = 0; i < value.length; i++) if (isDigit(code(value[i]))) return true;
+  return false;
+}
+function maskEnvCredentialLooking(text, rep) {
+  for (const [pattern, skipFileExtension] of ENV_CREDENTIAL_CANDIDATES) {
+    text = text.replace(pattern, (whole, prefix, openingQuote, value, closingQuote, offset, source) => {
+      if (!looksLikeMixedCredential(value)) return whole;
+      if (skipFileExtension) {
+        const suffix = offset + prefix.length + openingQuote.length + value.length;
+        if (source[suffix] === '.' && isAlpha(code(source[suffix + 1] || ''))) return whole;
+      }
+      return rep;
+    });
+  }
+  return text;
+}
+const API_KEY_CREDENTIAL = /\bapi_key[ \t]*=[ \t]*["']?([A-Za-z0-9_-]{16,})/g;
+function maskApiKeyCredential(text, rep) {
+  return text.replace(API_KEY_CREDENTIAL, (whole, value) => containsDigit(value) ? rep : whole);
+}
 const ENV_LONG = [
   new RegExp(`${ENV_NAME}=${ENV_VALUE}`, 'g'),                                  // a: dotenv, configuration names exempt for a benign value
-  new RegExp(`${ENV_NAME_ANY}=${CRED_LOOKING}`, 'g'),                            // a2: ... but never for a credential-looking one (TOKEN_ID=Zq7Xk9..., SESSION_TYPE=...)
-  new RegExp(`${ENV_NAME_ANY}${SP}+=${SP}+${Q}?(?=[A-Za-z+/=_]{0,512}\\d)(?=[0-9+/=_]{0,512}[A-Za-z])(?=([A-Za-z0-9+/=_]{16,}))\\1(?![.][A-Za-z])${Q}?`, 'g'),
-  new RegExp(`${ENV_NAME_ANY}${SP}*:${SP}*${Q}?(?=[^\\s"';<>()\\[\\]\\\\,]{0,512}\\d)(?=[^\\s"';<>()\\[\\]\\\\,]{0,512}[A-Za-z])[^\\s"';<>()\\[\\]\\\\,]{12,}(?=[\\s"',\\\\]|$)${Q}?`, 'g'),
 ];
 
 /* Header-ish shapes the generic rules miss. Bounded quantifiers only. */
@@ -467,4 +500,4 @@ function maskJsonCredentials(text, rep) {
   return out + text.slice(pos);
 }
 
-module.exports = { ENV_LONG, escB, KEYWORDS, ASSIGNMENT, ASSIGNMENT_LONG_NAME, EXTRA, maskPrivateKeys, maskUrlCredentials, maskJwt, maskAuthHeaders, maskJsonCredentials, looksLikeCredential };
+module.exports = { ENV_LONG, escB, KEYWORDS, ASSIGNMENT, ASSIGNMENT_LONG_NAME, EXTRA, maskPrivateKeys, maskUrlCredentials, maskJwt, maskAuthHeaders, maskJsonCredentials, maskEnvCredentialLooking, maskApiKeyCredential, looksLikeCredential };

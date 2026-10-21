@@ -6,8 +6,8 @@ const BUILDER_VERSION = 'juqode-context-v1';
 const sha256 = (value) => createHash('sha256').update(value, 'utf8').digest('hex');
 
 /* Every rule here runs on text a CHILD wrote, on the main thread, so each is LINEAR on hostile input. The structural ones
- * (private key, URL credentials, JWT, Authorization header, JSON key/value) are scans in ../masking.js shared with the
- * display masker (qc/run.js); a field longer than a scan's bound is masked WHOLE, never passed through. */
+ * (private key, URL credentials, JWT, Authorization header, JSON key/value, credential-looking assignments) are shared
+ * with the display masker (qc/run.js); variable-length assignment values are captured once and checked in one pass. */
 const M = require('../masking');
 const rx = (re) => (t, rep) => t.replace(re, rep);
 const SECRET_RULES = [
@@ -28,6 +28,7 @@ const SECRET_RULES = [
   ['x_auth_header', M.EXTRA[1]],
   ['curl_user', M.EXTRA[2]],
   ...M.ENV_LONG.map((r) => ['env_assignment_long', rx(M.escB(r))]),
+  ['env_assignment_credential_looking', M.maskEnvCredentialLooking],
   ['credential_assignment', rx(M.escB(M.ASSIGNMENT))],
   /* a name with a prefix longer than 64 characters: the keyword and its value are still masked (the prefix stays) */
   ['credential_assignment', rx(M.ASSIGNMENT_LONG_NAME)],

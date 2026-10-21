@@ -43,9 +43,8 @@ const TAIL_LINES = 3;
  * treats this as a containment boundary is wrong. */
 const M = require('../masking');
 const { escB } = M;
-/* Each step is `(text, rep) => text`. The regexes are bounded (no unbounded prefix, no lazy span); the structural
- * ones (private key, URL credentials, JWT, Authorization header, JSON key/value) are linear scans in ../masking.js,
- * shared with the write-time masker in work/context.js so the two cannot drift. */
+/* Each step is `(text, rep) => text`. There are no unbounded regex look-aheads; structural scans and full-value
+ * credential classifiers live in ../masking.js, shared with the write-time masker in work/context.js. */
 const re = (r) => (t, rep) => t.replace(r, rep);
 const TOKENISH = [
   /\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{16,}/g,
@@ -64,7 +63,6 @@ const TOKENISH = [
   /\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]{20,}/g,
   /\bAIza[0-9A-Za-z_-]{35}/g,
 ].map((r) => re(escB(r))), [M.maskJsonCredentials], [
-  /\bapi_key[ \t]*=[ \t]*["']?(?=[A-Za-z_-]{0,512}\d)[A-Za-z0-9_-]{16,}/g,
   /* An ENV-VAR-SHAPED name and its value, on ONE line.
    *
    * MEASURED before this was narrowed: case-insensitive matching plus `\s*` after the separator
@@ -77,7 +75,7 @@ const TOKENISH = [
    * is one), and the value must be on the same line. `password:` in an English sentence is not
    * an environment variable and is left alone. */
   /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*(?:"[^"\r\n]{0,4096}"|'[^'\r\n]{0,4096}'|\S+)/g,   // a quoted value is masked whole, spaces included
-].map((r) => re(escB(r))), M.ENV_LONG.map((r) => re(escB(r))));
+].map((r) => re(escB(r))), M.ENV_LONG.map((r) => re(escB(r))), [M.maskEnvCredentialLooking, M.maskApiKeyCredential]);
 
 /** Replace token-shaped runs. See TOKENISH: this is a reduction, never a guarantee. */
 function mask(text) {
