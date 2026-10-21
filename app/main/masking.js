@@ -69,19 +69,21 @@ const ENV_KW = 'TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?|CO
 /* a name whose LAST word says it is configuration, not a secret (COOKIE_SECURE, COOKIE_DOMAIN, TOKEN_TTL, SESSION_COOKIE_NAME, SECRET_..._CSV) */
 const ENV_BENIGN = 'SECURE|DOMAIN|TTL|NAME|PATH|FILE|URL|ID|MODE|ENABLED|TIMEOUT|AGE|CSV|DIR|HOST|PORT|EXPIRES|VERSION|LENGTH|SIZE|COUNT|LIMIT|TYPE|ALGORITHM|HEADER|PREFIX|SUFFIX';
 const ENV_NAME_ANY = `\\b[A-Z0-9_]{0,255}(?:${ENV_KW})[A-Z0-9_]{0,255}`;
-const ENV_NAME = `\\b[A-Z0-9_]{0,255}(?:${ENV_KW})(?![A-Z0-9_]*_(?:${ENV_BENIGN})(?![A-Z0-9_]))[A-Z0-9_]{0,255}`;   // (a configuration name: only a benign VALUE is exempt, see ENV_LONG)
+const ENV_NAME = `\\b[A-Z0-9_]{0,255}(?:${ENV_KW})(?![A-Z0-9_]{0,255}_(?:${ENV_BENIGN})(?![A-Z0-9_]))[A-Z0-9_]{0,255}`;   // (a configuration name: only a benign VALUE is exempt, see ENV_LONG)
 const SP = '(?:[ \\t]|\\\\+t)';                      // a space, a tab, or a JSON-escaped tab
 const Q = '(?:\\\\*["\'])';                          // a quote, also backslash-escaped at any depth
 /* `NAME=value`: the value is a whole quoted string (spaces allowed) or a token that ends at whitespace, a quote, ; ) , or a backslash - never a
  * bare \S+ that swallows the code after it. Booleans, numbers, paths and dotted domains are configuration, not secrets. */
 const ENV_VALUE = `(?!(?:true|false|null|undefined|\\d+)(?![A-Za-z0-9_])|\\.{0,2}/|~|\\.[A-Za-z])(?:"[^"\\r\\n]{0,4096}"|'[^'\\r\\n]{0,4096}'|(\\\\{1,1023})"(?:(?!\\1")[^\\r\\n]){0,4096}\\1"|[^\\s"'\`;),\\\\]+)`;
-/* a credential-LOOKING value (16+ plain characters mixing letters and digits, optionally quoted): masked whatever the name says */
-const CRED_LOOKING = `${Q}?(?=[^\\s"';,)\\\\]*\\d)(?=[^\\s"';,)\\\\]*[A-Za-z])(?=([A-Za-z0-9+/=_-]{16,}))\\1(?![.][A-Za-z])${Q}?`;   // (atomic: a value that continues as `.csv` / `.example.com` is a file or a host, not a token)
+/* every look-ahead below is BOUNDED (512): an unbounded `[^…]*` look-ahead re-scans the rest of the run at every `=` and made the scan quadratic.
+ * The letter/digit mix is judged on the first 512 characters of the value.
+ * a credential-LOOKING value (16+ plain characters mixing letters and digits, optionally quoted): masked whatever the name says */
+const CRED_LOOKING = `${Q}?(?=[^\\s"';,)\\\\]{0,512}\\d)(?=[^\\s"';,)\\\\]{0,512}[A-Za-z])(?=([A-Za-z0-9+/=_-]{16,}))\\1(?![.][A-Za-z])${Q}?`;   // (atomic: a value that continues as `.csv` / `.example.com` is a file or a host, not a token)
 const ENV_LONG = [
   new RegExp(`${ENV_NAME}=${ENV_VALUE}`, 'g'),                                  // a: dotenv, configuration names exempt for a benign value
   new RegExp(`${ENV_NAME_ANY}=${CRED_LOOKING}`, 'g'),                            // a2: ... but never for a credential-looking one (TOKEN_ID=Zq7Xk9..., SESSION_TYPE=...)
-  new RegExp(`${ENV_NAME_ANY}${SP}+=${SP}+${Q}?(?=[A-Za-z+/=_]*\\d)(?=[0-9+/=_]*[A-Za-z])(?=([A-Za-z0-9+/=_]{16,}))\\1(?![.][A-Za-z])${Q}?`, 'g'),
-  new RegExp(`${ENV_NAME_ANY}${SP}*:${SP}*${Q}?(?=[^\\s"';<>()\\[\\]\\\\,]*\\d)(?=[^\\s"';<>()\\[\\]\\\\,]*[A-Za-z])[^\\s"';<>()\\[\\]\\\\,]{12,}(?=[\\s"',\\\\]|$)${Q}?`, 'g'),
+  new RegExp(`${ENV_NAME_ANY}${SP}+=${SP}+${Q}?(?=[A-Za-z+/=_]{0,512}\\d)(?=[0-9+/=_]{0,512}[A-Za-z])(?=([A-Za-z0-9+/=_]{16,}))\\1(?![.][A-Za-z])${Q}?`, 'g'),
+  new RegExp(`${ENV_NAME_ANY}${SP}*:${SP}*${Q}?(?=[^\\s"';<>()\\[\\]\\\\,]{0,512}\\d)(?=[^\\s"';<>()\\[\\]\\\\,]{0,512}[A-Za-z])[^\\s"';<>()\\[\\]\\\\,]{12,}(?=[\\s"',\\\\]|$)${Q}?`, 'g'),
 ];
 
 /* Header-ish shapes the generic rules miss. Bounded quantifiers only. */
