@@ -243,9 +243,11 @@ window.__openDrawerWith = (phrase) => {
   drawer.paint();
 };
 
-window.__toggleDrawer = () => {
+/* Recovery actions can request an open state without changing an in-progress Quick Command.
+ * Calls without an argument retain the top-bar's existing toggle behavior. */
+window.__toggleDrawer = (open) => {
   if (!state.project) return;
-  state.drawerOpen = !state.drawerOpen;
+  state.drawerOpen = typeof open === 'boolean' ? open : !state.drawerOpen;
   drawer.paint();
 };
 

@@ -240,8 +240,14 @@ function evidenceGapCard(reader) {
   card.appendChild(fileSummary(gap.paths.map((p) => p.path)));
   card.appendChild(el('p', 'sm mut', C.reader.evidenceGapWhy));
   /* The only honest next step: JuQode does not guess at the contents, and says where to look. */
-  card.appendChild(el('p', 'xs sc04-gapalt', C.reader.evidenceGapAlt));
+  card.appendChild(terminalRecoveryButton(C.reader.evidenceGapAlt));
   return card;
+}
+
+function terminalRecoveryButton(label = C.work.terminal) {
+  const action = btn('btn sm ghost rec sc04-terminal-recovery', label, () => window.__toggleDrawer?.(true));
+  action.setAttribute('data-act', 'reader-open-terminal');
+  return action;
 }
 
 /* ── 1 · what was observed to change: counts and names, nothing inferred from the names ── */
@@ -320,6 +326,7 @@ function groupColumn(reader, selected, api, nav, state) {
         card.appendChild(el('p', 'sm mut', C.reader.unexplainedBody));
       }
       const acts = el('div', 'row-acts');
+      if (!g.pending) acts.appendChild(terminalRecoveryButton());
       acts.appendChild(btn('btn sm ghost rec', C.reader.toBlocks, () => select(i, false)));
       acts.appendChild(btn('btn sm ghost rec', C.reader.toRaw, () => select(i, true)));
       /* WBS-26's pass, and it runs only because the user pressed this. It spawns a Claude Code
@@ -387,6 +394,7 @@ function blockColumn(group, state, nav) {
        * this the card was a dead end — told the reader nothing can be shown, offered nothing. */
       const acts = el('div', 'row-acts');
       acts.appendChild(btn('btn sm ghost rec', C.gap.readerToGroups, () => { state.readerRaw = false; nav.toReader(state.workSnapshot, state.reader); }));
+      acts.appendChild(terminalRecoveryButton());
       card.appendChild(acts);
       col.appendChild(card);
       return;
@@ -486,6 +494,10 @@ function rawColumn(group, state, nav) {
     card.appendChild(fileLine(group.files.map((x) => x.file), f.file));
     if (!f.displayable) {
       card.appendChild(el('p', 'sm sc04-undisplayable', C.reader.binary));
+      const acts = el('div', 'row-acts');
+      acts.appendChild(btn('btn sm ghost rec', C.gap.readerToGroups, () => closeRaw()));
+      acts.appendChild(terminalRecoveryButton());
+      card.appendChild(acts);
     } else {
       const pre = el('pre', 'sc04-patch');
       /* The patch is TEXT, byte for byte. It is set through textContent, never parsed as markup — it is

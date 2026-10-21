@@ -9,6 +9,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -53,4 +54,32 @@ test('the ledger is metadata only — nothing here can carry a secret', async ()
   const { hasEvidenceGap } = await load();
   assert.strictEqual(hasEvidenceGap({ known: true, paths: [{}] }), true);
   assert.strictEqual(hasEvidenceGap({ known: true, paths: [null] }), true);
+});
+
+test('SC-04 terminal recovery actions are buttons and request an open drawer without resetting it', () => {
+  const sc04 = fs.readFileSync(path.join(R, 'app/renderer/screens/sc04.js'), 'utf8');
+  const recoveryStart = sc04.indexOf('function terminalRecoveryButton(');
+  const recoveryEnd = sc04.indexOf('\n}', recoveryStart);
+  assert.ok(recoveryStart >= 0 && recoveryEnd > recoveryStart, 'the shared recovery button helper is present');
+  const recovery = sc04.slice(recoveryStart, recoveryEnd);
+  assert.match(recovery, /btn\('btn sm ghost rec sc04-terminal-recovery', label, \(\) => window\.__toggleDrawer\?\.\(true\)\)/,
+    'the recovery helper renders a native button and requests the drawer open');
+  assert.match(recovery, /setAttribute\('data-act', 'reader-open-terminal'\)/);
+
+  const cardStart = sc04.indexOf('function evidenceGapCard(');
+  const cardEnd = sc04.indexOf('\n}\n', cardStart);
+  assert.ok(cardStart >= 0 && cardEnd > cardStart, 'evidenceGapCard source is present');
+  const card = sc04.slice(cardStart, cardEnd);
+  assert.match(card, /terminalRecoveryButton\(C\.reader\.evidenceGapAlt\)/,
+    'the evidence-gap recovery uses the shared button');
+  assert.match(sc04, /if \(!g\.pending\) acts\.appendChild\(terminalRecoveryButton\(\)\)/,
+    'only a failed explanation exposes the unexplained-group terminal action');
+  assert.match(sc04, /acts\.appendChild\(terminalRecoveryButton\(\)\);\s*card\.appendChild\(acts\);/,
+    'an undisplayable block offers terminal recovery');
+  assert.match(sc04, /if \(!f\.displayable\) \{[\s\S]*?acts\.appendChild\(terminalRecoveryButton\(\)\)/,
+    'an undisplayable raw card offers terminal recovery');
+
+  const renderer = fs.readFileSync(path.join(R, 'app/renderer/renderer.js'), 'utf8');
+  assert.match(renderer, /window\.__toggleDrawer = \(open\) => \{[\s\S]*?state\.drawerOpen = typeof open === 'boolean' \? open : !state\.drawerOpen;[\s\S]*?drawer\.paint\(\)/,
+    'the drawer supports idempotent open while preserving the existing no-argument toggle');
 });

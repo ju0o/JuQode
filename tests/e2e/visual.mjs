@@ -2877,6 +2877,9 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
         files: [{ file: 'src/index.js', displayable: true, blocks: [{ name: 'main', change: 'modify', afterLines: [1, 2] }], patch: '@@ -1 +1 @@\n-a\n+b\n' },
                 { file: 'README.md', displayable: true, blocks: [], note: 'unblocked', patch: '@@ -1 +1 @@\n-x\n+y\n' }] }],
       evidenceGap: { known: true, paths: [{ path: 'node_modules/.cache/x' }] } } },
+    unexplained: { outcome: 'complete', reader: { ok: true, groups: [
+      { title: '설명을 마치지 못한 변경', explainable: false, pending: false, confidence: null,
+        files: [{ file: 'src/unexplained.js', displayable: true, blocks: [{ name: 'update', change: 'modify', afterLines: [1, 2] }], patch: '@@ -1 +1 @@\n-old\n+new\n' }] }] } },
     special: { outcome: 'complete', reader: { ok: true, groups: [{ title: '이름이 까다로운 파일들', explainable: true, confidence: 'confirmed', what: 'x', why: null, affects: null, files: [
       { file: 'src/a#b.js', displayable: true, blocks: [{ name: 'one', change: 'modify', afterLines: [1, 2] }, { name: 'two', change: 'add', afterLines: [5, 6] }], patch: 'PATCH-0 src/a#b.js\n+only in a#b\n' },
       { file: 'src/a.js', displayable: true, blocks: [{ name: 'b.js', change: 'modify', afterLines: [1, 1] }], patch: 'PATCH-1 src/a.js\n+only in a\n' },
@@ -2962,6 +2965,43 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     }
     out.sc04d3[kind] = rows;
   }
+  /* SC-04 terminal recovery actions: real renderer buttons opened with real keyboard input.
+   * The draft is synthetic. Opening the existing TD-01 drawer must preserve it. */
+  step('SC-04 terminal recovery keyboard flow');
+  out.sc04recovery = {};
+  const recoveryCases = [
+    { name: 'unexplained-group', kind: 'unexplained', selector: '[data-group="0"] [data-act="reader-open-terminal"]' },
+    { name: 'undisplayable-block', kind: 'explained', selector: '.sc04-file [data-act="reader-open-terminal"]', setup: 'window.__sc04.state.readerGroup = 1; window.__sc04.state.readerRaw = false; window.__sc04.state.readerBlock = null; window.__sc04.rerender()' },
+    { name: 'undisplayable-raw', kind: 'explained', selector: '.sc04-rawcard [data-act="reader-open-terminal"]', setup: 'window.__sc04.state.readerGroup = 1; window.__sc04.state.readerRaw = true; window.__sc04.state.readerBlock = null; window.__sc04.rerender()' },
+    { name: 'evidence-gap', kind: 'explained', selector: '[data-el="evidence-gap"] [data-act="reader-open-terminal"]' },
+  ];
+  for (const recovery of recoveryCases) {
+    await sc04Mount(recovery.kind);
+    if (recovery.setup) await evalJs(recovery.setup);
+    await evalJs(`window.__openDrawerWith('synthetic recovery draft'); window.__toggleDrawer(false)`);
+    const before = JSON.parse(await evalJs('JSON.stringify(window.__drawer())'));
+    const selector = JSON.stringify(recovery.selector);
+    const button = JSON.parse(await evalJs(`(() => { const b = document.querySelector(${selector}); return JSON.stringify({ tag: b?.tagName ?? null, type: b?.type ?? null, text: b?.textContent?.trim() ?? null, tabIndex: b?.tabIndex ?? null }); })()`));
+    assert.deepStrictEqual(before, { open: false, phrase: 'synthetic recovery draft', discover: false, card: null, run: null },
+      `${recovery.name}: preparation retains a closed drawer and synthetic draft`);
+    assert.strictEqual(button.tag, 'BUTTON', `${recovery.name}: recovery is a real button`);
+    assert.strictEqual(button.type, 'button', `${recovery.name}: button does not submit a form`);
+    assert.ok(button.text?.startsWith('▸'), `${recovery.name}: recovery action has its contracted arrow label`);
+    assert.ok(button.tabIndex >= 0, `${recovery.name}: recovery button is keyboard reachable`);
+    await evalJs(`document.querySelector(${selector}).focus()`);
+    await press('Enter', 'Enter', 13);
+    await sleep(220);
+    const opened = JSON.parse(await evalJs(`JSON.stringify({ drawer: window.__drawer(), td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')) })`));
+    assert.strictEqual(opened.drawer.open, true, `${recovery.name}: Enter opens TD-01`);
+    assert.strictEqual(opened.drawer.phrase, 'synthetic recovery draft', `${recovery.name}: Quick Command draft is preserved`);
+    assert.strictEqual(opened.td01, true, `${recovery.name}: TD-01 is present in the rendered DOM`);
+    out.sc04recovery[recovery.name] = { button, drawerOpened: opened.drawer.open, td01Rendered: opened.td01, draftPreserved: opened.drawer.phrase === 'synthetic recovery draft' };
+    await evalJs('window.__toggleDrawer(false)');
+  }
+  await sc04Mount('partial');
+  out.sc04recovery.pendingHasNoTerminalAction = await evalJs(`!document.querySelector('[data-group="0"] [data-act="reader-open-terminal"]')`);
+  assert.strictEqual(out.sc04recovery.pendingHasNoTerminalAction, true,
+    'a not-yet-explained pending group does not claim an explanation failure');
   /* keyboard-only flow at 1200: pick the 2nd group with Enter, open Raw with Enter, Esc closes it and focus returns to the opener */
   await sc04Mount('explained');
   await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 773, deviceScaleFactor: 1, mobile: false });
