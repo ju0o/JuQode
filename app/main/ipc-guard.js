@@ -146,19 +146,79 @@ function scrubString(value) {
   t = mask(safeSnapshot(t).safe).trim();
   return t.length > DETAIL_CAP ? `${t.slice(0, DETAIL_CAP)}…` : t;
 }
-function scrubDetail(value, depth = 0) {
-  if (typeof value === 'string') return scrubString(value);
-  if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
-  if (depth >= 3) return null;
-  if (Array.isArray(value)) return value.slice(0, 50).map((v) => scrubDetail(v, depth + 1));
-  if (typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubDetail(v, depth + 1)]));
-  return null;
+/* One bounded walk over anything that leaves the main process: strings go through `fn`, plain objects and
+ * arrays keep their shape, an Error becomes {name, code?, message} (no stack, no cause, no other props), a cycle, a
+ * function, a symbol or anything past the depth / node caps becomes the string TRUNC (a string, so a renderer that
+ * reads `.id` on it gets undefined instead of a TypeError on null), an array cut by `caps.array` ends with TRUNC.
+ * Two keys that mask to the same text keep the first and get `~2`, `~3`... for the rest. `keep`: keys whose string
+ * values are NOT passed through `fn` (text the user typed or a path the renderer echoes back). Fail closed, never throw. */
+const WALK = Object.freeze({ depth: 12, nodes: 20000, leaves: 200000, array: Infinity });
+const TRUNC = '[truncated]';
+function walk(value, fn, caps = WALK, keep = null) {
+  let nodes = 0;
+  let leaves = 0;                                  // strings: 1M of them in one array is 2.4 s on the main thread
+  const up = new Set();
+  const go = (v, depth, kept) => {
+    if (typeof v === 'string') {
+      if (++leaves > (caps.leaves ?? WALK.leaves)) return TRUNC;     // only STRINGS are capped: a number / boolean / null cannot leak and must keep its truth value
+      return kept ? v : fn(v);
+    }
+    if (v == null || typeof v === 'number' || typeof v === 'boolean') return v;
+    if (typeof v !== 'object') return TRUNC;
+    if (++nodes > caps.nodes || depth >= caps.depth || up.has(v)) return TRUNC;
+    if (v instanceof Error) {
+      const e = { name: safeCode(v.name) ?? 'Error', message: fn(String(v.message ?? '')) };
+      if (safeCode(v.code)) e.code = v.code;
+      return e;
+    }
+    if (v instanceof Date) return v;
+    up.add(v);
+    try {
+      if (Array.isArray(v)) {
+        const cut = v.length > caps.array;
+        const out = v.slice(0, caps.array).map((x) => go(x, depth + 1, kept));
+        return cut ? [...out, TRUNC] : out;
+      }
+      const out = {};
+      const used = new Map();                      // masked key -> last suffix handed out (one fn(k) per key, no rescans)
+      for (const [k, x] of Object.entries(v)) {
+        const mk = fn(k);
+        let key = mk;
+        if (Object.hasOwn(out, key)) {
+          let n = used.get(mk) ?? 1;
+          do { n += 1; key = `${mk}~${n}`; } while (Object.hasOwn(out, key));
+          used.set(mk, n);
+        }
+        /* defineProperty: a key named `__proto__` must stay a data property, not become the prototype */
+        Object.defineProperty(out, key, { value: go(x, depth + 1, Boolean(keep && keep.has(k))), enumerable: true, writable: true, configurable: true });
+      }
+      return out;
+    } catch { return TRUNC; } finally { up.delete(v); }
+  };
+  return go(value, 0, false);
 }
-/* `open-project` / `open-path` echo the folder the USER picked (SC-01's technical disclosure);
- * everything else passes through the scrub. */
+const scrubDetail = (value) => walk(value, scrubString, { depth: 3, nodes: 500, leaves: 2000, array: 50 });
+/* Everything else that leaves: the same masker the Quick Command output already passes (qc/run `mask`), nothing
+ * longer or shorter. Display only - what was STORED or EXECUTED is untouched. */
+/* Keys whose text the renderer sends BACK into a later call or that is the user's own words / a folder: a masked copy
+ * would corrupt the next call (open-path, a resubmitted intent, the Quick Command phrase). `intent` is already masked
+ * at write time by safeSnapshot; paths are the user's own folders, like open-project. */
+const ECHO_KEYS = new Set(['path', 'cwd', 'root', 'readFiles', 'intent', 'phrase']);
+const maskOut = (value) => walk(value, mask, WALK, ECHO_KEYS);
+/* `open-project` / `open-path` echo the folder the USER picked (SC-01's technical disclosure); the Task channels
+ * hand back text the user typed so they can edit it (masking it would overwrite the original on save). */
 const DETAIL_EXEMPT = new Set(['juqode:open-project', 'juqode:open-path']);
-const publicOut = (channel, r) => (r && typeof r === 'object' && r.detail != null && !DETAIL_EXEMPT.has(channel)
-  ? { ...r, detail: scrubDetail(r.detail) } : r);
+const OUT_EXEMPT = new Set([...DETAIL_EXEMPT, 'juqode:task-list', 'juqode:task-detail', 'juqode:task-create', 'juqode:task-update',
+  /* SC-04's explicit raw contract: the diff text is the user's own file content (legacy-read-masking.test.js pins it) */
+  'juqode:work-reader', 'juqode:work-explain', 'juqode:work-changes']);
+const publicOut = (channel, r) => {
+  if (r == null || typeof r !== 'object') return typeof r === 'string' && !OUT_EXEMPT.has(channel) ? mask(r) : r;
+  let out = OUT_EXEMPT.has(channel) ? r : maskOut(r);
+  if (out && out.detail != null && !DETAIL_EXEMPT.has(channel)) out = { ...out, detail: scrubDetail(r.detail) };
+  return out;
+};
+/* A push (work-update / qc-update / term-update) is a main -> renderer answer without a handler. */
+const publicPush = (payload) => (payload && typeof payload === 'object' ? maskOut(payload) : payload);
 
-module.exports = { idList, scrubString, scrubDetail, publicOut, DETAIL_EXEMPT, LIMITS, text, shellLine, taskInput, shortId, taskErrorCode, TASK_ERRORS, REVIEW_ERRORS, TASK_CODES, safeCode,
+module.exports = { idList, scrubString, scrubDetail, publicOut, publicPush, maskOut, walk, DETAIL_EXEMPT, LIMITS, text, shellLine, taskInput, shortId, taskErrorCode, TASK_ERRORS, REVIEW_ERRORS, TASK_CODES, safeCode,
   overPoints, overBytes };

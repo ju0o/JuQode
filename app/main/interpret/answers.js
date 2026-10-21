@@ -13,6 +13,8 @@
 
 /* `18` brief.q order — 하는 일 · 주요 기능 · 쓰인 기술 · 폴더가 하는 일 · 실행 방법 · 확인 못한 것.
  * The schema numbers them 1..6 (`20`: `check (q between 1 and 6)`). */
+const { mask } = require('../qc/run');
+
 const Q = { WHAT: 1, FEATURES: 2, TECH: 3, FOLDERS: 4, RUN: 5, UNKNOWN: 6 };
 
 /**
@@ -81,7 +83,7 @@ function answers(scanned) {
       data: {
         pm: lock?.pm ?? null,
         scripts: runnable.map((s) => ({
-          name: s.name, body: s.body,
+          name: s.name, body: mask(s.body),
           /* With no lockfile the runner is unknown, so the script NAME is all we can state. */
           command: lock ? `${lock.pm} run ${s.name}` : null,
         })),

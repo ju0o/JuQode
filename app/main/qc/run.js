@@ -41,16 +41,28 @@ const TAIL_LINES = 3;
  * counted (q02 §5.6). It reduces what appears on screen; it is NOT a guarantee that nothing
  * leaks, and the original text is still in the user's own terminal and log. Anything that
  * treats this as a containment boundary is wrong. */
+const M = require('../masking');
+const { escB } = M;
+/* Each step is `(text, rep) => text`. There are no unbounded regex look-aheads; structural scans and full-value
+ * credential classifiers live in ../masking.js, shared with the write-time masker in work/context.js. */
+const re = (r) => (t, rep) => t.replace(r, rep);
 const TOKENISH = [
   /\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{16,}/g,
   /\bsk[-_](?:live|test)?[-_]?[A-Za-z0-9_-]{16,}/g,
   /\bxox[abposr]-[A-Za-z0-9-]{8,}/g,
   /\bAKIA[0-9A-Z]{12,}/g,
-  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
-  /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z]+ )?PRIVATE KEY-----|$)/g,
+].map((r) => re(escB(r))).concat([
+  M.maskJwt,
+  M.maskPrivateKeys,
+  M.maskAuthHeaders,
+], [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/g,
-  /\bBasic\s+[A-Za-z0-9._~+/=-]{16,}/g,
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]+@/g,          // scheme://user:password@host
+  /\bBasic\s+[A-Za-z0-9+/=.]{16,}/g,
+].map((r) => re(escB(r))), [M.maskUrlCredentials], M.EXTRA, [
+  /\bnpm_[A-Za-z0-9]{36,}\b/g,
+  /\bhooks\.slack\.com\/services\/[A-Za-z0-9/_-]{20,}/g,
+  /\bAIza[0-9A-Za-z_-]{35}/g,
+].map((r) => re(escB(r))), [M.maskJsonCredentials], [
   /* An ENV-VAR-SHAPED name and its value, on ONE line.
    *
    * MEASURED before this was narrowed: case-insensitive matching plus `\s*` after the separator
@@ -62,13 +74,13 @@ const TOKENISH = [
    * So: the NAME must look like an environment variable (upper-case, digits, underscores — it
    * is one), and the value must be on the same line. `password:` in an English sentence is not
    * an environment variable and is left alone. */
-  /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*\S+/g,
-];
+  /\b[A-Z0-9_]{0,32}(?:TOKEN|SECRET|PASSWORD|APIKEY|API_KEY|PRIVATE_KEY|CREDENTIALS?)[A-Z0-9_]{0,32}[ \t]*[=:][ \t]*(?:"[^"\r\n]{0,4096}"|'[^'\r\n]{0,4096}'|\S+)/g,   // a quoted value is masked whole, spaces included
+].map((r) => re(escB(r))), M.ENV_LONG.map((r) => re(escB(r))), [M.maskEnvCredentialLooking, M.maskApiKeyCredential]);
 
 /** Replace token-shaped runs. See TOKENISH: this is a reduction, never a guarantee. */
 function mask(text) {
   let out = String(text ?? '');
-  for (const re of TOKENISH) out = out.replace(re, '***');
+  for (const step of TOKENISH) out = step(out, '***');
   return out;
 }
 

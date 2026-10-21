@@ -768,7 +768,7 @@ test('the main-process handler wrapper answers instead of rejecting, and refuses
      renderer's boot is a top-level await), and a sub-frame is refused. */
   const src = srcOf('app/main/main.js');
   const body = src.split('const handle = (channel, fn)')[1].slice(0, 900);
-  assert.match(body, /senderFrame && e\.senderFrame\.parent/, 'the sub-frame check is gone');
+  assert.match(body, /trustedSender\(e, APP_URL\)/, 'the sender check is gone (sub-frame + app URL: security.js trustedSender)');
   assert.match(body, /bad-sender/);
   assert.match(body, /catch \(err\)/, 'a throwing handler would reject the invoke');
   assert.match(body, /ok: false, reason: 'internal'/);
