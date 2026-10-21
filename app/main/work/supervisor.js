@@ -821,11 +821,11 @@ function snapshot(db, workId) {
  * elsewhere. */
 function resumeRefusal(db, entry) {
   const project = entry.projectId ? db.prepare('select path from project where id = ?').get(entry.projectId) : null;
-  const widened = projectSettingsRefusal(project?.path);
-  if (widened) return { ok: false, reason: 'effective-permission-widened', detail: widened };
   const v = session.verifyResume(entry.binding, { cwd: entry.cwd, sessionId: entry.sessionId, bin: entry.bin,
     projectPath: project?.path });
-  return v.ok ? null : { ok: false, reason: 'resume-binding-unverified', detail: v.reason };
+  if (!v.ok) return { ok: false, reason: 'resume-binding-unverified', detail: v.reason };
+  const widened = projectSettingsRefusal(project?.path);
+  return widened ? { ok: false, reason: 'effective-permission-widened', detail: widened } : null;
 }
 
 /* The init-cwd check fires after the child is running, so what it may have written before
