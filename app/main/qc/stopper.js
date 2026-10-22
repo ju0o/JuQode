@@ -11,8 +11,9 @@
  * whose card text, "끝났는지 확인할 수 없어요", is already approved copy). Nothing here adds a state; the
  * detail goes in `stop` evidence, which `ipc.js` stores next to the run.
  *
- * POSIX keeps its rule: `stopped` only from a signal (a cancelled child can still exit 0).
- * Windows has no signal, so the proof is different:
+ * A Stop request or forced signal cannot prove escaped descendants stopped. Such results stay
+ * `unknown` on every platform, including exit-0/not-found races. Natural no-Stop results remain ok/failed.
+ * Windows root observations are still recorded:
  *   - `taskkill /PID <pid> /T /F` exit 0 means taskkill terminated that process; 128 means it was
  *     not there (it ended by itself first -- NOT a stop); anything else is a failure and is never
  *     reported as a stop. A failed taskkill falls back to the owned handle's kill(), whose signal Node
@@ -122,31 +123,21 @@ const windowsTools = {
 /** Pure: the end state a finished run is reported with. */
 function classifyEnd({ windows, code, signal, stop }) {
   const natural = code === 0 ? 'ok' : 'failed';
-  if (!windows) {
-    return { state: signal != null ? 'stopped' : natural, stop: { ...stop, observed: signal != null ? 'signal' : null, verdict: !stop.requested ? 'not-requested' : (signal != null ? 'stopped-by-signal' : 'requested-not-observed') } };
-  }
-  if (!stop.requested) return { state: natural, stop: { ...stop, verdict: 'not-requested' } };
-  const rootConfirmed = stop.root === 'terminated-by-taskkill' || stop.root === 'terminated-by-kill';   // the latter ONLY with an observed signal, see finalize
+  if (!stop.requested && signal == null) return { state: natural, stop: { ...stop,
+    verdict: stop.root === 'exited-before-request' ? 'ended-before-stop-took-effect' : 'not-requested' } };
+  if (!windows) return { state: 'unknown', stop: { ...stop, observed: signal != null ? 'signal' : null,
+    verdict: signal != null ? 'root-signalled-tree-unproven' : 'stop-requested-termination-unproven', observedExit: { code, signal } } };
+  if (!stop.requested) return { state: 'unknown', stop: { ...stop, verdict: 'root-signalled-tree-unproven', observedExit: { code, signal } } };
+  const rootConfirmed = stop.root === 'terminated-by-taskkill' || stop.root === 'terminated-by-kill';
   if (rootConfirmed) {
-    if (code === 0 && signal == null) {
-      // taskkill says it terminated the process, the process says it finished cleanly: both cannot be the whole story
-      return { state: 'unknown', stop: { ...stop, verdict: 'contradiction-exit-0', observedExit: { code, signal } } };
-    }
-    if (stop.descendants === 'none') return { state: 'stopped', stop: { ...stop, verdict: 'stopped-tree-observed' } };
-    return { state: 'unknown', stop: { ...stop, verdict: stop.descendants === 'survivors' ? 'root-stopped-descendants-alive' : 'root-stopped-descendants-unverified' } };
+    if (code === 0 && signal == null) return { state: 'unknown', stop: { ...stop, verdict: 'contradiction-exit-0', observedExit: { code, signal } } };
+    return { state: 'unknown', stop: { ...stop, verdict: stop.descendants === 'survivors' ? 'root-stopped-descendants-alive'
+      : stop.descendants === 'none' ? 'root-stopped-tree-ownership-unproven' : 'root-stopped-descendants-unverified' } };
   }
   if (stop.root === 'not-found' || stop.root === 'exited-before-request') {
-    return { state: natural, stop: { ...stop, verdict: 'ended-before-stop-took-effect' } };
+    return { state: 'unknown', stop: { ...stop, verdict: 'stop-race-termination-unproven', observedExit: { code, signal } } };
   }
-  if (stop.root === 'kill-requested') {
-    /* Node's `child.kill()` returning true says a signal was DELIVERED to the handle, not that the signal ended the process. With no
-     * signal reported at exit the process ended some other way (or at the same moment), and the exit code is its own. */
-    return { state: 'unknown', stop: { ...stop, verdict: 'kill-unconfirmed', observedExit: { code, signal } } };
-  }
-  /* The request failed or was never confirmed and the process has ended anyway. WHY it ended is not shown: not by
-   * our kill (no proof), and not "by itself" either (taskkill did not say it was gone). So it is neither `failed`
-   * nor `stopped` -- the exit code is kept as an observation, the state is `unknown`. */
-  return { state: 'unknown', stop: { ...stop, verdict: 'stop-unconfirmed', observedExit: { code, signal } } };
+  return { state: 'unknown', stop: { ...stop, verdict: stop.root === 'kill-requested' ? 'kill-unconfirmed' : 'stop-unconfirmed', observedExit: { code, signal } } };
 }
 
 /**
@@ -192,6 +183,7 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
   function request(posixStop) {
     if (['terminated-by-taskkill', 'terminated-by-kill', 'kill-requested', 'signalled'].includes(stop.root)) return false;   // duplicate Stop: nothing new to say
     if (stop.requested && stop.root === 'in-flight') return false;
+    if (!stop.requested && exited()) { stop.root = 'exited-before-request'; return false; }
     if (!stop.requested) { stop.requested = true; stop.requestedAt = now(); }
     stop.attempts += 1;
     if (exited()) { stop.root = stop.root ?? 'exited-before-request'; return false; }
@@ -228,9 +220,9 @@ function createStopper({ child, windows, tools = windowsTools, now = () => new D
     }
     const end = classifyEnd({ windows, code, signal, stop });
     /* The Writer gate holds while this is true: something this Stop touched might still be running. */
-    if (end.state === 'unknown' && windows && stop.requested) {
-      end.stop.uncertain = stop.descendants !== 'none';
-      end.stop.members = end.stop.uncertain ? (stop.members ?? null) : [];
+    if (end.state === 'unknown') {
+      end.stop.uncertain = true;
+      end.stop.members = stop.members ?? null;
     }
     return end;
   }

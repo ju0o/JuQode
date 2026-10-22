@@ -405,8 +405,7 @@ function makeHandlers(deps) {
       handle.done.then((res) => {
         qcLive.delete(runId);
         repo.endQcRun(db(), runId, {
-          /* `20` `qc_status`: success · failed · stopped · unknown. `07` §8.1 — a signalled
-           * child is `stopped`, never `success`, whatever code it carried. */
+          /* Keep natural results; a Stop request or signal without whole-tree proof remains unknown. */
           status: res.state === 'ok' ? 'success' : res.state,
           exitCode: res.code, outputHead: res.output ?? null,
           endedAt: res.endedAt, stoppedAt: res.state === 'stopped' ? res.endedAt : null,

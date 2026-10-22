@@ -88,8 +88,13 @@ function restore({ rows, root, registry }) {
   for (const r of rows) {
     /* a read-only run (the fixed `git status`) cannot have changed a file; everything else, and anything not provably that, can */
     if (registry.has(r.id) || isReadOnlyRun(r)) continue;
-    const read = readStop(root, r.output_ref);
     const info = { command: r.command, startedAt: r.started_at };
+    if (r.status === 'stopped') {
+      registry.add(r.id, r.project_id, null, { ...info, why: 'ownership-unproven' });
+      out.push(r.id);
+      continue;
+    }
+    const read = readStop(root, r.output_ref);
     const proof = read.ok && read.rec ? validateStop(read.rec, r) : { kind: 'untrusted', why: read.ok ? 'no-stop-record' : read.why };
     /* The Stop looked again after the kill and found nothing alive -- and the record is complete and agrees with the row. Only then. */
     if (proof.kind === 'clear' && r.status === 'unknown') {

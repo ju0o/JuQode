@@ -930,13 +930,13 @@ const qcRunsFor = (db, projectId, limit = 20) =>
   db.prepare(`select * from quick_command_run where project_id = ?
               order by created_at desc, rowid desc limit ?`).all(projectId, limit);
 
-/** SAFETY query, deliberately without a LIMIT: every `unknown` run of the project, plus any run still marked running/long_running whose
+/** SAFETY query, deliberately without a LIMIT: every unknown or historically stopped run of the project, plus any run still marked running/long_running whose
  *  process this app does not hold (`liveIds`). The History list pages; this must not. */
 const qcUnresolvedRuns = (db, projectId, liveIds = []) => {
   const live = new Set(liveIds);
   return db.prepare(`select * from quick_command_run where project_id = ?
-                     and status in ('unknown','running','long_running') order by created_at, rowid`).all(projectId)
-    .filter((r) => r.status === 'unknown' || !live.has(r.id));
+                     and status in ('unknown','stopped','running','long_running') order by created_at, rowid`).all(projectId)
+    .filter((r) => r.status === 'unknown' || r.status === 'stopped' || !live.has(r.id));
 };
 
 const qcRun = (db, id) => db.prepare('select * from quick_command_run where id = ?').get(id) ?? null;

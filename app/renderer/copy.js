@@ -463,8 +463,12 @@ export const C = {
       detailMore: '자세한 기록 보기',
       detailArgv: '실행한 명령', detailFull: '전체 출력', detailStop: '멈춤 기록', detailRun: '기록 번호',
       stopRequestedAt: '멈춤 요청 시각', stopTool: '종료 도구 응답', stopExit: '관측한 종료 코드', stopAlive: '남은 프로세스 확인', stopTiming: '걸린 시간', stopVerdict: '판정',
-      aliveState: { none: '남은 것 없음으로 확인했어요', survivors: '남아 있는 프로세스가 있어요', unverified: '확인하지 못했어요' },
+      aliveState: { none: '관측한 범위에서 남은 것을 찾지 못했어요', survivors: '남아 있는 프로세스가 있어요', unverified: '확인하지 못했어요' },
       unknownWhy: {
+        'root-signalled-tree-unproven': '본 프로세스가 종료 신호로 끝났지만 분리된 프로세스까지 끝났는지 입증하지 못했어요.',
+        'stop-requested-termination-unproven': '멈춤 요청 뒤 종료 코드가 왔지만 모든 프로세스의 종료가 입증되지 않았어요.',
+        'root-stopped-tree-ownership-unproven': '관측한 프로세스는 사라졌지만 관측 범위를 벗어난 프로세스의 종료는 입증되지 않았어요.',
+        'stop-race-termination-unproven': '멈춤 요청과 종료가 겹쳐 모든 프로세스의 종료를 입증하지 못했어요.',
         'stop-unconfirmed': '멈추라고 요청했지만, 그 요청 때문에 끝났는지 확인하지 못했어요.',
         'kill-unconfirmed': '종료 신호를 보냈지만, 그 신호 때문에 끝났는지 확인하지 못했어요.',
         'contradiction-exit-0': '멈췄다는 응답과 정상 종료 기록이 서로 맞지 않아요.',

@@ -213,17 +213,30 @@ async function cdp(sendFn) {
       assert.strictEqual(denied.reason, 'prior-process-may-still-live');
       isolateAfterUnknown.refusals.push(JSON.stringify(denied));
     }
+    const qcHeld = await evalJs(`(async () => (await window.juqode.qcList(${JSON.stringify(oldProject)})).held)()`);
+    if (qcHeld.length) {
+      const actual = await evalJs(`window.juqode.qcAckStopped(${JSON.stringify(oldProject)}, ${JSON.stringify(qcHeld.map((row) => row.runId))}, true)`);
+      assert.strictEqual(actual.ok, false);
+      assert.deepStrictEqual(actual.acked, []);
+    }
     const next = freshProject('after-unknown');
+    isolateAfterUnknown.projects += 1;
     await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent === '다른 프로젝트 열기')?.click()`);
     await sleep(500);
     await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')].find(r => r.querySelector('.nm')?.textContent === ${JSON.stringify(path.basename(next))})?.click()`);
-    await sleep(900);
+    for (let tries = 0; tries < 200; tries += 1) {
+      if (await evalJs(`window.__screen() === 'SC-02' && window.__project()?.path === ${JSON.stringify(next)} && Boolean(window.__interp())`)) break;
+      await sleep(50);
+    }
     assert.strictEqual(await evalJs('window.__project().path'), next, 'the new scenario did not open its isolated Project');
     const remaining = await evalJs(`(async () => (await window.juqode.taskList(${JSON.stringify(oldProject)})).legacyUnknownRuns.length)()`);
     assert.strictEqual(remaining, runs.length, 'switching fixtures modified the old unknown hold');
+    const qcRemaining = await evalJs(`(async () => (await window.juqode.qcList(${JSON.stringify(oldProject)})).held.map((row) => row.runId))()`);
+    assert.deepStrictEqual(qcRemaining.sort(), qcHeld.map((row) => row.runId).sort(), 'switching fixtures modified the QC hold');
     return remaining;
   };
   isolateAfterUnknown.refusals = [];
+  isolateAfterUnknown.projects = 0;
   /* The renderer is LOADED before anything is asked of it.
    *
    * `pageTarget` waits for the debugger target, which exists as soon as the window does — the
@@ -1661,6 +1674,10 @@ const results = await cdp(async ({ send, evalJs, isolateAfterUnknown }) => {
     const dev = l.rules.find(r => r.id === 'qc.dev.start');
     return JSON.stringify({ available: dev.available, reason: dev.reason }); })()`);
 
+  await isolateAfterUnknown();
+  await evalJs('window.__toggleDrawer()');
+  await sleep(300);
+
   /* ── 카드는 스냅샷이다 ────────────────────────────────────────────────────────────────
    * `19` §C4 는 설명과 확인을 두 번의 왕복으로 나눈다, 그리고 그 사이에 세상이 바뀔 수 있다.
    * `ipc.js` 는 확인 시점에 availability 를 **다시 묻는다** — 카드를 믿지 않는다. 그 경로에
@@ -1688,7 +1705,7 @@ const results = await cdp(async ({ send, evalJs, isolateAfterUnknown }) => {
     for (let i = 0; i < 40 && !noticed; i++) {
       const l = JSON.parse(await evalJs(`(async () =>
         JSON.stringify(await window.juqode.qcList(window.__project().id)))()`));
-      noticed = Boolean(l.rules.find((r) => r.id === 'qc.dev.start')?.available);
+      noticed = l.held.length > 0;
       if (!noticed) await sleep(250);
     }
     assert.ok(noticed, 'the app never noticed the dev server it started had died');
@@ -1697,6 +1714,10 @@ const results = await cdp(async ({ send, evalJs, isolateAfterUnknown }) => {
   await qcConfirm();
   await sleep(900);
   out.qcStaleAfter = await qcCardNow();
+  await isolateAfterUnknown();
+  out.termFixturePath = await evalJs('window.__project().path');
+  await evalJs('window.__toggleDrawer()');
+  await sleep(300);
 
   /* ── WBS-25 · 셸 명령줄 (DV-11: 파이프 셸 · PM 2026-09-10) ───────────────────────────
    * `15` TD-01 의 Primary Action 이고, 이 런에서 처음으로 존재한다. 여기서 보는 것은 네 가지:
@@ -1911,6 +1932,8 @@ const results = await cdp(async ({ send, evalJs, isolateAfterUnknown }) => {
    * exit code says nothing. Until now the colour grammar's red had no rendered evidence on
    * SC-03 at all: every Work here ended 끝남, 취소 or 부분. */
   step('failure');
+  const staleFixture = await evalJs('window.__project().path');
+  fs.mkdirSync(path.join(staleFixture, 'server'), { recursive: true });
   fs.writeFileSync(path.join(DB_DIR, 'failing'), '');
   await evalJs(`(() => { const f = document.querySelector('[data-el="intent"]'); f.value = '남은 버튼도 고쳐줘'; })()`);
 
@@ -2093,6 +2116,7 @@ const results = await cdp(async ({ send, evalJs, isolateAfterUnknown }) => {
 
 
   out.recentExpectedAfterBack = await evalJs('window.__project()?.path ?? null');
+  out.recentExpectedCount = 3 + isolateAfterUnknown.projects;
   step('back to picker');
   // 다른 프로젝트 열기 goes back to SC-01, and the project it just opened is now remembered
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트')).click()`);
@@ -3867,18 +3891,18 @@ assert.ok(results.qcPickable > 0, '할 수 있는 것 목록에 누를 수 있�
    * that dies on the signal is already 멈췄어요 by the first paint — so what is pinned is that
    * the card is in one of those two and in neither of the ones that would be a lie. */
   const req = JSON.parse(results.qcStopRequested);
-  assert.ok(['stopped-requested', 'stopped'].includes(req.state),
+  assert.ok(['stopped-requested', 'unknown'].includes(req.state),
     `pressing 실행 on the stop card gave ${req.state}`);
-  assert.ok(req.text.includes('멈춤 요청함') || req.text.includes('멈췄어요'),
+  assert.ok(req.text.includes('멈춤 요청함') || req.text.includes('끝났는지 확인할 수 없어요'),
     `the stopping card says ${req.text}`);
   const stopped = JSON.parse(results.qcStopped);
-  assert.strictEqual(stopped.state, 'stopped', `the stopped server ended as ${stopped.state}`);
-  assert.ok(stopped.text.includes('멈췄어요'), `a stopped run says ${stopped.text}`);
+  assert.strictEqual(stopped.state, 'unknown', `the stopped server ended as ${stopped.state}`);
+  assert.ok(stopped.text.includes('끝났는지 확인할 수 없어요'), `a stopped run says ${stopped.text}`);
   /* `07` §8.1: a signalled child is never 끝났어요, whatever code it carried. */
   assert.ok(!stopped.text.includes('끝났어요'), 'a stopped run was reported as completed');
   /* …and it really is gone: the rule is available again, which is the store's own answer. */
   const gone = JSON.parse(results.qcDevGone);
-  assert.strictEqual(gone.available, true,
+  assert.strictEqual(gone.available, false,
     `the dev server survived the stop (${gone.reason}) — this run would leak it past the app`);
 
   /* 확인 시점에 다시 묻는다 — 그리고 거절된 카드는 **없어진 것의 pid 를 들고 있지 않는다.** */
@@ -3917,12 +3941,12 @@ assert.ok(results.qcPickable > 0, '할 수 있는 것 목록에 누를 수 있�
 
   const pwd = JSON.parse(results.termPwd);
   assert.strictEqual(pwd.run.code, 0, `pwd exited ${pwd.run.code}`);
-  assert.ok(pwd.run.output.includes(SEED), `the shell is not in the project: ${pwd.run.output}`);
+  assert.ok(pwd.run.output.includes(results.termFixturePath ?? SEED), `the shell is not in the project: ${pwd.run.output}`);
   /* 조건 ④ · 줄 사이 상태. 스파이크는 줄마다 새 셸일 때 이것을 `LOST` 로 쟀다. */
   const moved = JSON.parse(results.termAfterCd);
-  assert.ok(!moved.run.output.includes(SEED + '\n'),
+  assert.ok(!moved.run.output.includes((results.termFixturePath ?? SEED) + '\n'),
     `cd did not carry to the next line: ${moved.run.output}`);
-  assert.ok(moved.run.output.trim() && moved.run.output.trim() !== SEED,
+  assert.ok(moved.run.output.trim() && moved.run.output.trim() !== (results.termFixturePath ?? SEED),
     `the shell went back to where it started: ${moved.run.output}`);
 
   const failed = JSON.parse(results.termFail);
@@ -3959,7 +3983,7 @@ assert.ok(results.qcPickable > 0, '할 수 있는 것 목록에 누를 수 있�
   /* …그리고 다음 줄이 새 셸을 연다: 같은 줄을 두 번 치게 하지 않는다. */
   const afterExit = JSON.parse(results.termAfterExit);
   assert.strictEqual(afterExit.run.code, 0, 'the line after an exited session did not run');
-  assert.ok(afterExit.run.output.includes(SEED),
+  assert.ok(afterExit.run.output.includes(results.termFixturePath ?? SEED),
     `the reopened shell is not in the project: ${afterExit.run.output}`);
 
   assert.strictEqual(JSON.parse(results.termStopped).ok, true, 'the shell this run started is still up');
@@ -5034,7 +5058,7 @@ assert.ok(results.recentLast.includes('마지막 작업'),
   assert.ok(quoted, `the summary quotes something nobody submitted: ${results.recentLast}`);
 }
 
-assert.strictEqual(results.recentAfterBack, 5, 'the recent list lost the original or isolated fixture Projects');
+assert.strictEqual(results.recentAfterBack, results.recentExpectedCount, 'the recent list lost the original or isolated fixture Projects');
 assert.ok(results.recentTopAfterBack && results.recentTopAfterBack.endsWith(path.basename(results.recentExpectedAfterBack ?? SEED)),
   'the just-opened project is not at the top of the recent list — the list was not re-read');
 /* 15 SC-01 Failure State: title + reason in plain words + TWO recovery actions, and it is

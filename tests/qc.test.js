@@ -584,7 +584,7 @@ test('the exit code is reported as the code, and stderr is not hidden', async ()
   assert.ok(out.output.includes('to-stderr'), 'stderr was dropped — the user cannot see what failed');
 });
 
-test('a command that succeeds is `ok`, and one that is signalled is `stopped`', async () => {
+test('a natural success is ok and a signalled command remains unknown without whole-tree proof', async () => {
   const dir = project({});
   assert.strictEqual((await run.start({ argv: NODE('process.exit(0)'), cwd: dir }).done).state, 'ok');
 
@@ -592,10 +592,9 @@ test('a command that succeeds is `ok`, and one that is signalled is `stopped`', 
   await new Promise((res) => setTimeout(res, 120));
   r.stop();
   const out = await r.done;
-  assert.strictEqual(out.state, 'stopped', 'a stopped command was reported as finished');
-  /* POSIX proves the stop with the signal that ended it; Windows has none, so it proves it with the
-   * taskkill result and the process tree it observed (stopper.js). A request alone proves nothing. */
-  assert.strictEqual(out.stop.verdict, WIN ? 'stopped-tree-observed' : 'stopped-by-signal', JSON.stringify(out.stop));
+  assert.strictEqual(out.state, 'unknown', 'a root signal was promoted into whole-tree termination');
+  assert.strictEqual(out.stop.uncertain, true);
+  assert.strictEqual(out.stop.verdict, WIN ? 'root-stopped-tree-ownership-unproven' : 'root-signalled-tree-unproven', JSON.stringify(out.stop));
 });
 
 test('a program that does not exist fails without throwing', async () => {
@@ -900,12 +899,10 @@ test('a running dev server makes 켜기 사용 불가 and 끄기 가능 — from
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
   const ev = stopEvidenceOf(row, b);
-  /* `stopped` is the proof case. Under CPU load on Windows taskkill itself can answer 255 although the tree is then gone; PM policy
-   * (D2): that is `unknown` -- never `stopped`, never `failed` -- and only acceptable here when the evidence says exactly that
-   * and the re-checked tree is gone (so nothing is left to hold the Writer gate). */
-  const honestUnknown = row.status === 'unknown' && ev?.verdict === 'stop-unconfirmed' && ev.descendants === 'none' && ev.uncertain === false;
-  assert.ok(row.status === 'stopped' || honestUnknown, `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: ev })}`);
-  assert.strictEqual(row.stopped_at === null, row.status !== 'stopped', 'stopped_at is set only for a proven stop');
+  assert.strictEqual(row.status, 'unknown', JSON.stringify(ev));
+  assert.strictEqual(ev.uncertain, true);
+  assert.strictEqual(row.stopped_at, null, 'an unproven tree cannot carry stopped_at');
+
 });
 
 test('the discoverability list names every rule and why each cannot run', () => {
@@ -1001,10 +998,10 @@ test('개발 서버 꺼줘 signals the server JuQode started', async () => {
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
   const ev = stopEvidenceOf(row, b);
-  const honestUnknown = row.status === 'unknown' && ev?.verdict === 'stop-unconfirmed' && ev.descendants === 'none' && ev.uncertain === false;   // PM D2: taskkill 255 under load is unknown, never stopped/failed
-  assert.ok(row.status === 'stopped' || honestUnknown, `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: ev })}`);
-  if (row.status === 'stopped') assert.ok(row.stopped_at, '`20` keeps stopped_at for a run that was signalled');
-  else assert.strictEqual(row.stopped_at, null, 'an unconfirmed Stop must not carry stopped_at');
+  assert.strictEqual(row.status, 'unknown', JSON.stringify(ev));
+  assert.strictEqual(ev.uncertain, true);
+  assert.strictEqual(row.stopped_at, null, 'an unproven tree cannot carry stopped_at');
+
 });
 
 test('every refusal the run handler can give has a sentence', () => {
@@ -1348,7 +1345,7 @@ test('stopping a child that IS running does signal it', { skip: WIN && 'POSIX pr
   });
 });
 
-test('Windows: stopping a running child ends it and the card says stopped (root only is what run.js can reach)', { skip: !WIN && 'Windows-only' }, async () => {
+test('Windows: stopping a running child ends its root while whole-tree termination remains unknown', { skip: !WIN && 'Windows-only' }, async () => {
   /* There are no process groups to signal here: run.js falls back to the root handle's kill. This
    * pins what IS true — the root dies and the state is \`stopped\` — and deliberately does NOT claim
    * the descendants died (an unmeasured Windows tree is V1-404's, on H1). */
@@ -1357,7 +1354,7 @@ test('Windows: stopping a running child ends it and the card says stopped (root 
   await new Promise((res) => setTimeout(res, 300));
   r.stop();
   const out = await r.done;
-  assert.strictEqual(out.state, 'stopped');
+  assert.strictEqual(out.state, 'unknown');
 });
 
 test('a script\'s pre/post hooks are disclosed, because they also run', () => {
@@ -1628,7 +1625,7 @@ test('restart: a run nobody saw finish keeps the Writer gate shut after user con
 
 });
 
-test('restart: only a Stop that ended `stopped` is not held; complete records and records with members remain held after confirmation', async (t) => {
+test('restart: historic stopped rows and unknown records remain held after confirmation', async (t) => {
   const restoreEnv = noClaude(); t.after(restoreEnv);
   const b = qcBench();
   const T1 = '2026-10-16T10:00:01.000Z';
@@ -1651,15 +1648,15 @@ test('restart: only a Stop that ended `stopped` is not held; complete records an
   let alive = [{ pid: 777, created: T1 }];
   const reg = createUncertain({ probe: async () => alive, retryMs: 5, maxTries: 3 });
   const h = restartOf(b, { qcUncertain: reg });
-  assert.deepStrictEqual(h['juqode:qc-list'](null, b.project.id).held.map((x) => x.runId).sort(), [clear, withMembers].sort(), 'unknown runs are held, the stopped one is not');
-  assert.ok(!reg.has(stopped));
+  assert.deepStrictEqual(h['juqode:qc-list'](null, b.project.id).held.map((x) => x.runId).sort(), [clear, stopped, withMembers].sort(), 'historic stopped rows must also retain their hold');
+  assert.ok(reg.has(stopped));
   alive = [];
   reg.refresh(b.project.id);
   await new Promise((r) => setTimeout(r, 30));
   assert.ok(reg.blocks(b.project.id), 'a snapshot showing every member gone released the hold');
   const r = h['juqode:qc-ack-stopped'](null, b.project.id, [clear, withMembers], true);
   assert.deepStrictEqual(r.acked, []);
-  assert.deepStrictEqual(r.stillHeld.sort(), [clear, withMembers].sort());
+  assert.deepStrictEqual(r.stillHeld.sort(), [clear, stopped, withMembers].sort());
   assert.ok(reg.blocks(b.project.id));
   const work = await h['juqode:work-start'](null, b.project.id, '고쳐줘');
   assert.strictEqual(work.reason, 'prior-process-may-still-live');

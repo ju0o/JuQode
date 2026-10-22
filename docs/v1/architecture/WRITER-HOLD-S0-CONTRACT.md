@@ -4,7 +4,7 @@
 
 ## Safety rule
 
-A Work whose result is `ended_unknown`, or an unresolved Quick Command that is not provably read-only, keeps that project's automated Writer gate closed. The current runtime has no producer that proves termination of descendants which left the recorded process group/session/tree. An absent root PID, empty group/session, reused PID, complete snapshot, old user statement, old every-runner ACK, or user checkbox is not such proof.
+A Work whose result is `ended_unknown`, or a Quick Command that was cancelled, forcibly signalled, historically labelled stopped, or otherwise unresolved and is not provably read-only, keeps that project's automated Writer gate closed. The current runtime has no producer that proves termination of descendants which left the recorded process group/session/tree. An absent root PID, empty group/session, reused PID, complete snapshot, old user statement, old every-runner ACK, or user checkbox is not such proof.
 
 There is no current user action or flag that releases this hold. `runner-liveness.holdReleased()` and the QC registry's compatibility `release()` return false. Existing Work ACK rows and QC ACK files remain readable and unchanged, but no longer authorize release. `acknowledgeAfterObservation` and `qc-ack-stopped` validate their existing bounded inputs and refuse without adding ACK evidence, a Run, a permission grant, an answer, or a process. No replacement attestation option or migration was added.
 
@@ -16,10 +16,10 @@ There is no current user action or flag that releases this hold. `runner-livenes
 | Same-Task retry | old unknown source cannot be acknowledged; shared QC Writer gate remains required |
 | Permission grant / input answer | `resumeRefusal` checks unresolved Work before session verification; IPC checks the same QC gate as start/retry before supervisor can record grant/answer |
 | File-changing Quick Command (build/test/dev/deploy/commit) | `fileQcBlock` checks active Work, unresolved Work and QC holds before `beginQcRun` or spawn |
-| App restart / QC restore | unresolved rows rebuild holds regardless of any historical ACK file; read errors remain fail-closed |
+| App restart / QC restore | unknown and historical stopped rows rebuild holds regardless of any historical ACK file; rows/evidence remain unchanged and read errors remain fail-closed |
 | Historical confirmation APIs | bounded validation remains; no record writer or release is called |
 
-Normally ended Work results and QC results retain their existing behavior. A QC whose Stop already established the normal `stopped` result does not become an unknown hold. Live preview server handling and read-only fixed `qc.git.status` retain their existing rules. The change does not reclassify an unknown result as failed, stopped or complete.
+Naturally ended Work results and no-Stop QC success/failure retain their existing behavior. A Stop request or forced signal now yields unknown even when the root exits 0, Windows reports not-found, or an observed snapshot is empty. A handle already finished before any Stop was requested retains its natural result; a Stop which races the exit does not. Historical non-readonly stopped rows remain stopped in History but rebuild a Writer hold because their earlier classification did not prove whole-tree termination. Live preview server handling before Stop and fixed read-only qc.git.status retain their existing rules.
 
 ## What a user can do now
 
@@ -36,8 +36,8 @@ This is an application gate for JuQode's automated Writer entry points. It is no
 
 The process observer remains informational and still reports its escaped-descendant limitation. Closing this limitation in a future version needs a real production ownership/termination mechanism and a new reviewed contract; a caller-supplied boolean or ACK is insufficient.
 
-## First-candidate QA boundary
+## Independent QA follow-up
 
-The existing QC Stop classifier can still classify a signalled POSIX root or an empty Windows descendant snapshot as `stopped`. Whether an escaped descendant can survive while that status avoids the unknown hold remains **NOT_PROVEN** and is a required independent-QA check. Historical `stopped` rows are not covered by the unknown-only lookup in this first candidate. This candidate must not be reported as integration-safe until that boundary is resolved.
+The first candidate `3058ab533ccd0603ab5ff169f50c82c4b34d22a0` failed independent QA: a real Linux setsid descendant survived SIGTERM while QC was labelled stopped, and a following build created another Run/child. Historical stopped rows were also omitted by the safety query. The follow-up changes `stopper.classifyEnd`, the unresolved-row query and restore without rewriting historical rows/evidence. `tests/writer-s0-stop-regression.test.js` records six cancellation/signal/race cases plus natural no-Stop positive controls and unchanged historical stopped/read-only restoration. It was RED 1/8 on 3058 and GREEN 8/8 after the fix. Exact final-SHA independent QA is still required.
 
-The tracked Visual harness now checks that unknown confirmation refuses and moves subsequent scenarios into newly seeded synthetic Projects. Its `freshProject` setup was assert-checked for distinct Project IDs, no inherited Runs and unchanged historical unknown rows. Only syntax/setup checks were run by the Worker; the complete Electron Visual sequence remains **NOT_PROVEN** on this candidate.
+The tracked Visual harness checks that Work and QC confirmations refuse, retains their held records, and moves later execution scenarios into newly seeded synthetic Projects. Its `freshProject` setup was assert-checked for distinct Project IDs, no inherited Runs and unchanged historical unknown rows. Only syntax/setup checks were run by the Worker; the complete Electron Visual sequence remains NOT_PROVEN on this candidate.
