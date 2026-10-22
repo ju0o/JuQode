@@ -1,6 +1,6 @@
 'use strict';
 /* V1-409 · `qc-ack-stopped` input boundary: shape and size are refused BEFORE any hold, ack file or DB row is touched;
- * per-run confirmation (partial success, foreign project, duplicates) is unchanged. */
+ * valid per-run requests remain fail-closed; foreign project and duplicate inputs are still bounded. */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -62,7 +62,7 @@ test('refused shapes and sizes leave DB, ack records and the Writer hold exactly
   assert.strictEqual(guard.LIMITS.ackRuns, 50);
 });
 
-test('exactly 50 and exactly 128 chars pass the guard; duplicates act once; foreign and unknown runs are reported per run', (t) => {
+test('exactly 50 and exactly 128 chars pass the guard; duplicates act once; every held run remains refused and foreign runs are reported per run', (t) => {
   const b = bench(); t.after(b.restore);
   const other = repo.openProject(b.db, tempDir('juqode-ai-o-'), 'o');
   const mine = b.stranded(b.project.id, 1001);
@@ -70,11 +70,12 @@ test('exactly 50 and exactly 128 chars pass the guard; duplicates act once; fore
   b.h['juqode:qc-list'](null, b.project.id);          // build the holds, as the panel does
   const pad = ['z'.repeat(128), ...Array.from({ length: 46 }, (_, i) => `n${i}`)];
   const r = ack(b, b.project.id, [mine, mine, foreign, ...pad], true);          // 50 entries, with a duplicate
-  assert.strictEqual(r.ok, true);
-  assert.deepStrictEqual(r.acked.map((x) => x.runId), [mine], 'a duplicate acknowledged twice or a foreign run released');
+  assert.strictEqual(r.ok, false);
+  assert.deepStrictEqual(r.acked, []);
+  assert.strictEqual(r.skipped.filter((x) => x.runId === mine && x.reason === 'termination-not-proven').length, 1);
   assert.ok(r.skipped.some((x) => x.runId === foreign && x.reason === 'not-held-by-this-project'));
   assert.ok(r.skipped.some((x) => x.runId === 'z'.repeat(128)));
-  assert.strictEqual(acksOnDisk(b).filter((n) => n.startsWith(mine)).length, 1);
-  assert.deepStrictEqual(r.stillHeld, []);
+  assert.deepStrictEqual(acksOnDisk(b), []);
+  assert.deepStrictEqual(r.stillHeld, [mine]);
   assert.strictEqual(b.h['juqode:qc-list'](null, other.id).held.length, 1, 'the other project lost its hold');
 });

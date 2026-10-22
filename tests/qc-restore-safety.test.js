@@ -97,7 +97,7 @@ test('A: a Stop-evidence file that cannot be trusted (directory, symlink, outsid
   for (const k of ['dir', 'broken', 'missing', 'escape']) assert.ok(heldIds.includes(ids[k]), `${k}: evidence that cannot be trusted released the run`);
   if (link) assert.ok(heldIds.includes(link), 'a symlinked evidence file was trusted');
   assert.ok(heldIds.includes(ids.clear), 'a bare {"stop":{"uncertain":false}} released the run');
-  assert.ok(held.every((x) => x.needsAck), 'untrusted evidence must need the user, not a snapshot');
+  assert.ok(held.every((x) => x.needsAck === false), 'untrusted evidence must not advertise a user-confirmation release');
 });
 
 /* ───────────── B · no LIMIT in the safety query ───────────── */
@@ -117,7 +117,7 @@ test('B: the oldest unresolved run among 1,500 newer finished ones still holds t
 });
 
 /* ───────────── C · a confirmation counts only if it verifies ───────────── */
-test('C: empty, broken, foreign, tampered, half-written, symlinked and directory "acknowledgements" release nothing; a valid one is written next to them, never over them', async (t) => {
+test('C: empty, broken, foreign, tampered, half-written, symlinked and directory "acknowledgements" release nothing; a valid historic ACK also remains held and intact', async (t) => {
   const b = bench(); t.after(b.restoreEnv);
   const other = repo.openProject(b.db, tmp('juqode-other-'), 'other'); dirs.push(other.path);
   const id = stranded(b);
@@ -144,10 +144,16 @@ test('C: empty, broken, foreign, tampered, half-written, symlinked and directory
   put(`${id}.json`, '');
   const h = b.boot();
   const r = await h['juqode:qc-ack-stopped'](null, b.project.id, [id], true);
-  assert.deepStrictEqual([r.ok, r.acked[0].existing, r.acked[0].ref], [true, false, `evidence:qc-ack/${id}.2.json`]);
+  assert.strictEqual(r.ok, false);
+  assert.deepStrictEqual(r.acked, []);
   assert.strictEqual(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8'), '', 'the unusable file was overwritten');
+  assert.strictEqual(fs.readdirSync(dir).length, 1, 'a refused confirmation appended a file');
+  // Seed an old valid record through the legacy storage helper; it remains readable but never releases.
+  assert.strictEqual(ack.writeAck(b.evidence, row).ok, true);
+  const historic = fs.readFileSync(path.join(dir, `${id}.2.json`));
   assert.strictEqual(ack.hasAck(b.evidence, row), true);
-  assert.strictEqual(b.boot()['juqode:qc-list'](null, b.project.id).held.length, 0, 'the valid record did not survive a restart');
+  assert.strictEqual(b.boot()['juqode:qc-list'](null, b.project.id).held.length, 1);
+  assert.ok(fs.readFileSync(path.join(dir, `${id}.2.json`)).equals(historic));
   // the run and its evidence were never touched
   const after = repo.qcRun(b.db, id);
   assert.deepStrictEqual([after.status, after.exit_code, after.output_ref], [row.status, row.exit_code, row.output_ref]);
@@ -179,7 +185,7 @@ test('C: a symlinked file or a symlinked / escaping qc-ack directory is never tr
 });
 
 /* ───────────── D · the confirmation names runs ───────────── */
-test('D: only the named runs are released; a run held AFTER the panel was drawn, another project\'s run and an unheld id stay as they are', async (t) => {
+test('D: named, late and foreign runs all keep their holds; requests are bounded and cannot rewrite the past', async (t) => {
   const b = bench(); t.after(b.restoreEnv);
   const other = repo.openProject(b.db, tmp('juqode-other-'), 'other'); dirs.push(other.path);
   const a1 = stranded(b, { pid: 1001, command: 'npm run dev' });
@@ -194,15 +200,15 @@ test('D: only the named runs are released; a run held AFTER the panel was drawn,
   const h2 = b.boot();
   assert.strictEqual(h2['juqode:qc-list'](null, b.project.id).held.length, 3);
   const r = await h2['juqode:qc-ack-stopped'](null, b.project.id, [a1, foreign, 'no-such-run'], true);
-  assert.deepStrictEqual(r.acked.map((x) => x.runId), [a1], 'only the named, held run of this project is acknowledged');
-  assert.deepStrictEqual(r.skipped.map((x) => x.runId).sort(), [foreign, 'no-such-run'].sort());
-  assert.deepStrictEqual(r.stillHeld.sort(), [a2, late].sort(), 'the rest of the Writer hold was dropped');
-  assert.strictEqual((await gate(h2, b.project.id)).build, 'prior-run-unknown', 'partial confirmation opened the gate');
-  assert.deepStrictEqual(b.boot()['juqode:qc-list'](null, other.id).held.map((x) => x.runId), [foreign], 'the other project lost its hold');
-  // the whole list, once the user has seen and named every run, opens it
+  assert.deepStrictEqual(r.acked, []);
+  assert.strictEqual(r.skipped.find((x) => x.runId === a1).reason, 'termination-not-proven');
+  assert.deepStrictEqual(r.skipped.filter((x) => x.reason === 'not-held-by-this-project').map((x) => x.runId).sort(), [foreign, 'no-such-run'].sort());
+  assert.deepStrictEqual(r.stillHeld.sort(), [a1, a2, late].sort());
+  assert.strictEqual((await gate(h2, b.project.id)).build, 'prior-run-unknown');
+  assert.deepStrictEqual(b.boot()['juqode:qc-list'](null, other.id).held.map((x) => x.runId), [foreign]);
   const r2 = await h2['juqode:qc-ack-stopped'](null, b.project.id, [a2, late], true);
-  assert.deepStrictEqual(r2.stillHeld, []);
-  assert.strictEqual((await gate(h2, b.project.id)).build, 'allowed');
+  assert.deepStrictEqual(r2.stillHeld.sort(), [a1, a2, late].sort());
+  assert.strictEqual((await gate(h2, b.project.id)).build, 'prior-run-unknown');
   for (const id of [a1, a2, late]) assert.strictEqual(repo.qcRun(b.db, id).status, 'unknown', 'a past run was rewritten');
 });
 

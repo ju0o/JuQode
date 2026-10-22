@@ -22,7 +22,6 @@ const qcRules = require('./qc/rules');
 const qcAvail = require('./qc/availability');
 const qcRun = require('./qc/run');
 const { createUncertain, restore: restoreHolds } = require('./qc/uncertain');
-const qcAck = require('./qc/ack');
 const { windowsTools } = require('./qc/stopper');
 const term = require('./term/session');
 const { classify } = require('./router/intent');
@@ -156,6 +155,13 @@ function makeHandlers(deps) {
    * `fileQcBlock`). A dev server is long-running and is how the user watches the Work, so it does not count. */
   const writerQcLive = (projectId) => liveFor(projectId).find((e) => qcRules.mutatesProjectFiles(e.ruleId) && e.kind !== 'long_running') ?? null;
   const liveFor = (projectId) => [...qcLive.values()].filter((e) => e.projectId === projectId);
+  /* Start, retry, permission and answer must obey the same Project QC Writer gate. */
+  const qcWriterRefusal = (projectId) => {
+    const holdWhy = qcHoldReason(projectId);
+    if (holdWhy) return { ok: false, reason: 'prior-process-may-still-live', detail: { qcRunId: qcUncertain.blocks(projectId), restoreFailed: holdWhy === 'qc-restore-failed' } };
+    const writer = writerQcLive(projectId);
+    return writer ? { ok: false, reason: 'qc-writer-running', detail: { qcRunId: writer.runId, command: writer.command } } : null;
+  };
   /* Re-read at the moment of use. A card built earlier is a snapshot and must not be the
    * gate: a Work can start, or an ended attempt can become unresolved, after the list
    * was drawn. Read-only: this does not probe a PID and does not record an acknowledgement.
@@ -399,8 +405,7 @@ function makeHandlers(deps) {
       handle.done.then((res) => {
         qcLive.delete(runId);
         repo.endQcRun(db(), runId, {
-          /* `20` `qc_status`: success · failed · stopped · unknown. `07` §8.1 — a signalled
-           * child is `stopped`, never `success`, whatever code it carried. */
+          /* Keep natural results; a Stop request or signal without whole-tree proof remains unknown. */
           status: res.state === 'ok' ? 'success' : res.state,
           exitCode: res.code, outputHead: res.output ?? null,
           endedAt: res.endedAt, stoppedAt: res.state === 'stopped' ? res.endedAt : null,
@@ -418,8 +423,8 @@ function makeHandlers(deps) {
                command: avail.data.command, kind: rule.kind };
     },
 
-    /* The user says the previous Quick Command's processes are gone. Recorded append-only in the evidence store; the runs stay
-     * `unknown`. Releases every hold of this project (the statement is about "the earlier processes", not about one pid). */
+    /* Compatibility endpoint: validate the same bounded input, but user statements cannot prove
+     * termination of escaped descendants. Preserve old evidence and append no new ACK or release. */
     'juqode:qc-ack-stopped': (_e, projectId, runIds, confirmedStopped) => {
       const gate = needDb();
       if (gate) return gate;
@@ -428,20 +433,14 @@ function makeHandlers(deps) {
       if (bad) return bad;
       if (!db().prepare('select id from project where id = ?').get(projectId)) return { ok: false, reason: 'no-project' };
       if (!ensureHolds(projectId)) return { ok: false, reason: 'qc-restore-failed', detail: qcUncertain.restoreFailure(projectId)?.reason ?? null };
-      const root = deps.evidenceStore(projectId);
       const heldNow = new Map(qcUncertain.heldFor(projectId).map((h) => [h.runId, h]));
-      const acked = []; const skipped = [];
+      const skipped = [];
       for (const runId of new Set(runIds)) {
-        const h = heldNow.get(runId);
         const row = repo.qcRun(db(), runId);
-        /* only a run THIS project holds right now, and only the ones the user was shown and named */
-        if (!h || !row || row.project_id !== projectId) { skipped.push({ runId, reason: 'not-held-by-this-project' }); continue; }
-        const w = qcAck.writeAck(root, { ...row, heldBecause: h.why });
-        if (!w.ok) { skipped.push({ runId, reason: w.reason, detail: w.detail ?? null }); continue; }   // nothing is released without a verified record
-        qcUncertain.release(runId);
-        acked.push({ runId, ref: w.ref, existing: w.existing });
+        const held = heldNow.has(runId) && row?.project_id === projectId;
+        skipped.push({ runId, reason: held ? 'termination-not-proven' : 'not-held-by-this-project' });
       }
-      return { ok: acked.length > 0, acked, skipped, stillHeld: qcUncertain.heldFor(projectId).map((x) => x.runId) };
+      return { ok: false, acked: [], skipped, stillHeld: qcUncertain.heldFor(projectId).map((x) => x.runId) };
     },
 
     /* WBS-22 · stop the one JuQode started. `19` §C4: JuQode 밖에서 켠 서버는 끄지 않는다 —
@@ -639,10 +638,8 @@ function makeHandlers(deps) {
         const acknowledged = acknowledgeAfterObservation(db(), task.project_id, prior.id, deps.observeRunner);
         if (!acknowledged.ok) return acknowledged;
       }
-      const holdWhy = qcHoldReason(task.project_id);
-      if (holdWhy) return { ok: false, reason: 'prior-process-may-still-live', detail: { qcRunId: qcUncertain.blocks(task.project_id), restoreFailed: holdWhy === 'qc-restore-failed' } };
-      const qcWriter = writerQcLive(task.project_id);
-      if (qcWriter) return { ok: false, reason: 'qc-writer-running', detail: { qcRunId: qcWriter.runId, command: qcWriter.command } };
+      const qcRefused = qcWriterRefusal(task.project_id);
+      if (qcRefused) return qcRefused;
       const latest = repo.worksForTask(db(), task.id, 1)[0];
       if (!latest || latest.id !== prior.id) return { ok: false, reason: 'retry-source-not-latest' };
       const taskRefusal = repo.taskRunRefusal(db(), task.project_id, task.id, { retryOfWorkId: prior.id });
@@ -665,7 +662,6 @@ function makeHandlers(deps) {
           retryOfWorkId: prior.id,
           retryReason: reason,
           appSessionId: deps.appSessionId?.() ?? null,
-          allowUnknownWorkId: prior.outcome === 'ended_unknown' && confirmPriorStopped ? prior.id : null,
         }); } finally { workStarting.delete(task.project_id); }
       return result.ok ? { ok: true, work: supervisor.snapshot(db(), result.workId), existing: Boolean(result.existing) } : result;
     },
@@ -693,10 +689,8 @@ function makeHandlers(deps) {
           : { ok: false, reason: 'idempotency-key-conflict' };
       }
       /* a Quick Command Stop that left something possibly alive: no new Writer, task or not */
-      const holdWhy = qcHoldReason(projectId);
-      if (holdWhy) return { ok: false, reason: 'prior-process-may-still-live', detail: { qcRunId: qcUncertain.blocks(projectId), restoreFailed: holdWhy === 'qc-restore-failed' } };
-      const qcWriter = writerQcLive(projectId);
-      if (qcWriter) return { ok: false, reason: 'qc-writer-running', detail: { qcRunId: qcWriter.runId, command: qcWriter.command } };
+      const qcRefused = qcWriterRefusal(projectId);
+      if (qcRefused) return qcRefused;
       if (taskId != null) {
         const uncertain = unknownTaskRunWithLiveRunner(db(), projectId);
         if (uncertain) return { ok: false, reason: 'prior-process-may-still-live', detail: { workId: uncertain.id } };
@@ -731,6 +725,9 @@ function makeHandlers(deps) {
       if (gate) return gate;
       if (!workOr(workId)) return { ok: false, reason: 'no-work' };
       if (toolUseId != null && !guard.shortId(toolUseId)) return { ok: false, reason: 'bad-permission-id' };
+      const work = workOr(workId);
+      const qcRefused = qcWriterRefusal(work.project_id);
+      if (qcRefused) return qcRefused;
       return supervisor.allow(db(), workId, toolUseId ?? null, { onUpdate: deps.push });
     },
 
@@ -740,6 +737,9 @@ function makeHandlers(deps) {
       if (!workOr(workId)) return { ok: false, reason: 'no-work' };
       const bad = guard.text(text, guard.LIMITS.text, { allowEmpty: true });
       if (bad) return bad;
+      const work = workOr(workId);
+      const qcRefused = qcWriterRefusal(work.project_id);
+      if (qcRefused) return qcRefused;
       return supervisor.answer(db(), workId, text, { onUpdate: deps.push });
     },
 

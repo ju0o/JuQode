@@ -77,8 +77,8 @@ function livenessOf(state, work) {
  * @returns {{ok:true, useGit:boolean, evidenceStore:string} | {ok:false, reason:string, detail?:any}}
  */
 async function preflight(db, project, { evidenceStore, detect = claude.detect, taskId = null,
-  retryOfWorkId = null, allowUnknownWorkId = null }) {
-  const uncertain = unknownTaskRunWithLiveRunner(db, project.id, allowUnknownWorkId);
+  retryOfWorkId = null }) {
+  const uncertain = unknownTaskRunWithLiveRunner(db, project.id);
   if (uncertain) return { ok: false, reason: 'prior-process-may-still-live', detail: { workId: uncertain.id } };
   const taskRefusal = repo.taskRunRefusal(db, project.id, taskId, { retryOfWorkId });
   if (taskRefusal) return { ok: false, reason: taskRefusal };
@@ -120,7 +120,7 @@ async function start(db, project, intent, opts = {}) {
   const {
     evidenceStore, onUpdate = () => {}, bin, detect, taskId = null,
     idempotencyKey = null, attempt = 1, retryOfWorkId = null, retryReason = null, appSessionId = null,
-    allowUnknownWorkId = null, executionMode,
+    executionMode,
   } = opts;
   void session.prewarmIdentity(bin);      // background hash only: not awaited, so start()'s synchronous reservation order is untouched
 
@@ -145,7 +145,7 @@ async function start(db, project, intent, opts = {}) {
   try {
     return await startGuarded(db, project, intent, {
       evidenceStore, onUpdate, bin, detect, taskId, idempotencyKey, attempt, retryOfWorkId, retryReason,
-      appSessionId, allowUnknownWorkId, executionMode,
+      appSessionId, executionMode,
     });
   } finally {
     starting.delete(project.id);
@@ -154,9 +154,9 @@ async function start(db, project, intent, opts = {}) {
 
 async function startGuarded(db, project, intent, {
   evidenceStore, onUpdate, bin, detect, taskId, idempotencyKey, attempt, retryOfWorkId, retryReason,
-  appSessionId, allowUnknownWorkId, executionMode,
+  appSessionId, executionMode,
 }) {
-  const pre = await preflight(db, project, { evidenceStore, detect, taskId, retryOfWorkId, allowUnknownWorkId });
+  const pre = await preflight(db, project, { evidenceStore, detect, taskId, retryOfWorkId });
   if (!pre.ok) return pre;
 
   let context = null;
@@ -359,7 +359,7 @@ async function startGuarded(db, project, intent, {
       }
       if (runEntry?.cancelRequested && !runEntry.cancelTreeStopped) {
         /* No owned-child stop observation has arrived yet. Keep the request visible until its
-         * timeout records ended_unknown and releases the slot behind an explicit acknowledgement. */
+         * timeout records ended_unknown; the active slot closes but the Project Writer hold stays closed. */
         if (repo.getWork(db, workId)?.status === 'ended') {
           repo.setWorkState(db, workId, { status: 'cancel_requested' });
         }
@@ -831,6 +831,8 @@ function snapshot(db, workId) {
  * unverifiable refuses BEFORE a process exists, so no grant reaches a CLI that could act
  * elsewhere. */
 function resumeRefusal(db, entry) {
+  const uncertain = unknownTaskRunWithLiveRunner(db, entry.projectId);
+  if (uncertain) return { ok: false, reason: 'prior-process-may-still-live', detail: { workId: uncertain.id } };
   const project = entry.projectId ? db.prepare('select path from project where id = ?').get(entry.projectId) : null;
   const v = session.verifyResume(entry.binding, { cwd: entry.cwd, sessionId: entry.sessionId, bin: entry.bin,
     projectPath: project?.path });
@@ -841,7 +843,7 @@ function resumeRefusal(db, entry) {
 
 /* The init-cwd check fires after the child is running, so what it may have written before
  * stopping is unknown, and a root exit proves nothing about descendants (`stop`). Never `failed`
- * and never a freed slot without acknowledgement: `ended_unknown` (D-124), side effects measured
+ * and never a freed Writer slot from process absence: `ended_unknown` (D-124), side effects measured
  * and recorded, not claimed as prevented. */
 function endResumeMismatch(db, workId, entry, r, onUpdate) {
   const kind = r.mismatch?.kind === 'session' ? 'session' : 'cwd';

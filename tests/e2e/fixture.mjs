@@ -214,9 +214,9 @@ if (restricted) {
  * One .js file (S1 — real declarations) and one .md file (S2 — \`19\` §C5-B sends structured
  * formats straight to Raw), so both strategies get rendered evidence. */
 if (resumed) {
-  fs.writeFileSync(${JSON.stringify(path.join(SEED, 'src', 'index.js'))},
+  fs.writeFileSync(require('node:path').join(process.cwd(), 'src', 'index.js'),
     'export const hi = 1;\\n\\nexport function greet(name) {\\n  return "hi " + name;\\n}\\n');
-  fs.writeFileSync(${JSON.stringify(path.join(SEED, 'README.md'))},
+  fs.writeFileSync(require('node:path').join(process.cwd(), 'README.md'),
     '# seed-app\\n\\n작은 예제 프로젝트예요.\\n\\n## 설치\\n\\nnpm i\\n\\n## 실행\\n\\nnpm run dev\\n');
   /* …and it touches the gitignored, JuQode-excluded .env. Canon 19 SS-E: that change is NOT in
    * the diff by design, and the product still has to SAY it happened — from the ledger, as a
@@ -224,14 +224,14 @@ if (resumed) {
   /* ONCE, on the first granted turn only. The card must also be ABSENT for a Work that touched
    * no excluded path, and while every Work in the run wrote this file there was no such Work to
    * look at — so the absent half of D-126a could not be checked at all. */
-  const envOnce = ${JSON.stringify(path.join(SEED, '.env-touched'))};
+  const envOnce = require('node:path').join(process.cwd(), '.env-touched');
   if (!fs.existsSync(envOnce)) {
-    fs.writeFileSync(${JSON.stringify(path.join(SEED, '.env'))},
+    fs.writeFileSync(require('node:path').join(process.cwd(), '.env'),
       'SECRET_TOKEN=juqode-synthetic-fixture-marker-CHANGED\\n');
     fs.writeFileSync(envOnce, '1');
   } else {
     /* a NORMAL edit, so this Work still has changes to read — just no excluded one */
-    fs.writeFileSync(${JSON.stringify(path.join(SEED, 'src', 'later.js'))},
+    fs.writeFileSync(require('node:path').join(process.cwd(), 'src', 'later.js'),
       'export const later = true;\\n');
   }
 }
@@ -342,4 +342,17 @@ const SEED3 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-seed
   db.close();
 }
 
-export { DB_DIR, DB, USER_DATA, SEED, SEED2, SEED3, PE_UNSIGNED, PE_SIGNED, FAKE_CLI };
+/* Unsafe cancellation fixtures never unlock their Project. Later scenarios get a new local
+ * clone of the committed synthetic baseline, seeded as an offered Project through the test DB. */
+function freshProject(label) {
+  const dir = fs.mkdtempSync(path.join(DB_DIR, `project-${label}-`));
+  execFileSync('git', ['clone', '-q', '--no-local', SEED, dir], { stdio: 'ignore' });
+  fs.writeFileSync(path.join(dir, '.env'), 'SECRET_TOKEN=juqode-synthetic-fixture-marker\n');
+  const { openDb } = require(path.join(ROOT, 'app/main/db/db.js'));
+  const repo = require(path.join(ROOT, 'app/main/db/repo.js'));
+  const db = openDb(DB);
+  try { repo.openProject(db, dir, path.basename(dir)); } finally { db.close(); }
+  return dir;
+}
+
+export { freshProject, DB_DIR, DB, USER_DATA, SEED, SEED2, SEED3, PE_UNSIGNED, PE_SIGNED, FAKE_CLI };

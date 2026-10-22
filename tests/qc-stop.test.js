@@ -30,11 +30,11 @@ const tools = (o = {}) => {
 };
 const stopperFor = (child, t, windows = true) => createStopper({ child, windows, tools: t, now: () => 'T' });
 
-test('Windows: taskkill succeeded and the whole observed tree is gone -> stopped, with the proof recorded', async () => {
+test('Windows: root killed and observed tree empty still leaves whole-tree ownership unproven', async () => {
   const child = handle(); const t = tools(); const s = stopperFor(child, t);
   assert.strictEqual(s.request(() => {}), true);
   const end = await s.finalize({ code: 1, signal: null });
-  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.root, end.stop.descendants], ['stopped', 'stopped-tree-observed', 'terminated-by-taskkill', 'none']);
+  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.root, end.stop.descendants], ['unknown', 'root-stopped-tree-ownership-unproven', 'terminated-by-taskkill', 'none']);
   assert.deepStrictEqual(t.calls.taskkill, [4242], 'taskkill must address only the owned pid');
   assert.deepStrictEqual(t.calls.survivors, [[5001, 5002]]);
 });
@@ -50,21 +50,21 @@ test('Windows: the run ended by itself BEFORE the request got in (handle already
   }
 });
 
-test('Windows: taskkill says "not found" (128): it ended by itself in the race -> failed/ok by its own code, NOT stopped', async () => {
-  for (const [code, want] of [[1, 'failed'], [0, 'ok'], [7, 'failed']]) {
+test('Windows: taskkill not-found after a request remains unknown even with natural-looking exit codes', async () => {
+  for (const code of [1, 0, 7]) {
     const s = stopperFor(handle(), tools({ taskkill: { status: 128, error: null } }));
     s.request(() => {});
     const end = await s.finalize({ code, signal: null });
-    assert.deepStrictEqual([end.state, end.stop.verdict], [want, 'ended-before-stop-took-effect'], `code ${code}`);
+    assert.deepStrictEqual([end.state, end.stop.verdict], ['unknown', 'stop-race-termination-unproven'], `code ${code}`);
   }
 });
 
-test('Windows: taskkill FAILS -> the owned handle is asked to end it; a signal from that is a stop, no signal is not', async () => {
+test('Windows: taskkill FAILS -> the owned handle is asked to end it; a signal confirms only the root, never the whole tree', async () => {
   const child = handle(); const s = stopperFor(child, tools({ taskkill: { status: 5, error: null } }));
   s.request(() => {});
   await s.whenIdle();
   assert.strictEqual(child.killed, 1, 'no handle fallback');
-  assert.strictEqual((await s.finalize({ code: null, signal: 'SIGTERM' })).state, 'stopped');
+  assert.strictEqual((await s.finalize({ code: null, signal: 'SIGTERM' })).state, 'unknown');
 });
 
 test('Windows: taskkill=255 and the root gone is NOT a stop, NOT `failed` -> unknown, exit code and taskkill status kept (PM policy)', async () => {
@@ -79,8 +79,8 @@ test('Windows: taskkill=255 and the root gone is NOT a stop, NOT `failed` -> unk
     assert.deepStrictEqual(end.stop.observedExit, { code: 1, signal: null }, 'the observed exit code is evidence');
     assert.strictEqual(end.stop.taskkill.status, status, 'the taskkill status is evidence');
     assert.strictEqual(end.stop.requested, true, 'the request is not erased');
-    /* …and the root + tree were looked at again: nothing alive, so the Writer gate has nothing to hold on to */
-    assert.deepStrictEqual([end.stop.descendants, end.stop.uncertain, end.stop.members], ['none', false, []]);
+    /* …and the root + tree were looked at again: nothing observed alive still cannot prove escaped descendants stopped */
+    assert.deepStrictEqual([end.stop.descendants, end.stop.uncertain, end.stop.members], ['none', true, []]);
   }
 });
 
@@ -97,7 +97,7 @@ test('Windows: taskkill=255 and something still alive (or unreadable) -> unknown
   const s3 = stopperFor(handle({ killReturns: false }), noTree);
   s3.request(() => {});
   const e3 = await s3.finalize({ code: 1, signal: null });
-  assert.deepStrictEqual([e3.state, e3.stop.descendants, e3.stop.uncertain], ['unknown', 'none', false]);
+  assert.deepStrictEqual([e3.state, e3.stop.descendants, e3.stop.uncertain], ['unknown', 'none', true]);
   assert.deepStrictEqual(noTree.calls.survivors, [[4242]]);
 
   for (const o of [{ survivors: null }, { survivorsThrows: true }]) {
@@ -148,17 +148,17 @@ test('duplicate Stop does nothing new (also while the first is still in flight);
   assert.strictEqual(s2.evidence().attempts, 2);
 });
 
-test('POSIX: a signal proves the stop; a clean exit 0 after a request is still `ok` (a cancelled child can exit 0)', async () => {
+test('POSIX: a root signal or clean exit after a request cannot prove the full tree stopped', async () => {
   const sent = [];
   const s = stopperFor(handle(), tools(), false);
   s.request((c) => sent.push(c.pid)); s.request((c) => sent.push(c.pid));
   assert.deepStrictEqual(sent, [4242], 'duplicate POSIX Stop signalled twice');
   const end = await s.finalize({ code: null, signal: 'SIGTERM' });
-  assert.deepStrictEqual([end.state, end.stop.verdict], ['stopped', 'stopped-by-signal']);
+  assert.deepStrictEqual([end.state, end.stop.verdict], ['unknown', 'root-signalled-tree-unproven']);
 
   const s2 = stopperFor(handle(), tools(), false); s2.request(() => {});
   const e2 = await s2.finalize({ code: 0, signal: null });
-  assert.deepStrictEqual([e2.state, e2.stop.verdict], ['ok', 'requested-not-observed']);
+  assert.deepStrictEqual([e2.state, e2.stop.verdict], ['unknown', 'stop-requested-termination-unproven']);
 });
 
 test('no Stop requested: ok / failed by code, whatever the host', () => {
@@ -190,7 +190,7 @@ const until = async (fn, ms = 8000) => { const end = Date.now() + ms; while (Dat
 const dirs = [];
 test.after(() => { for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* busy */ } } });
 
-test('real: Stop twice on a running command ends it as `stopped` with the proof, and a bystander is untouched', async () => {
+test('real: duplicate Stop ends the owned root but keeps an unknown result, and a bystander is untouched', async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qcstop-'))); dirs.push(dir);
   const bystander = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', path.join(dir, 'bystander')], { stdio: 'ignore' });
   try {
@@ -207,16 +207,16 @@ test('real: Stop twice on a running command ends it as `stopped` with the proof,
     assert.strictEqual(out.stop.requested, true);
     assert.strictEqual(out.stop.attempts, 1, 'the second Stop ran again');
     if (WIN) {
-      assert.deepStrictEqual([out.state, out.stop.verdict, out.stop.descendants], ['stopped', 'stopped-tree-observed', 'none'], JSON.stringify(out.stop));
+      assert.deepStrictEqual([out.state, out.stop.verdict, out.stop.descendants], ['unknown', 'root-stopped-tree-ownership-unproven', 'none'], JSON.stringify(out.stop));
       assert.strictEqual(out.stop.taskkill.status, 0);
       assert.ok(await until(() => members.every((p) => !alive(p))), 'a member of the tree survived taskkill /T');
     } else {
-      assert.deepStrictEqual([out.state, out.stop.verdict], ['stopped', 'stopped-by-signal']);
+      assert.deepStrictEqual([out.state, out.stop.verdict], ['unknown', 'root-signalled-tree-unproven']);
     }
     assert.ok(alive(bystander.pid), 'an unrelated process was terminated');
     // the same Stop after the run is over changes nothing
     r.stop();
-    assert.strictEqual(out.state, 'stopped');
+    assert.strictEqual(out.state, 'unknown');
   } finally {
     try { bystander.kill('SIGKILL'); } catch { /* gone */ }
   }
@@ -231,7 +231,7 @@ test('real: a command that finishes by itself and is then "stopped" is NOT repor
   assert.notStrictEqual(out.stop?.requested, true);
 });
 
-test('the Windows stop snapshot never blocks the event loop; a child that ends DURING it is not addressed by taskkill (pid reuse) and keeps its own result (the loaded-H1 qc.test.js mechanism)', async () => {
+test('the Windows stop snapshot never blocks the event loop; a child that ends DURING it is not addressed by taskkill (pid reuse) and keeps an unknown result because the Stop raced the exit', async () => {
   /* The snapshot used to be a spawnSync of PowerShell: 0.5 s idle, ~2 s under 2x CPU load on H1 -- the Electron main
    * process could not even observe the child's exit meanwhile. Now it is awaited. Fake slow tool, real child. */
   const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 250)'], { stdio: 'ignore' });
@@ -246,11 +246,11 @@ test('the Windows stop snapshot never blocks the event loop; a child that ends D
   assert.ok(ticks >= 3, `the event loop was blocked during the snapshot (${ticks} ticks)`);
   const end = await s.finalize({ code, signal });         // waits for the in-flight attempt
   clearInterval(beat);
-  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.root], ['ok', 'ended-before-stop-took-effect', 'exited-before-request']);
+  assert.deepStrictEqual([end.state, end.stop.verdict, end.stop.root], ['unknown', 'stop-race-termination-unproven', 'exited-before-request']);
   assert.deepStrictEqual(slow.calls.taskkill, [], 'taskkill addressed a pid whose handle had already closed');
 });
 
-test('real (any host): run.start with a snapshot that is slow keeps the loop alive and still ends the command with `stopped`', { skip: !WIN && 'the Windows path needs taskkill' }, async () => {
+test('real (any host): run.start with a snapshot that is slow keeps the loop alive and still ends the command with `unknown`', { skip: !WIN && 'the Windows path needs taskkill' }, async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qcstop-'))); dirs.push(dir);
   const r = run.start({ argv: NODE('setInterval(()=>{},1000)'), cwd: dir, kind: 'long_running' });
   await new Promise((x) => setTimeout(x, 400));
@@ -258,7 +258,7 @@ test('real (any host): run.start with a snapshot that is slow keeps the loop ali
   r.stop();
   const out = await r.done;
   clearInterval(beat);
-  assert.strictEqual(out.state, 'stopped', JSON.stringify(out.stop));
+  assert.strictEqual(out.state, 'unknown', JSON.stringify(out.stop));
   assert.ok(ticks >= 5, `the main loop was starved while Stop read the process tree (${ticks} ticks)`);
 });
 
@@ -287,15 +287,15 @@ test('Windows: taskkill=255, the fallback kill() was handed over, the process ex
     assert.deepStrictEqual([end.stop.taskkill.status, end.stop.fallback.sent, end.stop.requested], [255, true, true], 'the original Stop evidence was lost');
     assert.deepStrictEqual(end.stop.observedExit, { code, signal: null });
     assert.deepStrictEqual(t.calls.survivors, [[4242, 5001, 5002]], 'the root was not re-checked when no signal proved the kill');
-    assert.strictEqual(end.stop.uncertain, false);
+    assert.strictEqual(end.stop.uncertain, true);
   }
 });
 
-test('Windows: the same fallback with the signal REPORTED at exit is a stop; with a survivor it is unknown and uncertain', async () => {
+test('Windows: the fallback signal at exit confirms only root termination; empty or surviving snapshots remain unknown', async () => {
   const s = stopperFor(handle(), tools({ taskkill: { status: 255, error: null } }));
   s.request(() => {});
   const end = await s.finalize({ code: null, signal: 'SIGTERM' });
-  assert.deepStrictEqual([end.state, end.stop.root, end.stop.fallback.signalObserved], ['stopped', 'terminated-by-kill', 'SIGTERM']);
+  assert.deepStrictEqual([end.state, end.stop.root, end.stop.fallback.signalObserved], ['unknown', 'terminated-by-kill', 'SIGTERM']);
 
   const s2 = stopperFor(handle(), tools({ taskkill: { status: 255, error: null }, survivors: [{ pid: 5001, created: 'x' }] }));
   s2.request(() => {});
@@ -340,7 +340,7 @@ test('duplicate Stop after a kill was requested does nothing; a NEW run of the s
 const { windowsTools } = require(path.join(R, 'app/main/qc/stopper.js'));
 const { createUncertain } = require(path.join(R, 'app/main/qc/uncertain.js'));
 
-test('real Windows: a recorded scratch tree holds the gate while alive, a reused pid (wrong creation time) does not, and once the tree is gone it is only OBSERVED gone -- the user releases it', { skip: !WIN && 'needs the Windows process snapshot' }, async () => {
+test('real Windows: a recorded scratch tree holds the gate while alive, a reused pid (wrong creation time) does not, and once the tree is gone it is only OBSERVED gone -- the hold remains closed', { skip: !WIN && 'needs the Windows process snapshot' }, async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qcstop-'))); dirs.push(dir);
   const grand = "setInterval(()=>{},1000)";
   const root = "const {spawn}=require('child_process'); spawn(process.execPath,['-e'," + JSON.stringify(grand) + "],{stdio:'ignore'}); setInterval(()=>{},1000)";
@@ -364,9 +364,9 @@ test('real Windows: a recorded scratch tree holds the gate while alive, a reused
     assert.strictEqual(k.status, 0);
     assert.ok(await until(() => { reg.refresh('p1'); return reg.heldFor('p1')[0]?.observed === 'observed-gone'; }, 20000), 'the snapshot never saw the whole tree gone');
     assert.ok(members.every((m) => !alive(m.pid)), 'a member survived');
-    assert.strictEqual(reg.blocks('p1'), 'real-run', 'a snapshot alone released the hold (policy: only the user does)');
+    assert.strictEqual(reg.blocks('p1'), 'real-run', 'a snapshot alone released the hold');
     reg.release('real-run');
-    assert.strictEqual(reg.blocks('p1'), null);
+    assert.strictEqual(reg.blocks('p1'), 'real-run');
   } finally { try { scratch.kill(); } catch { /* gone */ } }
 });
 

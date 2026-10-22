@@ -373,8 +373,8 @@ function processTreeMayBeAlive(pid, { platform = process.platform, probe = windo
  *
  * A root `exit` is not proof that every descendant exited: on POSIX a descendant can call
  * `setsid()`, and after the root exits its lineage is lost to the portable probes here. Therefore
- * this adapter never certifies `cancelled`; it marks the attempt ended_unknown and requires an
- * explicit user acknowledgement before another Task Run. Signal only through the owned handle,
+ * this adapter never certifies `cancelled`; it marks the attempt ended_unknown and leaves the
+ * Project Writer hold closed. User acknowledgement cannot prove escaped descendants stopped. Signal only through the owned handle,
  * never through a numeric PID or process-group id that may have been reused.
  */
 function stop(child, { graceMs = 5000, confirmMs = 3000,

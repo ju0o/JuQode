@@ -584,7 +584,7 @@ test('the exit code is reported as the code, and stderr is not hidden', async ()
   assert.ok(out.output.includes('to-stderr'), 'stderr was dropped — the user cannot see what failed');
 });
 
-test('a command that succeeds is `ok`, and one that is signalled is `stopped`', async () => {
+test('a natural success is ok and a signalled command remains unknown without whole-tree proof', async () => {
   const dir = project({});
   assert.strictEqual((await run.start({ argv: NODE('process.exit(0)'), cwd: dir }).done).state, 'ok');
 
@@ -592,10 +592,9 @@ test('a command that succeeds is `ok`, and one that is signalled is `stopped`', 
   await new Promise((res) => setTimeout(res, 120));
   r.stop();
   const out = await r.done;
-  assert.strictEqual(out.state, 'stopped', 'a stopped command was reported as finished');
-  /* POSIX proves the stop with the signal that ended it; Windows has none, so it proves it with the
-   * taskkill result and the process tree it observed (stopper.js). A request alone proves nothing. */
-  assert.strictEqual(out.stop.verdict, WIN ? 'stopped-tree-observed' : 'stopped-by-signal', JSON.stringify(out.stop));
+  assert.strictEqual(out.state, 'unknown', 'a root signal was promoted into whole-tree termination');
+  assert.strictEqual(out.stop.uncertain, true);
+  assert.strictEqual(out.stop.verdict, WIN ? 'root-stopped-tree-ownership-unproven' : 'root-signalled-tree-unproven', JSON.stringify(out.stop));
 });
 
 test('a program that does not exist fails without throwing', async () => {
@@ -900,12 +899,10 @@ test('a running dev server makes 켜기 사용 불가 and 끄기 가능 — from
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
   const ev = stopEvidenceOf(row, b);
-  /* `stopped` is the proof case. Under CPU load on Windows taskkill itself can answer 255 although the tree is then gone; PM policy
-   * (D2): that is `unknown` -- never `stopped`, never `failed` -- and only acceptable here when the evidence says exactly that
-   * and the re-checked tree is gone (so nothing is left to hold the Writer gate). */
-  const honestUnknown = row.status === 'unknown' && ev?.verdict === 'stop-unconfirmed' && ev.descendants === 'none' && ev.uncertain === false;
-  assert.ok(row.status === 'stopped' || honestUnknown, `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: ev })}`);
-  assert.strictEqual(row.stopped_at === null, row.status !== 'stopped', 'stopped_at is set only for a proven stop');
+  assert.strictEqual(row.status, 'unknown', JSON.stringify(ev));
+  assert.strictEqual(ev.uncertain, true);
+  assert.strictEqual(row.stopped_at, null, 'an unproven tree cannot carry stopped_at');
+
 });
 
 test('the discoverability list names every rule and why each cannot run', () => {
@@ -1001,10 +998,10 @@ test('개발 서버 꺼줘 signals the server JuQode started', async () => {
   });
   const [row] = repo.qcRunsFor(b.db, b.project.id);
   const ev = stopEvidenceOf(row, b);
-  const honestUnknown = row.status === 'unknown' && ev?.verdict === 'stop-unconfirmed' && ev.descendants === 'none' && ev.uncertain === false;   // PM D2: taskkill 255 under load is unknown, never stopped/failed
-  assert.ok(row.status === 'stopped' || honestUnknown, `a stopped server was recorded as ${row.status}: ${JSON.stringify({ exit: row.exit_code, stopped_at: row.stopped_at, stop: ev })}`);
-  if (row.status === 'stopped') assert.ok(row.stopped_at, '`20` keeps stopped_at for a run that was signalled');
-  else assert.strictEqual(row.stopped_at, null, 'an unconfirmed Stop must not carry stopped_at');
+  assert.strictEqual(row.status, 'unknown', JSON.stringify(ev));
+  assert.strictEqual(ev.uncertain, true);
+  assert.strictEqual(row.stopped_at, null, 'an unproven tree cannot carry stopped_at');
+
 });
 
 test('every refusal the run handler can give has a sentence', () => {
@@ -1215,21 +1212,23 @@ test('an unacknowledged ended_unknown Work refuses a file-changing Quick Command
   const still = await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘');
   assert.strictEqual(still.reason, 'prior-run-unknown');
 
+  const beforeAck = b.db.prepare('select count(*) n from work_signal').get().n;
   const acked = b.h['juqode:legacy-unknown-ack'](null, b.project.id, legacy.work.id, true);
-  assert.strictEqual(acked.ok, true, acked.reason);
+  assert.strictEqual(acked.ok, false);
+  assert.strictEqual(acked.reason, 'prior-process-may-still-live');
   assert.strictEqual(repo.getWork(b.db, legacy.work.id).outcome, 'ended_unknown');
-  assert.strictEqual(repo.hasStoppedProcessAcknowledgement(b.db, legacy.work.id), true);
-  const held = await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘');
-  assert.strictEqual(held.reason, 'prior-run-unknown', 'acking one unknown Work freed another');
+  assert.strictEqual(repo.hasStoppedProcessAcknowledgement(b.db, legacy.work.id), false);
+  assert.strictEqual(b.db.prepare('select count(*) n from work_signal').get().n, beforeAck);
 
-  const cleared = repo.acknowledgeUnknownProcessStopped(b.db, b.project.id, linked.work.id, { verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'stub', scope: 'all-runners' });   // a recorded confirmation WITH an observation
-  assert.strictEqual(cleared.ok, true, cleared.reason);
-  assert.strictEqual(repo.getWork(b.db, linked.work.id).outcome, 'ended_unknown');
-  assert.strictEqual(unknownTaskRunWithLiveRunner(b.db, b.project.id), null);
+  // A historical all-runners ACK remains visible, but cannot prove escaped descendants stopped.
+  repo.acknowledgeUnknownProcessStopped(b.db, b.project.id, linked.work.id,
+    { verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'historic-stub', scope: 'all-runners' });
+  assert.ok(unknownTaskRunWithLiveRunner(b.db, b.project.id));
   const after = await b.h['juqode:qc-run'](null, b.project.id, 'qc.build', '빌드 해줘');
-  assert.strictEqual(after.ok, true, `${after.reason}/${after.detail}`);
-  await waitFor(5000, () => b.pushed.some((u) => u.runId === after.runId && u.ended));
-  assert.ok(fs.existsSync(path.join(b.dir, 'touched.txt')), 'the build did not write after the stop was confirmed');
+  assert.strictEqual(after.ok, false);
+  assert.strictEqual(after.reason, 'prior-run-unknown');
+  assert.strictEqual(fs.existsSync(path.join(b.dir, 'touched.txt')), false, 'a held build wrote a file');
+
 });
 
 function waitFor(ms, pred) {
@@ -1346,7 +1345,7 @@ test('stopping a child that IS running does signal it', { skip: WIN && 'POSIX pr
   });
 });
 
-test('Windows: stopping a running child ends it and the card says stopped (root only is what run.js can reach)', { skip: !WIN && 'Windows-only' }, async () => {
+test('Windows: stopping a running child ends its root while whole-tree termination remains unknown', { skip: !WIN && 'Windows-only' }, async () => {
   /* There are no process groups to signal here: run.js falls back to the root handle's kill. This
    * pins what IS true — the root dies and the state is \`stopped\` — and deliberately does NOT claim
    * the descendants died (an unmeasured Windows tree is V1-404's, on H1). */
@@ -1355,7 +1354,7 @@ test('Windows: stopping a running child ends it and the card says stopped (root 
   await new Promise((res) => setTimeout(res, 300));
   r.stop();
   const out = await r.done;
-  assert.strictEqual(out.state, 'stopped');
+  assert.strictEqual(out.state, 'unknown');
 });
 
 test('a script\'s pre/post hooks are disclosed, because they also run', () => {
@@ -1525,7 +1524,7 @@ test('a package.json whose `scripts` is not an object is 사용 불가, never a 
 const { STOP_WORST_CASE_MS } = require(path.join(R, 'app/main/qc/stopper.js'));
 const { createUncertain } = require(path.join(R, 'app/main/qc/uncertain.js'));
 
-test('Writer gate: an uncertain QC Stop refuses a new Work and file-changing Quick Commands; read-only ones and Stop still work; only a later snapshot showing it gone opens it', async () => {
+test('Writer gate: an uncertain QC Stop refuses a new Work and file-changing Quick Commands; read-only ones and Stop still work; neither a later snapshot nor confirmation opens it', async () => {
   let alive = [{ pid: 4242, created: 'T0' }];
   const probes = [];
   const uncertain = createUncertain({ probe: async (m) => { probes.push(m.map((x) => x.pid)); return alive; }, retryMs: 5, maxTries: 3 });
@@ -1553,16 +1552,17 @@ test('Writer gate: an uncertain QC Stop refuses a new Work and file-changing Qui
   assert.ok(uncertain.blocks(b.project.id), 'an unreadable snapshot opened the gate');
   assert.strictEqual(uncertain.blocks('another-project'), null);
 
-  // gone in a later snapshot -> open (the run itself stays `unknown`; nothing rewrote it)
+  // Absence in a later snapshot cannot prove escaped descendants stopped.
   alive = [];
   uncertain.refresh(b.project.id);
   await new Promise((r) => setTimeout(r, 30));
-  assert.ok(uncertain.blocks(b.project.id), 'a snapshot alone released the hold (policy: only the user\'s confirmation does)');
-  uncertain.release('qc-run-1');                      // the ack handler's last step; its row/evidence checks are covered in qc-stop-proof.test.js
-  assert.strictEqual(uncertain.blocks(b.project.id), null);
-  const ran = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
-  assert.strictEqual(ran.ok, true, `${ran.reason}/${ran.detail}`);
-  await waitFor(8000, () => b.pushed.some((u) => u.runId === ran.runId && u.ended));
+  assert.ok(uncertain.blocks(b.project.id), 'a snapshot alone released the hold');
+  uncertain.release('qc-run-1');
+  assert.strictEqual(uncertain.blocks(b.project.id), 'qc-run-1');
+  const held = await b.h['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트 돌려줘');
+  assert.strictEqual(held.ok, false);
+  assert.strictEqual(held.reason, 'prior-run-unknown');
+
 });
 
 test('Writer gate: an uncertain Stop with NO recorded members (nothing to look for) stays shut', async () => {
@@ -1587,7 +1587,7 @@ const strandedRun = (b, pid = 4242) => {
   return id;
 };
 
-test('restart: a run nobody saw finish keeps the Writer gate shut across restarts until the USER confirms; the row stays unknown and the record is append-only', async (t) => {
+test('restart: a run nobody saw finish keeps the Writer gate shut after user confirmation; no new ACK is recorded', async (t) => {
   const restoreEnv = noClaude(); t.after(restoreEnv);
   const b = qcBench();
   const id = strandedRun(b);
@@ -1602,7 +1602,7 @@ test('restart: a run nobody saw finish keeps the Writer gate shut across restart
     const work = await h['juqode:work-start'](null, b.project.id, '고쳐줘');
     assert.deepStrictEqual([work.ok, work.reason], [false, 'prior-process-may-still-live'], `restart ${restart}`);
     const listed = h['juqode:qc-list'](null, b.project.id);
-    assert.deepStrictEqual(listed.held.map((x) => [x.runId, x.needsAck, x.why]), [[id, true, 'never-finished']]);
+    assert.deepStrictEqual(listed.held.map((x) => [x.runId, x.needsAck, x.why]), [[id, false, 'never-finished']]);
     assert.ok(h['juqode:qc-route'](null, b.project.id, '깃 상태').reason !== 'prior-run-unknown', 'a read-only command was blocked');
     assert.deepStrictEqual(repo.qcRunsFor(b.db, b.project.id).map((r) => r.id), [id], 'a refused command became a row');
   }
@@ -1612,23 +1612,20 @@ test('restart: a run nobody saw finish keeps the Writer gate shut across restart
   assert.strictEqual((await h['juqode:qc-ack-stopped'](null, b.project.id, [id], 'yes')).reason, 'confirmation-required');
   assert.strictEqual((await h['juqode:qc-ack-stopped'](null, b.project.id, [], true)).reason, 'no-runs-named', 'a confirmation that names no run released something');
   assert.ok(h['juqode:qc-list'](null, b.project.id).held.length === 1, 'an unconfirmed ack released the hold');
-  const ack = await h['juqode:qc-ack-stopped'](null, b.project.id, [id], true);
-  assert.deepStrictEqual([ack.ok, ack.acked.length, ack.acked[0].existing], [true, 1, false]);
-  const rec = JSON.parse(fs.readFileSync(path.join(b.evidence, 'qc-ack', `${id}.json`), 'utf8'));
-  assert.deepStrictEqual([rec.runId, rec.confirmedBy, rec.before.status, rec.before.runnerPid, rec.heldBecause], [id, 'user', 'unknown', 4242, 'never-finished']);
-  assert.strictEqual(repo.qcRun(b.db, id).status, 'unknown', 'a confirmation rewrote the past result');
-  assert.strictEqual(repo.qcRun(b.db, id).exit_code, null);
+  const before = JSON.stringify(repo.qcRun(b.db, id));
+  const acked = await h['juqode:qc-ack-stopped'](null, b.project.id, [id], true);
+  assert.deepStrictEqual([acked.ok, acked.acked], [false, []]);
+  assert.deepStrictEqual(acked.stillHeld, [id]);
+  assert.strictEqual(fs.existsSync(path.join(b.evidence, 'qc-ack')), false, 'a refused confirmation created an ACK directory');
+  const after = restartOf(b);
+  assert.strictEqual(after['juqode:qc-list'](null, b.project.id).held.length, 1);
+  assert.strictEqual(JSON.stringify(repo.qcRun(b.db, id)), before, 'confirmation rewrote the old Run');
+  const denied = await after['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트');
+  assert.strictEqual(denied.reason, 'prior-run-unknown');
 
-  const after = restartOf(b);                                           // the confirmation survives a restart
-  assert.strictEqual(after['juqode:qc-list'](null, b.project.id).held.length, 0);
-  const again = await after['juqode:qc-ack-stopped'](null, b.project.id, [id], true);
-  assert.deepStrictEqual([again.ok, again.skipped.map((x) => x.reason)], [false, ['not-held-by-this-project']], 'a run that is no longer held was acknowledged again');
-  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(b.evidence, 'qc-ack', `${id}.json`), 'utf8')).confirmedAt, rec.confirmedAt, 'the record was overwritten');
-  const ran = await after['juqode:qc-run'](null, b.project.id, 'qc.test', '테스트');
-  assert.strictEqual(ran.ok, true, `${ran.reason}/${ran.detail}`);
 });
 
-test('restart: only a Stop that ended `stopped` is not held; a complete record and a record with members are held until the user confirms the run', async (t) => {
+test('restart: historic stopped rows and unknown records remain held after confirmation', async (t) => {
   const restoreEnv = noClaude(); t.after(restoreEnv);
   const b = qcBench();
   const T1 = '2026-10-16T10:00:01.000Z';
@@ -1651,23 +1648,24 @@ test('restart: only a Stop that ended `stopped` is not held; a complete record a
   let alive = [{ pid: 777, created: T1 }];
   const reg = createUncertain({ probe: async () => alive, retryMs: 5, maxTries: 3 });
   const h = restartOf(b, { qcUncertain: reg });
-  assert.deepStrictEqual(h['juqode:qc-list'](null, b.project.id).held.map((x) => x.runId).sort(), [clear, withMembers].sort(), 'unknown runs are held, the stopped one is not');
-  assert.ok(!reg.has(stopped));
+  assert.deepStrictEqual(h['juqode:qc-list'](null, b.project.id).held.map((x) => x.runId).sort(), [clear, stopped, withMembers].sort(), 'historic stopped rows must also retain their hold');
+  assert.ok(reg.has(stopped));
   alive = [];
   reg.refresh(b.project.id);
   await new Promise((r) => setTimeout(r, 30));
   assert.ok(reg.blocks(b.project.id), 'a snapshot showing every member gone released the hold');
   const r = h['juqode:qc-ack-stopped'](null, b.project.id, [clear, withMembers], true);
-  assert.deepStrictEqual(r.acked.map((x) => x.runId).sort(), [clear, withMembers].sort());
-  assert.strictEqual(reg.blocks(b.project.id), null);
+  assert.deepStrictEqual(r.acked, []);
+  assert.deepStrictEqual(r.stillHeld.sort(), [clear, stopped, withMembers].sort());
+  assert.ok(reg.blocks(b.project.id));
   const work = await h['juqode:work-start'](null, b.project.id, '고쳐줘');
-  assert.notStrictEqual(work.reason, 'prior-process-may-still-live');
+  assert.strictEqual(work.reason, 'prior-process-may-still-live');
 
-  // after another restart the confirmed runs stay released (the record is on disk), and nothing else appears
+  // A restart must retain every unresolved hold even after a user confirmation.
   const reg2 = createUncertain({ probe: async () => alive, retryMs: 5, maxTries: 3 });
   const h2 = restartOf(b, { qcUncertain: reg2 });
   h2['juqode:qc-list'](null, b.project.id);
-  assert.strictEqual(reg2.blocks(b.project.id), null);
+  assert.ok(reg2.blocks(b.project.id));
 });
 
 test('both directions: a running file-changing Quick Command refuses a new Work; a running Work refuses file-changing Quick Commands; a dev server and read-only commands do not', async (t) => {
