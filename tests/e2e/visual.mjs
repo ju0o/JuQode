@@ -30,7 +30,7 @@ const spawnApp = (args, opts) => {
 
 /* 이 세계를 만드는 것은 fixture.mjs 다 — 불러오는 것만으로 임시 디렉터리와 씨앗 저장소가 생긴다.
  * `scripts/record-demo.mjs` 가 같은 것을 쓴다. */
-import { DB_DIR, DB, USER_DATA, SEED, SEED2, SEED3, PE_UNSIGNED, PE_SIGNED, FAKE_CLI } from './fixture.mjs';
+import { freshProject, DB_DIR, DB, USER_DATA, SEED, SEED2, SEED3, PE_UNSIGNED, PE_SIGNED, FAKE_CLI } from './fixture.mjs';
 
 /* Artifact hygiene: a test run must never mutate committed evidence, or a reviewer cannot
  * verify without dirtying the tree. Screenshots go to an untracked directory by default;
@@ -202,36 +202,28 @@ async function cdp(sendFn) {
     if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails));
     return r.result?.result?.value;
   };
-  /* V1-404 · the confirmation is recorded only once the stored runner is OBSERVED gone. A runner the fixture left alive (the
-   * stubborn CLI's `sleep 60` outlives its killed shell) is REFUSED, on screen, until it really ends: every refusal is kept in
-   * `legacyAckRefusals`, and the click is repeated (own scratch fixture, bounded 90 s) until the observation allows it. */
-  const acknowledgeAllLegacyUnknowns = async () => {
-    const count = () => evalJs(`(async () => (await window.juqode.taskList(window.__project().id)).legacyUnknownRuns.length)()`);
-    let remaining = await count();
-    const deadline = Date.now() + 90_000;
-    while (remaining > 0 && Date.now() < deadline) {
-      const before = remaining;
-      await evalJs(`(() => {
-        const panel = document.querySelector('[data-el="legacy-unknown"]');
-        if (!panel) throw new Error('unresolved legacy Run is missing its confirmation panel');
-        const box = panel.querySelector('input[type="checkbox"]');
-        if (!box.checked) box.click();
-        panel.querySelector('button').click();
-      })()`);
-      await sleep(600);
-      remaining = await count();
-      if (remaining >= before) {
-        acknowledgeAllLegacyUnknowns.refusals.push(await evalJs(`document.querySelector('[data-el="legacy-unknown"]')?.innerText ?? null`));
-        /* the same request made directly, so the refusal's observation (LIVE_CONFIRMED vs UNKNOWN, and why) is on the record */
-        acknowledgeAllLegacyUnknowns.refusals.push('direct:' + await evalJs(`(async () => { const p = window.__project().id;
-          const run = (await window.juqode.taskList(p)).legacyUnknownRuns[0];
-          return run ? JSON.stringify(await window.juqode.legacyUnknownAck(p, run.id, true)) : 'none'; })()`));
-        await sleep(2000);
-      }
+  /* An unknown writer stays held. Record the refused confirmation and use a NEW synthetic
+   * Project for the next scenario; never delete the old Run or manufacture release evidence. */
+  const isolateAfterUnknown = async () => {
+    const oldProject = await evalJs('window.__project().id');
+    const runs = await evalJs(`(async () => (await window.juqode.taskList(${JSON.stringify(oldProject)})).legacyUnknownRuns)()`);
+    for (const run of runs) {
+      const denied = await evalJs(`window.juqode.legacyUnknownAck(${JSON.stringify(oldProject)}, ${JSON.stringify(run.id)}, true)`);
+      assert.strictEqual(denied.ok, false);
+      assert.strictEqual(denied.reason, 'prior-process-may-still-live');
+      isolateAfterUnknown.refusals.push(JSON.stringify(denied));
     }
+    const next = freshProject('after-unknown');
+    await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent === '다른 프로젝트 열기')?.click()`);
+    await sleep(500);
+    await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')].find(r => r.querySelector('.nm')?.textContent === ${JSON.stringify(path.basename(next))})?.click()`);
+    await sleep(900);
+    assert.strictEqual(await evalJs('window.__project().path'), next, 'the new scenario did not open its isolated Project');
+    const remaining = await evalJs(`(async () => (await window.juqode.taskList(${JSON.stringify(oldProject)})).legacyUnknownRuns.length)()`);
+    assert.strictEqual(remaining, runs.length, 'switching fixtures modified the old unknown hold');
     return remaining;
   };
-  acknowledgeAllLegacyUnknowns.refusals = [];
+  isolateAfterUnknown.refusals = [];
   /* The renderer is LOADED before anything is asked of it.
    *
    * `pageTarget` waits for the debugger target, which exists as soon as the window does — the
@@ -246,7 +238,7 @@ async function cdp(sendFn) {
     return false; })()`);
   if (!loaded) throw new Error('the renderer never finished loading (window.__screen is missing after 10s)');
 
-  try { return await sendFn({ send, evalJs, acknowledgeAllLegacyUnknowns }); } finally { ws.close(); }
+  try { return await sendFn({ send, evalJs, isolateAfterUnknown }); } finally { ws.close(); }
 }
 
 /* `detached` puts xvfb-run AND the Electron tree it starts into one process group.
@@ -306,7 +298,7 @@ const PANELS = `(() => {
     liveness: w?.liveness ?? null, input: n('input'), quiet: n('quiet'), unknown: n('unknown') });
 })()`;
 
-const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns }) => {
+const results = await cdp(async ({ send, evalJs, isolateAfterUnknown }) => {
   step('cdp attached');
   await send('Page.enable');
   const out = {};
@@ -1876,9 +1868,9 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await samplePanels('cancel-ended');
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
-  out.cancelUnknownGateAfterAck = await acknowledgeAllLegacyUnknowns();
-  out.legacyAckRefusals = [...acknowledgeAllLegacyUnknowns.refusals];
-  console.log(`  · legacy acknowledgement: remaining=${out.cancelUnknownGateAfterAck}, refused ${out.legacyAckRefusals.length}x; first direct: ${out.legacyAckRefusals.find((r) => r.startsWith("direct:"))}`);
+  out.cancelUnknownGateAfterAck = await isolateAfterUnknown();
+  out.legacyAckRefusals = [...isolateAfterUnknown.refusals];
+  step('old cancellation Project remains held; next scenario uses a fresh Project');
 
   /* ── `15` SC-03 부분 완료 — 된 것과 안 된 것, 둘 다 ────────────────────────────────────
    * The most complex result state and the one WBS-18's acceptance is written about, and it had
@@ -1911,7 +1903,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('작업대로'))?.click()`);
   await sleep(900);
-  out.partialUnknownGateAfterAck = await acknowledgeAllLegacyUnknowns();
+  out.partialUnknownGateAfterAck = await isolateAfterUnknown();
 
   /* ── `15` SC-03 실패 — the ONLY red on the screen ───────────────────────────────────────
    * `19` §C3-L: the three finish signals are read TOGETHER. This turn exits 0 with
@@ -2100,6 +2092,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   out.afterRereadState = await evalJs('JSON.stringify(window.__brief())');
 
 
+  out.recentExpectedAfterBack = await evalJs('window.__project()?.path ?? null');
   step('back to picker');
   // 다른 프로젝트 열기 goes back to SC-01, and the project it just opened is now remembered
   await evalJs(`[...document.querySelectorAll('.topbar button')].find(b => b.textContent.includes('다른 프로젝트')).click()`);
@@ -2415,7 +2408,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   const composerHidden = await evalJs(`document.querySelector('[data-el="composer-draft"]')?.hidden ?? null`);
   if (composerHidden !== true) throw new Error('clearing the sentence left the proposal on screen');
   /* Model a Work from before Task/process identity existed. It remains unattached and must
-   * block execution until the visible user confirmation records that the old process stopped. */
+   * keep execution held even after a user confirmation of an absent root. */
   {
     const { openDb } = require(path.join(ROOT, 'app/main/db/db.js'));
     const repo = require(path.join(ROOT, 'app/main/db/repo.js'));
@@ -2444,14 +2437,14 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     checkbox: Boolean(document.querySelector('[data-el="legacy-unknown"] input[type="checkbox"]')),
     disabledBefore: document.querySelector('[data-el="legacy-unknown"] button')?.disabled ?? null,
   }))()`);
-  if (!out.legacyUnknownBeforeAck.checkbox || !out.legacyUnknownBeforeAck.disabledBefore) {
-    throw new Error(`Legacy process confirmation did not require an explicit checkbox: ${JSON.stringify(out.legacyUnknownBeforeAck)}`);
+  if (out.legacyUnknownBeforeAck.checkbox || out.legacyUnknownBeforeAck.disabledBefore !== null) {
+    throw new Error(`Unproven legacy stop advertised a release control: ${JSON.stringify(out.legacyUnknownBeforeAck)}`);
   }
   if (JSON.parse(out.taskList).legacyUnknownRuns.length < 1) {
     throw new Error(`The Project did not disclose its unattached unknown Work: ${out.taskList}`);
   }
   /* V1-310 · the same unacknowledged ended_unknown row blocks a file-changing Quick Command.
-   * The visible confirmation below is still what clears it. The drawer is closed first. */
+   * The hold stays closed; a later scenario uses another synthetic Project. */
   step('unknown run blocks file qc');
   await evalJs(`if (!window.__drawer().open) window.__toggleDrawer()`);
   await sleep(300);
@@ -2465,7 +2458,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   out.qcPriorUnknownReds = await evalJs(RED_COUNT('[data-el="qc-card"], [data-el="qc-card"] *'));
   out.qcPriorUnknownBox = await evalJs(`(() => {
     const card = document.querySelector('[data-el="qc-card"]');
-    const p = [...(card?.querySelectorAll('p') ?? [])].find(n => n.innerText.includes('확인하지 못했어요'));
+    const p = [...(card?.querySelectorAll('p') ?? [])].find(n => n.innerText.includes('근거가 없어'));
     const box = document.querySelector('.td01-qcbody');
     if (!p || !box) return null;
     const a = p.getBoundingClientRect();
@@ -2488,7 +2481,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await sleep(250);
   out.qcPriorUnknownShort = await evalJs(`(() => {
     const card = document.querySelector('[data-el="qc-card"]');
-    const p = [...(card?.querySelectorAll('p') ?? [])].find(n => n.innerText.includes('확인하지 못했어요'));
+    const p = [...(card?.querySelectorAll('p') ?? [])].find(n => n.innerText.includes('근거가 없어'));
     const box = document.querySelector('.td01-qcbody');
     const shell = document.querySelector('[data-el="term-input"]');
     if (!p || !box || !shell) return null;
@@ -2517,8 +2510,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     fs.writeFileSync(path.join(OUT, 'sc02-legacy-unknown-confirmation.png'), Buffer.from(shot.result.data, 'base64'));
   }
   /* Earlier scenarios in this same disposable Project can also leave unknown legacy Works.
-   * Each remains blocked until the user-visible confirmation is performed once per Work. */
-  const remainingLegacy = await acknowledgeAllLegacyUnknowns();
+   * Each remains blocked; the next execution uses a new synthetic Project. */
   out.legacyUnknownAfterAck = await evalJs(`(async () => {
     const list = await window.juqode.taskList(window.__project().id);
     return JSON.stringify({ unresolved: list.legacyUnknownRuns.length,
@@ -2526,10 +2518,21 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
       oldWorkStillVisibleInHistory: Boolean((await window.juqode.history(window.__project().id)).works
         .find(work => work.intent === 'Synthetic legacy unknown Work')) });
   })()`);
-  if (JSON.parse(out.legacyUnknownAfterAck).unresolved !== 0 || JSON.parse(out.legacyUnknownAfterAck).bannerVisible ||
+  if (JSON.parse(out.legacyUnknownAfterAck).unresolved < 1 || !JSON.parse(out.legacyUnknownAfterAck).bannerVisible ||
       !JSON.parse(out.legacyUnknownAfterAck).oldWorkStillVisibleInHistory) {
-    throw new Error(`Legacy stop acknowledgement did not preserve the old Run and unblock Project: ${out.legacyUnknownAfterAck}`);
+    throw new Error(`The held legacy Run or its honest hold panel disappeared: ${out.legacyUnknownAfterAck}`);
   }
+  await isolateAfterUnknown();
+  const taskProjectPath = await evalJs('window.__project().path');
+  await evalJs(`(() => {
+    document.querySelector('.task-create summary')?.click();
+    const fields = [...document.querySelectorAll('.task-create textarea')];
+    fields[0].value = 'Visual E2E Task selection';
+    fields[1].value = 'The Project shows the selected Task';
+    document.querySelector('.task-create button')?.click();
+  })()`);
+  await sleep(700);
+  out.taskList = await evalJs(`(async () => JSON.stringify(await window.juqode.taskList(window.__project().id)))()`);
   out.taskSelectedText = await evalJs(`document.querySelector('[data-el="selected-task"]')?.innerText ?? null`);
   out.taskSelectedId = await evalJs(`document.querySelector('[data-el="task-list"] .task-pick.selected')?.getAttribute('data-task-id') ?? null`);
   await evalJs(`document.documentElement.setAttribute('data-theme', 'light')`);
@@ -2599,7 +2602,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     .find(b => b.textContent.includes('다른 프로젝트'))?.click()`);
   await sleep(700);
   await evalJs(`[...document.querySelectorAll('[data-el="recent-row"]')]
-    .find(row => row.innerText.includes(${JSON.stringify(path.basename(SEED))}))?.click()`);
+    .find(row => row.innerText.includes(${JSON.stringify(path.basename(taskProjectPath))}))?.click()`);
   await sleep(900);
   await evalJs(`document.querySelector('[data-el="task-list"] [data-task-id="${taskId}"]')?.click()`);
   await sleep(700);
@@ -3238,17 +3241,14 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   await evalJs(`document.querySelector('[data-el="drawer-syn"] [data-el="qc-detail"] > summary').focus()`);
   await press('Enter', 'Enter', 13); await sleep(200);
   out.td01keys.closed = await evalJs(`JSON.stringify({ open: window.__td.state.qcDetailOpen, label: document.querySelector('[data-el="qc-detail"] > summary').textContent })`);
-  /* the Writer-hold panel: pick ONE of two runs, the button counts, and only that run is sent */
+  /* The Writer-hold panel offers record refresh and no checkbox or release action. */
   await tdMount('hold');
-  await evalJs(`window.__sent = null; window.__td.state.qcHoldAt = Date.now();`);
-  out.td01hold = await evalJs(`(async () => {
+  out.td01hold = await evalJs(`(() => {
     const root = document.querySelector('[data-el="drawer-syn"]');
-    const boxes = [...root.querySelectorAll('.qc-hold input[type=checkbox]')];
-    const go = () => [...root.querySelectorAll('.qc-hold button')].find((b) => b.textContent.includes('확인했다고 기록하기'));
-    const before = { boxes: boxes.length, disabled: go().disabled, label: go().textContent };
-    boxes[1].click(); await new Promise((r) => setTimeout(r, 50));
-    const one = { disabled: go().disabled, label: go().textContent };
-    return JSON.stringify({ before, one }); })()`);
+    return JSON.stringify({ boxes: root.querySelectorAll('.qc-hold input[type=checkbox]').length,
+      commands: root.querySelectorAll('.qc-hold-row').length,
+      buttons: [...root.querySelectorAll('.qc-hold button')].map((b) => b.textContent),
+      text: root.querySelector('.qc-hold')?.innerText }); })()`);
   await evalJs(`document.documentElement.setAttribute('data-theme','')`);
   await evalJs(`document.querySelectorAll('[data-el="drawer-syn"]').forEach((n) => n.remove()); document.querySelectorAll('[data-el="drawer"]').forEach((n) => { n.style.display = ''; })`);
 
@@ -3678,9 +3678,9 @@ assert.deepStrictEqual(JSON.parse(results.drawerBannerParts),
 {
   const unknown = JSON.parse(results.qcPriorUnknown);
   assert.strictEqual(unknown.kind, 'unavailable', `the build card stayed ${unknown.kind} while a stop was unconfirmed`);
-  assert.ok(unknown.text.includes('이전 시도가 멈췄는지 아직 확인하지 못했어요'),
+  assert.ok(unknown.text.includes('이전 실행이 모두 끝났다는 근거가 없어'),
     `the card did not say the stop is unconfirmed: ${unknown.text}`);
-  assert.ok(unknown.text.includes('파일을 바꾸는 명령은 확인한 뒤에 할 수 있어요'));
+  assert.ok(unknown.text.includes('직접 확인해도 보류를 해제할 수 없어요'));
   assert.ok(!unknown.text.includes('작업이 진행 중이에요'), 'an unconfirmed stop was described as a live Work');
   assert.ok(!unknown.text.includes('샌드박스'));
   assert.strictEqual(results.qcPriorUnknownReds, 0, 'an unconfirmed stop was painted as a failure');
@@ -4706,8 +4706,8 @@ for (const [kind, rows] of Object.entries(results.td01d4)) {
   const k = results.td01keys;
   assert.deepStrictEqual([JSON.parse(k.opened).open, JSON.parse(k.opened).label, k.survivedRedraw, JSON.parse(k.closed).open, JSON.parse(k.closed).label], [true, '출력 접기', true, false, '출력 보기'], `Enter on the details control: ${JSON.stringify(k)}`);
   const h = JSON.parse(results.td01hold);
-  assert.deepStrictEqual([h.before.boxes, h.before.disabled, h.one.disabled], [2, true, false], `the hold panel: ${results.td01hold}`);
-  assert.ok(/1건/.test(h.one.label), `the confirmation button does not say how many runs are being confirmed: ${h.one.label}`);
+  assert.deepStrictEqual([h.boxes, h.commands, h.buttons], [0, 2, ['기록 다시 읽기']], `the hold panel: ${results.td01hold}`);
+  assert.ok(h.text.includes('직접 확인해도 보류를 해제할 수 없어요'));
 }
 /* SC-04 D3 (design + function) on the real renderer in the real window */
 for (const [kind, rows] of Object.entries(results.sc04d3)) {
@@ -4947,17 +4947,14 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
     'an unconfirmed stop was painted as a failure — nobody has established that anything failed');
 
   /* The root is stopped, but that does not prove all detached descendants are gone. Preserve
-   * the explicit unknown outcome and require a visible acknowledgement before another Run. */
+   * the explicit unknown outcome and keep that Project held before another Run. */
   const ended = JSON.parse(results.cancelEnded);
   assert.strictEqual(ended.status, 'ended', `the Work never ended (${ended.status})`);
   assert.strictEqual(ended.outcome, 'ended_unknown',
     `a cancel without full process-tree proof reported ${ended.outcome}`);
-  assert.strictEqual(results.cancelUnknownGateAfterAck, 0,
-    'the Project remained blocked after visible legacy-unknown acknowledgement');
-  /* V1-404: the killed shell left its `sleep 60` in the runner's group, so the first confirmation(s) were refused on screen */
-  assert.ok((results.legacyAckRefusals?.length ?? 0) >= 1 &&
-    results.legacyAckRefusals[0].includes('아직 실행 중일 수 있어요'),
-    `a confirmation was not refused while the runner's child was alive: ${JSON.stringify(results.legacyAckRefusals)}`);
+  assert.ok(results.cancelUnknownGateAfterAck >= 1, 'the cancellation Project lost its unknown Writer hold');
+  assert.ok((results.legacyAckRefusals?.length ?? 0) >= 1 && results.legacyAckRefusals.every((entry) => JSON.parse(entry).ok === false),
+    'a synthetic unknown writer was released by user confirmation');
 }
 
 /* ── `15` SC-03 부분 완료 — WBS-18's acceptance row, rendered ──────────────────────────── */
@@ -4986,8 +4983,7 @@ assert.strictEqual(results.screenAfterBack, 'SC-01', '다른 프로젝트 열기
     `the 못 한 것 list still speaks the CLI's tool name instead of the action: ${results.partialNotDone}`);
   assert.ok(results.partialCard.includes('JuQode가 지켜본 도구 실행 1'),
     'the Result lost its independently observed tool result when the process tree became unknown');
-  assert.strictEqual(results.partialUnknownGateAfterAck, 0,
-    'the Project remained blocked after visible legacy-unknown acknowledgement');
+  assert.ok(results.partialUnknownGateAfterAck >= 1, 'the partial cancellation Project lost its unknown Writer hold');
   assert.strictEqual(results.partialReds, 0, '부분 완료 was painted as a failure');
   assert.ok(!results.partialCard.includes('취소했어요'),
     'the unknown partial Run was presented as a confirmed cancellation');
@@ -5038,8 +5034,8 @@ assert.ok(results.recentLast.includes('마지막 작업'),
   assert.ok(quoted, `the summary quotes something nobody submitted: ${results.recentLast}`);
 }
 
-assert.strictEqual(results.recentAfterBack, 3, 'the recent list lost a row on return');
-assert.ok(results.recentTopAfterBack && results.recentTopAfterBack.endsWith(path.basename(SEED)),
+assert.strictEqual(results.recentAfterBack, 5, 'the recent list lost the original or isolated fixture Projects');
+assert.ok(results.recentTopAfterBack && results.recentTopAfterBack.endsWith(path.basename(results.recentExpectedAfterBack ?? SEED)),
   'the just-opened project is not at the top of the recent list — the list was not re-read');
 /* 15 SC-01 Failure State: title + reason in plain words + TWO recovery actions, and it is
  * the one red on this screen. */

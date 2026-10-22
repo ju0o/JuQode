@@ -1,6 +1,6 @@
 'use strict';
 /* V1-404 · the user's "it stopped" confirmation is necessary and never enough. A stored ended_unknown runner is OBSERVED
- * (Linux /proc: pgrp/sid membership + root start time) before an acknowledgement may be written, on BOTH entry points
+ * (Linux /proc: pgrp/sid membership + root start time) as information only; neither absence nor a user statement can release the Writer hold, on BOTH entry points
  * (legacy-unknown-ack, task-retry confirmPriorStopped). Real processes below are started and killed by this test only
  * (own pids / own process groups); nothing else on the host is touched and no model is called (PATH holds only `git`). */
 const test = require('node:test');
@@ -84,7 +84,7 @@ test('the root gone but a CHILD left in its group: still LIVE_CONFIRMED, still r
   process.kill(c.pid, 'SIGKILL');                                     // the root only
   await rig(async ({ db, project, h, unknownWork }) => {
     const w = unknownWork({}, { pid: c.pid, startedAt });
-    assert.ok(await until(() => { try { process.kill(c.pid, 0); return false; } catch { return true; } }) || true);
+    assert.ok(await until(() => { try { process.kill(c.pid, 0); return false; } catch { return true; } }), 'the owned root was not reaped');
     const o = observeRunner(repo.getWork(db, w.id));
     assert.deepStrictEqual([o.verdict, o.reason], ['LIVE_CONFIRMED', 'group-or-session-members-alive']);
     assert.ok(o.evidence.members.length >= 1);
@@ -95,23 +95,21 @@ test('the root gone but a CHILD left in its group: still LIVE_CONFIRMED, still r
   killGroup(c.pid);
 });
 
-test('a runner that really ended: absence is OBSERVED, the confirmation is recorded WITH the observation, a repeat adds nothing, the next gate is the ordinary one', { skip: !LINUX }, async () => {
+test('a recorded runner absent from its group/session still leaves the hold closed because escaped descendants are unproven', { skip: !LINUX }, async () => {
   const c = spawnOwned('sleep', ['300']);
   const startedAt = iso();
   killGroup(c.pid);
   await rig(async ({ db, project, task, h, unknownWork }) => {
     const w = unknownWork({ taskId: task.id, idempotencyKey: 'k2' }, { pid: c.pid, startedAt });
     assert.ok(await until(() => observeRunner(repo.getWork(db, w.id)).verdict === 'NOT_OBSERVED_WITH_EVIDENCE'), 'never observed as gone');
+    const before = rows(db);
     const r = await h['juqode:task-retry'](null, task.id, w.id, 'again', 'k-r2', true);
-    assert.strictEqual(r.reason, 'claude-unavailable', 'the ordinary gate after the hold lifted');
-    const a = acks(db, w.id);
-    assert.strictEqual(a.length, 1);
-    const rec = JSON.parse(a[0].payload).juqodeProcess;
-    assert.deepStrictEqual([rec.stoppedConfirmedByUser, rec.observation.verdict], [true, 'NOT_OBSERVED_WITH_EVIDENCE']);
-    assert.ok(rec.observation.limits.length, 'the observation hides its limit');
+    assert.strictEqual(r.reason, HELD);
+    assert.strictEqual(r.detail.observation, 'NOT_OBSERVED_WITH_EVIDENCE');
     const again = await h['juqode:task-retry'](null, task.id, w.id, 'again', 'k-r3', true);
-    assert.notStrictEqual(again.reason, HELD);
-    assert.strictEqual(acks(db, w.id).length, 1, 'a duplicate confirmation added a record');
+    assert.strictEqual(again.reason, HELD);
+    assert.strictEqual(acks(db, w.id).length, 0);
+    assert.strictEqual(rows(db), before, 'a refused confirmation changed records');
   });
 });
 
@@ -183,7 +181,10 @@ test('app restart: the stored identity is read back from the file store and judg
   assert.deepStrictEqual([r.ok, r.reason, r.detail?.observation], [false, HELD, 'LIVE_CONFIRMED']);
   killGroup(c.pid);
   assert.ok(await until(() => observeRunner(repo.getWork(db2, ids.w)).verdict === 'NOT_OBSERVED_WITH_EVIDENCE'));
-  assert.strictEqual(h2['juqode:legacy-unknown-ack'](null, ids.p, ids.w, true).ok, true, 'after the runner really ended, the same confirmation works');
+  const before = rows(db2);
+  assert.strictEqual(h2['juqode:legacy-unknown-ack'](null, ids.p, ids.w, true).ok, false, 'absence after restart released an unproven tree');
+  assert.strictEqual(rows(db2), before);
+  db2.close();
 });
 
 /* a synthetic /proc: how the parser and the verdict treat shapes a real host rarely produces */
@@ -226,7 +227,7 @@ test('source pin: both entry points go through the observation gate; nothing in 
   assert.ok(!/repo\.acknowledgeUnknownProcessStopped/.test(ipc), 'ipc.js writes the acknowledgement without observing');
   const all = ['app/main/ipc.js', 'app/main/work/supervisor.js', 'app/main/qc/run.js'].map((f) => src.code(f)).join('\n');
   assert.ok(!/repo\.acknowledgeUnknownProcessStopped|\backnowledgeUnknownProcessStopped\(/.test(all.replace(/acknowledgeAfterObservation/g, '')));
-  assert.ok(/obs\?\.verdict !== 'NOT_OBSERVED_WITH_EVIDENCE'/.test(src.code('app/main/work/runner-liveness.js')));
+  assert.ok(!/repo\.acknowledgeUnknownProcessStopped/.test(src.code('app/main/work/runner-liveness.js')), 'an informational observation can still append an ACK');
 });
 
 test('the FIRST child\'s identity reaches the Work row (it used to exist only as a signal, so the columns stayed empty)', async () => {
@@ -249,7 +250,7 @@ test('the FIRST child\'s identity reaches the Work row (it used to exist only as
   assert.ok(Date.parse(w.runner_started_at) >= t0 - 1000 && Date.parse(w.runner_started_at) <= Date.now());
 });
 
-test('an older row with the identity only in its juqodeProcess signal is judged by that signal (live refused, ended accepted)', { skip: !LINUX }, async () => {
+test('an older signal-only runner identity remains observable, while both live and absent runners keep the hold', { skip: !LINUX }, async () => {
   const live = spawnOwned('sleep', ['300']);
   const gone = spawnOwned('sleep', ['300']);
   const goneAt = iso(); killGroup(gone.pid);
@@ -263,8 +264,11 @@ test('an older row with the identity only in its juqodeProcess signal is judged 
     const r1 = h['juqode:legacy-unknown-ack'](null, project.id, a.id, true);
     assert.deepStrictEqual([r1.ok, r1.detail?.observation], [false, 'LIVE_CONFIRMED']);
     const b = mkSignalOnly(gone.pid, goneAt);
-    assert.ok(await until(() => h['juqode:legacy-unknown-ack'](null, project.id, b.id, true).ok));
-    assert.strictEqual(JSON.parse(acks(db, b.id)[0].payload).juqodeProcess.observation.verdict, 'NOT_OBSERVED_WITH_EVIDENCE');
+    assert.ok(await until(() => require(path.join(R, 'app/main/work/runner-liveness.js')).observeWork(repo.getWork(db, b.id), db).verdict === 'NOT_OBSERVED_WITH_EVIDENCE'));
+    const before = rows(db);
+    assert.strictEqual(h['juqode:legacy-unknown-ack'](null, project.id, b.id, true).ok, false);
+    assert.strictEqual(acks(db, b.id).length, 0);
+    assert.strictEqual(rows(db), before);
   });
   killGroup(live.pid);
 });
@@ -292,7 +296,7 @@ test('F1: an OLD statement-only confirmation + a runner that is still alive: eve
   killGroup(c.pid);
 });
 
-test('F1: statement-only + identity missing (UNKNOWN) keeps the hold; statement-only + observed gone releases it WITHOUT rewriting, and a new confirmation appends an observed one', { skip: !LINUX }, async () => {
+test('F1: historic statement-only records never release a hold, including beside a currently absent runner', { skip: !LINUX }, async () => {
   const gone = spawnOwned('sleep', ['300']); const startedAt = iso(); killGroup(gone.pid);
   await rig(async ({ db, project, h, unknownWork }) => {
     const none = unknownWork({}, null);
@@ -300,20 +304,21 @@ test('F1: statement-only + identity missing (UNKNOWN) keeps the hold; statement-
     assert.strictEqual((await h['juqode:work-start'](null, project.id, 'x')).reason, HELD, 'UNKNOWN identity released a hold');
     const b = unknownWork({}, { pid: gone.pid, startedAt });
     STATEMENT(db, project, b);
-    // `none` still holds the project; look at `b` alone through the hold lookup
-    const { unknownTaskRunWithLiveRunner } = require(path.join(R, 'app/main/work/runner-liveness.js'));
-    assert.ok(await until(() => unknownTaskRunWithLiveRunner(db, project.id, none.id) === null), 'a statement beside an observed-gone runner never released');
-    const stmtRows = acks(db, b.id).length;
-    assert.strictEqual(stmtRows, 1);
-    const ok = h['juqode:legacy-unknown-ack'](null, project.id, b.id, true);
-    assert.deepStrictEqual([ok.ok, ok.existing], [true, false]);
-    assert.strictEqual(acks(db, b.id).length, 2, 'the old statement row must stay and the observed one be appended');
-    assert.strictEqual(repo.stopAcknowledgementKind(db, b.id), 'observed');
+    const { unknownTaskRunWithLiveRunner, holdReleased } = require(path.join(R, 'app/main/work/runner-liveness.js'));
+    assert.ok(await until(() => observeRunner(repo.getWork(db, b.id)).verdict === 'NOT_OBSERVED_WITH_EVIDENCE'));
+    assert.strictEqual(holdReleased(db, repo.getWork(db, b.id)), false);
+    assert.ok(unknownTaskRunWithLiveRunner(db, project.id, none.id), 'a legacy source-id bypass released the project');
+    const before = rows(db);
+    const refused = h['juqode:legacy-unknown-ack'](null, project.id, b.id, true);
+    assert.strictEqual(refused.ok, false);
+    assert.strictEqual(acks(db, b.id).length, 1, 'the old statement was removed or a new ACK appended');
+    assert.strictEqual(repo.stopAcknowledgementKind(db, b.id), 'statement');
+    assert.strictEqual(rows(db), before);
   });
 });
 
 /* ── F2 · every runner a Work ever left (first child + each resume child) is judged ── */
-test('F2: two independent process groups: the EARLIER group\'s child is alive, the later group ended -> LIVE, refused; the reverse too; both ended -> accepted', { skip: !LINUX }, async () => {
+test('F2: two independent process groups: the EARLIER group\'s child is alive, the later group ended -> LIVE, refused; the reverse too; both absent -> still held', { skip: !LINUX }, async () => {
   const mkGroup = async (withChild) => {
     const g = withChild ? spawnOwned('sh', ['-c', 'sleep 300 & wait']) : spawnOwned('sleep', ['300']);
     if (withChild) await until(() => cp.spawnSync('pgrep', ['-g', String(g.pid), '-x', 'sleep']).status === 0);
@@ -338,7 +343,8 @@ test('F2: two independent process groups: the EARLIER group\'s child is alive, t
     const ok = h['juqode:legacy-unknown-ack'](null, project.id, w.id, true);   // task-linked: legacy path refuses by contract
     assert.strictEqual(ok.reason, 'not-legacy-work');
     const r2 = await h['juqode:task-retry'](null, task.id, w.id, 'again', 'k-f2b', true);
-    assert.strictEqual(r2.reason, 'claude-unavailable', 'with every recorded runner gone the ordinary gate follows');
+    assert.strictEqual(r2.reason, HELD, 'all recorded runners absent cannot prove escaped descendants stopped');
+    assert.strictEqual(acks(db, w.id).length, 0);
   });
   killGroup(first.pid); killGroup(second.pid);
 });
@@ -393,14 +399,14 @@ test('older single-runner observed ACK + the EARLIER runner group still alive: e
     killGroup(early.pid);
     assert.ok(await until(() => require(path.join(R, 'app/main/work/runner-liveness.js')).observeWork(repo.getWork(db, w.id), db).verdict === 'NOT_OBSERVED_WITH_EVIDENCE'));
     const ok = await h['juqode:task-retry'](null, task.id, w.id, 'again', 'k-v1b', true);
-    assert.strictEqual(ok.reason, 'claude-unavailable', 'all runners observed, none unrecorded: the hold lifts');
-    assert.strictEqual(acks(db, w.id).length, 2, 'old row kept, new every-runner row appended');
-    assert.strictEqual(repo.stopAcknowledgementKind(db, w.id), 'observed');
+    assert.strictEqual(ok.reason, HELD);
+    assert.strictEqual(acks(db, w.id).length, 1, 'old row must remain without a new ACK');
+    assert.strictEqual(repo.stopAcknowledgementKind(db, w.id), 'statement');
   });
   killGroup(early.pid); killGroup(late.pid);
 });
 
-test('older single-runner observed ACK with an unrecorded resume (incomplete identities) stays held; a new every-runner ACK records scope and runner count', async () => {
+test('older ACKs with incomplete identities stay held, and current process absence appends no replacement ACK', async () => {
   await rig(async ({ db, project, task, h, unknownWork, mk }) => {
     const dead = { pid: 2_000_000_001, startedAt: iso() };
     const w = unknownWork({}, dead);
@@ -410,7 +416,8 @@ test('older single-runner observed ACK with an unrecorded resume (incomplete ide
     const ok = unknownWork({}, dead);
     const hh = mk({ observeRunner: undefined });
     const r = hh['juqode:legacy-unknown-ack'](null, project.id, ok.id, true);
-    // pid 2_000_000_001 is absent on Linux: observed gone
-    if (LINUX) { assert.strictEqual(r.ok, true); const o = JSON.parse(acks(db, ok.id)[0].payload).juqodeProcess.observation; assert.deepStrictEqual([o.scope, o.runners], ['all-runners', 1]); }
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.reason, HELD);
+    assert.strictEqual(acks(db, ok.id).length, 0);
   });
 });

@@ -2,7 +2,7 @@
 /* V1-004 §6.6 · an `ended_unknown` Work (a process JuQode could not prove stopped) holds the project's Writer slot on EVERY way
  * to start something that could write: same-Task retry, another Task, a new Work with no Task, a file-changing Quick Command.
  * Synthetic DB only. PATH is emptied, so a start that slipped past the hold would show up as `claude-unavailable`, never as a
- * model call. The hold lifts only through the user's explicit acknowledgement (existing contract). */
+ * model call. The hold stays closed without trusted proof covering escaped descendants; user confirmation alone never releases it. */
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
@@ -69,18 +69,18 @@ test('a read-only Quick Command is not held, and a wrong or missing acknowledgem
   });
 });
 
-test('only the user\'s explicit confirmation lifts the hold, and then it lifts for THAT Work only (the next gate is the ordinary one)', async () => {
+test('explicit confirmation plus process absence leaves the hold closed and appends no ACK', async () => {
   await rig(async ({ db, project, h, t1, prior }) => {
+    const before = snapRows(db);
     const r = await h['juqode:task-retry'](null, t1.id, prior.id, 'again', 'k-retry3', true);
-    assert.strictEqual(repo.hasStoppedProcessAcknowledgement(db, prior.id), true, 'the confirmation was not recorded');
-    assert.strictEqual(r.reason, 'claude-unavailable', 'with PATH emptied the ordinary next gate answers, not a model call');
-    const ack = db.prepare("select source, kind from work_signal where work_id = ? and payload like '%stoppedConfirmedByUser%'").get(prior.id);
-    assert.deepStrictEqual({ ...ack }, { source: 'user', kind: 'raw' });
-  }, { observeRunner: () => ({ verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'stub-see-runner-liveness.test.js' }) });   // the real observer is exercised there
+    assert.strictEqual(repo.hasStoppedProcessAcknowledgement(db, prior.id), false);
+    assert.strictEqual(r.reason, HELD);
+    assert.strictEqual(snapRows(db), before);
+  }, { observeRunner: () => ({ verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: 'stub-see-runner-liveness.test.js' }) });
 });
 
-test('the hold is a single shared gate: preflight and the Quick Command gate both read the same acknowledgement lookup (source pin)', () => {
+test('the hold is a single shared gate: preflight and the Quick Command gate both read the same unresolved-work lookup (source pin)', () => {
   const src = require(path.join(__dirname, 'src.js'));
-  assert.ok(/unknownTaskRunWithLiveRunner\(db, project\.id, allowUnknownWorkId\)/.test(src.code('app/main/work/supervisor.js')));
+  assert.ok(/unknownTaskRunWithLiveRunner\(db, project\.id\)/.test(src.code('app/main/work/supervisor.js')));
   assert.ok(/if \(unknownTaskRunWithLiveRunner\(db\(\), projectId\)\) return 'prior-run-unknown'/.test(src.code('app/main/ipc.js')));
 });

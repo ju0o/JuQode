@@ -506,24 +506,6 @@ export function renderSC02(root, api, nav, state) {
     panel.appendChild(el('div', 'sm t', C.gap.task.legacyUnknownTitle));
     panel.appendChild(el('div', 'xs mut', C.gap.task.legacyUnknownBody));
     if (runs.length > 1) panel.appendChild(el('div', 'xs mut2', C.gap.task.legacyUnknownManyRuns(runs.length)));
-    const check = el('input');
-    check.type = 'checkbox';
-    const label = el('label', 'xs mut2 task-legacy-confirm');
-    label.append(check, document.createTextNode(` ${C.gap.task.legacyUnknownCheck}`));
-    const note = el('div', 'xs mut2');
-    const acknowledge = btn('btn sm', C.gap.task.legacyUnknownResolve, async () => {
-      if (!check.checked) return;
-      acknowledge.disabled = true;
-      const result = await api.legacyUnknownAck(p.id, work.id, true);
-      if (result?.ok) await refreshTasks();
-      else {
-        note.textContent = result?.reason === 'prior-process-may-still-live' ? C.gap.task.retryProcessStillLive : C.gap.task.retryFailed;
-        acknowledge.disabled = false;
-      }
-    });
-    acknowledge.disabled = true;
-    check.addEventListener('change', () => { acknowledge.disabled = !check.checked; });
-    panel.append(label, note, acknowledge);
     legacyUnknownNotice.appendChild(panel);
   };
   const drawTaskList = () => {
@@ -1498,7 +1480,9 @@ function renderRunReview(task, detail, refresh, nav) {
   }
   section.appendChild(criteria);
 
-  if (latest.work.status === 'ended' && task.verdict !== 'pass') {
+  if (latest.work.status === 'ended' && latest.work.outcome === 'ended_unknown') {
+    section.appendChild(el('div', 'panel unk task-writer-hold', C.gap.task.retryProcessStillLive));
+  } else if (latest.work.status === 'ended' && task.verdict !== 'pass') {
     const retry = el('details', 'task-retry');
     retry.appendChild(el('summary', 'xs mut', C.gap.board.retryShort));
     retry.appendChild(el('div', 'xs mut2', C.gap.task.retryRun));
@@ -1507,19 +1491,12 @@ function renderRunReview(task, detail, refresh, nav) {
     reason.placeholder = C.gap.task.retryPlaceholder;
     reason.setAttribute('aria-label', C.gap.task.retryReason);
     const note = el('div', 'xs mut2');
-    const confirmUnknown = latest.work.outcome === 'ended_unknown' ? el('label', 'xs mut2') : null;
-    const confirmCheck = confirmUnknown ? el('input') : null;
-    if (confirmUnknown) {
-      confirmCheck.type = 'checkbox';
-      confirmUnknown.append(confirmCheck, document.createTextNode(` ${C.gap.task.retryUnknownConfirm}`));
-    }
     const start = btn('btn sm pri', C.gap.task.retrySubmit, async () => {
       if (!reason.value.trim()) { note.textContent = C.gap.task.retryNeedsReason; return; }
-      if (confirmCheck && !confirmCheck.checked) { note.textContent = C.gap.task.retryUnknownRequired; return; }
       start.disabled = true;
       note.textContent = '';
       const result = await window.juqode.taskRetry(task.id, latest.work.id, reason.value.trim(),
-        window.crypto.randomUUID(), Boolean(confirmCheck?.checked));
+        window.crypto.randomUUID());
       if (result?.ok) nav.toWork(result.work);
       else {
         note.textContent = result?.reason === 'prior-process-may-still-live'
@@ -1528,7 +1505,6 @@ function renderRunReview(task, detail, refresh, nav) {
       }
     });
     retry.append(el('label', 'xs mut2', C.gap.task.retryReason), reason);
-    if (confirmUnknown) retry.appendChild(confirmUnknown);
     retry.append(note, start);
     section.appendChild(retry);
   }

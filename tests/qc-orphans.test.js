@@ -26,12 +26,12 @@ test('a reused parent id is told apart by creation time: its children are not ou
   assert.deepStrictEqual(survivorsIn([P(100, 4, 30), P(300, 100, 31)], [kid], [ROOT]), [], 'children of an unrelated process that reuses the root pid');
   assert.deepStrictEqual(survivorsIn([P(101, 4, 40)], [kid], [ROOT]), [], 'another process now has the member pid');
 });
-test('LIMITED: a descendant whose parent died before the snapshot has no recorded link -- the check cannot see it (documented limit; such a Stop needs the user, see README)', () => {
+test('LIMITED: a descendant whose parent died before the snapshot has no recorded link -- the check cannot see it (documented limit; such a Stop remains held, see README)', () => {
   assert.deepStrictEqual(survivorsIn([P(900, 777, 3)], [kid], [ROOT]), [], 'if this ever finds it, the contract in the README can change');
 });
 
 const settle = () => new Promise((r) => setTimeout(r, 40));
-test('POLICY: no snapshot -- gone, alive, failed, thrown, bare pid -- ever releases; the observation is only recorded; the user\'s per-Run confirmation is the release', async () => {
+test('POLICY: no snapshot -- gone, alive, failed, thrown, bare pid -- ever releases; the observation is only recorded; user confirmation cannot release it', async () => {
   let ans = null; let seen = null;
   const reg = createUncertain({ probe: async (m, parents) => { seen = { m, parents }; if (ans instanceof Error) throw ans; return ans; }, retryMs: 5, maxTries: 2 });
   reg.add('r1', 'p', [kid], { parents: [ROOT] });
@@ -42,8 +42,8 @@ test('POLICY: no snapshot -- gone, alive, failed, thrown, bare pid -- ever relea
   ans = [kid]; reg.refresh('p'); await settle(); assert.ok(reg.blocks('p')); assert.strictEqual(reg.heldFor('p')[0].observed, 'observed-alive');
   ans = []; reg.refresh('p'); await settle();
   assert.ok(reg.blocks('p'), 'a snapshot showing every recorded pid gone released the hold');
-  assert.deepStrictEqual([reg.heldFor('p')[0].observed, reg.heldFor('p')[0].needsAck], ['observed-gone', true]);
-  reg.release('r1'); assert.strictEqual(reg.blocks('p'), null, 'the user\'s confirmation did not release');
+  assert.deepStrictEqual([reg.heldFor('p')[0].observed, reg.heldFor('p')[0].needsAck], ['observed-gone', false]);
+  reg.release('r1'); assert.strictEqual(reg.blocks('p'), 'r1', 'a compatibility release call unlocked the hold');
   assert.strictEqual(reg.blocks('other'), null);
 
   for (const m of [[], null, [{ pid: 5 }], [{ pid: 5, created: '' }], [{ pid: 5, created: null }]]) {

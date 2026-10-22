@@ -560,7 +560,7 @@ function stopAcknowledgementKind(db, workId) {
       const process = JSON.parse(row.payload ?? '')?.juqodeProcess;
       if (process?.stoppedConfirmedByUser !== true || process?.workId !== workId) continue;
       /* 'observed' = recorded by the every-runner observer (scope 'all-runners'). An observation written by the earlier single-runner
-       * observer carries no scope: it saw one runner, so it is a statement again until the CURRENT observation says otherwise. */
+       * observer carries no scope: it saw one runner, so this historical classification remains statement. Neither kind releases a current Writer hold. */
       if (process.observation?.verdict === 'NOT_OBSERVED_WITH_EVIDENCE' && process.observation.scope === 'all-runners') return 'observed';
       kind = 'statement';
     } catch { /* not a confirmation */ }
@@ -569,7 +569,8 @@ function stopAcknowledgementKind(db, workId) {
 }
 const hasStoppedProcessAcknowledgement = (db, workId) => stopAcknowledgementKind(db, workId) !== null;
 
-/* Writes the record only. Callers go through runner-liveness.acknowledgeAfterObservation, which decides whether it may be written. */
+/* Legacy record writer retained for historic data compatibility. Current runtime endpoints append no such ACK:
+ * process absence cannot prove escaped descendants stopped, and these records cannot release a Writer hold. */
 function acknowledgeUnknownProcessStopped(db, projectId, workId, observation = null) {
   const work = db.prepare(`select id, project_id, task_id, status, outcome from work where id = ?`).get(workId);
   if (!work || work.project_id !== projectId || work.status !== 'ended' || work.outcome !== 'ended_unknown') {

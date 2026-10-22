@@ -340,7 +340,7 @@ test('duplicate Stop after a kill was requested does nothing; a NEW run of the s
 const { windowsTools } = require(path.join(R, 'app/main/qc/stopper.js'));
 const { createUncertain } = require(path.join(R, 'app/main/qc/uncertain.js'));
 
-test('real Windows: a recorded scratch tree holds the gate while alive, a reused pid (wrong creation time) does not, and once the tree is gone it is only OBSERVED gone -- the user releases it', { skip: !WIN && 'needs the Windows process snapshot' }, async () => {
+test('real Windows: a recorded scratch tree holds the gate while alive, a reused pid (wrong creation time) does not, and once the tree is gone it is only OBSERVED gone -- the hold remains closed', { skip: !WIN && 'needs the Windows process snapshot' }, async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'juqode-qcstop-'))); dirs.push(dir);
   const grand = "setInterval(()=>{},1000)";
   const root = "const {spawn}=require('child_process'); spawn(process.execPath,['-e'," + JSON.stringify(grand) + "],{stdio:'ignore'}); setInterval(()=>{},1000)";
@@ -364,9 +364,9 @@ test('real Windows: a recorded scratch tree holds the gate while alive, a reused
     assert.strictEqual(k.status, 0);
     assert.ok(await until(() => { reg.refresh('p1'); return reg.heldFor('p1')[0]?.observed === 'observed-gone'; }, 20000), 'the snapshot never saw the whole tree gone');
     assert.ok(members.every((m) => !alive(m.pid)), 'a member survived');
-    assert.strictEqual(reg.blocks('p1'), 'real-run', 'a snapshot alone released the hold (policy: only the user does)');
+    assert.strictEqual(reg.blocks('p1'), 'real-run', 'a snapshot alone released the hold');
     reg.release('real-run');
-    assert.strictEqual(reg.blocks('p1'), null);
+    assert.strictEqual(reg.blocks('p1'), 'real-run');
   } finally { try { scratch.kill(); } catch { /* gone */ } }
 });
 

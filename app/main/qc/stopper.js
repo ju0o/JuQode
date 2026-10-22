@@ -28,7 +28,8 @@
  *     IMMEDIATELY before taskkill: a process that ended in the meantime is never addressed (a pid is reusable).
  *   - A Stop that was requested and whose cause of ending cannot be shown (taskkill failed, no signal from the
  *     fallback) is `unknown` -- never `failed` and never `stopped`. `stop.uncertain` + `stop.members` say which
- *     processes might still be alive, so the Writer gate can hold until a later snapshot shows them gone. */
+ *     processes might still be alive. For an unknown result, snapshots and user statements cannot release
+ *     the Writer gate; descendants outside the snapshot remain unproven. */
 const { execFile } = require('node:child_process');
 
 const PS_SNAPSHOT = "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToString('o') }";

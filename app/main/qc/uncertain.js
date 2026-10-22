@@ -1,19 +1,9 @@
 'use strict';
-/* Quick Command runs that MIGHT still have processes writing (stopper.js `stop.uncertain`, or a run nobody saw finish).
- *
- * The run's own status stays `unknown` (an existing qc_status): not `failed`, not `stopped`, and a user's confirmation
- * never rewrites it. What this holds is the Writer gate: while an entry is here, a new Work and a file-changing Quick
- * Command are refused (`prior-run-unknown`, approved copy).
- *
- * Two kinds of entry:
- *   - members known (pid + creation time from the Stop snapshot): leaves when a LATER snapshot shows every member gone.
- *   - needsAck (the tree was never recorded: a restart found a run that never finished, or the Stop could not read it):
- *     an absent root cannot prove that detached descendants are gone, so ONLY the user's recorded confirmation leaves.
- * A snapshot that cannot be read keeps the gate shut. Entries are rebuilt after a restart (`restore`) from the run rows
- * and their Stop evidence, so a restart alone never opens it. */
+/* An unresolved Quick Command keeps the Project Writer gate closed. Current process snapshots
+ * cannot exclude descendants that escaped the recorded tree. Historic user ACKs are records only;
+ * neither an ACK nor absence of observed members releases the hold, including after restart. */
 const fs = require('node:fs');
 const path = require('node:path');
-const { hasAck } = require('./ack');
 const { validate: validateStop } = require('./stop-proof');
 const { isReadOnlyRun } = require('./rules');
 
@@ -21,7 +11,6 @@ const inside = (root, p) => { const r = path.relative(root, p); return r !== '' 
 
 function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setTimeout } = {}) {
   const held = new Map();                  // runId -> entry
-  const done = new Set();                  // runIds that were held and left this session (never re-added by a restore)
   const failures = new Map();              // projectId -> { reason, at }: the holds could not be rebuilt, so NOTHING is known to be safe
 
   async function recheck(runId) {
@@ -33,7 +22,7 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
     try { alive = await probe(e.members, e.parents); } catch { alive = null; }
     e.checking = false;
     if (!held.has(runId)) return;
-    /* POLICY: what a snapshot sees is only what it sees -- it NEVER releases. It is recorded for the user's eyes; only the user's per-Run confirmation lifts the hold. */
+    /* A snapshot is informational: it cannot prove escaped descendants stopped. */
     if (Array.isArray(alive)) { e.observed = alive.length ? 'observed-alive' : 'observed-gone'; if (!alive.length) return; }
     e.tries += 1;
     if (Array.isArray(alive)) e.members = alive;
@@ -42,16 +31,16 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
 
   const api = {
     add(runId, projectId, members, info = {}) {
-      if (held.has(runId) || done.has(runId)) return;
-      /* a member with no creation time is a bare pid: "that pid is gone" proves nothing about its tree (or a reused pid), so only the user lifts it */
+      if (held.has(runId)) return;
+      /* a member with no creation time is a bare pid: "that pid is gone" proves nothing about its tree (or a reused pid), so it cannot authorize release */
       const identified = Array.isArray(members) && members.length > 0 && members.every((m) => m && Number.isInteger(m.pid) && typeof m.created === 'string' && m.created);
-      held.set(runId, { runId, projectId, members: Array.isArray(members) ? members : null, needsAck: true, observed: null,   // POLICY: ownership of a Windows run's whole tree cannot be proven, so every hold waits for the user
+      held.set(runId, { runId, projectId, members: Array.isArray(members) ? members : null, needsAck: false, observed: null,   // no user confirmation can prove whole-tree termination
                         identified,
                         parents: Array.isArray(info.parents) ? info.parents : [],
                         command: info.command ?? null, startedAt: info.startedAt ?? null, why: info.why ?? null, tries: 0, checking: false });
       const t = schedule(() => recheck(runId), 0); t?.unref?.();
     },
-    has: (runId) => held.has(runId) || done.has(runId),
+    has: (runId) => held.has(runId),
     blocks(projectId) {
       for (const [runId, e] of held) if (e.projectId === projectId) return runId;
       return failures.has(projectId) ? 'restore-failed' : null;
@@ -62,8 +51,8 @@ function createUncertain({ probe, retryMs = 2000, maxTries = 30, schedule = setT
     restoreFailure: (projectId) => failures.get(projectId) ?? null,
     heldFor: (projectId) => [...held.values()].filter((e) => e.projectId === projectId)
       .map(({ runId, command, startedAt, needsAck, why, observed }) => ({ runId, command, startedAt, needsAck, why, observed })),
-    /** The user's recorded confirmation ended it (the caller wrote the audit record). */
-    release(runId) { if (held.delete(runId)) done.add(runId); },
+    /** No current termination proof covers escaped descendants; compatibility callers cannot release a hold. */
+    release() { return false; },
     refresh(projectId) { for (const [runId, e] of held) if (e.projectId === projectId) { e.tries = 0; recheck(runId); } },
     size: () => held.size,
     recheck,
@@ -86,7 +75,7 @@ function readStop(root, ref) {
 }
 
 /**
- * Rebuild the holds a restart would otherwise forget. FAIL CLOSED: a row whose evidence cannot be read is held (needs the user),
+ * Rebuild the holds a restart would otherwise forget. FAIL CLOSED: a row whose evidence cannot be read is held,
  * and any error that stops the pass is thrown so the caller records a restore failure instead of "restored".
  * @param {object} o
  * @param {object[]} o.rows        EVERY unresolved quick_command_run row of ONE project (no LIMIT; the safety query)
@@ -98,7 +87,7 @@ function restore({ rows, root, registry }) {
   const out = [];
   for (const r of rows) {
     /* a read-only run (the fixed `git status`) cannot have changed a file; everything else, and anything not provably that, can */
-    if (registry.has(r.id) || isReadOnlyRun(r) || hasAck(root, r)) continue;
+    if (registry.has(r.id) || isReadOnlyRun(r)) continue;
     const read = readStop(root, r.output_ref);
     const info = { command: r.command, startedAt: r.started_at };
     const proof = read.ok && read.rec ? validateStop(read.rec, r) : { kind: 'untrusted', why: read.ok ? 'no-stop-record' : read.why };
@@ -109,9 +98,9 @@ function restore({ rows, root, registry }) {
     } else if (proof.kind === 'members') {
       registry.add(r.id, r.project_id, proof.members, { ...info, parents: proof.parents, why: 'stop-uncertain' });
     } else {
-      /* never finished, no record, or a record that is incomplete/contradictory: nothing may be inferred; only the user lifts it */
+      /* never finished, no record, or a record that is incomplete/contradictory: nothing may be inferred; the Writer hold stays closed */
       registry.add(r.id, r.project_id, [{ pid: r.runner_pid ?? null, created: null }].filter((m) => m.pid), {
-        ...info, needsAck: true, why: !read.ok ? 'evidence-unreadable' : (read.rec ? 'evidence-incomplete' : 'never-finished') });
+        ...info, why: !read.ok ? 'evidence-unreadable' : (read.rec ? 'evidence-incomplete' : 'never-finished') });
     }
     out.push(r.id);
   }

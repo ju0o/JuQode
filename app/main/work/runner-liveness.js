@@ -1,12 +1,11 @@
 'use strict';
 const { windowsRunnerTreeMayBeAlive } = require('../claude/session');
 const fs = require('node:fs');
-const repo = require('../db/repo');
 
 /* A Run which became ended_unknown after cancellation/restart may still have a detached Claude
  * process writing to the Project. An absent root PID cannot prove detached descendants are gone.
- * The probe is informational only; an unknown Task Run blocks the Project until explicit user
- * acknowledgement even when the original PID now appears absent. */
+ * The probe is informational only; an ended_unknown Work keeps the Project Writer hold even when
+ * every recorded PID now appears absent or a previous version stored a user acknowledgement. */
 function runnerMayBeAlive(work) {
   /* No durable identity means there is no sound basis for saying the detached child is gone. */
   if (!Number.isInteger(work?.runner_pid) || work.runner_pid < 1) return true;
@@ -121,40 +120,30 @@ function observeWork(work, db, opts) {
   return { verdict: 'NOT_OBSERVED_WITH_EVIDENCE', reason: seen.length > 1 ? 'all-recorded-runners-absent' : seen[0].reason, evidence, limits: LIMITS };
 }
 
-/* Is this ended_unknown Work's Writer Hold released? Only by a confirmation recorded WITH an observation, or by a user statement
- * (everything recorded before the observer existed) that the runner's CURRENT observation does not contradict. A statement is never
- * promoted: the row stays as it is, and a live or unobservable runner keeps the hold. */
-function holdReleased(db, row, observe = observeWork) {
-  const kind = repo.stopAcknowledgementKind(db, row.id);
-  if (kind === 'observed') return true;
-  if (kind !== 'statement') return false;
-  try { return observe(row, db)?.verdict === 'NOT_OBSERVED_WITH_EVIDENCE'; } catch { return false; }
-}
+/* No current producer proves termination of descendants that escaped their recorded session.
+ * Historic ACKs and process absence remain inspectable records, never authority to free a Writer. */
+function holdReleased() { return false; }
 
-/* The ONE way a stopped-by-the-user acknowledgement is recorded. The user's confirmation is necessary and never
- * enough: a live runner, or one that cannot be observed, appends nothing. An acknowledgement that already exists
- * is returned as it is (no second record, no second probe). */
+/* Compatibility endpoint: a user statement and an informational observation cannot prove termination.
+ * Keep prior records untouched and append no acknowledgement, including when an old ACK exists. */
 function acknowledgeAfterObservation(db, projectId, workId, observe = observeWork) {
   const work = db.prepare('select * from work where id = ?').get(workId);
   if (!work || work.project_id !== projectId || work.status !== 'ended' || work.outcome !== 'ended_unknown') {
     return { ok: false, reason: 'not-unknown-work' };
   }
-  if (repo.stopAcknowledgementKind(db, workId) === 'observed') return { ok: true, existing: true };
   let obs;
   try { obs = observe(work, db); } catch { obs = verdictFailed(); }
-  if (obs?.verdict !== 'NOT_OBSERVED_WITH_EVIDENCE') {
-    return { ok: false, reason: 'prior-process-may-still-live',
-      detail: { observation: obs?.verdict === 'LIVE_CONFIRMED' ? 'LIVE_CONFIRMED' : 'UNKNOWN', why: obs?.reason ?? 'no-verdict' } };
-  }
-  return repo.acknowledgeUnknownProcessStopped(db, projectId, workId, { verdict: obs.verdict, reason: obs.reason, limits: obs.limits, scope: 'all-runners', runners: obs.evidence?.recorded ?? null });
+  return { ok: false, reason: 'prior-process-may-still-live',
+    detail: { observation: ['LIVE_CONFIRMED', 'NOT_OBSERVED_WITH_EVIDENCE'].includes(obs?.verdict) ? obs.verdict : 'UNKNOWN',
+      why: obs?.reason ?? 'no-verdict', termination: 'not-proven' } };
 }
 const verdictFailed = () => ({ verdict: 'UNKNOWN', reason: 'observer-failed' });
 
-function unknownTaskRunWithLiveRunner(db, projectId, acknowledgedWorkId = null, observe = observeWork) {
+function unknownTaskRunWithLiveRunner(db, projectId) {
   const unknown = db.prepare(`select * from work
     where project_id = ? and status = 'ended' and outcome = 'ended_unknown'
     order by started_at desc, rowid desc`).all(projectId);
-  return unknown.find((row) => row.id !== acknowledgedWorkId && !holdReleased(db, row, observe)) ?? null;
+  return unknown.find((row) => !holdReleased(db, row)) ?? null;
 }
 
 function unresolvedLegacyUnknownWorks(db, projectId) {

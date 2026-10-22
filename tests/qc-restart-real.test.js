@@ -90,11 +90,12 @@ test('real: force-killing the app leaves the dev server alive; the restarted app
   killTreeOf(c.info.pid); killTreeOf(server);
   assert.ok(await until(() => !alive(server) && !alive(c.info.pid)), 'the test fixture could not be ended');
   const h = mk();
-  assert.strictEqual((await h['juqode:qc-run'](null, c.info.projectId, 'qc.build', 'b')).reason, 'prior-run-unknown', 'the survivor ended, but only the user can say so');
+  assert.strictEqual((await h['juqode:qc-run'](null, c.info.projectId, 'qc.build', 'b')).reason, 'prior-run-unknown', 'observed absence cannot prove escaped descendants stopped');
   const r = await h['juqode:qc-ack-stopped'](null, c.info.projectId, [c.info.runId], true);
-  assert.strictEqual(r.ok, true);
-  const after = mk();                                                   // restart after the release: history and result preserved
-  assert.strictEqual((await after['juqode:qc-run'](null, c.info.projectId, 'qc.build', 'b')).ok, true);
+  assert.strictEqual(r.ok, false);
+  assert.deepStrictEqual(r.acked, []);
+  const after = mk();                                                   // restart after refused confirmation: hold, history and result preserved
+  assert.strictEqual((await after['juqode:qc-run'](null, c.info.projectId, 'qc.build', 'b')).reason, 'prior-run-unknown');
   assert.deepStrictEqual([repo.qcRun(db, c.info.runId).status, repo.qcRun(db, c.info.runId).exit_code], ['unknown', null]);
   assert.ok(repo.qcRunsFor(db, c.info.projectId).some((x) => x.id === c.info.runId), 'the run left the history');
   await until(() => repo.qcRunsFor(db, c.info.projectId).every((x) => x.status !== 'running'), 10000);

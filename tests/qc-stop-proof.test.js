@@ -142,7 +142,7 @@ test('a read-only unknown run never blocks; a write-capable one does; one that o
   assert.deepStrictEqual(h['juqode:qc-list'](null, w.b.id).held, []);
 });
 
-test('tampered or contradictory Stop evidence keeps the hold; a complete record still waits for the user per-Run confirmation', async (t) => {
+test('tampered or contradictory Stop evidence keeps the hold; a complete record remains held after user confirmation', async (t) => {
   const x = bench(); t.after(x.restore);
   fs.writeFileSync(path.join(x.a.path, 'package.json'), JSON.stringify({ scripts: { build: 'node -e 1' } }));
   const id = unknownRun(x, x.a.id, { ruleId: 'qc.build', command: 'npm run build', pid: 4242 });
@@ -159,8 +159,9 @@ test('tampered or contradictory Stop evidence keeps the hold; a complete record 
   put(base);                                                              assert.ok(await held(), 'a complete Stop record alone released the hold (ownership of the whole tree is unproven)');
   assert.strictEqual(x.boot()['juqode:qc-list'](null, x.a.id).held[0].why, 'ownership-unproven');
   const r = x.boot()['juqode:qc-ack-stopped'](null, x.a.id, [id], true);
-  assert.strictEqual(r.ok, true, 'the user\'s confirmation of THIS run did not release');
-  assert.ok(!(await held()));
+  assert.strictEqual(r.ok, false);
+  assert.deepStrictEqual(r.acked, []);
+  assert.ok(await held(), 'confirmation released an unproven process tree');
   assert.deepStrictEqual([row().status, row().exit_code], ['unknown', 1], 'the past result was changed');
 });
 

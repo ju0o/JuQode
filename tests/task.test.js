@@ -550,12 +550,12 @@ test('an unknown Task Run stays gated even when its original PID is absent', () 
       'the fixture PID should be absent on this Linux test host');
     assert.strictEqual(unknownTaskRunWithLiveRunner(db, project.id)?.id, unknown.id,
       'an unknown Run bypassed the gate just because its original PID is absent');
-    assert.strictEqual(unknownTaskRunWithLiveRunner(db, project.id, unknown.id), null,
-      'the explicit acknowledgement exception did not release its own Run');
+    assert.strictEqual(unknownTaskRunWithLiveRunner(db, project.id, unknown.id)?.id, unknown.id,
+      'a supplied source id bypassed the unresolved Run');
   } finally { db.close(); }
 });
 
-test('an unattached legacy unknown Work blocks a Task Run until its process stop is explicitly acknowledged', async () => {
+test('an unattached legacy unknown Work keeps Task Runs held after an unproven confirmation', async () => {
   const { db, project } = setup();
   const dir = tempDir('juqode-legacy-unknown-no-pid-');
   try {
@@ -579,24 +579,20 @@ test('an unattached legacy unknown Work blocks a Task Run until its process stop
     assert.deepStrictEqual(handlers['juqode:legacy-unknown-ack'](null, project.id, legacy.id, false),
       { ok: false, reason: 'confirmation-required' }, 'the app recorded a stop confirmation without explicit user action');
     const acknowledged = handlers['juqode:legacy-unknown-ack'](null, project.id, legacy.id, true);
-    assert.strictEqual(acknowledged.ok, true);
-    assert.strictEqual(repo.hasStoppedProcessAcknowledgement(db, legacy.id), true);
-    const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'legacy-ack-session', cwd: project.path });
-    const finish = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [] });
-    fake.scriptBin(dir, 'claude', `require('node:fs').appendFileSync(${JSON.stringify(invoked)}, 'invoked'); process.stdout.write(${JSON.stringify(init + '\n' + finish + '\n')});`);
-    const allowed = await require(path.join(R, 'app/main/work/supervisor.js')).start(db, project, 'start Task Run after acknowledgement', {
+    assert.strictEqual(acknowledged.ok, false);
+    assert.strictEqual(acknowledged.reason, 'prior-process-may-still-live');
+    assert.strictEqual(repo.hasStoppedProcessAcknowledgement(db, legacy.id), false);
+    const stillHeld = await require(path.join(R, 'app/main/work/supervisor.js')).start(db, project, 'do not overlap after confirmation', {
       evidenceStore: tempDir('juqode-legacy-unknown-store-2-'), bin, detect: async () => ({ available: true }),
       taskId: task.id, idempotencyKey: 'after-legacy-unknown-ack',
     });
-    assert.strictEqual(allowed.ok, true, 'the explicit acknowledgement was not honored by the liveness guard');
-    await allowed.done;
-    assert.strictEqual(fs.existsSync(invoked), true, 'the accepted Task Run did not reach its Agent adapter');
-    assert.strictEqual(db.prepare('select count(*) n from work').get().n, 2,
-      'acknowledging the legacy Work erased it instead of preserving History');
+    assert.strictEqual(stillHeld.reason, 'prior-process-may-still-live');
+    assert.strictEqual(fs.existsSync(invoked), false, 'the refused Task Run reached its Agent adapter');
+    assert.strictEqual(db.prepare('select count(*) n from work').get().n, 1);
   } finally { db.close(); }
 });
 
-test('retrying an unknown Run requires an explicit stopped-process confirmation and creates a new Run', async () => {
+test('retrying an unknown Run remains refused even with a stopped-process confirmation', async () => {
   const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
   const { db, project } = setup();
   const originalStart = require(path.join(R, 'app/main/work/supervisor.js')).start;
@@ -621,13 +617,12 @@ test('retrying an unknown Run requires an explicit stopped-process confirmation 
 
     const confirmed = await handlers['juqode:task-retry'](null, task.id, prior.id,
       'Try again after checking', 'unknown-retry-idem', true);
-    assert.strictEqual(confirmed.ok, true);
-    assert.notStrictEqual(confirmed.work.work.id, prior.id);
-    assert.strictEqual(confirmed.work.work.retry_of_work_id, prior.id);
-    assert.strictEqual(calls[0].allowUnknownWorkId, prior.id);
+    assert.strictEqual(confirmed.ok, false);
+    assert.strictEqual(confirmed.reason, 'prior-process-may-still-live');
+    assert.strictEqual(calls.length, 0, 'a refused retry reached supervisor.start');
+    assert.strictEqual(repo.hasStoppedProcessAcknowledgement(db, prior.id), false);
     assert.strictEqual(repo.getWork(db, prior.id).outcome, 'ended_unknown');
-    assert.strictEqual(repo.worksForTask(db, task.id).length, 2);
-    repo.setWorkState(db, confirmed.work.work.id, { status: 'ended', outcome: 'failed' });
+    assert.strictEqual(repo.worksForTask(db, task.id).length, 1);
   } finally {
     require(path.join(R, 'app/main/work/supervisor.js')).start = originalStart;
     db.close();
