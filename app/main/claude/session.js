@@ -15,7 +15,7 @@
  *     `--allowedTools Edit` was measured changing a second, unapproved file.
  */
 const { spawn, spawnSync } = require('node:child_process');
-const { preflightLaunch, createIdentityCache, EXECUTION_MODES, normaliseMode } = require('../provider/claude-contract');
+const { preflightLaunch, createIdentityCache, EXECUTION_MODES, normaliseMode, grantRefusal, isControlTarget, realTarget, hardLinked } = require('../provider/claude-contract');
 
 /* sha256 per file fingerprint; the version is taken from the process's own `init` event (a `--version` spawn per launch would also pollute fixtures and cost time) */
 const identityCache = createIdentityCache();
@@ -163,30 +163,16 @@ function baseArgs(sessionId) {
  *     accepts comma-separated specs, so the second half became an independent grant.
  * Anything that could mean more than one thing is refused. Not granting is always safe. */
 const UNSAFE_TARGET = /[(),*?[\]{}!\n\r\0]|^\s*$/;
+/* A FILE spec is also refused when it would READ differently from the card: `~` (Claude expands it to the home folder, so `Edit(~/x)` is not the project file `~/x`),
+ * a backslash (an escape in the rule grammar, a separator only on Windows - where the path is already normalised), invisible or control characters, edge whitespace. */
+const UNSAFE_FILE_SPEC = /^~|\\|:|~\d|[\p{Cc}\p{Cf}]|^\s|\s$/u;
+
+/* ONE predicate for "may this grant be offered" and "may this grant be launched": a spec the launch gate (claude-contract.grantRefusal) would refuse is never offered as a button. */
+const grantOrRefusal = (spec) => (grantRefusal(spec) ? { refusal: 'cannot-scope' } : { spec });
 
 function allowSpec(denial, cwd) {
   const r = scopeOf(denial, cwd);
   return r.spec ?? null;
-}
-
-/** Where a file the model names REALLY is: symlinks resolved, and for a file that does not exist yet, the real path of its nearest
- * existing ancestor plus the remaining names. `null` = ambiguous (dangling link, a non-directory in the way, unreadable) and
- * ambiguity is a refusal, never a guess. */
-function realTarget(abs) {
-  const rest = [];
-  let p = abs;
-  for (;;) {
-    let exists = true;
-    try { fs.lstatSync(p); } catch (e) { if (e.code !== 'ENOENT') return null; exists = false; }
-    if (exists) {
-      /* it is there (file, directory or link). A DANGLING link is there too, and realpath refuses it: ambiguous, not "free". */
-      try { return path.join(fs.realpathSync(p), ...rest); } catch { return null; }
-    }
-    const parent = path.dirname(p);
-    if (parent === p) return null;
-    rest.unshift(path.basename(p));
-    p = parent;
-  }
 }
 
 /**
@@ -203,30 +189,36 @@ function scopeOf(denial, cwd) {
   const tool = denial?.tool === 'Write' ? 'Edit' : denial?.tool;
   if (!tool || !/^[A-Za-z][A-Za-z0-9_]*$/.test(tool)) return { refusal: 'cannot-scope' };
   const input = denial.input ?? {};
-  const file = input.file_path ?? input.path ?? input.notebook_path ?? null;
+  /* `Bash(<path>)` is a COMMAND rule, never a file: a Bash denial is scoped by its command only. */
+  const file = tool === 'Bash' ? null : (input.file_path ?? input.path ?? input.notebook_path ?? null);
+  /* no project folder given = nothing to be "inside" of; `cwd ?? '/'` used to make the whole filesystem the project */
+  if (typeof cwd !== 'string' || !cwd) return { refusal: 'cannot-scope' };
 
   if (typeof file === 'string' && file) {
     /* Resolve against the PROJECT, not against JuQode's own working directory — measured:
      * a relative `../../../etc/shadow` resolved into an unrelated tree, so the card and the
      * grant named different files. */
-    const root = cwd ?? '/';
+    const root = cwd;
     const abs = path.resolve(root, file);
     const rel = path.relative(root, abs).split(path.sep).join('/');
     const lexicallyInside = Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
     if (!lexicallyInside) return { refusal: 'outside-project' };
-    if (UNSAFE_TARGET.test(rel)) return { refusal: 'cannot-scope' };
+    if (UNSAFE_TARGET.test(rel) || UNSAFE_FILE_SPEC.test(rel)) return { refusal: 'cannot-scope' };
     let realRoot; let real;
     try { realRoot = fs.realpathSync(root); } catch { return { refusal: 'cannot-scope' }; }
     real = realTarget(abs);
     if (real === null) return { refusal: 'cannot-scope' };
     const rr = path.relative(realRoot, real);
     if (!rr || rr.startsWith('..') || path.isAbsolute(rr)) return { refusal: 'outside-project' };
-    return { spec: `${tool}(${rel})` };
+    /* the project's OWN control files (settings, MCP config, git and husky hooks, .claude hooks/commands/agents, .envrc, tasks.json, workflows) - one list, claude-contract.CONTROL, shared with the settings gate;
+     * checked by name, by real target, and through a symlinked folder that leads there */
+    if (isControlTarget(realRoot, rel, real) || hardLinked(real)) return { refusal: 'cannot-scope' };
+    return grantOrRefusal(`${tool}(${rel})`);
   }
 
   if (typeof input.command === 'string' && input.command.trim()) {
     if (UNSAFE_TARGET.test(input.command)) return { refusal: 'cannot-scope' };
-    return { spec: `${tool}(${input.command}:*)` };
+    return grantOrRefusal(`${tool}(${input.command}:*)`);
   }
   return { refusal: 'cannot-scope' };      // nothing we can scope narrowly → do not widen it instead
 }

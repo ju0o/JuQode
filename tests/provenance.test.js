@@ -1,0 +1,741 @@
+/* V1-410 / V1-307 · provenance, PASS guard, truth invariants. Fixture-driven + seeded properties. */
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const R = path.resolve(__dirname, '..');
+const prov = require(path.join(R, 'app/main/work/provenance.js'));
+const { adaptChangedFilesEvidence } = prov;
+const { toSignal, replay } = require(path.join(R, 'app/main/work/reducer.js'));
+const result = require(path.join(R, 'app/main/work/result.js'));
+const { testEvidenceFromSignals } = require(path.join(R, 'app/main/work/run-evidence.js'));
+const { PROVENANCE: P, taskPassVerdict, checkTruthInvariants, checkImmutableRun, summarizeChanges, limitClaim, classifyFact, classifyClaim, CLAIM_LIMIT } = prov;
+
+const FX = path.join(R, 'tests/fixtures');
+const lines = (f) => fs.readFileSync(path.join(FX, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+const RECORDED = ['stream-permission-denied.ndjson', ...[1, 2, 3, 4].map((n) => `claude-h3-live/call${n}.jsonl`)];
+const codes = (v) => v.map((x) => x.code).sort();
+
+/** An honest snapshot of a replayed stream: tone follows the outcome, changes are not measured. */
+function snapshotOf(file, changes = { known: false, files: [] }) {
+  const events = lines(file);
+  const signals = events.map((e) => ({ ...toSignal(e), payload: toSignal(e).payload }));
+  const state = replay(signals);
+  const res = result.buildChecked({ state, changes, toolResults: null }).result;
+  const tone = state.outcome === 'complete' ? 'success' : state.outcome === 'failed' ? 'failure' : 'neutral';
+  const real = summarizeChanges(changes);
+  return { events, state, res, snap: {
+    work: { status: state.status, outcome: state.outcome, finishObserved: Boolean(state.finish) },
+    display: { tone, changes: real, testsPassed: false },
+    changes, claims: res.claims.map((c) => ({ ...c, ...(c.kind === 'agent-report' ? { ...limitClaim(c.data.text), text: c.data.text } : {}) })),
+  } };
+}
+
+/* ── recorded real streams: zero violations ── */
+for (const f of RECORDED) {
+  test(`recorded stream ${f}: replay + result + classifier -> zero violations`, () => {
+    for (const changes of [{ known: false, files: [] }, { known: true, files: [{ path: 'hello.txt', patch_state: 'stored' }] }]) {
+      const { snap, res, state } = snapshotOf(f, changes);
+      assert.deepStrictEqual(prov.checkTruthInvariants(snap), []);
+      assert.ok(state.finish, 'recorded stream has an observed finish');
+      for (const c of res.claims) {
+        const p = classifyClaim(c);
+        assert.notStrictEqual(c.kind === 'changes-unknown' ? null : p, P.UNKNOWN, c.kind);
+        if (c.kind === 'agent-report') { assert.strictEqual(p, P.AGENT_SAID); assert.strictEqual(c.confidence, 'expected'); }
+      }
+    }
+  });
+}
+
+test('recorded streams contain no test run, so the PASS guard cannot pass on their text', () => {
+  for (const f of RECORDED) {
+    const events = lines(f);
+    const signals = events.map((e) => ({ payload: JSON.stringify(e), observed_at: 't' }));
+    const tests = testEvidenceFromSignals(signals);
+    assert.deepStrictEqual(tests, []);
+    const said = replay(events.map(toSignal)).finish?.text ?? '';
+    assert.strictEqual(taskPassVerdict([{ id: 'c1', text: 'All tests pass' }], { tests, agentSaid: said }).pass, false);
+  }
+});
+
+test('the denied stream: an unresolved denial is not shown as success', () => {
+  const { state, snap } = snapshotOf('stream-permission-denied.ndjson');
+  assert.notStrictEqual(state.outcome, 'complete');
+  assert.deepStrictEqual(checkTruthInvariants(snap), []);
+  assert.deepStrictEqual(codes(checkTruthInvariants({ ...snap, display: { ...snap.display, tone: 'success' } })), ['non_success_shown_success']);
+});
+
+/* ── classifier table ── */
+test('classifyFact: one provenance per source', () => {
+  const ok = { kind: 'test_command', details: { result_state: 'returned', exit_code: 0, tests_passed_count: 3 } };
+  const bad = { kind: 'test_command', details: { result_state: 'returned', exit_code: 1, tests_passed_count: 0 } };
+  const table = [
+    [{ source: 'agent_summary' }, P.AGENT_SAID], [{ source: 'agent_claim' }, P.AGENT_SAID], [{ source: 'agent_report' }, P.AGENT_SAID],
+    [{ source: 'tool_use' }, P.OBSERVED], [{ source: 'tool_result' }, P.OBSERVED], [{ source: 'file_change' }, P.OBSERVED],
+    [{ source: 'changed_files', known: true }, P.OBSERVED], [{ source: 'changed_files', known: false }, P.UNKNOWN],
+    [{ source: 'test_command', evidence: ok }, P.TEST_CONFIRMED], [{ source: 'test_command', evidence: bad }, P.OBSERVED],
+    [{ source: 'criterion_review', verdict: 'pass' }, P.HUMAN_CONFIRMED], [{ source: 'criterion_review', verdict: 'fail' }, P.HUMAN_CONFIRMED],
+    [{ source: 'criterion_review', verdict: 'maybe' }, P.UNKNOWN], [{ source: 'novel' }, P.UNKNOWN], [null, P.UNKNOWN],
+  ];
+  for (const [fact, want] of table) assert.strictEqual(classifyFact(fact), want, JSON.stringify(fact));
+  assert.strictEqual(classifyClaim({ kind: 'agent-report' }), P.AGENT_SAID);
+  assert.strictEqual(classifyClaim({ kind: 'changed-files' }), P.OBSERVED);
+  assert.strictEqual(classifyClaim({ kind: 'tools-observed' }), P.OBSERVED);
+  assert.strictEqual(classifyClaim({ kind: 'changes-unknown' }), P.UNKNOWN);
+});
+
+/* ── PASS guard ── */
+const passing = (cmd, over = {}) => ({ kind: 'test_command', summary: cmd,
+  details: { command: cmd, result_state: 'returned', exit_code: 0, tests_passed_count: 5, ...over } });
+const UNIT = [{ id: 'u', text: 'unit tests pass' }];
+
+const RUN = { id: 'w1', outcome: 'complete' };
+const inRun = (e, at = 't1', over = {}) => ({ ...e, work_id: 'w1', observed_at: at, ...over });
+const tconf = (ev) => taskPassVerdict(UNIT, { run: RUN, ...ev }).criteria[0];
+
+test('PASS guard: confirmed tests are SUPPORTING only (status tests_confirmed), never a Task pass', () => {
+  const cmd = 'node --test tests/unit.test.js';
+  const ok = taskPassVerdict(UNIT, { run: RUN, tests: [inRun(passing(cmd))] });
+  assert.deepStrictEqual([ok.pass, ok.criteria[0].status, ok.criteria[0].provenance], [false, 'tests_confirmed', P.TEST_CONFIRMED]);
+  const st = (tests) => tconf({ tests }).status;
+  assert.strictEqual(st([inRun(passing('node --test tests/e2e/x.test.js'))]), 'unverified');
+  assert.strictEqual(st([inRun(passing(cmd, { exit_code: 1 }))]), 'unverified');
+  assert.strictEqual(st([inRun(passing(cmd, { tests_passed_count: 0 }))]), 'unverified');
+  assert.strictEqual(st([inRun(passing(cmd, { result_state: 'error' }))]), 'unverified');
+  assert.strictEqual(st([inRun(passing(cmd), 't1'), inRun(passing(cmd, { exit_code: 1 }), 't2')]), 'unverified');
+  assert.strictEqual(st([inRun(passing(cmd, { exit_code: 1 }), 't1'), inRun(passing(cmd), 't2')]), 'tests_confirmed');
+  /* order comes from observed_at, not array position: newest-first input must not pass */
+  assert.strictEqual(st([inRun(passing(cmd, { exit_code: 1 }), 't2'), inRun(passing(cmd), 't1')]), 'unverified');
+  /* same Run only: other Run's test, or a failed/cancelled Run, supports nothing */
+  assert.strictEqual(st([passing(cmd, {}) && { ...passing(cmd), work_id: 'w2', observed_at: 't1' }]), 'unverified');
+  assert.strictEqual(taskPassVerdict(UNIT, { run: { id: 'w1', outcome: 'failed' }, tests: [inRun(passing(cmd))] }).criteria[0].status, 'unverified');
+  assert.strictEqual(taskPassVerdict(UNIT, { tests: [inRun(passing(cmd))] }).criteria[0].status, 'unverified', 'no Run context');
+});
+
+test('multi-scope criterion needs EVERY scope confirmed (every, not some)', () => {
+  const both = [{ id: 'm', text: 'unit and integration tests pass' }];
+  const u = inRun(passing('node --test tests/unit.test.js')); const i = inRun(passing('node --test tests/integration/a.test.js'), 't2');
+  const one = taskPassVerdict(both, { run: RUN, tests: [u] }).criteria[0].status;
+  const two = taskPassVerdict(both, { run: RUN, tests: [u, i] }).criteria[0].status;
+  assert.deepStrictEqual([one, two], ['unverified', 'tests_confirmed']);
+});
+
+test('isConfirmedTestRun: each field of the bar matters', () => {
+  const ok = passing('node --test');
+  assert.strictEqual(prov.isConfirmedTestRun(ok), true);
+  for (const over of [{ exit_code: 1 }, { exit_code: 2 }, { exit_code: null }, { exit_code: '0' }, { result_state: 'unknown' },
+    { result_state: 'error' }, { tests_passed_count: '3' }, { tests_passed_count: 2.5 }, { tests_passed_count: null }, { tests_passed_count: 0 }]) {
+    assert.strictEqual(prov.isConfirmedTestRun(passing('node --test', over)), false, JSON.stringify(over));
+  }
+  assert.strictEqual(prov.isConfirmedTestRun({ ...ok, kind: 'changed_files' }), false);
+  assert.strictEqual(prov.isConfirmedTestRun(null), false);
+});
+
+test('PASS guard: Agent text, observed changes, no criteria, and unsupported checks never pass', () => {
+  const ev = { agentSaid: 'all tests pass, 12 passed', observed: { files: ['a'] } };
+  assert.strictEqual(taskPassVerdict(UNIT, ev).pass, false);
+  assert.strictEqual(taskPassVerdict([], {}).pass, false);
+  assert.strictEqual(taskPassVerdict(UNIT, undefined).pass, false);
+  assert.strictEqual(taskPassVerdict([{ id: 'l', text: 'lint is clean' }], { tests: [passing('node --test tests/unit.test.js')] }).pass, false);
+  assert.strictEqual(taskPassVerdict([{ id: 'x', text: 'the page looks good' }], { tests: [passing('node --test')] }).pass, false);
+});
+
+const sha256 = (x) => require('node:crypto').createHash('sha256').update(x).digest('hex');
+const SPEC = 'spec1';
+const HC = [{ id: 'h', text: 'looks right' }];
+let seq = 0;
+const rv = (verdict, over = {}) => ({ criterion_id: 'h', verdict, criterion_digest: sha256('looks right'), task_spec_digest: SPEC,
+  work_id: 'w1', work_outcome: 'complete', reviewed_at: `2026-01-01T00:00:${String(10 + seq++).padStart(2, '0')}`, rowid: seq, ...over });
+const hv = (reviews, extra = {}) => taskPassVerdict(HC, { taskSpecDigest: SPEC, reviews, ...extra });
+
+test('PASS guard: human verdicts - repo bar (latest first, digests, one complete Run)', () => {
+  const p = hv([rv('pass')]);
+  assert.deepStrictEqual([p.pass, p.criteria[0].status, p.criteria[0].provenance, p.runId], [true, 'passed', P.HUMAN_CONFIRMED, 'w1']);
+  assert.strictEqual(hv([rv('pass'), rv('fail')]).pass, false);
+  assert.strictEqual(hv([rv('fail')]).criteria[0].status, 'failed');
+  assert.strictEqual(hv([rv('fail'), rv('pass')]).pass, true);
+  /* newest-first array order: sorted by reviewed_at, so [fail(newer), pass(older)] is a fail */
+  const older = rv('pass'); const newer = rv('fail');
+  assert.strictEqual(hv([newer, older]).pass, false);
+  assert.strictEqual(hv([older, newer]).pass, false);
+  /* stale latest review is unverified, with NO fallback to an older pass or fail */
+  assert.strictEqual(hv([rv('pass'), rv('fail', { criterion_digest: sha256('other') })]).pass, false);
+  assert.strictEqual(hv([rv('pass'), rv('fail', { criterion_digest: sha256('other') })]).criteria[0].status, 'unverified');
+  assert.strictEqual(hv([rv('fail'), rv('pass', { criterion_digest: sha256('other') })]).criteria[0].status, 'unverified');
+  assert.strictEqual(hv([rv('pass', { task_spec_digest: 'old' })]).pass, false);
+  assert.strictEqual(taskPassVerdict(HC, { reviews: [rv('pass')] }).pass, false, 'no current taskSpecDigest');
+  assert.strictEqual(hv([rv('pass', { work_outcome: 'ended_unknown' })]).pass, false);
+  assert.strictEqual(hv([rv('pass', { criterion_id: 'other' })]).pass, false);
+  /* a human FAIL beats a confirmed test run */
+  const u = [{ id: 'u', text: 'unit tests pass' }];
+  const fail = rv('fail', { criterion_id: 'u', criterion_digest: sha256('unit tests pass') });
+  const failed = taskPassVerdict(u, { taskSpecDigest: SPEC, run: RUN, tests: [inRun(passing('node --test tests/unit.test.js'))], reviews: [fail] });
+  assert.deepStrictEqual([failed.pass, failed.criteria[0].status], [false, 'failed']);
+});
+
+test('PASS guard fails closed on missing fields (callers must JOIN work.outcome and pass taskSpecDigest)', () => {
+  for (const drop of ['criterion_digest', 'task_spec_digest', 'work_id', 'work_outcome', 'reviewed_at']) {
+    const r = rv('pass'); delete r[drop];
+    assert.strictEqual(hv([r]).pass, false, drop);
+  }
+  /* an undated FAIL cannot be ordered, so it poisons the criterion instead of being dropped */
+  const undated = rv('fail'); delete undated.reviewed_at;
+  assert.strictEqual(hv([rv('pass'), undated]).pass, false);
+});
+
+test('PASS guard needs ONE Run across all criteria and every criterion reviewed', () => {
+  const two = [{ id: 'a', text: 'looks right' }, { id: 'b', text: 'is fine' }];
+  const mk = (id, text, wid) => rv('pass', { criterion_id: id, criterion_digest: sha256(text), work_id: wid });
+  const g = (reviews) => taskPassVerdict(two, { taskSpecDigest: SPEC, reviews }).pass;
+  assert.strictEqual(g([mk('a', 'looks right', 'w1'), mk('b', 'is fine', 'w1')]), true);
+  assert.strictEqual(g([mk('a', 'looks right', 'w1'), mk('b', 'is fine', 'w2')]), false);
+  assert.strictEqual(g([mk('a', 'looks right', 'w1')]), false);
+});
+
+test('never throws: malformed input fails closed', () => {
+  const evil = new Proxy({}, { get() { throw new Error('boom'); } });
+  const cyc = {}; cyc.self = cyc;
+  for (const bad of [null, undefined, 1, 'x', [], [null], evil]) {
+    assert.strictEqual(taskPassVerdict(bad, evil).pass, false);
+    assert.strictEqual(taskPassVerdict(bad, { reviews: [null, 1, evil], tests: [null, evil] }).pass, false);
+    assert.ok(Array.isArray(checkTruthInvariants(bad)));
+  }
+  assert.strictEqual(taskPassVerdict([null], { reviews: [null] }).pass, false);
+  assert.deepStrictEqual(codes(checkTruthInvariants(null)), ['malformed_input']);
+  assert.deepStrictEqual(codes(checkTruthInvariants(evil)), ['malformed_input']);
+  assert.deepStrictEqual(codes(checkTruthInvariants({ ...good(), claims: [null] })), ['malformed_input']);
+  assert.ok(Array.isArray(checkTruthInvariants({ ...good(), changes: { known: true, files: [null] } })));
+  assert.strictEqual(summarizeChanges({ known: true, files: [null] }).changesKnown, true);
+  assert.strictEqual(summarizeChanges(evil).changesKnown, false);
+  const row = { work: { status: 'ended', outcome: 'complete' }, evidence: [cyc] };
+  assert.deepStrictEqual(codes(checkImmutableRun(row, row)), ['malformed_input']);
+  assert.deepStrictEqual(codes(checkImmutableRun({ work: { status: 'ended' }, evidence: 'x' }, { work: { status: 'ended' } })), ['malformed_input']);
+  assert.deepStrictEqual(codes(checkImmutableRun(evil, evil)), ['malformed_input']);
+});
+
+/* ── summarizeChanges / limitClaim ── */
+test('summarizeChanges: 0 changes is a measurement; unavailable/unknown/unrecognised is not', () => {
+  const z = summarizeChanges({ known: true, files: [] });
+  assert.deepStrictEqual([z.changesKnown, z.count, z.patchComplete, z.lowerBound], [true, 0, true, false]);
+  assert.strictEqual(summarizeChanges({ known: true, files: [{ path: 'a', patch_state: 'unchanged' }] }).count, 0);
+  for (const s of ['unavailable', 'mystery']) {
+    const r = summarizeChanges({ known: true, files: [{ path: 'a', patch_state: s }] });
+    assert.deepStrictEqual([r.changesKnown, r.count], [false, null], String(s));
+  }
+  assert.strictEqual(summarizeChanges({ known: false, files: [] }).changesKnown, false);
+  assert.strictEqual(summarizeChanges({ known: true }).changesKnown, false);
+  for (const s of ['binary', 'too_large']) {
+    const r = summarizeChanges({ known: true, files: [{ path: 'a', patch_state: s }] });
+    assert.deepStrictEqual([r.changesKnown, r.count, r.patchComplete], [true, 1, false], s);
+  }
+  assert.strictEqual(summarizeChanges({ known: true, files: [{ path: 'a', patch_state: 'stored' }] }).patchComplete, true);
+});
+
+test('summarizeChanges: today\'s changed_files evidence has NO patch_state -> files known, patch availability unknown', () => {
+  const real = adaptChangedFilesEvidence({ kind: 'changed_files', details: { known: true, files: [{ path: 'a', change: 'modified' }, 'b.txt'] } });
+  const r = summarizeChanges(real);
+  assert.deepStrictEqual([r.changesKnown, r.patchStateKnown, r.count, r.patchComplete], [true, false, 2, false]);
+  assert.deepStrictEqual(adaptChangedFilesEvidence({ details: { known: true } }), { known: false, files: [] });
+  assert.deepStrictEqual(adaptChangedFilesEvidence(null), { known: false, files: [] });
+  assert.strictEqual(summarizeChanges(adaptChangedFilesEvidence({ details: { known: false, files: [] } })).changesKnown, false);
+});
+
+test('summarizeChanges: sensitive_excluded is a LOWER BOUND, not counted as changed', () => {
+  const r = summarizeChanges({ known: true, files: [{ path: 'a', patch_state: 'stored' }, { path: '.env', patch_state: 'sensitive_excluded' }] });
+  assert.deepStrictEqual([r.changesKnown, r.count, r.lowerBound, r.patchComplete], [true, 1, true, false]);
+  const only = summarizeChanges({ known: true, files: [{ path: '.env', patch_state: 'sensitive_excluded' }] });
+  assert.deepStrictEqual([only.count, only.lowerBound], [0, true]);
+});
+
+test('normFile accepts snake_case and camelCase digests', () => {
+  const a = prov.normFile({ path: 'p', before_digest: 'x', after_digest: 'y', patch_state: 'stored' });
+  const b = prov.normFile({ path: 'p', beforeDigest: 'x', afterDigest: 'y', patchState: 'stored' });
+  assert.deepStrictEqual(a, b);
+});
+
+test('limitClaim: exact boundary, marker, full text kept', () => {
+  const at = 'a'.repeat(CLAIM_LIMIT); const over = 'b'.repeat(CLAIM_LIMIT + 1);
+  assert.deepStrictEqual(limitClaim(at), { shown: at, truncated: false, full: at });
+  const l = limitClaim(over);
+  assert.strictEqual(l.truncated, true); assert.strictEqual(l.full, over);
+  assert.strictEqual(l.shown, 'b'.repeat(CLAIM_LIMIT) + '…');
+  assert.strictEqual(limitClaim(null).shown, '');
+});
+
+test('limitClaim: never splits a surrogate pair or a ZWJ sequence; invalid limit -> default', () => {
+  const emoji = 'a' + '\u{1F600}'.repeat(200);
+  const e = limitClaim(emoji, 100);
+  assert.ok(!/[\uD800-\uDBFF]…$/.test(e.shown) && !/[\uD800-\uDBFF]$/.test(e.shown.slice(0, -1)), 'lone high surrogate');
+  assert.strictEqual(e.full, emoji);
+  const fam = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'; // one grapheme
+  const f = limitClaim(fam.repeat(10), 3);
+  assert.strictEqual(f.shown, fam.repeat(3) + '…');
+  for (const bad of [0, -1, NaN, 2.5, '5', null, Infinity]) assert.strictEqual(limitClaim('x'.repeat(300), bad).shown.length, CLAIM_LIMIT + 1, String(bad));
+});
+
+/* ── crafted negatives: each MUST produce its violation ── */
+const GOOD_TASK = { status: 'open', verdict: 'unverified', criteria: UNIT, evidence: {} };
+const good = () => ({
+  work: { status: 'ended', outcome: 'complete', finishObserved: true },
+  display: { tone: 'success', changes: { changesKnown: true, count: 1 }, testsPassed: false },
+  changes: { known: true, files: [{ path: 'a.txt', patch_state: 'stored' }] },
+  claims: [{ kind: 'agent-report', confidence: 'expected', text: 'done' }],
+  task: GOOD_TASK,
+});
+test('crafted baseline snapshot has no violations', () => assert.deepStrictEqual(checkTruthInvariants(good()), []));
+
+const NEG = {
+  agent_says_tests_pass_no_run: [(s) => { s.display.testsPassed = true; s.task = { ...GOOD_TASK, evidence: { agentSaid: 'all tests pass' } }; }, ['tests_passed_without_test_run']],
+  task_marked_passed_on_agent_text: [(s) => { s.task = { ...GOOD_TASK, status: 'complete', verdict: 'pass', evidence: { agentSaid: 'tests pass' } }; }, ['task_pass_unconfirmed']],
+  human_verdict_missing_task_passed: [(s) => { s.task = { ...GOOD_TASK, verdict: 'pass', evidence: { reviews: [] } }; }, ['task_pass_unconfirmed']],
+  cancelled_with_success_text: [(s) => { s.work.outcome = 'cancelled_partial'; s.claims[0].text = 'All done!'; }, ['non_success_shown_success']],
+  ended_unknown_rendered_complete: [(s) => { s.work.outcome = 'ended_unknown'; }, ['non_success_shown_success']],
+  complete_without_finish: [(s) => { s.work.finishObserved = false; }, ['complete_without_finish']],
+  interrupted_as_success: [(s) => { s.work = { status: 'interrupted', outcome: null, finishObserved: false }; }, ['non_success_shown_success']],
+  patch_unavailable_shown_as_zero: [(s) => { s.changes.files[0].patch_state = 'unavailable'; s.display.changes = { changesKnown: true, count: 0 }; }, ['changes_known_overclaim', 'unknown_rendered_as_zero']],
+  patch_unavailable_known_true: [(s) => { s.changes.files[0].patch_state = 'unavailable'; s.display.changes = { changesKnown: true, count: null }; }, ['changes_known_overclaim']],
+  changes_unknown_shown_zero: [(s) => { s.changes = { known: false, files: [] }; s.display.changes = { changesKnown: false, count: 0 }; }, ['fabricated_count', 'unknown_rendered_as_zero']],
+  too_large_shown_zero: [(s) => { s.changes.files[0].patch_state = 'too_large'; s.display.changes = { changesKnown: true, count: 0 }; }, ['unknown_rendered_as_zero']],
+  dirty_baseline_attributed: [(s) => { s.baseline = { dirtyFiles: [{ path: 'a.txt', digest: 'd1' }] }; s.changes.files[0].afterDigest = 'd1'; }, ['dirty_baseline_attributed']],
+  sensitive_lower_bound_shown_zero: [(s) => { s.changes.files = [{ path: '.env', patch_state: 'sensitive_excluded' }]; s.display.changes = { changesKnown: true, count: '0' }; }, ['changes_known_overclaim', 'unknown_rendered_as_zero']],
+  sensitive_lower_bound_exact: [(s) => { s.changes.files.push({ path: '.env', patch_state: 'sensitive_excluded' }); s.display.changes = { changesKnown: true, count: 1 }; }, ['changes_known_overclaim']],
+  identical_digests_attributed: [(s) => { s.changes.files[0].before_digest = 'q'; s.changes.files[0].after_digest = 'q'; }, ['dirty_baseline_attributed']],
+  identical_digests_camel: [(s) => { s.changes.files[0].beforeDigest = 'q'; s.changes.files[0].afterDigest = 'q'; }, ['dirty_baseline_attributed']],
+  patch_state_claimed_without_state: [(s) => { s.changes.files = [{ path: 'a' }]; s.display.changes = { changesKnown: true, count: 1, patchStateKnown: true }; }, ['changes_known_overclaim']],
+  status_success_variant: [(s) => { s.work.outcome = 'failed'; s.display = { status: 'SUCCESS' }; }, ['non_success_shown_success']],
+  success_flag_variant: [(s) => { s.work.outcome = 'failed'; s.display = { success: true }; }, ['non_success_shown_success']],
+  copy_key_label_variant: [(s) => { s.work.outcome = 'ended_unknown'; s.display = { label: ' \uc644\ub8cc ' }; }, ['non_success_shown_success']],
+  tone_case_variant: [(s) => { s.work.outcome = 'cancelled_partial'; s.display.tone = 'Completed'; }, ['non_success_shown_success']],
+  unknown_tone_on_failed: [(s) => { s.work.outcome = 'failed'; s.display.tone = 'celebrate'; }, ['unknown_display_tone']],
+  count_numeric_string_zero: [(s) => { s.changes = { known: false, files: [] }; s.display.changes = { changesKnown: false, count: '0' }; }, ['fabricated_count', 'unknown_rendered_as_zero']],
+  fabricated_count_unknown: [(s) => { s.changes = { known: false, files: [] }; s.display.changes = { changesKnown: false, count: 3 }; }, ['fabricated_count']],
+  long_claim_data_text_only: [(s) => { s.claims = [{ kind: 'agent-report', confidence: 'expected', data: { text: 'z'.repeat(400) } }]; }, ['claim_not_truncated']],
+  long_claim_shown_too_long: [(s) => { const t = 'z'.repeat(400); s.claims[0] = { kind: 'agent-report', confidence: 'expected', text: t, full: t, truncated: true, shown: t }; }, ['claim_not_truncated']],
+  long_claim_flag_missing: [(s) => { const t = 'z'.repeat(400); s.claims[0] = { kind: 'agent-report', confidence: 'expected', text: t, full: t, shown: t.slice(0, 280) + '…' }; }, ['claim_not_truncated']],
+  confidence_case_variant: [(s) => { s.claims[0].confidence = 'Confirmed'; }, ['agent_said_confirmed']],
+  task_status_passed_variant: [(s) => { s.task = { ...GOOD_TASK, status: 'passed' }; }, ['task_pass_unconfirmed']],
+  task_verdict_PASS_variant: [(s) => { s.task = { ...GOOD_TASK, verdict: 'PASS' }; }, ['task_pass_unconfirmed']],
+  tests_passed_truthy_string: [(s) => { s.display.testsPassed = 'yes'; }, ['tests_passed_without_test_run']],
+  task_pass_on_tests_alone: [(s) => { s.task = { ...GOOD_TASK, status: 'complete', evidence: { run: RUN, tests: [inRun(passing('node --test tests/unit.test.js'))] } }; }, ['task_pass_unconfirmed']],
+  dirty_baseline_no_digest: [(s) => { s.baseline = { dirtyFiles: [{ path: 'a.txt', digest: 'd1' }] }; }, ['dirty_baseline_attributed']],
+  agent_claim_wears_confirmed: [(s) => { s.claims[0].confidence = 'confirmed'; }, ['agent_said_confirmed']],
+  unknown_claim_confirmed: [(s) => { s.claims.push({ kind: 'novel', confidence: 'confirmed' }); }, ['unknown_confirmed']],
+  long_claim_not_truncated: [(s) => { s.claims[0].text = 'x'.repeat(CLAIM_LIMIT + 1); }, ['claim_not_truncated']],
+  long_claim_truncated_but_full_lost: [(s) => { const t = 'x'.repeat(500); Object.assign(s.claims[0], limitClaim(t), { text: t, full: undefined }); }, ['claim_not_truncated']],
+};
+for (const [name, [mutate, want]] of Object.entries(NEG)) {
+  test(`negative: ${name}`, () => {
+    const s = good(); mutate(s);
+    assert.deepStrictEqual(codes(checkTruthInvariants(s)), want);
+  });
+}
+
+test('positives: moved dirty file, truncated long claim, human-confirmed Task are all clean', () => {
+  const s = good();
+  s.baseline = { dirtyFiles: [{ path: 'a.txt', digest: 'd1' }] }; s.changes.files[0].afterDigest = 'd2';
+  s.changes.files[0].before_digest = 'd1';
+  const t = 'y'.repeat(900); s.claims[0] = { kind: 'agent-report', confidence: 'expected', ...limitClaim(t), text: t };
+  s.task = { status: 'complete', verdict: 'pass', criteria: UNIT, evidence: { taskSpecDigest: SPEC, run: RUN,
+    tests: [inRun(passing('node --test tests/unit.test.js'))], reviews: [rv('pass', { criterion_id: 'u', criterion_digest: sha256('unit tests pass') })] } };
+  s.display.testsPassed = true;
+  assert.deepStrictEqual(checkTruthInvariants(s), []);
+});
+
+test('today\'s changed_files evidence (no patch_state) is consistent when reported as known-files / unknown-patch', () => {
+  const s = good();
+  s.changes = adaptChangedFilesEvidence({ details: { known: true, files: [{ path: 'a.txt', change: 'modified' }] } });
+  s.display.changes = { changesKnown: true, count: 1, patchStateKnown: false };
+  assert.deepStrictEqual(checkTruthInvariants(s), []);
+});
+
+/* ── immutability ── */
+test('checkImmutableRun: altered/removed rows and a rewritten outcome are flagged; appends are not', () => {
+  const before = { work: { id: 'w', status: 'ended', outcome: 'complete' }, evidence: [{ id: 'e1', v: 1 }], patches: [{ id: 'p1', patch_state: 'stored' }] };
+  const clone = () => JSON.parse(JSON.stringify(before));
+  assert.deepStrictEqual(checkImmutableRun(before, clone()), []);
+  const add = clone(); add.evidence.push({ id: 'e2' }); assert.deepStrictEqual(checkImmutableRun(before, add), []);
+  const alt = clone(); alt.patches[0].patch_state = 'unchanged'; assert.deepStrictEqual(codes(checkImmutableRun(before, alt)), ['ended_run_row_altered']);
+  const rm = clone(); rm.evidence = []; assert.deepStrictEqual(codes(checkImmutableRun(before, rm)), ['ended_run_row_removed']);
+  const oc = clone(); oc.work.outcome = 'ended_unknown'; assert.deepStrictEqual(codes(checkImmutableRun(before, oc)), ['ended_run_changed']);
+  const reopened = clone(); reopened.work.status = 'running'; assert.deepStrictEqual(codes(checkImmutableRun(before, reopened)), ['ended_run_changed']);
+  const live = { ...before, work: { id: 'w', status: 'running' } };
+  assert.deepStrictEqual(checkImmutableRun(live, alt), []);
+});
+
+test('a RECONCILED signal cannot rewrite the outcome of an ended Work', () => {
+  const { toSignal: ts } = require(path.join(R, 'app/main/work/reducer.js'));
+  const { reduce, initial, KIND } = require(path.join(R, 'app/main/work/reducer.js'));
+  let s = reduce(initial(), { kind: KIND.FINISH, payload: { subtype: 'success', isError: false, terminalReason: 'end_turn', denials: [], text: 'ok' } });
+  assert.strictEqual(s.outcome, 'complete');
+  const later = reduce(s, { kind: KIND.RECONCILED, payload: null });
+  void ts;
+  const v = checkImmutableRun({ work: { status: 'ended', outcome: s.outcome } }, { work: { status: later.status, outcome: later.outcome } });
+  assert.deepStrictEqual([later.status, later.outcome], ['ended', 'complete']);
+  assert.deepStrictEqual(v, [], 'reconciliation must leave the ended Run outcome unchanged');
+});
+
+test('checkImmutableRun: key order does not matter; id-less rows are compared by position; duplicate ids do not collide', () => {
+  const mk = (evidence) => ({ work: { status: 'ended', outcome: 'complete' }, evidence });
+  assert.deepStrictEqual(checkImmutableRun(mk([{ id: 'e', a: 1, b: { x: 1, y: 2 } }]), mk([{ b: { y: 2, x: 1 }, id: 'e', a: 1 }])), []);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk([{ a: 1 }, { a: 2 }]), mk([{ a: 1 }, { a: 3 }]))), ['ended_run_row_altered']);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk([{ a: 1 }, { a: 2 }]), mk([{ a: 1 }]))), ['ended_run_row_removed']);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk([{ id: 'd', v: 1 }, { id: 'd', v: 2 }]), mk([{ id: 'd', v: 1 }, { id: 'd', v: 9 }]))), ['ended_run_row_altered']);
+});
+
+/* ── seeded properties: guard vs an INDEPENDENT oracle written from repo.currentTaskVerdict ── */
+function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const CRIT = ['All tests pass', 'unit tests pass', 'integration tests pass', 'e2e screen renders', 'lint is clean', 'looks good', 'tests pass after restart'];
+const CMDS = ['node --test', 'node --test tests/unit.test.js', 'node --test tests/integration/x.test.js', 'node --test tests/e2e/a.test.js', 'npm test', 'pytest -k a', 'echo node --test'];
+const DIG = Object.fromEntries(CRIT.map((c) => [c, sha256(c)]));
+
+/** repo.currentTaskVerdict, restated: latest row per criterion by (reviewed_at, rowid); relevant = same spec + same text digest. */
+function oracle(criteria, spec, reviews) {
+  const latest = new Map();
+  [...reviews].sort((x, y) => (x.reviewed_at < y.reviewed_at ? -1 : x.reviewed_at > y.reviewed_at ? 1 : x.rowid - y.rowid))
+    .forEach((r) => latest.set(r.criterion_id, r));
+  const rel = criteria.map((c) => { const r = latest.get(c.id); return r && r.task_spec_digest === spec && r.criterion_digest === DIG[c.text] ? r : null; });
+  if (rel.some((r) => r && r.verdict === 'fail')) return false;
+  if (!criteria.length || !rel.every((r) => r && r.verdict === 'pass')) return false;
+  const runs = new Set(rel.map((r) => r.work_id));
+  return runs.size === 1 && rel[0].work_outcome === 'complete';
+}
+
+test('property (120000 seeded cases): guard === repo-bar oracle; tests/Agent text never change pass', () => {
+  let passes = 0;
+  for (let seed = 1; seed <= 120000; seed++) {
+    const r = rng(seed); const pick = (a) => a[Math.floor(r() * a.length)];
+    const criteria = Array.from({ length: Math.floor(r() * 4) }, (_, i) => ({ id: `c${i}`, text: pick(CRIT) }));
+    const outcomeOf = { w1: r() < 0.85 ? 'complete' : pick(['failed', 'ended_unknown']), w2: r() < 0.5 ? 'complete' : 'failed' }; // one Run has one outcome
+    const nrev = Math.floor(r() * (criteria.length * 2 + 1));
+    const reviews = Array.from({ length: nrev }, (_, i) => {
+      const c = criteria.length ? pick(criteria) : { id: 'zz', text: CRIT[0] };
+      return { criterion_id: c.id, verdict: pick(['pass', 'pass', 'fail']), criterion_digest: r() < 0.85 ? DIG[c.text] : DIG[CRIT[6]],
+        task_spec_digest: r() < 0.9 ? 'S' : 'old', work_id: 'W', work_outcome: null,
+        reviewed_at: `t${String(Math.floor(r() * 6)).padStart(2, '0')}`, rowid: i + 1 };
+    });
+    for (const x of reviews) { x.work_id = r() < 0.9 ? 'w1' : 'w2'; x.work_outcome = outcomeOf[x.work_id]; }
+    for (let i = reviews.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [reviews[i], reviews[j]] = [reviews[j], reviews[i]]; }
+    /* equal reviewed_at ties must be broken by rowid, same as the oracle */
+    const tests = Array.from({ length: Math.floor(r() * 4) }, () => ({ ...passing(pick(CMDS), { exit_code: pick([0, 0, 1, null]),
+      tests_passed_count: pick([0, 3, null]), result_state: pick(['returned', 'returned', 'error', 'unknown']) }), work_id: pick(['w1', 'w2']), observed_at: `o${Math.floor(r() * 4)}` }));
+    const base = { taskSpecDigest: 'S', reviews };
+    const want = oracle(criteria, 'S', reviews);
+    const got = taskPassVerdict(criteria, { ...base, tests, agentSaid: 'all tests pass', observed: { files: ['x'] }, run: pick([undefined, RUN]) });
+    assert.strictEqual(got.pass, want, `seed ${seed}`);
+    assert.strictEqual(taskPassVerdict(criteria, base).pass, want, `seed ${seed} (no tests)`);
+    assert.strictEqual(taskPassVerdict(criteria, { taskSpecDigest: 'S', tests, agentSaid: 'x', run: RUN }).pass, false, `seed ${seed} (no reviews)`);
+    if (want) { passes++; for (const c of got.criteria) assert.strictEqual(c.provenance, P.HUMAN_CONFIRMED); }
+  }
+  assert.ok(passes > 500, `property must exercise real passes (got ${passes})`);
+});
+
+test('property (seed 1..300): the checker flags exactly the Task-pass claims the guard denies, and non-complete success tones', () => {
+  for (let seed = 1; seed <= 300; seed++) {
+    const r = rng(seed * 7); const pick = (a) => a[Math.floor(r() * a.length)];
+    const criteria = Array.from({ length: 1 + Math.floor(r() * 2) }, (_, i) => ({ id: `c${i}`, text: pick(CRIT) }));
+    const tests = r() < 0.5 ? [inRun(passing(pick(CMDS), { exit_code: pick([0, 1]) }))] : [];
+    const task = { status: pick(['open', 'complete']), verdict: pick(['unverified', 'pass', 'fail']), criteria, evidence: { run: RUN, tests, agentSaid: 'all tests pass' } };
+    const claimsPass = task.status === 'complete' || task.verdict === 'pass';
+    const has = checkTruthInvariants({ ...good(), task }).some((v) => v.code === 'task_pass_unconfirmed');
+    assert.strictEqual(has, claimsPass, `seed ${seed}`);
+    const o = pick(['complete', 'partial', 'failed', 'cancelled_partial', 'cancelled_nochange', 'ended_unknown']); const tone = pick(['success', 'neutral', 'failure', 'unknown']);
+    const hit = checkTruthInvariants({ work: { outcome: o, finishObserved: true }, display: { tone } }).length > 0;
+    assert.strictEqual(hit, (o !== 'complete' && tone === 'success') || (o === 'complete' && tone === 'failure'), `seed ${seed}`);
+  }
+});
+
+/* ═══ round 3: copy-derived labels, wrong counts, ties, bounded cost, survivors ═══ */
+const src = require(path.join(R, 'tests/src.js'));
+const copyC = (() => { // copy.js is an ES module: evaluate its object, never import it
+  const code = src.text('app/renderer/copy.js').replace(/\bexport /g, '');
+  return new (require('node:vm').Script)(`${code};C`).runInNewContext({});
+})();
+const L = {
+  success: [copyC.work.resultTitle.complete, copyC.qc.ok, copyC.gap.task.pass, copyC.gap.task.completeState, copyC.gap.presenceLabel.complete],
+  failure: [copyC.work.resultTitle.failed, copyC.qc.failed, copyC.gap.task.fail, copyC.gap.presenceLabel.failure],
+  neutral: [copyC.work.resultTitle.partial, copyC.work.resultTitle.cancelled_none, copyC.work.resultTitle.cancelled_partial, copyC.work.unknownBody],
+};
+const withLabel = (outcome, label, opts) => checkTruthInvariants({ work: { outcome, finishObserved: true }, display: { label } }, opts);
+
+test('labels: every real success copy value on a non-complete Work is non_success_shown_success (built-in AND copy-derived)', () => {
+  for (const label of [...L.success, 'Done!', 'Task complete', ' DONE ']) {
+    for (const opts of [undefined, { successLabels: L.success }]) {
+      assert.deepStrictEqual(codes(withLabel('failed', label, opts)), ['non_success_shown_success'], label);
+    }
+    assert.deepStrictEqual(withLabel('complete', label), [], label);
+  }
+  /* an option label the built-ins do not know is honoured */
+  assert.deepStrictEqual(codes(withLabel('failed', 'zzz', { successLabels: ['zzz'] })), ['non_success_shown_success']);
+});
+
+test('labels: real failure/neutral copy values are NOT unknown tones; free text still is', () => {
+  for (const label of [...L.failure, L.neutral[0]]) assert.deepStrictEqual(withLabel('failed', label), [], label);   // built-in fallback
+  for (const label of [...L.failure, ...L.neutral.slice(0, 3)]) {
+    assert.deepStrictEqual(withLabel('failed', label, { failureLabels: L.failure, neutralLabels: L.neutral }), [], label);
+  }
+  assert.deepStrictEqual(codes(withLabel('failed', 'celebrate wildly')), ['unknown_display_tone']);
+  assert.deepStrictEqual(codes(withLabel('failed', L.neutral[3])), ['unknown_display_tone'], 'a body sentence is free text unless supplied');
+  assert.deepStrictEqual(withLabel('failed', L.neutral[3], { neutralLabels: L.neutral }), []);
+});
+
+test('count_mismatch / count_malformed: wrong non-zero counts are caught', () => {
+  const three = { known: true, files: ['a', 'b', 'c'].map((p) => ({ path: p, patch_state: 'stored' })) };
+  const chk = (changes, count, extra = {}) => { const s = good(); s.changes = changes; s.display.changes = { changesKnown: true, count, ...extra }; return codes(checkTruthInvariants(s)); };
+  assert.deepStrictEqual(chk(three, 3), []);
+  assert.deepStrictEqual(chk(three, '3'), []);
+  assert.deepStrictEqual(chk(three, 1), ['count_mismatch']);
+  assert.deepStrictEqual(chk(three, 2), ['count_mismatch']);
+  assert.deepStrictEqual(chk(three, 4), ['count_mismatch']);
+  assert.deepStrictEqual(chk({ known: true, files: [] }, 99), ['count_mismatch']);
+  assert.deepStrictEqual(chk({ known: true, files: [] }, 1), ['count_mismatch']);
+  assert.deepStrictEqual(chk({ known: true, files: [] }, 0), []);
+  for (const bad of ['abc', NaN, -1, 1.5, {}, Infinity]) assert.deepStrictEqual(chk(three, bad), ['count_malformed'], String(bad));
+  /* lower bound: known count <= shown <= all files */
+  const lb = { known: true, files: [{ path: 'a', patch_state: 'stored' }, { path: '.env', patch_state: 'sensitive_excluded' }, { path: 'b', patch_state: 'stored' }] };
+  assert.deepStrictEqual(chk(lb, 1, { lowerBound: true }), ['count_mismatch']);
+  assert.deepStrictEqual(chk(lb, 2, { lowerBound: true }), []);
+  assert.deepStrictEqual(chk(lb, 3, { lowerBound: true }), []);
+  assert.deepStrictEqual(chk(lb, 4, { lowerBound: true }), ['count_mismatch']);
+});
+
+test('ties: same reviewed_at, different content, no sequence -> unverified; with rowid, or identical content, resolved', () => {
+  const at = '2026-01-01T00:00:00.000';
+  const mk = (verdict, over = {}) => { const r = rv(verdict, { reviewed_at: at }); delete r.rowid; return { ...r, ...over }; };
+  const g = (reviews) => hv(reviews);
+  assert.deepStrictEqual([g([mk('pass'), mk('fail')]).pass, g([mk('pass'), mk('fail')]).criteria[0].reason], [false, 'ambiguous_order']);
+  assert.strictEqual(g([mk('fail'), mk('pass')]).criteria[0].reason, 'ambiguous_order');
+  assert.strictEqual(g([mk('pass'), mk('pass')]).pass, true, 'identical content is not ambiguous');
+  assert.strictEqual(g([mk('fail', { rowid: 1 }), mk('pass', { rowid: 2 })]).pass, true);
+  assert.strictEqual(g([mk('pass', { rowid_: 2 }), mk('fail', { rowid_: 1 })]).pass, true, 'rowid_ alias');
+  assert.strictEqual(g([mk('pass', { rowid: 1 }), mk('fail', { rowid: 1 })]).pass, false, 'equal sequences still ambiguous');
+  assert.strictEqual(g([mk('pass', { reviewed_at: at + '1' }), mk('fail')]).pass, true, 'distinct times need no sequence');
+  /* ties on a DIFFERENT criterion do not poison this one */
+  const other = mk('fail', { criterion_id: 'zz' }); const other2 = mk('pass', { criterion_id: 'zz' });
+  assert.strictEqual(g([mk('pass'), other, other2]).pass, true);
+});
+
+test('present(spec): a missing taskSpecDigest never matches a row missing its own', () => {
+  const r = rv('pass'); delete r.task_spec_digest;
+  assert.strictEqual(taskPassVerdict(HC, { reviews: [r] }).pass, false);
+  assert.strictEqual(taskPassVerdict(HC, { taskSpecDigest: '', reviews: [{ ...r, task_spec_digest: '' }] }).pass, false);
+});
+
+test('per-criterion status is never passed unless the Run bar holds', () => {
+  const two = [{ id: 'a', text: 'looks right' }, { id: 'b', text: 'is fine' }];
+  const mk = (id, text, wid, out = 'complete') => rv('pass', { criterion_id: id, criterion_digest: sha256(text), work_id: wid, work_outcome: out });
+  for (const reviews of [[mk('a', 'looks right', 'w1'), mk('b', 'is fine', 'w2')], [mk('a', 'looks right', 'w1', 'failed'), mk('b', 'is fine', 'w1', 'failed')], [mk('a', 'looks right', 'w1')]]) {
+    const out = taskPassVerdict(two, { taskSpecDigest: SPEC, reviews });
+    assert.strictEqual(out.pass, false);
+    assert.ok(out.criteria.every((c) => c.status !== 'passed'), JSON.stringify(out.criteria));
+  }
+});
+
+test('checker measures graphemes, not UTF-16 length; shown must be a prefix', () => {
+  const claim = (t, over = {}) => ({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', text: t, ...over }] });
+  const e = '\u{1F600}';                                  // 2 code units, 1 grapheme
+  assert.deepStrictEqual(checkTruthInvariants(claim(e.repeat(CLAIM_LIMIT))), [], '280 graphemes = 560 code units, not over');
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(e.repeat(CLAIM_LIMIT + 1)))), ['claim_not_truncated']);
+  const ok = e.repeat(CLAIM_LIMIT + 1);
+  assert.deepStrictEqual(checkTruthInvariants(claim(ok, limitClaim(ok))), []);
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(ok, { ...limitClaim(ok), shown: 'q'.repeat(CLAIM_LIMIT) + '…' }))), ['shown_not_prefix']);
+  for (const n of [CLAIM_LIMIT - 1, CLAIM_LIMIT, CLAIM_LIMIT + 1]) {
+    const t = 'k'.repeat(n);
+    assert.deepStrictEqual(checkTruthInvariants(claim(t, n > CLAIM_LIMIT ? limitClaim(t) : {})).length, 0, String(n));
+  }
+});
+
+test('testsPassed string branches: false-ish words are not "passed", others are', () => {
+  for (const w of ['false', 'FALSE', 'no', 'n', '0', '', ' ']) assert.deepStrictEqual(checkTruthInvariants({ ...good(), display: { ...good().display, testsPassed: w } }), [], JSON.stringify(w));
+  for (const w of ['yes', 'true', '1', 'passed']) assert.deepStrictEqual(codes(checkTruthInvariants({ ...good(), display: { ...good().display, testsPassed: w } })), ['tests_passed_without_test_run'], w);
+});
+
+test('canonical comparison: NaN, null and undefined differ; unavailableCount is exposed', () => {
+  const mk = (v) => ({ work: { status: 'ended', outcome: 'complete' }, evidence: [{ id: 'e', v }] });
+  assert.deepStrictEqual(codes(checkImmutableRun(mk(NaN), mk(null))), ['ended_run_row_altered']);
+  assert.deepStrictEqual(checkImmutableRun(mk(NaN), mk(NaN)), []);
+  assert.deepStrictEqual(checkImmutableRun(mk(null), mk(null)), []);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk(0), mk(-1))), ['ended_run_row_altered']);
+  const r = summarizeChanges({ known: true, files: [{ path: 'a', patch_state: 'unavailable' }, { path: 'b', patch_state: 'stored' }, { path: 'c', patch_state: 'unavailable' }] });
+  assert.deepStrictEqual([r.changesKnown, r.count, r.unavailableCount], [false, null, 2]);
+  assert.strictEqual(limitClaim('x'.repeat(10), 2 ** 53).truncated, false);
+});
+
+test('limitClaim: a long combining run is ONE grapheme (exact) up to the scan cap; beyond it, cut well-formed (documented)', () => {
+  const heavy = 'e' + '\u0301'.repeat(5000);          // ONE grapheme, 5001 code units
+  assert.strictEqual(limitClaim(heavy).truncated, false);
+  const huge = 'e' + '\u0301'.repeat((1 << 20) + 10);  // past the 1 MiB scan cap
+  const l = limitClaim(huge);
+  assert.deepStrictEqual([l.truncated, l.full === huge, l.shown.endsWith('…'), l.shown.isWellFormed(), l.shown.length < 10], [true, true, true, true, true]);
+});
+
+/* ═══ round 4 ═══ */
+const FAM = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';       // one grapheme, 8 code units
+const refSeg = (t) => Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(t), (x) => x.segment);
+const refLimit = (t, max) => { const g = refSeg(t); return g.length <= max ? { shown: t, truncated: false } : { shown: g.slice(0, max).join('') + '…', truncated: true }; };
+
+test('limitClaim: wide graphemes are judged on graphemes (QA strings), shown always well-formed', () => {
+  const cases = [[FAM.repeat(279), CLAIM_LIMIT], [FAM.repeat(280), CLAIM_LIMIT], [FAM.repeat(281), CLAIM_LIMIT], [FAM.repeat(500), CLAIM_LIMIT],
+    [FAM.repeat(9), 10], [FAM.repeat(10), 10], [FAM.repeat(11), 10], [FAM.repeat(49), 50], [FAM.repeat(50), 50], [FAM.repeat(51), 50],
+    ['e' + '\u0301'.repeat(3000), CLAIM_LIMIT], [('e' + '\u0301'.repeat(30)).repeat(100), CLAIM_LIMIT], [('e' + '\u0301'.repeat(30)).repeat(300), CLAIM_LIMIT],
+    ['abcdefghi' + 'x'.repeat(0), 3], ['a'.repeat(2440), 40], [(FAM + 'a'.repeat(52)).repeat(40), 40]];
+  for (const [t, max] of cases) {
+    const got = limitClaim(t, max); const want = refLimit(t, max);
+    assert.deepStrictEqual([got.shown, got.truncated, got.full], [want.shown, want.truncated, t], `${t.length} units limit ${max}`);
+    assert.ok(got.shown.isWellFormed(), `well-formed ${t.length}/${max}`);
+  }
+  assert.strictEqual(limitClaim(FAM.repeat(279)).truncated, false);
+  assert.strictEqual(limitClaim(FAM.repeat(281)).shown, FAM.repeat(280) + '…');
+});
+
+test('limitClaim: seeded grapheme-heavy fuzz equals the full-segmentation reference (texts <= 1 MiB)', () => {
+  const pieces = ['a', 'b', ' ', '\u{1F600}', FAM, 'e\u0301', 'e\u0301\u0302\u0303', '\u{1F1F0}\u{1F1F7}', '\uD55C', '\u1112\u1161\u11AB', '\r\n', '\u200D', 'x\u0300'.repeat(5)];
+  for (let seed = 1; seed <= 400; seed++) {
+    const r = rng(seed * 13); const n = Math.floor(r() * (seed % 20 === 0 ? 30000 : 700));
+    let t = ''; for (let i = 0; i < n; i++) t += pieces[Math.floor(r() * pieces.length)];
+    const max = [1, 3, 10, 50, CLAIM_LIMIT][Math.floor(r() * 5)];
+    const got = limitClaim(t, max); const want = refLimit(t, max);
+    assert.deepStrictEqual([got.shown, got.truncated], [want.shown, want.truncated], `seed ${seed}`);
+    assert.ok(got.shown.isWellFormed() || !t.isWellFormed() , `seed ${seed}`);
+    /* the checker agrees with the helper: a claim built by limitClaim is clean, one with a wrong flag is not */
+    const dflt = limitClaim(t); const claim = { kind: 'agent-report', confidence: 'expected', text: t, ...dflt };
+    assert.deepStrictEqual(checkTruthInvariants({ ...good(), claims: [claim] }), [], `seed ${seed}`);
+    if (dflt.truncated) assert.deepStrictEqual(codes(checkTruthInvariants({ ...good(), claims: [{ ...claim, truncated: false }] })), ['claim_not_truncated'], `seed ${seed}`);
+  }
+});
+
+test('checker: ill-formed shown, shown-length bound exact, complete shown with a failure label', () => {
+  const claim = (t, over) => ({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', text: t, full: t, truncated: true, ...over }] });
+  const t = 'z'.repeat(400);
+  assert.deepStrictEqual(checkTruthInvariants(claim(t, { shown: 'z'.repeat(CLAIM_LIMIT) + '…' })), []);
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(t, { shown: 'z'.repeat(CLAIM_LIMIT + 1) + '…' }))), ['claim_not_truncated']);
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(t, { shown: 'z'.repeat(CLAIM_LIMIT + 100) + '…' }))), ['claim_not_truncated']);
+  const emo = '\u{1F600}'.repeat(400);
+  assert.deepStrictEqual(codes(checkTruthInvariants(claim(emo, { shown: emo.slice(0, 559) + '…' }))), ['shown_ill_formed']);
+  /* complete + failure label (built-in, option, English word) */
+  const lbl = (label, opts) => codes(checkTruthInvariants({ work: { outcome: 'complete', finishObserved: true }, display: { label } }, opts));
+  assert.deepStrictEqual(lbl(L.failure[0]), ['complete_shown_failure']);
+  assert.deepStrictEqual(lbl('Failed'), ['complete_shown_failure']);
+  assert.deepStrictEqual(lbl('custom bad', { failureLabels: ['custom bad'] }), ['complete_shown_failure']);
+  assert.deepStrictEqual(lbl(L.success[0]), []);
+});
+
+test('immutability: Date/Map/Set/toJSON/function/undefined changes are flagged; equal ones are not', () => {
+  const mk = (row) => ({ work: { status: 'ended', outcome: 'complete' }, evidence: [{ id: 'a', ...row }] });
+  const diff = (a, b) => codes(checkImmutableRun(mk(a), mk(b)));
+  const ALT = ['ended_run_row_altered'];
+  assert.deepStrictEqual(diff({ d: new Date(5) }, { d: new Date(6) }), ALT);
+  assert.deepStrictEqual(diff({ d: new Date(5) }, { d: new Date(5) }), []);
+  assert.deepStrictEqual(diff({ d: new Date(NaN) }, { d: new Date(5) }), ALT);
+  assert.deepStrictEqual(diff({ m: new Map([[1, 'x']]) }, { m: new Map([[1, 'y']]) }), ALT);
+  assert.deepStrictEqual(diff({ m: new Map([[1, 'x']]) }, { m: new Map([[1, 'x']]) }), []);
+  assert.deepStrictEqual(diff({ s: new Set([1, 2]) }, { s: new Set([1, 3]) }), ALT);
+  assert.deepStrictEqual(diff({ s: new Set([1, 2]) }, { s: new Set([2, 1]) }), []);
+  assert.deepStrictEqual(diff({ v: { toJSON: () => 1, x: 1 } }, { v: { toJSON: () => 1, x: 2 } }), ALT);
+  assert.deepStrictEqual(diff({ f() {} }, {}), ALT);
+  assert.deepStrictEqual(diff({ u: undefined }, {}), ALT);
+  assert.deepStrictEqual(diff({ n: 1n }, { n: 2n }), ALT);
+  assert.deepStrictEqual(diff({ x: NaN }, { x: null }), ALT);
+  assert.deepStrictEqual(diff({ x: Infinity }, { x: null }), ALT);
+  assert.deepStrictEqual(diff({ o: { b: 1, a: [1, { c: 2 }] } }, { o: { a: [1, { c: 2 }], b: 1 } }), []);
+});
+
+test('immutability: ids are matched by id (reordered same content is clean), duplicate ids keep their occurrence', () => {
+  const mk = (evidence) => ({ work: { status: 'ended', outcome: 'complete' }, evidence });
+  assert.deepStrictEqual(checkImmutableRun(mk([{ id: 'a', v: 1 }, { id: 'b', v: 2 }]), mk([{ id: 'b', v: 2 }, { id: 'a', v: 1 }])), []);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk([{ id: 'a', v: 1 }, { id: 'b', v: 2 }]), mk([{ id: 'b', v: 3 }, { id: 'a', v: 1 }]))), ['ended_run_row_altered']);
+  const dup = mk([{ id: 'd', v: 1 }, { id: 'x' }, { id: 'd', v: 2 }]);
+  assert.deepStrictEqual(checkImmutableRun(dup, mk([{ id: 'x' }, { id: 'd', v: 1 }, { id: 'd', v: 2 }])), []);
+  assert.deepStrictEqual(codes(checkImmutableRun(dup, mk([{ id: 'x' }, { id: 'd', v: 1 }]))), ['ended_run_row_removed']);
+  assert.deepStrictEqual(codes(checkImmutableRun(dup, mk([{ id: 'x' }, { id: 'd', v: 2 }, { id: 'd', v: 1 }]))), ['ended_run_row_altered', 'ended_run_row_altered']);
+});
+
+test('empty criteria fails closed explicitly (not by throwing)', () => {
+  assert.deepStrictEqual(taskPassVerdict([], { taskSpecDigest: SPEC, reviews: [rv('pass')] }), { pass: false, runId: null, criteria: [] });
+});
+
+test('bounded cost (robust): linear growth, generous absolute bounds', () => {
+  const best = (n, f) => { let m = Infinity; for (let i = 0; i < n; i++) { const t = process.hrtime.bigint(); f(); m = Math.min(m, Number(process.hrtime.bigint() - t) / 1e6); } return m; };
+  const big = 'x'.repeat(50 * 1024 * 1024);
+  const tLimit = best(3, () => limitClaim(big));
+  const lim = limitClaim(big);
+  assert.ok(lim.truncated && lim.shown.length === CLAIM_LIMIT + 1 && lim.full === big);
+  const tCheck = best(3, () => checkTruthInvariants({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', ...lim, text: big }] }));
+  const wide = FAM.repeat(2e6);                                   // 16M units, 2M graphemes
+  const tWide = best(3, () => limitClaim(wide));
+  const claims = Array.from({ length: 1e6 }, () => ({ kind: 'agent-report', confidence: 'expected', text: 'short claim' }));
+  const tClaims = best(2, () => checkTruthInvariants({ ...good(), claims }));
+  const rows = (n, nulls) => Array.from({ length: n }, (_, i) => nulls
+    ? { id: `r${i}`, kind: 'patch', before_digest: null, after_digest: null, patch_text: null, bytes: null, n: i }
+    : { id: `r${i}`, kind: 'test_command', summary: 'node --test', n: i });
+  const wrap = (evidence) => ({ work: { status: 'ended', outcome: 'complete' }, evidence });
+  const imm = (n, nulls) => { const a = wrap(rows(n, nulls)); const b = wrap(rows(n, nulls)); return best(n > 5e5 ? 2 : 3, () => assert.deepStrictEqual(checkImmutableRun(a, b), [])); };
+  const t250 = imm(250000, false); const t1M = imm(1e6, false); const tNull = imm(1e6, true);
+  console.log(`# timings ms: limitClaim(50MB) ${tLimit.toFixed(0)}, checker(50MB) ${tCheck.toFixed(0)}, wide(16M units) ${tWide.toFixed(0)}, 1M claims ${tClaims.toFixed(0)}, immutable 250k ${t250.toFixed(0)} / 1M ${t1M.toFixed(0)} / 1M null-heavy ${tNull.toFixed(0)}`);
+  assert.ok(tLimit < 2000 && tCheck < 2000 && tWide < 2000, 'a huge claim must cost O(limit), not O(text)');
+  assert.ok(tClaims < 8000, `1M claims ${tClaims}`);
+  assert.ok(t1M < 8000 && tNull < 8000, `1M rows ${t1M} / null-heavy ${tNull}`);
+  void t250;   // no load-dependent ratio assert: absolute bounds only
+});
+
+/* ═══ round 5 ═══ */
+test('shown_ill_formed only when the INPUT is well-formed: limitClaim output with a lone surrogate in the input is clean', () => {
+  for (const t of ['a'.repeat(279) + '\uD83D' + 'b'.repeat(20) + 'c'.repeat(100), '\uD83D' + 'a'.repeat(400), '\uDE00' + 'a'.repeat(400)]) {
+    const claim = { kind: 'agent-report', confidence: 'expected', text: t, ...limitClaim(t) };
+    assert.deepStrictEqual(checkTruthInvariants({ ...good(), claims: [claim] }), [], JSON.stringify(t.slice(278, 282)));
+  }
+  const emo = '\u{1F600}'.repeat(400);          // well-formed input, ill-formed shown: still flagged
+  assert.deepStrictEqual(codes(checkTruthInvariants({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', text: emo, full: emo, truncated: true, shown: emo.slice(0, 559) + '…' }] })), ['shown_ill_formed']);
+});
+
+test('complete_shown_failure: short labels ending in a failure word are flagged; prose and negations stay clean', () => {
+  const lbl = (label) => codes(checkTruthInvariants({ work: { outcome: 'complete', finishObserved: true }, display: { label } }));
+  for (const bad of ['Run failed', 'Task failed', 'Build error', 'The run has failed.', 'Task FAILED!']) assert.deepStrictEqual(lbl(bad), ['complete_shown_failure'], bad);
+  for (const ok of ['Task completed without error', 'No errors', 'failed 0', 'Tests failed: 0', '0 failures', 'Failure analysis', 'Failed: build', 'did not fail',
+    'Terror', 'all checks passed with no error', 'Run finished after a very long time and failed', 'errors']) assert.deepStrictEqual(lbl(ok), [], ok);
+  /* the same word does not fire on a non-complete Work through this rule */
+  assert.ok(!codes(checkTruthInvariants({ work: { outcome: 'failed', finishObserved: true }, display: { label: 'Run failed' } })).includes('complete_shown_failure'));
+});
+
+test('scan cap boundary: exactly 1 MiB of code units with one grapheme is exact; one more is cut', () => {
+  const edge = 'e' + '\u0301'.repeat((1 << 20) - 1);
+  assert.strictEqual(edge.length, 1 << 20);
+  assert.strictEqual(limitClaim(edge).truncated, false);
+  assert.strictEqual(limitClaim(edge + '\u0301').truncated, true);
+});
+
+test('claimText: considers full, text and data.text and uses the LONGEST', () => {
+  const long = 'q'.repeat(400);
+  const chk = (c) => codes(checkTruthInvariants({ ...good(), claims: [{ kind: 'agent-report', confidence: 'expected', ...c }] }));
+  assert.deepStrictEqual(chk({ full: long }), ['claim_not_truncated']);
+  assert.deepStrictEqual(chk({ text: 'short', data: { text: long } }), ['claim_not_truncated']);
+  assert.deepStrictEqual(chk({ text: 'short', full: long }), ['claim_not_truncated']);
+  assert.deepStrictEqual(chk({ text: long }), ['claim_not_truncated']);
+  assert.deepStrictEqual(chk({ text: 'short', data: { text: 'also short' } }), []);
+});
+
+test('immutability: arrays are plain only when their items are ([NaN] vs [null]); non-list snapshots are malformed', () => {
+  const mk = (row) => ({ work: { status: 'ended', outcome: 'complete' }, evidence: [{ id: 'a', ...row }] });
+  assert.deepStrictEqual(codes(checkImmutableRun(mk({ a: [NaN] }), mk({ a: [null] }))), ['ended_run_row_altered']);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk({ a: [-0] }), mk({ a: [0] }))), ['ended_run_row_altered']);
+  const ended = { status: 'ended', outcome: 'complete' };
+  assert.deepStrictEqual(codes(checkImmutableRun({ work: ended, evidence: {} }, { work: ended, evidence: [] })), ['malformed_input']);
+  assert.deepStrictEqual(codes(checkImmutableRun({ work: ended, evidence: [] }, { work: ended, evidence: {} })), ['malformed_input']);
+  assert.deepStrictEqual(codes(checkImmutableRun({ work: ended, patches: 'x' }, { work: ended })), ['malformed_input']);
+});
+
+test('immutability fails closed on exotic objects; typed arrays compare by content', () => {
+  const mk = (row) => ({ work: { status: 'ended', outcome: 'complete' }, evidence: [{ id: 'a', ...row }] });
+  const sym = (v) => { const o = { v }; o[Symbol('s')] = 1; return o; };
+  const hidden = (v) => Object.defineProperty({ v }, 'h', { value: 1, enumerable: false });
+  class K { constructor(v) { this.v = v; } }
+  for (const [name, a, b] of [['ArrayBuffer', { b: new ArrayBuffer(2) }, { b: new ArrayBuffer(2) }], ['RegExp', { r: /a/ }, { r: /b/ }],
+    ['Error', { e: new Error('x') }, { e: new Error('y') }], ['symbol key', { o: sym(1) }, { o: sym(1) }], ['non-enumerable', { o: hidden(1) }, { o: hidden(1) }],
+    ['class instance', { o: new K(1) }, { o: { v: 1 } }], ['DataView', { d: new DataView(new ArrayBuffer(1)) }, { d: new DataView(new ArrayBuffer(1)) }]]) {
+    assert.deepStrictEqual(codes(checkImmutableRun(mk(a), mk(b))), ['malformed_input'], name);
+  }
+  assert.deepStrictEqual(checkImmutableRun(mk({ t: new Uint8Array([1, 2]) }), mk({ t: new Uint8Array([1, 2]) })), []);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk({ t: new Uint8Array([1, 2]) }), mk({ t: new Uint8Array([1, 3]) }))), ['ended_run_row_altered']);
+  assert.deepStrictEqual(codes(checkImmutableRun(mk({ t: new Uint8Array([1]) }), mk({ t: new Int8Array([1]) }))), ['ended_run_row_altered']);
+});

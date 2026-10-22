@@ -2858,6 +2858,7 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
   step('SC-04 D3 matrix');
   /* real key presses (Enter needs a char event to activate a button) -- shared by the SC-04 and TD-01 blocks below */
   const press = async (k, code, vk) => { await send('Input.dispatchKeyEvent', k === 'Enter' ? { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, text: '\r' } : { type: 'rawKeyDown', key: k, code, windowsVirtualKeyCode: vk }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }); };
+  const pressTab = async () => { await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); };
   out.sc04d3 = {};
   const LONG = '문서/설정/알림 수신 여부를 바꾸면 곧바로 저장되고 다시 열어도 같은 값이 보이도록 고치는 안내 문서입니다.md';
   const SYN = {
@@ -2877,6 +2878,9 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
         files: [{ file: 'src/index.js', displayable: true, blocks: [{ name: 'main', change: 'modify', afterLines: [1, 2] }], patch: '@@ -1 +1 @@\n-a\n+b\n' },
                 { file: 'README.md', displayable: true, blocks: [], note: 'unblocked', patch: '@@ -1 +1 @@\n-x\n+y\n' }] }],
       evidenceGap: { known: true, paths: [{ path: 'node_modules/.cache/x' }] } } },
+    unexplained: { outcome: 'complete', reader: { ok: true, groups: [
+      { title: '설명을 마치지 못한 변경', explainable: false, pending: false, confidence: null,
+        files: [{ file: 'src/unexplained.js', displayable: true, blocks: [{ name: 'update', change: 'modify', afterLines: [1, 2] }], patch: '@@ -1 +1 @@\n-old\n+new\n' }] }] } },
     special: { outcome: 'complete', reader: { ok: true, groups: [{ title: '이름이 까다로운 파일들', explainable: true, confidence: 'confirmed', what: 'x', why: null, affects: null, files: [
       { file: 'src/a#b.js', displayable: true, blocks: [{ name: 'one', change: 'modify', afterLines: [1, 2] }, { name: 'two', change: 'add', afterLines: [5, 6] }], patch: 'PATCH-0 src/a#b.js\n+only in a#b\n' },
       { file: 'src/a.js', displayable: true, blocks: [{ name: 'b.js', change: 'modify', afterLines: [1, 1] }], patch: 'PATCH-1 src/a.js\n+only in a\n' },
@@ -2962,6 +2966,103 @@ const results = await cdp(async ({ send, evalJs, acknowledgeAllLegacyUnknowns })
     }
     out.sc04d3[kind] = rows;
   }
+  /* SC-04 terminal recovery actions: real renderer buttons opened with real keyboard input.
+   * The draft is synthetic. Opening the existing TD-01 drawer must preserve it. */
+  step('SC-04 terminal recovery keyboard flow');
+  out.sc04recovery = {};
+  const recoveryCases = [
+    { name: 'unexplained-group', kind: 'unexplained', selector: '[data-group="0"] [data-act="reader-open-terminal"]' },
+    { name: 'undisplayable-block', kind: 'explained', selector: '.sc04-file [data-act="reader-open-terminal"]', setup: 'window.__sc04.state.readerGroup = 1; window.__sc04.state.readerRaw = false; window.__sc04.state.readerBlock = null; window.__sc04.rerender()' },
+    { name: 'undisplayable-raw', kind: 'explained', selector: '.sc04-rawcard [data-act="reader-open-terminal"]', setup: 'window.__sc04.state.readerGroup = 1; window.__sc04.state.readerRaw = true; window.__sc04.state.readerBlock = null; window.__sc04.rerender()' },
+    { name: 'evidence-gap', kind: 'explained', selector: '[data-el="evidence-gap"] [data-act="reader-open-terminal"]' },
+  ];
+  for (const recovery of recoveryCases) {
+    await sc04Mount(recovery.kind);
+    if (recovery.setup) await evalJs(recovery.setup);
+    await evalJs(`window.__openDrawerWith('synthetic recovery draft'); window.__toggleDrawer(false)`);
+    const before = JSON.parse(await evalJs('JSON.stringify(window.__drawer())'));
+    const selector = JSON.stringify(recovery.selector);
+    const button = JSON.parse(await evalJs(`(() => { const b = document.querySelector(${selector}); return JSON.stringify({ tag: b?.tagName ?? null, type: b?.type ?? null, text: b?.textContent?.trim() ?? null, tabIndex: b?.tabIndex ?? null }); })()`));
+    assert.deepStrictEqual(before, { open: false, phrase: 'synthetic recovery draft', discover: false, card: null, run: null },
+      `${recovery.name}: preparation retains a closed drawer and synthetic draft`);
+    assert.strictEqual(button.tag, 'BUTTON', `${recovery.name}: recovery is a real button`);
+    assert.strictEqual(button.type, 'button', `${recovery.name}: button does not submit a form`);
+    assert.ok(button.text?.startsWith('▸'), `${recovery.name}: recovery action has its contracted arrow label`);
+    assert.ok(button.tabIndex >= 0, `${recovery.name}: recovery button is keyboard reachable`);
+    const traversalStart = JSON.parse(await evalJs(`(() => {
+      const start = document.querySelector('.term-toggle');
+      const target = document.querySelector(${selector});
+      const candidates = [...document.querySelectorAll('a[href], area[href], button, input:not([type="hidden"]), select, textarea, summary, iframe, object, embed, [tabindex], [contenteditable="true"]')];
+      const visibleStopBound = candidates.filter((n) => n.tabIndex >= 0 && !n.disabled && n.getClientRects().length > 0 &&
+        getComputedStyle(n).visibility !== 'hidden' && !n.closest('[hidden], [inert]')).length;
+      if (!start || !target || start.disabled || !start.getClientRects().length || getComputedStyle(start).visibility === 'hidden') {
+        return JSON.stringify({ valid: false, startFound: Boolean(start), targetFound: Boolean(target), visibleStopBound });
+      }
+      start.focus();
+      return JSON.stringify({ valid: document.activeElement === start, tag: start.tagName, text: start.textContent?.trim() ?? null,
+        tabIndex: start.tabIndex, visibleStopBound });
+    })()`));
+    assert.strictEqual(traversalStart.valid, true, `${recovery.name}: visible top-bar terminal button is a real keyboard start stop`);
+    let previousStop = { tag: traversalStart.tag, text: traversalStart.text, tabIndex: traversalStart.tabIndex, visible: true };
+    let traversal = null;
+    for (let step = 1; step <= traversalStart.visibleStopBound + 1; step += 1) {
+      await pressTab();
+      const current = JSON.parse(await evalJs(`(() => { const a = document.activeElement; const cs = getComputedStyle(a);
+        return JSON.stringify({ isTarget: a === document.querySelector(${selector}), tag: a.tagName, text: a.textContent?.trim() ?? null, tabIndex: a.tabIndex,
+          visible: a.getClientRects().length > 0 && cs.visibility !== 'hidden', focusVisible: a.matches(':focus-visible'),
+          outlineStyle: cs.outlineStyle, outlineWidth: cs.outlineWidth,
+          hasVisibleOutline: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 }); })()`));
+      if (current.isTarget) {
+        traversal = { steps: step, previousStop };
+        break;
+      }
+      previousStop = current;
+    }
+    assert.ok(traversal, `${recovery.name}: dispatched Tab reaches the recovery button within the rendered tab-stop bound`);
+    assert.ok(traversal.previousStop.visible && traversal.previousStop.tabIndex >= 0,
+      `${recovery.name}: preceding stop is a visible, keyboard-reachable element from actual Tab traversal`);
+    const focus = JSON.parse(await evalJs(`(() => { const a = document.activeElement; const cs = getComputedStyle(a);
+      return JSON.stringify({ isTarget: a === document.querySelector(${selector}), focusVisible: a.matches(':focus-visible'),
+        outlineStyle: cs.outlineStyle, outlineWidth: cs.outlineWidth, hasVisibleOutline: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 }); })()`));
+    assert.strictEqual(focus.isTarget, true, `${recovery.name}: one dispatched Tab reaches the recovery button from its preceding tab stop`);
+    assert.strictEqual(focus.focusVisible, true, `${recovery.name}: keyboard traversal applies :focus-visible`);
+    assert.strictEqual(focus.hasVisibleOutline, true,
+      `${recovery.name}: keyboard focus has a non-none outline with positive width (${focus.outlineStyle} ${focus.outlineWidth})`);
+    await press('Enter', 'Enter', 13);
+    await sleep(220);
+    const opened = JSON.parse(await evalJs(`JSON.stringify({ drawer: window.__drawer(), td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')),
+      focusInDrawer: document.querySelector('[data-screen-overlay="TD-01"]')?.contains(document.activeElement) ?? false,
+      focusIsQcInput: document.activeElement === document.querySelector('[data-screen-overlay="TD-01"] [data-el="qc-input"]') })`));
+    assert.strictEqual(opened.drawer.open, true, `${recovery.name}: Enter opens TD-01`);
+    assert.strictEqual(opened.drawer.phrase, 'synthetic recovery draft', `${recovery.name}: Quick Command draft is preserved`);
+    assert.strictEqual(opened.td01, true, `${recovery.name}: TD-01 is present in the rendered DOM`);
+    assert.strictEqual(opened.focusInDrawer, true, `${recovery.name}: keyboard activation moves focus into TD-01`);
+    assert.strictEqual(opened.focusIsQcInput, true, `${recovery.name}: focus lands in the Quick Command input`);
+    await press('Escape', 'Escape', 27);
+    await sleep(80);
+    const closed = JSON.parse(await evalJs(`JSON.stringify({ drawer: window.__drawer(), td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')),
+      focusReturned: document.activeElement === document.querySelector(${selector}) })`));
+    assert.strictEqual(closed.drawer.open, false, `${recovery.name}: Escape closes TD-01`);
+    assert.strictEqual(closed.td01, false, `${recovery.name}: Escape removes the TD-01 overlay`);
+    assert.strictEqual(closed.drawer.phrase, 'synthetic recovery draft', `${recovery.name}: closing retains the Quick Command draft`);
+    assert.strictEqual(closed.focusReturned, true, `${recovery.name}: Escape returns focus to the recovery button`);
+    out.sc04recovery[recovery.name] = { button, precedingTabStop: traversal, focus, drawerOpened: opened.drawer.open, draftPreserved: opened.drawer.phrase === 'synthetic recovery draft', escapeClosed: !closed.drawer.open, focusReturned: closed.focusReturned };
+  }
+  await sc04Mount('partial');
+  out.sc04recovery.pendingHasNoTerminalAction = await evalJs(`!document.querySelector('[data-group="0"] [data-act="reader-open-terminal"]')`);
+  assert.strictEqual(out.sc04recovery.pendingHasNoTerminalAction, true,
+    'a not-yet-explained pending group does not claim an explanation failure');
+  await sc04Mount('explained');
+  await evalJs(`window.__openDrawerWith('synthetic topbar draft'); window.__toggleDrawer(false)`);
+  const toggleStart = JSON.parse(await evalJs(`JSON.stringify({ open: window.__drawer().open, phrase: window.__drawer().phrase, button: document.querySelector('.term-toggle')?.tagName ?? null })`));
+  assert.deepStrictEqual(toggleStart, { open: false, phrase: 'synthetic topbar draft', button: 'BUTTON' }, 'the SC-04 top-bar test starts closed with its draft present');
+  await evalJs(`document.querySelector('.term-toggle').click()`);
+  const toggleOpened = JSON.parse(await evalJs(`JSON.stringify({ open: window.__drawer().open, phrase: window.__drawer().phrase, td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')) })`));
+  assert.deepStrictEqual(toggleOpened, { open: true, phrase: 'synthetic topbar draft', td01: true }, 'the first no-argument top-bar click opens TD-01 without clearing the draft');
+  await evalJs(`document.querySelector('.term-toggle').click()`);
+  const toggleClosed = JSON.parse(await evalJs(`JSON.stringify({ open: window.__drawer().open, phrase: window.__drawer().phrase, td01: Boolean(document.querySelector('[data-screen-overlay="TD-01"]')) })`));
+  assert.deepStrictEqual(toggleClosed, { open: false, phrase: 'synthetic topbar draft', td01: false }, 'the second no-argument top-bar click closes TD-01 and preserves the draft');
+  out.sc04recovery.topbarToggle = { firstClickOpened: toggleOpened.open, secondClickClosed: !toggleClosed.open, draftPreserved: toggleClosed.phrase === 'synthetic topbar draft' };
   /* keyboard-only flow at 1200: pick the 2nd group with Enter, open Raw with Enter, Esc closes it and focus returns to the opener */
   await sc04Mount('explained');
   await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 773, deviceScaleFactor: 1, mobile: false });
@@ -3449,12 +3550,11 @@ const confirmed = interp.answers.filter((a) => a.confidence === 'confirmed').map
 /* q4 is never 확인됨: the question is what the folders DO, and the scan established only that
  * they exist. A 확인됨 chip there would certify an answer nothing has given. */
 assert.deepStrictEqual(confirmed, [3, 5, 6], `the facts layer confirmed q${confirmed}`);
-/* WBS-04 · the narrative layer answers q1, q2 and q4, and its answers are 예상됨 at best —
- * `19` §C1 ① lets only the facts layer's own output be 확인됨. The fixture grounds q1 and q2 in
- * a file the scan really read and grounds q4 in one nobody read, so q4 stays 확인 못함. */
-assert.deepStrictEqual(interp.answers.filter((a) => a.confidence === 'expected').map((a) => a.q), [1, 2],
-  'the narrative layer did not fill the questions the facts layer left open');
-assert.deepStrictEqual(interp.answers.filter((a) => a.confidence === 'unconfirmed').map((a) => a.q), [4]);
+/* V1-314 · interpreting runs no model: q1, q2 and q4 stay open (확인 못함) until the user asks
+ * for a model read, and nothing is 예상됨 — the fixture CLI would have answered if it were asked. */
+assert.deepStrictEqual(interp.answers.filter((a) => a.confidence === 'expected').map((a) => a.q), [],
+  'a model answer reached the Brief without the user asking for one');
+assert.deepStrictEqual(interp.answers.filter((a) => a.confidence === 'unconfirmed').map((a) => a.q), [1, 2, 4]);
 assert.ok(!interp.answers.some((a) => a.confidence === 'confirmed' && !a.sourceRef),
   '`20`: a 확인됨 answer without the source that backs it');
 
@@ -3472,26 +3572,17 @@ assert.ok(results.sc02RedProbe > 0,
   'the red counter cannot see red — a zero from it would prove nothing (this check was once vacuous)');
 assert.strictEqual(results.sc02Reds, 0, 'SC-02 renders red with nothing failed — red is failure only (16 §2)');
 
-/* ── WBS-04 · the Brief's narrative layer ─────────────────────────────────────────────────── */
+/* ── V1-314 · the Brief has no automatic model layer ─────────────────────────────────────── */
 const narrative = results.narrative ? JSON.parse(results.narrative) : null;
-assert.ok(narrative, 'the renderer never saw a narrative report');
-assert.strictEqual(narrative.reason, null, `the narrative pass did not run: ${JSON.stringify(narrative)}`);
-assert.strictEqual(narrative.filled, 3, 'the three open questions were not filled');
-/* The fixture cites README.md twice (a file the scan really read) and one path nobody read. */
-assert.strictEqual(narrative.grounded, 2, 'a citation nobody read was counted as grounding');
+assert.deepStrictEqual(narrative, { skipped: true, reason: 'not-requested' },
+  `interpret reported a model pass: ${JSON.stringify(narrative)}`);
 
 const briefRows = JSON.parse(results.briefAfterReread ?? results.briefAnswers);
 const chip = (i) => briefRows[i].chip;
-/* ① 하는 일 and ② 주요 기능 cited a file the scan read → 예상됨. NEVER 확인됨: `19` §C1 ① lets
- * only the facts layer's own output be confirmed, and `20` demands a source_ref it cannot have. */
-assert.ok(chip(0).includes('예상됨'), `q1 chip was ${chip(0)}`);
-assert.ok(chip(1).includes('예상됨'), `q2 chip was ${chip(1)}`);
-/* ④ 폴더가 하는 일 cited a path nobody read, so the answer is shown under 확인 못함. */
-assert.ok(chip(3).includes('확인 못함'), `q4 chip was ${chip(3)}`);
-assert.ok(briefRows[3].text.includes('src 에 소스가 있어요'),
-  'the ungrounded answer was hidden instead of marked');
-assert.ok(!briefRows[3].text.includes('nobody-read-this'),
-  'a path nobody read was shown to the user as evidence');
+for (const i of [0, 1, 3]) {
+  assert.ok(chip(i).includes('확인 못함'), `q${i + 1} chip was ${chip(i)}`);
+  assert.ok(!chip(i).includes('예상됨'), `q${i + 1} claims a model read: ${chip(i)}`);
+}
 /* …and the measured rows are untouched by any of it. */
 assert.ok(chip(2).includes('확인됨') && !chip(2).includes('못함'), `q3 chip was ${chip(2)}`);
 assert.strictEqual(results.briefConfirmedHaveSource, 0,

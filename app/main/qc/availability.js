@@ -20,6 +20,7 @@ const path = require('node:path');
  * refuses to record — a non-developer with no `.gitignore` would otherwise have JuQode put
  * their `.env` into a permanent commit on the first press of the button. */
 const { pathspec } = require('../evidence/exclude');
+const { mask } = require('./run');   // what is SHOWN of a script is masked; argv (what runs) is built from names only
 /* The git capability is contained to ONE module (`tests/unit.test.js`). This file asks it
  * questions; it never spawns git itself. */
 const { worktreeDirty, hasIdentity } = require('../evidence/git');
@@ -75,7 +76,7 @@ function hooksFor(scripts, name) {
   const out = [];
   for (const [prefix, hook] of [['pre', `pre${name}`], ['post', `post${name}`]]) {
     const body = scripts[hook];
-    if (typeof body === 'string' && body.trim()) out.push({ when: prefix, script: hook, body });
+    if (typeof body === 'string' && body.trim()) out.push({ when: prefix, script: hook, body: mask(body) });
   }
   return out;
 }
@@ -171,13 +172,13 @@ function availability(ruleId, { root, devServer = null } = {}) {
      * useful thing. A server already running is otherwise the first answer forever. */
     if (devServer) return no('already_running', { pid: devServer.pid, startedAt: devServer.startedAt });
     return yes({ command: `${pm} run ${script}`, argv: [pm, 'run', script],
-                 script, scriptBody: scripts[script], hooks: hooksFor(scripts, script), cwd: root, pm });
+                 script, scriptBody: mask(scripts[script]), hooks: hooksFor(scripts, script), cwd: root, pm });
   }
 
   if (ruleId === 'qc.build') {
     if (typeof scripts.build !== 'string' || !scripts.build.trim()) return no('no_script');
     return yes({ command: `${pm} run build`, argv: [pm, 'run', 'build'],
-                 script: 'build', scriptBody: scripts.build, hooks: hooksFor(scripts, 'build'),
+                 script: 'build', scriptBody: mask(scripts.build), hooks: hooksFor(scripts, 'build'),
                  cwd: root, pm });
   }
 
@@ -186,9 +187,9 @@ function availability(ruleId, { root, devServer = null } = {}) {
     /* The placeholder is not a test command. Running it produces only an error, so the honest
      * answer is 사용 불가 with the reason — and the reason carries the script body, because the
      * user is entitled to see what is actually in their file. */
-    if (PLACEHOLDER_TEST.test(scripts.test)) return no('placeholder_script', { scriptBody: scripts.test });
+    if (PLACEHOLDER_TEST.test(scripts.test)) return no('placeholder_script', { scriptBody: mask(scripts.test) });
     return yes({ command: `${pm} run test`, argv: [pm, 'run', 'test'],
-                 script: 'test', scriptBody: scripts.test, hooks: hooksFor(scripts, 'test'),
+                 script: 'test', scriptBody: mask(scripts.test), hooks: hooksFor(scripts, 'test'),
                  cwd: root, pm });
   }
 
@@ -198,7 +199,7 @@ function availability(ruleId, { root, devServer = null } = {}) {
      * non-developer's work somewhere they never chose. No `deploy` script, no rule. */
     if (typeof scripts.deploy !== 'string' || !scripts.deploy.trim()) return no('no_script');
     return yes({ command: `${pm} run deploy`, argv: [pm, 'run', 'deploy'],
-                 script: 'deploy', scriptBody: scripts.deploy, hooks: hooksFor(scripts, 'deploy'),
+                 script: 'deploy', scriptBody: mask(scripts.deploy), hooks: hooksFor(scripts, 'deploy'),
                  cwd: root, pm });
   }
 

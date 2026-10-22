@@ -391,57 +391,61 @@ function handlerBench(projectFiles = {}) {
                                          push: () => {}, claudeBin: () => bin }) };
 }
 
-test('the Brief keeps its measured answers when the narrative pass fails', async () => {
-  /* `19` §C1 ⑥: 서술 실패 → 사실 층만으로 Brief(부분). The failure must not reach the screen as
-   * a failed interpretation, and it must not cost the facts. */
-  const h = handlerBench();
-  const out = await h.make(fakeCli('', { silent: true }))['juqode:interpret'](null, h.project.id);
+/* A claude binary that writes a line to `spawns.log` each time it is started. Any child the
+ * interpret handler spawns shows up there, whatever it was spawned for. */
+function recordingCli() {
+  const home = tempDir('juqode-rec-');
+  const log = path.join(home, 'spawns.log');
+  const script = path.join(home, 'fake.js');
+  fs.writeFileSync(script, `require('fs').appendFileSync(${JSON.stringify(log)}, 'spawn\\n');\n` +
+    `process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [], result: '[{"q":1,"text":"x","cites":["README.md"]}]' }) + '\\n');\n`);
+  return { bin: fake.launcher(home, 'fake', script),
+           spawns: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length : 0) };
+}
 
+test('V1-314 · interpreting spawns no model child and returns the deterministic answers', async () => {
+  const h = handlerBench();
+  const rec = recordingCli();
+  const out = await h.make(rec.bin)['juqode:interpret'](null, h.project.id);
+
+  assert.strictEqual(rec.spawns(), 0, 'interpret started a model/CLI child — the automatic call is back');
   assert.strictEqual(out.ok, true);
-  assert.notStrictEqual(out.interpretation.status, 'failed', 'a narrative failure failed the Brief');
+  assert.deepStrictEqual(out.narrative, { skipped: true, reason: 'not-requested' });
+  assert.notStrictEqual(out.interpretation.status, 'failed');
+  assert.strictEqual(out.interpretation.answers.length, 6, 'the six questions are a closed set');
   const tech = answerFor(out.interpretation.answers, 3);
   assert.strictEqual(tech.confidence, 'confirmed');
   assert.ok(tech.sourceRef, '`20` requires a source_ref on every confirmed row');
-  assert.strictEqual(out.narrative.filled, 0);
-});
-
-test('a successful pass fills the three open questions and persists them', async () => {
-  const h = handlerBench();
-  const bin = fakeCli(JSON.stringify([
-    { q: 1, text: '할 일을 적는 앱이에요', cites: ['README.md'] },
-    { q: 4, text: 'src 에 소스가 있어요', cites: ['README.md'] },
-  ]));
-  const out = await h.make(bin)['juqode:interpret'](null, h.project.id);
-
-  assert.strictEqual(out.narrative.filled, 2);
-  assert.strictEqual(out.narrative.grounded, 2);
-
-  /* …and it is on the row, not only in the return value. */
+  /* The two narrative questions stay open — nothing read the files on the user's behalf. */
+  assert.strictEqual(answerFor(out.interpretation.answers, 1).kind, 'needs-narrative');
+  assert.strictEqual(answerFor(out.interpretation.answers, 2).kind, 'needs-narrative');
+  assert.ok(!out.interpretation.answers.some((a) => a.confidence === 'expected'), 'a model answer reached the Brief');
+  /* …and it is the same on the stored row. */
   const back = h.repo.currentInterpretation(h.db, h.project.id);
-  assert.strictEqual(answerFor(back.answers, 1).confidence, 'expected');
-  assert.strictEqual(answerFor(back.answers, 1).data.text, '할 일을 적는 앱이에요');
-  assert.strictEqual(answerFor(back.answers, 3).confidence, 'confirmed', 'the measured row survived the write');
+  assert.strictEqual(answerFor(back.answers, 1).kind, 'needs-narrative');
 });
 
-test('the narrative pass does not run while a Work is running', async () => {
-  /* `19` §C1 ⑦ — D-117's spirit. A Work is what the user asked for; the Brief is not, so the
-   * Brief is the one that waits. The facts still reach the screen either way. */
+test('V1-314 · neither a Work in flight nor a re-interpret changes that: still no child, narrate() unreachable', async () => {
   const h = handlerBench();
-  assert.strictEqual(h.repo.beginWork(h.db, h.project.id, '진행 중인 작업').ok, true);
-
-  const bin = fakeCli(JSON.stringify([{ q: 1, text: '이건 안 실려야 해요', cites: ['README.md'] }]));
-  const out = await h.make(bin)['juqode:interpret'](null, h.project.id);
-
-  assert.deepStrictEqual(out.narrative, { skipped: true });
-  assert.strictEqual(answerFor(out.interpretation.answers, 1).kind, 'needs-narrative',
-    'a second Claude Code session ran in a project that already had one');
-  assert.strictEqual(answerFor(out.interpretation.answers, 3).confidence, 'confirmed',
-    'the facts layer must still answer while a Work is running');
+  const rec = recordingCli();
+  const narrateModule = require(path.join(R, 'app/main/interpret/narrate.js'));
+  const real = narrateModule.narrate;
+  let called = 0;
+  narrateModule.narrate = () => { called += 1; throw new Error('narrate() reached from interpret'); };
+  try {
+    const handlers = h.make(rec.bin);
+    await handlers['juqode:interpret'](null, h.project.id);
+    assert.strictEqual(h.repo.beginWork(h.db, h.project.id, '진행 중인 작업').ok, true);
+    const out = await handlers['juqode:interpret'](null, h.project.id);
+    assert.deepStrictEqual(out.narrative, { skipped: true, reason: 'not-requested' });
+    assert.strictEqual(answerFor(out.interpretation.answers, 3).confidence, 'confirmed');
+  } finally { narrateModule.narrate = real; }
+  assert.strictEqual(called, 0);
+  assert.strictEqual(rec.spawns(), 0);
 });
 
-test('a scan that failed does not get a narrative pass on top of it', () => {
-  /* `19` §C1 ⑥ separates the two failures: a scan failure is a 읽기 실패 card. Asking a model to
-   * narrate a project nobody could read would produce an answer with nothing under it. */
+test('a scan that failed spawns nothing either', () => {
+  /* `19` §C1 ⑥ separates the two failures: a scan failure is a 읽기 실패 card. */
   const { openDb } = require(path.join(R, 'app/main/db/db.js'));
   const repo = require(path.join(R, 'app/main/db/repo.js'));
   const { makeHandlers } = require(path.join(R, 'app/main/ipc.js'));
@@ -449,33 +453,14 @@ test('a scan that failed does not get a narrative pass on top of it', () => {
   const gone = path.join(tempDir('juqode-gone-'), 'not-here');
   const project = repo.openProject(db, gone, 'gone');
 
-  let spawned = false;
+  const rec = recordingCli();
   const h = makeHandlers({ db: () => db, dbFault: () => null, evidenceStore: () => '/tmp/x',
-                           push: () => {}, claudeBin: () => { spawned = true; return '/bin/false'; } });
+                           push: () => {}, claudeBin: () => rec.bin });
   return h['juqode:interpret'](null, project.id).then((out) => {
     assert.strictEqual(out.ok, true, 'a scan failure is a card, not a dead channel');
-    assert.deepStrictEqual(out.narrative, { skipped: true });
-    assert.strictEqual(spawned, false, 'a model was asked about a project nobody could read');
+    assert.deepStrictEqual(out.narrative, { skipped: true, reason: 'not-requested' });
+    assert.strictEqual(rec.spawns(), 0);
   });
-});
-
-test('a narrative pass that THROWS still leaves the facts on screen', () => {
-  /* `19` §C1 ⑥ has no exception clause: however the narrative layer goes wrong, the Brief is
-   * the facts layer's six rows. `narrate()` catches its own failures, so the handler's guard is
-   * for the ones it cannot — and a guard nothing exercises is a guard nobody has checked. */
-  const h = handlerBench();
-  const narrateModule = require(path.join(R, 'app/main/interpret/narrate.js'));
-  const real = narrateModule.narrate;
-  narrateModule.narrate = () => { throw new Error('boom'); };
-
-  return h.make('/bin/false')['juqode:interpret'](null, h.project.id)
-    .then((out) => {
-      assert.strictEqual(out.ok, true);
-      assert.strictEqual(answerFor(out.interpretation.answers, 3).confidence, 'confirmed',
-        'a thrown narrative pass took the measured answers with it');
-      assert.strictEqual(out.interpretation.answers.length, 6, 'the six questions are a closed set');
-    })
-    .finally(() => { narrateModule.narrate = real; });
 });
 
 test('a pass whose CLI is broken says so in the detail, not only in the reason', () => {

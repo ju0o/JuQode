@@ -61,7 +61,7 @@ export function renderBrief(card, interp, opts = {}) {
    * and two identical buttons in one card make the reader choose between the same thing. */
   if (interp && opts.rereading) {
     /* `15` SC-02 갱신 중: the OLD interpretation stays visible (F-C1-03) and the header says a
-     * re-read is under way. Nothing moved on screen for the seconds the narrative pass takes,
+     * re-read is under way. Nothing moved on screen for the seconds the re-scan takes,
      * and the button stayed pressable — so it could be pressed again and again. */
     head.appendChild(el('span', 'xs mut2 rereading', C.gap.briefRereading));
   } else if (interp && opts.onReread && !opts.stale?.changed) {
@@ -147,7 +147,7 @@ export function renderBrief(card, interp, opts = {}) {
   if (opts.folded) return;                 // D-132: folded shows the header and nothing more
 
   /* 부분 해석 — amber, because `16` §2 assigns amber to 부분 and this is the state the user
-   * is always in until the narrative layer exists. Grey would put it in no state at all. */
+   * is always in until a model read is requested (V1-314: never automatic). Grey would put it in no state at all. */
   if (interp.status === 'partial') card.appendChild(el('div', 'xs partial-line', C.brief.partial));
 
   const list = el('div', 'answers');

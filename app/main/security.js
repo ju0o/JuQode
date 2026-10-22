@@ -58,4 +58,24 @@ function enforceLocalOnly(session) {
   return read;
 }
 
-module.exports = { WEB_PREFERENCES, lockNavigation, enforceLocalOnly };
+/* Electron grants every permission request unless a handler says otherwise. The UI uses exactly one: copying text
+ * (`navigator.clipboard.writeText`, sc04.js and file-summary.js), which Chromium asks for as 'clipboard-sanitized-write'. */
+const ALLOWED_PERMISSIONS = Object.freeze(['clipboard-sanitized-write']);
+
+function denyPermissions(session) {
+  session.setPermissionRequestHandler((_contents, permission, callback) => callback(ALLOWED_PERMISSIONS.includes(permission)));
+  session.setPermissionCheckHandler((_contents, permission) => ALLOWED_PERMISSIONS.includes(permission));
+}
+
+/* An IPC call is ours only if its frame is the top frame of OUR page. A frame that reports no URL (destroyed
+ * mid-call) or no frame at all stays accepted - refusing it would drop legitimate calls; navigation is locked to
+ * `appUrl` anyway, so a frame at any other URL (devtools://, a file:// page, http) is refused. */
+function trustedSender(e, appUrl) {
+  const f = e && e.senderFrame;
+  if (!f) return true;
+  if (f.parent) return false;
+  if (typeof f.url !== 'string' || !f.url) return true;
+  return f.url.split(/[?#]/)[0] === appUrl;
+}
+
+module.exports = { trustedSender, WEB_PREFERENCES, lockNavigation, enforceLocalOnly, denyPermissions };

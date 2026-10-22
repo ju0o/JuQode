@@ -7,8 +7,11 @@
  */
 const path = require('node:path');
 const { app, BrowserWindow, ipcMain, session } = require('electron');
-const { createWindow } = require('./window');
-const { enforceLocalOnly } = require('./security');
+const { pathToFileURL } = require('node:url');
+const { createWindow, RENDERER } = require('./window');
+const { enforceLocalOnly, denyPermissions, trustedSender } = require('./security');
+const guard = require('./ipc-guard');
+const APP_URL = pathToFileURL(RENDERER).href;
 const { openDb } = require('./db/db');
 const project = require('./project');
 const claude = require('./claude-detect');
@@ -81,7 +84,7 @@ if (!app.requestSingleInstanceLock()) {
      * still refuse a SUB-FRAME. It does not establish that the sender is our window — a
      * destroyed frame reports null and reads as trusted here — so it is one layer, not the
      * boundary. The boundary is the preload surface and the locked navigation. */
-    if (e.senderFrame && e.senderFrame.parent) return { ok: false, reason: 'bad-sender' };
+    if (!trustedSender(e, APP_URL)) return { ok: false, reason: 'bad-sender' };
     try {
       return await fn(e, ...args);
     } catch (err) {
@@ -97,19 +100,19 @@ if (!app.requestSingleInstanceLock()) {
   const evidenceRoot = () => path.join(app.getPath('userData'), 'evidence');
   const pushUpdate = (snap) => {
     if (!snap) return;
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:work-update', snap);
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:work-update', guard.publicPush(snap));
   };
   /* WBS-22 · a Quick Command's live tail. Its own channel, because TD-01 is a drawer over
    * whatever screen is up — a QC update is not a Work update and must not redraw one. */
   const pushQc = (u) => {
     if (!u) return;
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:qc-update', u);
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:qc-update', guard.publicPush(u));
   };
   /* WBS-25 · the shell line's own channel. A terminal update is not a Quick Command update:
    * TD-01 draws them in different places and a shared channel would redraw the wrong card. */
   const pushTerm = (u) => {
     if (!u) return;
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:term-update', u);
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('juqode:term-update', guard.publicPush(u));
   };
 
   const handlers = makeHandlers({
@@ -150,6 +153,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     readExternalAttempts = enforceLocalOnly(session.defaultSession);
+    denyPermissions(session.defaultSession);
     openStore();
     if (db) {
       const appSession = repo.startAppSession(db, { appVersion: app.getVersion(), platform: process.platform });

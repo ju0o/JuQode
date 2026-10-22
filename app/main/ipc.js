@@ -18,7 +18,6 @@ const project = require('./project');
 const claude = require('./claude-detect');
 const supervisor = require('./work/supervisor');
 const explain = require('./change/explain');
-const narrate = require('./interpret/narrate');
 const qcRules = require('./qc/rules');
 const qcAvail = require('./qc/availability');
 const qcRun = require('./qc/run');
@@ -174,8 +173,6 @@ function makeHandlers(deps) {
     if (!reason) return avail;
     return { ...avail, available: false, reason };
   };
-  /* …and with a narrative pass in flight (`19` §C1 ⑦). Both spawn a Claude Code child. */
-  const narrating = new Set();
 
   const handlers = {
     'juqode:versions': () => deps.versions?.() ?? {},
@@ -226,28 +223,11 @@ function makeHandlers(deps) {
       if (!row) return { ok: false, reason: 'no-project' };
 
       const scanned = scan(row.path);
-      let list = answers(scanned);
+      const list = answers(scanned);
 
-      /* WBS-04 · the narrative layer. `19` §C1 ⑥ makes its failure a 부분 Brief rather than a
-       * failed one, so it is written as an ENRICHMENT of the deterministic answers: whatever
-       * comes back, `list` is still the facts layer's six rows or better.
-       *
-       * ⑦ the narrative session does not overlap an active Work — D-117's spirit, and the same
-       * rule the change-explanation pass obeys. A Work is what the user asked for; the Brief is
-       * not, so the Brief is the one that waits. The scan already happened either way, so the
-       * facts are on screen regardless. */
-      let narrated = null;
-      if (!scanned.failed && !repo.activeWork(db(), projectId) && !narrating.has(projectId)) {
-        narrating.add(projectId);
-        try {
-          narrated = await narrate.narrate({
-            deterministic: list, readFiles: scanned.readFiles, facts: scanned.facts,
-            cwd: row.path, bin: deps.claudeBin?.(),
-          });
-          list = narrated.answers;
-        } catch { /* `19` §C1 ⑥ — the facts stand on their own */ }
-        finally { narrating.delete(projectId); }
-      }
+      /* V1-314 · interpreting is the deterministic scan and nothing else: no model, no Claude Code
+       * child, no matter what the project looks like. A model read is something the user asks
+       * for (and sees the Agent and model for) — never a side effect of opening a Brief. */
 
       /* `21` WBS-05: 갱신 실패 시 이전 해석이 살아남는다. `saveInterpretation` retires the
        * current row and inserts a new one, so writing a failed scan over a good Brief would
@@ -258,7 +238,7 @@ function makeHandlers(deps) {
         return { ok: true,
                  interpretation: { ...existing, failedCode: null },
                  refreshFailed: scanned.failed,
-                 narrative: { skipped: true } };
+                 narrative: { skipped: true, reason: 'not-requested' } };
       }
 
       const saved = repo.saveInterpretation(db(), projectId, {
@@ -272,10 +252,8 @@ function makeHandlers(deps) {
        * fixed sentence in the renderer would state a cause that may not be the cause. */
       return { ok: true,
                interpretation: { ...saved, failedCode: scanned.failed ?? null },
-               /* Why the Brief looks the way it does, for the run log — not for the screen. */
-               narrative: narrated ? { filled: narrated.filled, grounded: narrated.grounded,
-                                       reason: narrated.reason, detail: narrated.detail ?? null }
-                                   : { skipped: true } };
+               /* For the run log — not for the screen. */
+               narrative: { skipped: true, reason: 'not-requested' } };
     },
 
     /* WBS-05 · the Brief as it stands, plus whether it has AGED — and neither is a write.

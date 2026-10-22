@@ -17,7 +17,7 @@ import { nextActions } from '../nextaction.js';
 import { rememberFocus, restoreFocus } from '../focus.js';
 import { contextFacts, changedFilesState } from '../human-read.mjs';
 import { fileSummary } from '../file-summary.js';
-import { inputProblem } from '../input-problem.js';
+import { refusalNote } from '../input-problem.js';
 
 /* The schema's outcome codes → the class that paints them and `18`'s own title key.
  * `cancelled_nochange` is a NEUTRAL chip (`15`): the 사용 불가 grey means "지금 안 됨 · 실패
@@ -274,6 +274,7 @@ function permissionPanel(snap, api, state) {
   panel.appendChild(el('div', 'sm', C.work.permGlossB));
 
   const acts = el('div', 'row-acts');
+  const allowNote = el('div', 'xs mut2');      // a refused allow is shown, never swallowed
   /* Decided BEFORE the button is drawn. Offering `허용하고 다시 해 보기` and then explaining
    * that no button can be offered is a control that contradicts itself. */
   if (d.scopable === false) {
@@ -288,13 +289,14 @@ function permissionPanel(snap, api, state) {
      * are ever allowed to disagree, the honest fix is one authority, not a second message. */
     const retry = btn('btn sm pri', C.work.permRetry, async () => {
       retry.disabled = true;
-      await api.workAllow(snap.work.id, d.toolUseId ?? null);
+      allowNote.textContent = refusalNote(await api.workAllow(snap.work.id, d.toolUseId ?? null)) ?? '';
       retry.disabled = false;
     });
     acts.appendChild(retry);
   }
   acts.appendChild(btn('btn sm cancel', C.gap.permStop, () => api.workCancel(snap.work.id)));
   panel.appendChild(acts);
+  panel.appendChild(allowNote);
   panel.appendChild(el('div', 'xs mut', C.gap.permStopNote));
   return panel;
 }
@@ -329,7 +331,7 @@ function inputPanel(snap, api) {
   const acts = el('div', 'row-acts');
   const note = el('div', 'xs mut2');
   acts.appendChild(btn('btn sm pri', C.work.answer, async () => {
-    note.textContent = inputProblem(await api.workAnswer(snap.work.id, box.value)) ?? '';
+    note.textContent = refusalNote(await api.workAnswer(snap.work.id, box.value)) ?? '';
   }));
   acts.appendChild(el('span', 'xs mut', C.work.inputHint));
   panel.appendChild(acts);

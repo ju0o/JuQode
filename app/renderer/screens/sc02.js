@@ -30,7 +30,7 @@ import { contextFacts, changedFilesState } from '../human-read.mjs';
 import { maskForDisplay } from '../path-view.mjs';
 import { fileSummary } from '../file-summary.js';
 import { holdPanel } from '../qc-hold.js';
-import { inputProblem, taskProblem } from '../input-problem.js';
+import { inputProblem, taskProblem, refusalNote } from '../input-problem.js';
 import { renderBrief, when } from './brief.js';
 import { mountThemeToggle } from '../design/theme.js';
 import { presenceBody, setPresenceMode, modeFor } from '../presence.js';
@@ -247,7 +247,7 @@ export function renderSC02(root, api, nav, state) {
        * and folding it would hide the reason. A re-read the user ASKED for re-opens itself
        * (see `onReread`), because they asked to see the result. */
       if (r?.ok) state.briefFolded = true;
-      /* WBS-04's own report — how many answers the narrative pass filled, and why it did not.
+      /* V1-314 · interpret runs no model, so this is `{ skipped, reason: 'not-requested' }`.
        * It is not drawn: the Brief shows the ANSWERS and their chips, which is what the reader
        * needs. This is for the run log and the e2e, the way `__work` carries counts. */
       state.narrative = r?.narrative ?? null;
@@ -1121,12 +1121,13 @@ function inspectPermission(snap, api, refresh) {
   if (d.message) raw.appendChild(el('div', 'xs mono mut', d.message));
   panel.appendChild(raw);
   const acts = el('div', 'row-acts');
+  const allowNote = el('div', 'xs mut2');      // a refused allow is shown, never swallowed
   if (d.scopable === false) {
     panel.appendChild(el('div', 'xs mut', d.scopeRefusal === 'outside-project' ? C.gap.workOutsideProject : (d.scopeRefusal === 'args-hidden' ? C.gap.workArgsHiddenRefused : C.gap.workNoScope)));
   } else {
     const allow = btn('btn sm pri', C.gap.board.allowContinue, async () => {
       allow.disabled = true;
-      await api.workAllow(snap.work.id, d.toolUseId ?? null);
+      allowNote.textContent = refusalNote(await api.workAllow(snap.work.id, d.toolUseId ?? null)) ?? '';
       allow.disabled = false;
       await refresh();
     });
@@ -1137,6 +1138,7 @@ function inspectPermission(snap, api, refresh) {
     await refresh();
   }));
   panel.appendChild(acts);
+  panel.appendChild(allowNote);
   panel.appendChild(el('div', 'xs mut', C.gap.permStopNote));
   return panel;
 }
@@ -1159,7 +1161,7 @@ function inspectInput(snap, api) {
   panel.appendChild(box);
   const note = el('div', 'xs mut2');
   panel.appendChild(btn('btn sm pri', C.work.answer, async () => {
-    note.textContent = inputProblem(await api.workAnswer(snap.work.id, box.value)) ?? '';
+    note.textContent = refusalNote(await api.workAnswer(snap.work.id, box.value)) ?? '';
   }));
   panel.appendChild(note);
   return panel;
@@ -1301,7 +1303,7 @@ function renderHumanRead(task, latest) {
     block.appendChild(raw);
   }
   const report = latest.result?.claims?.find((claim) => claim.kind === 'agent-report');
-  if (report?.data?.text) block.appendChild(voice(C.gap.task.humanAgent, report.data.text));
+  if (report?.data?.shown) block.appendChild(voice(C.gap.task.humanAgent, report.data.shown));
   else block.appendChild(voice(C.gap.task.humanAgent, ended ? C.gap.task.humanAgentNone : C.gap.task.humanAgentPending));
   const answer = changedFilesState(latest.runEvidence);
   block.appendChild(voice(C.gap.task.humanObserved, {
@@ -1673,7 +1675,7 @@ async function fillStream(body, stream, api, nav, state, onLive) {
    * claim that nothing is happening — and the store refusing to answer is not evidence for it. */
   if (!r?.ok) { setPresenceMode('unknown'); onLive?.(null); return; }
 
-  const live = r.works.find((w) => w.status !== 'ended');
+  const live = r.works.find((w) => w && typeof w === 'object' && w.status !== 'ended');   // a main-side '[truncated]' marker is not a Work
   if (!live) {
     /* TRUE, and now only said when it is: this project has no Work that has not ended. */
     body.appendChild(el('div', 'sm mut', C.work.empty));

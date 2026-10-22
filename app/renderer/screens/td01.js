@@ -53,7 +53,12 @@ function renderDrawer(host, api, state, repaint) {
   host.innerHTML = '';
   host.classList.toggle('open', Boolean(state.drawerOpen));
   host.setAttribute('data-open', state.drawerOpen ? 'true' : 'false');
-  if (!state.drawerOpen) return;
+  if (!state.drawerOpen) {
+    const opener = state.drawerOpener;
+    state.drawerOpener = null;
+    if (opener?.isConnected) opener.focus?.();
+    return;
+  }
 
   const panel = el('section', 'td01');
   panel.setAttribute('data-screen-overlay', 'TD-01');

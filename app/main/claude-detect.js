@@ -15,6 +15,7 @@
 const { execFile } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { mask } = require('./qc/run');
 
 /* Tunable so a test can exercise the timeout paths without a 16-second suite. Production
  * never sets it; the default is the value the product actually ships with. */
@@ -72,10 +73,13 @@ function run(args) {
  *   reason must NOT fall through to another reason's sentence.
  */
 async function detect() {
-  return Promise.race([
-    probe(),
-    new Promise((r) => setTimeout(() => r({ available: false, reason: 'no-response' }), DEADLINE_MS)),
-  ]);
+  let timer;
+  try {
+    return await Promise.race([
+      probe(),
+      new Promise((r) => { timer = setTimeout(() => r({ available: false, reason: 'no-response' }), DEADLINE_MS); }),
+    ]);
+  } finally { clearTimeout(timer); }   // a settled probe must not leave a 16 s timer behind (it held the process open)
 }
 
 async function probe() {
@@ -83,9 +87,9 @@ async function probe() {
   if (v.err) {
     if (v.err.code === 'ENOENT') return { available: false, reason: 'not-installed' };
     if (v.err.killed || v.err.signal) return { available: false, reason: 'no-response' };
-    return { available: false, reason: 'error', detail: cap(v.stderr || v.err.message) };
+    return { available: false, reason: 'error', detail: mask(cap(v.stderr || v.err.message)) };
   }
-  const version = v.stdout.trim().split(/\s+/)[0] || null;
+  const version = mask(v.stdout.trim().split(/\s+/)[0] || '') || null;
 
   const a = await run(['auth', 'status', '--json']);
   /* From here on, `a.stdout` / `a.stderr` are treated as radioactive: they may contain the
