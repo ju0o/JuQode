@@ -9,7 +9,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const fs = require('node:fs');
+const { code } = require('./src');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -57,7 +57,7 @@ test('the ledger is metadata only — nothing here can carry a secret', async ()
 });
 
 test('SC-04 terminal recovery actions are buttons and request an open drawer without resetting it', () => {
-  const sc04 = fs.readFileSync(path.join(R, 'app/renderer/screens/sc04.js'), 'utf8');
+  const sc04 = code('app/renderer/screens/sc04.js');
   const recoveryStart = sc04.indexOf('function terminalRecoveryButton(');
   const recoveryEnd = sc04.indexOf('\n}', recoveryStart);
   assert.ok(recoveryStart >= 0 && recoveryEnd > recoveryStart, 'the shared recovery button helper is present');
@@ -79,7 +79,7 @@ test('SC-04 terminal recovery actions are buttons and request an open drawer wit
   assert.match(sc04, /if \(!f\.displayable\) \{[\s\S]*?acts\.appendChild\(terminalRecoveryButton\(\)\)/,
     'an undisplayable raw card offers terminal recovery');
 
-  const renderer = fs.readFileSync(path.join(R, 'app/renderer/renderer.js'), 'utf8');
+  const renderer = code('app/renderer/renderer.js');
   const toggleStart = renderer.indexOf('window.__toggleDrawer = (open) => {');
   const toggleEnd = renderer.indexOf('\n};', toggleStart);
   assert.ok(toggleStart >= 0 && toggleEnd > toggleStart, 'the shared drawer toggle is present');
@@ -93,7 +93,7 @@ test('SC-04 terminal recovery actions are buttons and request an open drawer wit
   assert.doesNotMatch(toggle, /qcPhrase\s*=|qcCard\s*=|qcRun\s*=/,
     'opening does not clear or replace the existing Quick Command');
 
-  const td01 = fs.readFileSync(path.join(R, 'app/renderer/screens/td01.js'), 'utf8');
+  const td01 = code('app/renderer/screens/td01.js');
   assert.match(td01, /if \(!state\.drawerOpen\) \{\s*const opener = state\.drawerOpener;\s*state\.drawerOpener = null;\s*if \(opener\?\.isConnected\) opener\.focus\?\.\(\);/,
     'closing TD-01 restores focus to its connected opener');
 });
