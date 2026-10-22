@@ -125,10 +125,9 @@ export function renderSC02(root, api, nav, state) {
   for (const [key, label] of [['all', C.gap.board.filterAll], ['needs', C.gap.board.needs], ['done', C.gap.task.completeState]]) {
     const filterBtn = btn(`nav-item${(state.boardFilter || 'all') === key ? ' is-current' : ''}`, label, () => {
       state.boardFilter = key;
-      for (const node of filters.children) node.classList.toggle('is-current', node.textContent === label);
       paintTaskList();
     });
-    filterBtn.type = 'button';
+    filterBtn.setAttribute('data-filter', key);
     filters.appendChild(filterBtn);
   }
   navHead.appendChild(filters);
@@ -265,6 +264,35 @@ export function renderSC02(root, api, nav, state) {
   colInspect.appendChild(legacyUnknownNotice);
   const taskRows = el('div', 'kanban');
   taskRows.setAttribute('data-el', 'task-list');
+  const columns = [
+    ['queued', C.gap.board.queued],
+    ['doing', C.gap.historyRunning],
+    ['needs', C.gap.board.needs],
+    ['review', C.gap.board.review],
+    ['done', C.gap.task.completeState],
+  ];
+  const overview = el('section', 'task-overview');
+  overview.setAttribute('data-el', 'task-overview');
+  overview.setAttribute('aria-label', C.gap.board.overview);
+  const overviewHead = el('div', 'task-overview-head');
+  overviewHead.appendChild(el('h1', 'task-overview-title', C.gap.board.overview));
+  const completion = el('div', 'sm task-completion');
+  overviewHead.appendChild(completion);
+  const overviewStatus = el('div', 'xs mut2');
+  overviewStatus.setAttribute('role', 'status');
+  const overviewCounts = el('div', 'task-overview-counts');
+  const countButtons = columns.map(([key, label]) => {
+    const count = el('strong', 'overview-count');
+    const button = btn('overview-filter', '', () => {
+      state.boardFilter = state.boardFilter === key ? 'all' : key;
+      paintTaskList();
+    });
+    button.setAttribute('data-filter', key);
+    button.append(el('span', '', label), count);
+    overviewCounts.appendChild(button);
+    return { key, count, button };
+  });
+  overview.append(overviewHead, overviewStatus, overviewCounts);
 
   const createTask = el('details', 'task-create');
   const createSummary = el('summary', 'sm', C.gap.task.create);
@@ -494,10 +522,15 @@ export function renderSC02(root, api, nav, state) {
   intent.appendChild(el('div', 'xs mut2 task-request-note', C.intent.examples));
   intent.appendChild(el('div', 'xs mut2 task-request-note', C.intent.approvalNote));
   colMain.appendChild(intent);
+  colMain.appendChild(overview);
   colMain.appendChild(taskRows);
 
   let taskLoadSequence = 0;
+  let taskRefreshSequence = 0;
   let currentTasks = [];
+  let tasksLoaded = false;
+  let tasksLoading = true;
+  let tasksFailed = false;
   const paintLegacyUnknown = (runs) => {
     legacyUnknownNotice.innerHTML = '';
     const work = runs[0];
@@ -510,13 +543,34 @@ export function renderSC02(root, api, nav, state) {
   };
   const drawTaskList = () => {
     taskRows.innerHTML = '';
-    viewBoard.classList.toggle('is-current', state.boardView !== 'list');
-    viewList.classList.toggle('is-current', state.boardView === 'list');
+    const listView = state.boardView === 'list';
+    viewBoard.classList.toggle('is-current', !listView);
+    viewList.classList.toggle('is-current', listView);
+    viewBoard.setAttribute('aria-pressed', String(!listView));
+    viewList.setAttribute('aria-pressed', String(listView));
+    const filter = state.boardFilter || 'all';
+    for (const node of filters.children) {
+      const selected = node.getAttribute('data-filter') === filter;
+      node.classList.toggle('is-current', selected);
+      node.setAttribute('aria-pressed', String(selected));
+    }
+    overview.setAttribute('aria-busy', String(tasksLoading));
+    overviewStatus.textContent = tasksFailed ? C.gap.board.loadFailed
+      : tasksLoading ? (tasksLoaded ? C.gap.board.refreshing : C.gap.board.loading) : C.gap.board.overviewBasis;
+    const available = tasksLoaded && !tasksFailed;
+    overviewCounts.hidden = !available;
+    completion.textContent = available ? C.gap.board.completion(
+      currentTasks.filter((task) => columnFor(task, task._run) === 'done').length, currentTasks.length) : '';
+    for (const { key, count, button } of countButtons) {
+      count.textContent = String(currentTasks.filter((task) => columnFor(task, task._run) === key).length);
+      button.disabled = !available;
+      button.setAttribute('aria-pressed', String(filter === key));
+    }
+    if (!available) {
+      if (tasksFailed) taskRows.appendChild(btn('btn sm', C.gap.board.reload, () => refreshTasks()));
+      return;
+    }
     if (!currentTasks.length && !state.unlinkedLive) {
-      taskRows.appendChild(el('div', 'sm mut board-empty', C.gap.task.noTasks));
-      /* The board used to be five blank columns here: the sentence above is hidden by CSS and the only way in
-       * was the small `+ 새 작업` in the rail. This says what to do and puts the one primary action where the
-       * eye already is. It opens the request field — it does not send anything. */
       const start = el('section', 'board-start');
       start.setAttribute('data-el', 'board-start');
       start.append(el('div', 'board-start-title', C.gap.task.emptyBoardTitle), el('p', 'sm mut', C.gap.task.emptyBoardBody));
@@ -525,43 +579,76 @@ export function renderSC02(root, api, nav, state) {
       start.appendChild(go);
       taskRows.appendChild(start);
     }
-
-    const columns = [
-      ['queued', C.gap.board.queued],
-      ['doing', C.gap.historyRunning],
-      ['needs', C.gap.board.needs],
-      ['review', C.gap.board.review],
-      ['done', C.gap.task.completeState],
-    ];
-    const cols = el('div', `board-cols${state.boardView === 'list' ? ' is-list' : ''}`);
-    let liveMarked = false;
-    const filter = state.boardFilter || 'all';
     const loose = state.unlinkedLive;
     const looseColumn = loose ? columnFor(null, { status: loose.status, outcome: loose.outcome }) : null;
-    for (const [key, label] of columns) {
-      if (filter === 'needs' && key !== 'needs') continue;
-      if (filter === 'done' && key !== 'done') continue;
-      const items = currentTasks.filter((task) => columnFor(task, task._run) === key);
-      const extra = looseColumn === key ? 1 : 0;
-      const column = el('section', 'board-col');
-      column.setAttribute('data-column', key);
-      const headRow = el('div', 'col-head');
-      headRow.appendChild(el('span', 'col-title', label));
-      headRow.appendChild(el('span', 'col-count', String(items.length + extra)));
-      column.appendChild(headRow);
-      if (key === 'doing' && (items.length || extra)) column.appendChild(el('div', 'xs mut2 col-note', C.gap.board.oneRun));
-      if (!items.length && !extra && !currentTasks.length && !loose && key === 'queued') {
-        column.appendChild(el('div', 'xs mut2 col-empty', C.gap.board.empty));
+    let liveMarked = false;
+    if (listView) {
+      const scroll = el('div', 'task-table-scroll');
+      const table = el('table', 'task-table');
+      table.appendChild(el('caption', '', C.gap.board.tableCaption));
+      const head = el('thead');
+      const headings = el('tr');
+      for (const label of [C.gap.task.goal, C.gap.task.stateLabel, C.gap.board.latestRun, C.gap.board.nextCheck]) {
+        const cell = el('th', '', label);
+        cell.scope = 'col';
+        headings.appendChild(cell);
       }
-      for (const task of items) {
+      head.appendChild(headings);
+      const body = el('tbody');
+      for (const task of currentTasks) {
+        const key = columnFor(task, task._run);
+        if (filter !== 'all' && filter !== key) continue;
         const executing = key === 'doing' && !liveMarked;
         if (executing) liveMarked = true;
-        column.appendChild(taskTile(task, executing));
+        const row = el('tr', task.id === state.selectedTaskId ? 'selected' : '');
+        const goal = el('td');
+        goal.appendChild(taskTile(task, executing, true));
+        const bits = tileBits(task, task._run, executing);
+        const status = el('td');
+        status.appendChild(el('span', `tile-status tone-${tileTone(task, task._run)}`, `${bits.mark} ${bits.status}`.trim()));
+        const latest = el('td', 'xs mut');
+        if (task._run) {
+          latest.appendChild(el('div', '', outcomeKorean(task._run.outcome) ?? (task._run.status === 'ended' ? C.gap.task.unknownOutcome : C.gap.board.notEnded)));
+          if (task._run.at) latest.appendChild(el('div', 'mut2', shortWhen(task._run.at)));
+        } else latest.textContent = C.gap.task.noRuns;
+        row.append(goal, status, latest, el('td', 'xs task-next-check', bits.reason || C.gap.board.nextCheckState[key]));
+        body.appendChild(row);
       }
-      if (extra) column.appendChild(unlinkedTile(loose));
-      cols.appendChild(column);
+      if (!body.childNodes.length) {
+        const row = el('tr');
+        const cell = el('td', 'xs mut', C.gap.board.noMatching);
+        cell.colSpan = 4;
+        row.appendChild(cell);
+        body.appendChild(row);
+      }
+      table.append(head, body);
+      scroll.appendChild(table);
+      taskRows.appendChild(scroll);
+      if (loose && (filter === 'all' || filter === looseColumn)) taskRows.appendChild(unlinkedTile(loose));
+    } else {
+      const cols = el('div', 'board-cols');
+      for (const [key, label] of columns) {
+        if (filter !== 'all' && filter !== key) continue;
+        const items = currentTasks.filter((task) => columnFor(task, task._run) === key);
+        const extra = looseColumn === key ? 1 : 0;
+        const column = el('section', 'board-col');
+        column.setAttribute('data-column', key);
+        const headRow = el('div', 'col-head');
+        headRow.appendChild(el('span', 'col-title', label));
+        headRow.appendChild(el('span', 'col-count', String(items.length + extra)));
+        column.appendChild(headRow);
+        if (key === 'doing' && (items.length || extra)) column.appendChild(el('div', 'xs mut2 col-note', C.gap.board.oneRun));
+        if (!items.length && !extra) column.appendChild(el('div', 'xs mut2 col-empty', C.gap.board.empty));
+        for (const task of items) {
+          const executing = key === 'doing' && !liveMarked;
+          if (executing) liveMarked = true;
+          column.appendChild(taskTile(task, executing));
+        }
+        if (extra) column.appendChild(unlinkedTile(loose));
+        cols.appendChild(column);
+      }
+      taskRows.appendChild(cols);
     }
-    taskRows.appendChild(cols);
 
     dependencies.innerHTML = '';
     if (currentTasks.length) {
@@ -584,10 +671,10 @@ export function renderSC02(root, api, nav, state) {
     restoreFocus(taskRows, mem);
   };
 
-  const taskTile = (task, executing) => {
+  const taskTile = (task, executing, list = false) => {
     const tone = tileTone(task, task._run);
     const selected = task.id === state.selectedTaskId;
-    const row = btn(`task-pick tile tone-${tone}${selected ? ' selected' : ''}${executing ? ' is-live' : ''}`, '', () => {
+    const row = btn(`task-pick ${list ? 'task-table-pick' : 'tile'} tone-${tone}${selected ? ' selected' : ''}${executing ? ' is-live' : ''}`, '', () => {
       state.selectedTaskId = task.id;
       state.inspectDismissed = false;
       syncShell();
@@ -598,7 +685,8 @@ export function renderSC02(root, api, nav, state) {
     row.setAttribute('data-task-id', task.id);
     row.setAttribute('data-tone', tone);
     row.setAttribute('aria-pressed', String(selected));
-    fillTile(row, task.goal, tileBits(task, task._run, executing), tone, task._run);
+    if (list) row.appendChild(el('span', 'task-table-goal', task.goal));
+    else fillTile(row, task.goal, tileBits(task, task._run, executing), tone, task._run);
     return row;
   };
 
@@ -735,27 +823,36 @@ export function renderSC02(root, api, nav, state) {
   };
 
   async function refreshTasks() {
-    const sequence = ++taskLoadSequence;
-    const listed = await api.taskList(p.id);
-    if (sequence !== taskLoadSequence || state.project.id !== p.id) return;
-    if (!listed?.ok) { taskRows.textContent = listed?.detail ?? C.gap.task.noTasks; return; }
-    const details = await Promise.all((listed.tasks ?? []).map((task) => api.taskDetail(task.id)));
-    if (sequence !== taskLoadSequence || state.project.id !== p.id) return;
-    currentTasks = (listed.tasks ?? []).map((task, index) => {
-      const detail = details[index]?.ok ? details[index] : null;
-      const snap = detail?.runs?.[0] ?? null;
-      return {
-        ...task,
-        _run: runFace(snap),
-      };
-    });
-    paintLegacyUnknown(listed.legacyUnknownRuns ?? []);
-    if (state.selectedTaskId && !currentTasks.some((task) => task.id === state.selectedTaskId)) {
-      state.selectedTaskId = null;
-    }
-    syncShell();
+    const sequence = ++taskRefreshSequence;
+    tasksLoading = true;
+    tasksFailed = false;
     paintTaskList();
-    await paintSelectedTask();
+    try {
+      const listed = await api.taskList(p.id);
+      if (sequence !== taskRefreshSequence || state.project?.id !== p.id) return;
+      if (!listed?.ok) throw new Error('task-list-unavailable');
+      const details = await Promise.all((listed.tasks ?? []).map((task) => api.taskDetail(task.id)));
+      if (sequence !== taskRefreshSequence || state.project?.id !== p.id) return;
+      if (details.some((detail) => !detail?.ok)) throw new Error('task-detail-unavailable');
+      currentTasks = (listed.tasks ?? []).map((task, index) => ({
+        ...task,
+        _run: runFace(details[index].runs?.[0] ?? null),
+      }));
+      tasksLoaded = true;
+      tasksLoading = false;
+      paintLegacyUnknown(listed.legacyUnknownRuns ?? []);
+      if (state.selectedTaskId && !currentTasks.some((task) => task.id === state.selectedTaskId)) {
+        state.selectedTaskId = null;
+      }
+      syncShell();
+      paintTaskList();
+      await paintSelectedTask();
+    } catch {
+      if (sequence !== taskRefreshSequence || state.project?.id !== p.id) return;
+      tasksLoading = false;
+      tasksFailed = true;
+      paintTaskList();
+    }
   }
   refreshTasks();
 

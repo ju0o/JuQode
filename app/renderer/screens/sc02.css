@@ -498,7 +498,6 @@
   max-width: 100%;
   overflow-x: auto;
 }
-.sc02 .board-cols.is-list { flex-direction: column; overflow-x: visible; }
 /* The column is a place on the canvas. The header is the anchor. Cards float;
    an empty column is not a box. */
 .sc02 .board-col {
@@ -512,7 +511,6 @@
   border: none;
   border-radius: 0;
 }
-.sc02 .board-cols.is-list .board-col { flex-basis: auto; max-width: none; width: 100%; }
 .sc02 .col-head {
   display: flex; align-items: baseline; gap: 6px;
   padding: 0 2px 6px;
@@ -682,3 +680,32 @@
 .sc02 .agent-ack { display: flex; gap: 8px; align-items: flex-start; }
 .sc02 .agent-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }   /* announced, not drawn */
 .sc02 .agent-panel[hidden] { display: none; }
+
+/* Saved Tasks only: these counts describe recorded work, never estimated Agent progress. */
+.sc02 .task-overview { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; }
+.sc02 .task-overview-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; }
+.sc02 .task-overview-title { margin: 0; font-size: 20px; line-height: 28px; font-weight: var(--fw-strong); }
+.sc02 .task-completion { color: var(--ink2); }
+.sc02 .task-overview-counts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.sc02 .task-overview-counts[hidden] { display: none; }
+.sc02 .overview-filter {
+  appearance: none; font: inherit; color: var(--ink2); background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-inner); padding: 8px; min-height: 62px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; font-size: var(--fs-caption);
+}
+.sc02 .overview-filter:hover { background: var(--card2); border-color: var(--line2); }
+.sc02 .overview-filter[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
+.sc02 .overview-count { color: var(--ink); font-size: 22px; line-height: 28px; font-weight: var(--fw-strong); }
+.sc02 .task-table-scroll { overflow-x: auto; max-width: 100%; border: 1px solid var(--line); border-radius: var(--r-inner); background: var(--card); }
+.sc02 .task-table { width: 100%; min-width: 600px; table-layout: fixed; border-collapse: collapse; text-align: left; }
+.sc02 .task-table caption { text-align: left; padding: 10px 12px; font-size: var(--fs-label); font-weight: var(--fw-strong); }
+.sc02 .task-table th { color: var(--mut); font-size: var(--fs-caption); font-weight: var(--fw-strong); background: var(--card2); }
+.sc02 .task-table th, .sc02 .task-table td { padding: 8px 10px; border-top: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.sc02 .task-table th:first-child { width: 36%; }
+.sc02 .task-table th:nth-child(2) { width: 16%; }
+.sc02 .task-table th:nth-child(3) { width: 22%; }
+.sc02 .task-table tr.selected { background: var(--card2); }
+.sc02 .task-table .task-table-pick { width: 100%; min-height: 44px; padding: 4px 2px; border: 1px solid transparent; background: transparent; border-radius: 4px; }
+.sc02 .task-table .task-table-pick:hover { color: var(--ink); text-decoration: underline; }
+.sc02 .task-table-goal { font-size: var(--fs-label); font-weight: var(--fw-strong); line-height: 20px; }
+.sc02 .task-next-check { color: var(--ink2); }
