@@ -249,6 +249,20 @@ class InspectorTests(unittest.TestCase):
                         self.assertEqual(inspector.main(["--approved-gate", gate]), 2)
                 self.assertTrue(stdout.buffer.write.called)
 
+    def test_extra_cli_argument_is_not_echoed_or_inspected(self):
+        class Capture:
+            def __init__(self):
+                self.buffer = io.BytesIO()
+        capture = Capture()
+        stderr = io.StringIO()
+        canary = "SYNTHETIC_SECRET_CANARY"
+        with mock.patch.object(inspector, "inspect_home", side_effect=AssertionError("must not inspect")):
+            with mock.patch.object(sys, "stdout", capture), mock.patch.object(sys, "stderr", stderr):
+                self.assertEqual(inspector.main(["--approved-gate", "HG-20261024-a1b2c3", canary]), 2)
+        self.assertEqual(capture.buffer.getvalue(), b'{"status":"NOT_RUN","reason":"INVALID_APPROVAL_REFERENCE"}\n')
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertNotIn(canary.encode(), capture.buffer.getvalue())
+
     def test_renderer_whitelists_fields_and_never_echoes_untrusted_values(self):
         report = {
             "claude": {

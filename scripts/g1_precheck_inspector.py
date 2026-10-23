@@ -9,7 +9,6 @@ attestation, not an online verification of the Founder response.
 
 from __future__ import annotations
 
-import argparse
 import errno
 import json
 import os
@@ -436,10 +435,12 @@ def render_report(report: dict[str, Any]) -> bytes:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument("--approved-gate", required=True)
-    args = parser.parse_args(argv)
-    if not APPROVAL_ID.fullmatch(args.approved_gate) or args.approved_gate in REJECTED_APPROVAL_IDS:
+    args = sys.argv[1:] if argv is None else argv
+    if len(args) != 2 or args[0] != "--approved-gate":
+        sys.stdout.buffer.write(b'{"status":"NOT_RUN","reason":"INVALID_APPROVAL_REFERENCE"}\n')
+        return 2
+    approval_id = args[1]
+    if not APPROVAL_ID.fullmatch(approval_id) or approval_id in REJECTED_APPROVAL_IDS:
         sys.stdout.buffer.write(b'{"status":"NOT_RUN","reason":"INVALID_APPROVAL_REFERENCE"}\n')
         return 2
     try:
